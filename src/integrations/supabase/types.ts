@@ -14,7 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      public_listings: {
+        Row: {
+          auction_end: string | null
+          created_at: string | null
+          current_bid: number | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          listing_url: string
+          location: string | null
+          make: string | null
+          mileage: number | null
+          model: string | null
+          photo_url: string | null
+          scrape_metadata: Json | null
+          source_site: string
+          state: string | null
+          title_status: string | null
+          trim: string | null
+          updated_at: string | null
+          vin: string | null
+          year: number | null
+        }
+        Insert: {
+          auction_end?: string | null
+          created_at?: string | null
+          current_bid?: number | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          listing_url: string
+          location?: string | null
+          make?: string | null
+          mileage?: number | null
+          model?: string | null
+          photo_url?: string | null
+          scrape_metadata?: Json | null
+          source_site: string
+          state?: string | null
+          title_status?: string | null
+          trim?: string | null
+          updated_at?: string | null
+          vin?: string | null
+          year?: number | null
+        }
+        Update: {
+          auction_end?: string | null
+          created_at?: string | null
+          current_bid?: number | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          listing_url?: string
+          location?: string | null
+          make?: string | null
+          mileage?: number | null
+          model?: string | null
+          photo_url?: string | null
+          scrape_metadata?: Json | null
+          source_site?: string
+          state?: string | null
+          title_status?: string | null
+          trim?: string | null
+          updated_at?: string | null
+          vin?: string | null
+          year?: number | null
+        }
+        Relationships: []
+      }
+      scraper_configs: {
+        Row: {
+          category: string
+          created_at: string | null
+          headers: Json | null
+          id: string
+          is_enabled: boolean | null
+          max_pages: number | null
+          rate_limit_seconds: number | null
+          selectors: Json | null
+          site_name: string
+          site_url: string
+          updated_at: string | null
+        }
+        Insert: {
+          category: string
+          created_at?: string | null
+          headers?: Json | null
+          id?: string
+          is_enabled?: boolean | null
+          max_pages?: number | null
+          rate_limit_seconds?: number | null
+          selectors?: Json | null
+          site_name: string
+          site_url: string
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string | null
+          headers?: Json | null
+          id?: string
+          is_enabled?: boolean | null
+          max_pages?: number | null
+          rate_limit_seconds?: number | null
+          selectors?: Json | null
+          site_name?: string
+          site_url?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -1,4 +1,4 @@
-import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -53,6 +53,15 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           >
             <PieChart className="mr-2 h-4 w-4" />
             Analytics
+          </Button>
+          
+          <Button
+            variant={activeView === "scraper" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("scraper")}
+          >
+            <Search className="mr-2 h-4 w-4" />
+            Scraper
           </Button>
           
           <Button
