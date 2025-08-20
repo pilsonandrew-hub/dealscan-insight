@@ -10,6 +10,10 @@ export interface Vehicle {
   model: string;
   year: number;
   mileage: number;
+  trim?: string;
+  title_status?: "clean" | "salvage" | "rebuilt" | "flood" | "lemon";
+  photo_url?: string;
+  description?: string;
 }
 
 export interface DealerSale {
@@ -18,6 +22,18 @@ export interface DealerSale {
   auction: string;
   sale_price: number;
   date: string;
+}
+
+export interface MarketPrice {
+  make: string;
+  model: string;
+  year: number;
+  trim: string;
+  avg_price: number;
+  low_price: number;
+  high_price: number;
+  sample_size: number;
+  last_updated: string;
 }
 
 export interface Opportunity {
@@ -33,6 +49,18 @@ export interface Opportunity {
   auction_end?: string;
   status?: "hot" | "good" | "moderate";
   score?: number;
+  market_price?: MarketPrice;
+  total_cost: number;
+  potential_profit: number;
+  roi_percentage: number;
+  risk_score: number;
+  confidence_score: number;
+  transportation_cost: number;
+  fees_cost: number;
+  estimated_sale_price: number;
+  profit_margin: number;
+  source_site: string;
+  current_bid: number;
 }
 
 export interface PipelineStatus {
