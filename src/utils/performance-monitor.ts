@@ -50,7 +50,7 @@ class PerformanceMonitor {
       throw error;
     } finally {
       const duration = Date.now() - startTime;
-      this.recordMetric({
+      this.addMetric({
         operationName,
         duration,
         timestamp: new Date(),
@@ -61,7 +61,7 @@ class PerformanceMonitor {
     }
   }
 
-  private recordMetric(metric: PerformanceMetrics): void {
+  private addMetric(metric: PerformanceMetrics): void {
     this.metrics.push(metric);
     
     // Keep only recent metrics
@@ -210,53 +210,66 @@ class PerformanceMonitor {
   }
 
   // Backward compatibility methods
-  public startTimer(operationName: string): { end: () => void } {
+  public startTimer(operationName?: string): { end: (success?: boolean) => number } {
     const startTime = Date.now();
+    const opName = operationName || 'operation';
     return {
-      end: () => {
+      end: (success: boolean = true) => {
         const duration = Date.now() - startTime;
-        this.recordMetric({
-          operationName,
+        this.addMetric({
+          operationName: opName,
           duration,
           timestamp: new Date(),
-          success: true
+          success
         });
+        return duration;
       }
     };
   }
 
-  public async monitorAPI<T>(operationName: string, operation: () => Promise<T>): Promise<T> {
-    return this.measureOperation(operationName, operation);
+  public monitorAPI(operationName: string, method: string): { end: (success?: boolean) => number } {
+    const startTime = Date.now();
+    return {
+      end: (success: boolean = true) => {
+        const duration = Date.now() - startTime;
+        this.addMetric({
+          operationName: `${operationName}_${method}`,
+          duration,
+          timestamp: new Date(),
+          success
+        });
+        return duration;
+      }
+    };
   }
 
-  public getStats(operationName?: string) {
+  public getStats(operationName?: string): any {
     if (operationName) {
-      return this.getOperationStats(operationName);
+      const opStats = this.getOperationStats(operationName);
+      return {
+        ...opStats,
+        averageResponseTime: opStats.averageDuration,
+        overallSuccessRate: opStats.successRate
+      };
     }
-    return this.getSystemHealth();
+    
+    const systemHealth = this.getSystemHealth();
+    return {
+      averageResponseTime: systemHealth.metrics.averageResponseTime,
+      overallSuccessRate: 1 - systemHealth.metrics.errorRate,
+      requestsPerMinute: systemHealth.metrics.requestsPerMinute,
+      ...systemHealth.metrics
+    };
   }
 
-  public recordMetric(operationName: string, duration: number, success: boolean = true): void;
-  public recordMetric(metric: PerformanceMetrics): void;
-  public recordMetric(arg1: string | PerformanceMetrics, duration?: number, success?: boolean): void {
-    if (typeof arg1 === 'string') {
-      const metric: PerformanceMetrics = {
-        operationName: arg1,
-        duration: duration || 0,
-        timestamp: new Date(),
-        success: success !== undefined ? success : true
-      };
-      this.metrics.push(metric);
-    } else {
-      this.metrics.push(arg1);
-    }
-    
-    // Keep only recent metrics
-    if (this.metrics.length > this.MAX_METRICS) {
-      this.metrics = this.metrics.slice(-this.MAX_METRICS / 2);
-    }
-    
-    this.updateSystemMetrics();
+  public recordMetric(operationName: string, duration: number, metadata?: any): void {
+    this.addMetric({
+      operationName,
+      duration,
+      timestamp: new Date(),
+      success: true,
+      metadata
+    });
   }
 }
 
