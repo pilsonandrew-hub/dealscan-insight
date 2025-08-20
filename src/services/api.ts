@@ -132,19 +132,27 @@ export const api = {
       .from('scoring_jobs')
       .select('*')
       .eq('id', jobId)
-      .single();
+      .maybeSingle();
     
     if (error) throw error;
     
+    if (!data) {
+      throw new Error(`Pipeline job ${jobId} not found`);
+    }
+    
     return {
-      id: data?.id || jobId,
-      stage: (data?.status as 'pending' | 'running' | 'completed' | 'failed') || 'running',
-      progress: data?.progress || 0,
-      total_items: data?.total_listings || 100,
-      processed_items: data?.processed_listings || 50,
-      opportunities_found: data?.opportunities_created || 12,
-      created_at: data?.started_at || new Date().toISOString(),
-      estimated_completion: new Date(Date.now() + 60000).toISOString()
+      id: data.id,
+      status: (data.status as 'pending' | 'running' | 'completed' | 'failed') || 'pending',
+      stage: data.status || 'initializing',
+      progress: data.progress || 0,
+      created_at: data.started_at || new Date().toISOString(),
+      completed_at: data.completed_at || undefined,
+      error_message: data.error_message || undefined,
+      results: {
+        scraped_count: data.total_listings || 0,
+        analyzed_count: data.processed_listings || 0,
+        opportunities_found: data.opportunities_created || 0
+      }
     };
   },
 
