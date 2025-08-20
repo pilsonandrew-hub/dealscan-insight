@@ -5,7 +5,7 @@
 
 import { Opportunity, PipelineStatus, UploadResult, ApiResponse } from '@/types/dealerscope';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 class APIError extends Error {
   constructor(public status: number, message: string) {
@@ -179,4 +179,4 @@ export const mockApi = {
 };
 
 // Use mock API in development
-export default process.env.NODE_ENV === 'development' ? mockApi : api;
+export default import.meta.env.MODE === 'development' ? mockApi : api;
