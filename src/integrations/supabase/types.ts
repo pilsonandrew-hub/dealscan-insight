@@ -252,6 +252,8 @@ export type Database = {
           mileage: number | null
           model: string | null
           photo_url: string | null
+          score_metadata: Json | null
+          scored_at: string | null
           scrape_metadata: Json | null
           source_site: string
           state: string | null
@@ -274,6 +276,8 @@ export type Database = {
           mileage?: number | null
           model?: string | null
           photo_url?: string | null
+          score_metadata?: Json | null
+          scored_at?: string | null
           scrape_metadata?: Json | null
           source_site: string
           state?: string | null
@@ -296,6 +300,8 @@ export type Database = {
           mileage?: number | null
           model?: string | null
           photo_url?: string | null
+          score_metadata?: Json | null
+          scored_at?: string | null
           scrape_metadata?: Json | null
           source_site?: string
           state?: string | null
@@ -304,6 +310,48 @@ export type Database = {
           updated_at?: string | null
           vin?: string | null
           year?: number | null
+        }
+        Relationships: []
+      }
+      scoring_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          opportunities_created: number
+          processed_listings: number
+          progress: number
+          started_at: string
+          status: string
+          total_listings: number
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          opportunities_created?: number
+          processed_listings?: number
+          progress?: number
+          started_at?: string
+          status: string
+          total_listings?: number
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          opportunities_created?: number
+          processed_listings?: number
+          progress?: number
+          started_at?: string
+          status?: string
+          total_listings?: number
+          updated_at?: string
         }
         Relationships: []
       }

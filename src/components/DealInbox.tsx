@@ -138,6 +138,7 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
       // Transform data structure for easier access
       const transformedDeals = data?.map(deal => ({
         ...deal,
+        status: (deal.status as 'new' | 'read' | 'flagged' | 'dismissed') || 'new',
         listing: deal.public_listings
       })) || [];
 

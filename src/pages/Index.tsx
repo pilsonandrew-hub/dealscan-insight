@@ -11,6 +11,7 @@ import { MarketAnalytics } from "@/components/MarketAnalytics";
 import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList";
 import { SystemEvaluationPanel } from "@/components/SystemEvaluationPanel";
 import { VehicleScraperPanel } from "@/components/VehicleScraperPanel";
+import { DealScoringPanel } from "@/components/DealScoringPanel";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 import { useToast } from "@/hooks/use-toast";
@@ -69,26 +70,12 @@ const Index = () => {
             <DealInbox />
           </div>
         );
-      case "deals":
-        return <DealInbox />;
       case "opportunities": 
         return (
           <DealOpportunities 
             opportunities={opportunities}
             isRealtime={isConnected}
             onNewCountCleared={clearNewCount}
-          />
-        );
-      case "opportunities":
-        return (
-          <OptimizedOpportunityList 
-            opportunities={opportunities}
-            onSelectOpportunity={(opportunity) => {
-              toast({
-                title: "Opportunity Selected",
-                description: `${opportunity.vehicle.year} ${opportunity.vehicle.make} ${opportunity.vehicle.model} - $${opportunity.profit.toLocaleString()} profit`,
-              });
-            }}
           />
         );
       case "analytics":
@@ -99,6 +86,8 @@ const Index = () => {
         return <SystemMetrics />;
       case "scraper":
         return <VehicleScraperPanel />;
+      case "scoring":
+        return <DealScoringPanel />;
       case "evaluation":
         return <SystemEvaluationPanel />;
       case "settings":
