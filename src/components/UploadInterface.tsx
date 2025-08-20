@@ -1,10 +1,12 @@
 import { useState, useCallback } from "react";
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, X } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, Shield } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { validateFileUpload, detectDangerousFormulas, sanitizeCSVContent } from "@/utils/csv-security";
+import apiService from "@/services/api";
 
 interface UploadFile {
   id: string;
@@ -32,29 +34,19 @@ export const UploadInterface = () => {
     setIsDragOver(false);
   }, []);
 
-  const validateFile = (file: File): string | null => {
-    const maxSize = 50 * 1024 * 1024; // 50MB
-    const allowedExtensions = ['.csv', '.xlsx', '.xls'];
-    const allowedMimeTypes = [
-      'text/csv',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    ];
-
-    if (file.size > maxSize) {
-      return `File size exceeds 50MB limit (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
+  // Security check for CSV content
+  const checkCSVSecurity = async (file: File): Promise<string[]> => {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      return [];
     }
 
-    const extension = '.' + file.name.split('.').pop()?.toLowerCase();
-    if (!allowedExtensions.includes(extension)) {
-      return `File type not supported. Please upload CSV or Excel files only.`;
+    try {
+      const content = await file.text();
+      return detectDangerousFormulas(content);
+    } catch (error) {
+      console.error('Error reading file for security check:', error);
+      return [];
     }
-
-    if (!allowedMimeTypes.includes(file.type) && file.type !== '') {
-      return `Invalid file type. Please upload CSV or Excel files only.`;
-    }
-
-    return null;
   };
 
   const processFile = async (file: File): Promise<void> => {
@@ -70,56 +62,88 @@ export const UploadInterface = () => {
 
     setFiles(prev => [...prev, uploadFile]);
 
-    // Simulate processing
+    // Progress simulation
     const progressInterval = setInterval(() => {
       setFiles(prev => prev.map(f => 
         f.id === fileId 
-          ? { ...f, progress: Math.min(f.progress + Math.random() * 30, 95) }
+          ? { ...f, progress: Math.min(f.progress + Math.random() * 20, 90) }
           : f
       ));
-    }, 300);
+    }, 500);
 
     try {
-      // Simulate API processing delay
-      await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 2000));
-
-      // Simulate random success/failure
-      const isSuccess = Math.random() > 0.2; // 80% success rate
-
-      clearInterval(progressInterval);
-
-      if (isSuccess) {
-        const records = Math.floor(Math.random() * 5000) + 500;
+      // Security check for CSV files
+      const securityIssues = await checkCSVSecurity(file);
+      if (securityIssues.length > 0) {
+        clearInterval(progressInterval);
         setFiles(prev => prev.map(f => 
           f.id === fileId 
-            ? { ...f, status: "success", progress: 100, records }
+            ? { 
+                ...f, 
+                status: "error", 
+                progress: 0, 
+                error: `Security warning: Potential formula injection detected. ${securityIssues.slice(0, 2).join(', ')}${securityIssues.length > 2 ? '...' : ''}` 
+              }
+            : f
+        ));
+        
+        toast({
+          title: "Security Warning",
+          description: "File contains potentially dangerous formulas and was rejected for security.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Use API service for upload
+      const result = await apiService.uploadCSV(file);
+      
+      clearInterval(progressInterval);
+
+      if (result.status === "success") {
+        setFiles(prev => prev.map(f => 
+          f.id === fileId 
+            ? { ...f, status: "success", progress: 100, records: result.rows_processed }
             : f
         ));
         
         toast({
           title: "Upload Successful",
-          description: `Processed ${records.toLocaleString()} records from ${file.name}`,
+          description: `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`,
         });
       } else {
         setFiles(prev => prev.map(f => 
           f.id === fileId 
-            ? { ...f, status: "error", progress: 0, error: "Failed to process file. Please check format and try again." }
+            ? { 
+                ...f, 
+                status: "error", 
+                progress: 0, 
+                error: result.errors?.join(', ') || "Failed to process file" 
+              }
             : f
         ));
         
         toast({
           title: "Upload Failed",
-          description: `Failed to process ${file.name}. Please check the file format.`,
+          description: `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
           variant: "destructive"
         });
       }
     } catch (error) {
       clearInterval(progressInterval);
+      const errorMessage = error instanceof Error ? error.message : "Network error occurred";
+      
       setFiles(prev => prev.map(f => 
         f.id === fileId 
-          ? { ...f, status: "error", progress: 0, error: "Network error occurred." }
+          ? { ...f, status: "error", progress: 0, error: errorMessage }
           : f
       ));
+      
+      toast({
+        title: "Upload Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
     }
   };
 
@@ -130,11 +154,11 @@ export const UploadInterface = () => {
     const droppedFiles = Array.from(e.dataTransfer.files);
     
     for (const file of droppedFiles) {
-      const error = validateFile(file);
-      if (error) {
+      const validation = validateFileUpload(file);
+      if (!validation.valid) {
         toast({
           title: "File Validation Error",
-          description: error,
+          description: validation.error,
           variant: "destructive"
         });
         continue;
@@ -148,11 +172,11 @@ export const UploadInterface = () => {
     const selectedFiles = Array.from(e.target.files || []);
     
     for (const file of selectedFiles) {
-      const error = validateFile(file);
-      if (error) {
+      const validation = validateFileUpload(file);
+      if (!validation.valid) {
         toast({
           title: "File Validation Error",
-          description: error,
+          description: validation.error,
           variant: "destructive"
         });
         continue;
@@ -285,7 +309,10 @@ export const UploadInterface = () => {
             <li>• Maximum file size: 50MB</li>
             <li>• Required columns: Year, Make, Model, Sale Price, Sale Date</li>
             <li>• Optional columns: Mileage, Condition, Location</li>
-            <li>• No formulas or macros allowed in Excel files</li>
+            <li className="flex items-center space-x-2">
+              <Shield className="h-4 w-4 text-warning" />
+              <span>No formulas or macros allowed (security protection enabled)</span>
+            </li>
           </ul>
         </CardContent>
       </Card>
