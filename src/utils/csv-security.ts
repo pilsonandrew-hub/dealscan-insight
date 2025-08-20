@@ -75,7 +75,7 @@ export function sanitizeCSVContent(content: string): string {
 }
 
 /**
- * Validate file size and type restrictions
+ * Validate file size and type restrictions with enhanced security
  */
 export function validateFileUpload(file: File): { valid: boolean; error?: string } {
   const maxSize = 50 * 1024 * 1024; // 50MB
@@ -111,4 +111,52 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
   }
 
   return { valid: true };
+}
+
+// Enhanced security check with comprehensive validation
+export function validateCSVSecurity(file: File): {
+  isSecure: boolean;
+  issues: string[];
+  riskLevel: 'low' | 'medium' | 'high';
+} {
+  const issues: string[] = [];
+  let riskLevel: 'low' | 'medium' | 'high' = 'low';
+
+  // File size validation (prevent DoS)
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+  if (file.size > MAX_FILE_SIZE) {
+    issues.push('File size exceeds maximum allowed (50MB)');
+    riskLevel = 'high';
+  }
+
+  // File name validation
+  const suspiciousPatterns = [
+    /\.\./,           // Path traversal
+    /[<>:"|?*]/,      // Invalid filename chars
+    /\.(exe|bat|sh|ps1|cmd)$/i  // Executable extensions
+  ];
+
+  if (suspiciousPatterns.some(pattern => pattern.test(file.name))) {
+    issues.push('Suspicious filename detected');
+    riskLevel = 'high';
+  }
+
+  // Content type validation
+  const allowedTypes = [
+    'text/csv',
+    'application/csv', 
+    'text/plain',
+    'application/vnd.ms-excel'
+  ];
+
+  if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.csv')) {
+    issues.push('Invalid file type - only CSV files allowed');
+    riskLevel = 'medium';
+  }
+
+  return {
+    isSecure: issues.length === 0,
+    issues,
+    riskLevel
+  };
 }

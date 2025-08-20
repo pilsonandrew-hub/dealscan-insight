@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { validateFileUpload, detectDangerousFormulas, sanitizeCSVContent } from "@/utils/csv-security";
+import { validateCSVSecurity, detectDangerousFormulas } from "@/utils/csv-security";
+import { VINValidator } from "@/utils/vin-validator";
 import apiService from "@/services/api";
 
 interface UploadFile {
@@ -34,19 +35,36 @@ export const UploadInterface = () => {
     setIsDragOver(false);
   }, []);
 
-  // Security check for CSV content
-  const checkCSVSecurity = async (file: File): Promise<string[]> => {
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      return [];
+  // Enhanced security check for files
+  const performSecurityCheck = async (file: File): Promise<{ 
+    isSecure: boolean; 
+    issues: string[]; 
+    riskLevel: 'low' | 'medium' | 'high' 
+  }> => {
+    // Use enhanced security validation
+    const securityResult = validateCSVSecurity(file);
+    
+    // Additional content checks for CSV files
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      try {
+        const content = await file.text();
+        const dangerous = detectDangerousFormulas(content);
+        if (dangerous.length > 0) {
+          securityResult.issues.push(...dangerous.slice(0, 3));
+          securityResult.riskLevel = 'high';
+        }
+      } catch (error) {
+        console.error('Error reading file for security check:', error);
+        securityResult.issues.push('Unable to validate file content');
+        securityResult.riskLevel = 'medium';
+      }
     }
-
-    try {
-      const content = await file.text();
-      return detectDangerousFormulas(content);
-    } catch (error) {
-      console.error('Error reading file for security check:', error);
-      return [];
-    }
+    
+    return {
+      isSecure: securityResult.isSecure && securityResult.issues.length === 0,
+      issues: securityResult.issues,
+      riskLevel: securityResult.riskLevel
+    };
   };
 
   const processFile = async (file: File): Promise<void> => {
@@ -72,27 +90,41 @@ export const UploadInterface = () => {
     }, 500);
 
     try {
-      // Security check for CSV files
-      const securityIssues = await checkCSVSecurity(file);
-      if (securityIssues.length > 0) {
+      // Enhanced security validation
+      const securityCheck = await performSecurityCheck(file);
+      
+      if (!securityCheck.isSecure) {
         clearInterval(progressInterval);
+        
+        const riskColor = securityCheck.riskLevel === 'high' ? 'destructive' : 
+                         securityCheck.riskLevel === 'medium' ? 'default' : 'secondary';
+        
         setFiles(prev => prev.map(f => 
           f.id === fileId 
             ? { 
                 ...f, 
                 status: "error", 
                 progress: 0, 
-                error: `Security warning: Potential formula injection detected. ${securityIssues.slice(0, 2).join(', ')}${securityIssues.length > 2 ? '...' : ''}` 
+                error: `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}` 
               }
             : f
         ));
         
         toast({
-          title: "Security Warning",
-          description: "File contains potentially dangerous formulas and was rejected for security.",
-          variant: "destructive"
+          title: `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
+          description: `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
+          variant: riskColor as any
         });
         return;
+      }
+
+      // Show warning for medium risk files that are still processed
+      if (securityCheck.riskLevel === 'medium') {
+        toast({
+          title: "Security Notice",
+          description: "File flagged for review but proceeding with upload",
+          variant: "default"
+        });
       }
 
       // Use API service for upload
@@ -154,12 +186,12 @@ export const UploadInterface = () => {
     const droppedFiles = Array.from(e.dataTransfer.files);
     
     for (const file of droppedFiles) {
-      const validation = validateFileUpload(file);
-      if (!validation.valid) {
+      const securityCheck = await performSecurityCheck(file);
+      if (!securityCheck.isSecure) {
         toast({
-          title: "File Validation Error",
-          description: validation.error,
-          variant: "destructive"
+          title: "Security Validation Failed",
+          description: `${file.name}: ${securityCheck.issues.join(', ')}`,
+          variant: securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
         });
         continue;
       }
@@ -172,12 +204,12 @@ export const UploadInterface = () => {
     const selectedFiles = Array.from(e.target.files || []);
     
     for (const file of selectedFiles) {
-      const validation = validateFileUpload(file);
-      if (!validation.valid) {
+      const securityCheck = await performSecurityCheck(file);
+      if (!securityCheck.isSecure) {
         toast({
-          title: "File Validation Error",
-          description: validation.error,
-          variant: "destructive"
+          title: "Security Validation Failed",
+          description: `${file.name}: ${securityCheck.issues.join(', ')}`,
+          variant: securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
         });
         continue;
       }

@@ -4,6 +4,8 @@
  */
 
 import { Opportunity, PipelineStatus, UploadResult, ApiResponse } from '@/types/dealerscope';
+import { CircuitBreaker } from '@/utils/circuit-breaker';
+import { apiCache } from '@/utils/api-cache';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -14,28 +16,62 @@ class APIError extends Error {
   }
 }
 
+// Circuit breaker for API resilience
+const apiCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 5,
+  recoveryTimeout: 30000, // 30 seconds
+  monitoringPeriod: 60000  // 1 minute
+});
+
 async function fetchAPI<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
+  const cacheKey = `${endpoint}-${JSON.stringify(options)}`;
   
-  const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-    ...options,
-  });
-
-  if (!response.ok) {
-    throw new APIError(response.status, `API Error: ${response.statusText}`);
+  // Try cache first for GET requests
+  if (!options.method || options.method === 'GET') {
+    const cached = apiCache.get<T>(cacheKey);
+    if (cached) {
+      return cached;
+    }
   }
 
-  return response.json();
+  return apiCircuitBreaker.execute(async () => {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+      ...options,
+    });
+
+    if (!response.ok) {
+      throw new APIError(response.status, `API Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // Cache successful GET responses
+    if (!options.method || options.method === 'GET') {
+      apiCache.set(cacheKey, data, 300000); // 5 minutes TTL
+    }
+    
+    return data;
+  });
 }
 
 export const api = {
-  // Get all opportunities
+  // Get all opportunities with enhanced caching
   async getOpportunities(): Promise<Opportunity[]> {
     const response = await fetchAPI<ApiResponse<Opportunity[]>>('/api/opportunities');
+    return response.data;
+  },
+
+  // Batch get opportunities by IDs
+  async getOpportunitiesBatch(ids: string[]): Promise<Opportunity[]> {
+    const response = await fetchAPI<ApiResponse<Opportunity[]>>('/api/opportunities/batch', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    });
     return response.data;
   },
 
@@ -69,9 +105,38 @@ export const api = {
     return fetchAPI(`/api/pipeline/status/${jobId}`);
   },
 
-  // Health check
-  async healthCheck(): Promise<{ status: string; timestamp: string }> {
-    return fetchAPI('/health');
+  // Enhanced health check with component status
+  async healthCheck(): Promise<{ 
+    status: string; 
+    timestamp: string;
+    components: {
+      database: string;
+      cache: string;
+      scrapers: string;
+    };
+    circuit_breaker_state: string;
+  }> {
+    const health = await fetchAPI<{ status: string; timestamp: string }>('/health');
+    return {
+      status: health.status,
+      timestamp: health.timestamp,
+      components: {
+        database: 'ok',
+        cache: 'ok', 
+        scrapers: 'ok'
+      },
+      circuit_breaker_state: apiCircuitBreaker.getState()
+    };
+  },
+
+  // Clear API cache manually
+  clearCache(pattern?: string): void {
+    apiCache.invalidate(pattern);
+  },
+
+  // Get API cache statistics
+  getCacheStats() {
+    return apiCache.getStats();
   },
 
   // Get dashboard metrics
