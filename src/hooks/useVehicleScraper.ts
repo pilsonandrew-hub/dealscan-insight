@@ -7,6 +7,7 @@ interface UseVehicleScraperReturn {
   listings: PublicListing[]
   isLoading: boolean
   isScraping: boolean
+  error: string | null
   startScraping: (sites: SiteName[]) => Promise<void>
   fetchListings: (limit?: number) => Promise<void>
   refreshListings: () => Promise<void>
@@ -17,27 +18,46 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
   const [listings, setListings] = useState<PublicListing[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isScraping, setIsScraping] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchListings = useCallback(async (limit = 50) => {
     setIsLoading(true)
+    setError(null)
+    
     try {
-      // Use GET request with query parameters instead of body
+      // Get auth session for proper authentication
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        throw new Error('Authentication required. Please log in.')
+      }
+
       const { data, error } = await supabase.functions.invoke(`vehicle-scraper?limit=${limit}`, {
-        method: 'GET'
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
       })
 
       if (error) {
-        toast.error('Failed to fetch listings: ' + error.message)
+        const errorMessage = error.message || 'Failed to fetch listings'
+        setError(errorMessage)
+        toast.error(errorMessage)
         return
       }
 
       if (data?.listings) {
         setListings(data.listings)
         toast.success(`Loaded ${data.listings.length} vehicle listings`)
+      } else {
+        setListings([])
+        toast.info('No listings found')
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch vehicle listings'
       console.error('Error fetching listings:', error)
-      toast.error('Failed to fetch vehicle listings')
+      setError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -45,7 +65,16 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
 
   const startScraping = useCallback(async (sites: SiteName[]) => {
     setIsScraping(true)
+    setError(null)
+    
     try {
+      // Get auth session for proper authentication
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        throw new Error('Authentication required. Please log in.')
+      }
+
       toast.info(`Starting scraping for ${sites.length} sites...`, {
         description: sites.join(', ')
       })
@@ -54,24 +83,50 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
         body: {
           action: 'start_scraping',
           sites
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
         }
       })
 
       if (error) {
-        toast.error('Scraping failed: ' + error.message)
+        const errorMessage = error.message || 'Scraping failed'
+        setError(errorMessage)
+        toast.error(errorMessage)
         return
       }
 
       const result: ScrapingResult = data.result
-      toast.success(`Scraping completed!`, {
-        description: `Found ${result.total_scraped} vehicles from ${result.sites_processed.join(', ')}`
-      })
+      
+      // Show detailed results if available
+      if (data.result.results) {
+        const successfulSites = data.result.results.filter((r: any) => !r.error)
+        const failedSites = data.result.results.filter((r: any) => r.error)
+        
+        if (successfulSites.length > 0) {
+          toast.success(`Scraping completed!`, {
+            description: `Found ${result.total_scraped} vehicles from ${successfulSites.length} sites`
+          })
+        }
+        
+        if (failedSites.length > 0) {
+          toast.warning(`Some sites failed`, {
+            description: `${failedSites.length} sites encountered errors`
+          })
+        }
+      } else {
+        toast.success(`Scraping completed!`, {
+          description: `Found ${result.total_scraped} vehicles from ${result.sites_processed.join(', ')}`
+        })
+      }
 
       // Refresh listings to show new data
-      await fetchListings()
+      setTimeout(() => fetchListings(), 2000) // Brief delay to ensure data is saved
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start scraping process'
       console.error('Error starting scraping:', error)
-      toast.error('Failed to start scraping process')
+      setError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setIsScraping(false)
     }
@@ -89,6 +144,7 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
     listings,
     isLoading,
     isScraping,
+    error,
     startScraping,
     fetchListings,
     refreshListings,

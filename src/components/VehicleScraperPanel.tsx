@@ -15,6 +15,7 @@ export const VehicleScraperPanel = () => {
     listings,
     isLoading,
     isScraping,
+    error,
     startScraping,
     fetchListings,
     refreshListings
@@ -146,6 +147,13 @@ export const VehicleScraperPanel = () => {
                   </Badge>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Error Display */}
+          {error && (
+            <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+              <strong>Error:</strong> {error}
             </div>
           )}
         </CardContent>

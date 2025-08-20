@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -45,9 +46,53 @@ const USER_AGENTS = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 ]
 
+// Circuit breaker for API resilience
+class CircuitBreaker {
+  private failures = 0
+  private lastFailureTime = 0
+  private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED'
+  
+  constructor(private threshold = 5, private timeout = 60000) {}
+  
+  async execute<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.lastFailureTime > this.timeout) {
+        this.state = 'HALF_OPEN'
+      } else {
+        throw new Error('Circuit breaker is OPEN')
+      }
+    }
+    
+    try {
+      const result = await operation()
+      this.onSuccess()
+      return result
+    } catch (error) {
+      this.onFailure()
+      throw error
+    }
+  }
+  
+  private onSuccess() {
+    this.failures = 0
+    this.state = 'CLOSED'
+  }
+  
+  private onFailure() {
+    this.failures++
+    this.lastFailureTime = Date.now()
+    if (this.failures >= this.threshold) {
+      this.state = 'OPEN'
+    }
+  }
+}
+
 class VehicleScraper {
   private supabase: any
-  private rateLimitDelay = 3000 // 3 seconds
+  private rateLimitDelay = 3000
+  private circuitBreaker = new CircuitBreaker()
+  private cache = new Map<string, { data: any, timestamp: number }>()
+  private readonly CACHE_TTL = 300000 // 5 minutes
   
   constructor(supabaseUrl: string, supabaseKey: string) {
     this.supabase = createClient(supabaseUrl, supabaseKey)
@@ -61,90 +106,146 @@ class VehicleScraper {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]
   }
 
-  private async fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3): Promise<Response | null> {
+  private getCachedData(key: string): any | null {
+    const cached = this.cache.get(key)
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.data
+    }
+    this.cache.delete(key)
+    return null
+  }
+  
+  private setCachedData(key: string, data: any): void {
+    this.cache.set(key, { data, timestamp: Date.now() })
+  }
+
+  private async fetchWithRetry(
+    url: string, 
+    options: RequestInit = {}, 
+    maxRetries = 3,
+    baseDelay = 1000
+  ): Promise<Response | null> {
+    // Check cache first
+    const cacheKey = `${url}_${JSON.stringify(options)}`
+    const cached = this.getCachedData(cacheKey)
+    if (cached) {
+      console.log(`Cache hit for ${url}`)
+      return new Response(cached, { status: 200 })
+    }
+    
     // Validate URL to prevent SSRF attacks
     if (!isValidURL(url)) {
       console.error(`Invalid URL rejected: ${url}`)
       return null
     }
     
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const response = await fetch(url, {
-          ...options,
-          headers: {
-            'User-Agent': this.getRandomUserAgent(),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            ...options.headers
+    return this.circuitBreaker.execute(async () => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
+          
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+            headers: {
+              'User-Agent': this.getRandomUserAgent(),
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+              'Accept-Encoding': 'gzip, deflate',
+              'Connection': 'keep-alive',
+              'Upgrade-Insecure-Requests': '1',
+              ...options.headers
+            }
+          })
+          
+          clearTimeout(timeoutId)
+          
+          if (response.ok) {
+            // Cache successful responses
+            const text = await response.text()
+            this.setCachedData(cacheKey, text)
+            return new Response(text, { status: response.status })
+          } else if (response.status === 429) {
+            // Rate limited - exponential backoff with jitter
+            const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000
+            console.log(`Rate limited on attempt ${attempt}, waiting ${delay}ms`)
+            await this.delay(delay)
+            continue
+          } else if (response.status >= 500) {
+            // Server error - retry
+            console.log(`Server error ${response.status} on attempt ${attempt}`)
+            const delay = baseDelay * Math.pow(2, attempt - 1)
+            await this.delay(delay)
+            continue
+          } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`)
           }
-        })
-        
-        if (response.ok) {
-          return response
-        } else if (response.status === 429) {
-          console.log(`Rate limited on attempt ${i + 1}, waiting...`)
-          await this.delay(this.rateLimitDelay * (i + 1))
-          continue
-        } else {
-          console.log(`HTTP ${response.status} on attempt ${i + 1}`)
-        }
-      } catch (error) {
-        console.error(`Fetch attempt ${i + 1} failed:`, error)
-        if (i < maxRetries - 1) {
-          await this.delay(1000 * (i + 1))
+        } catch (error) {
+          console.error(`Fetch attempt ${attempt} failed:`, error)
+          
+          if (attempt === maxRetries) {
+            throw error
+          }
+          
+          // Exponential backoff with jitter
+          const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000
+          await this.delay(delay)
         }
       }
-    }
-    return null
-  }
-
-  private extractText(html: string, selector: string): string {
-    // Basic text extraction - in production, you'd use a proper HTML parser
-    const regex = new RegExp(`<[^>]*class[^>]*${selector}[^>]*>([^<]*)<`, 'i')
-    const match = html.match(regex)
-    return match ? match[1].trim() : ''
+      
+      throw new Error(`Failed to fetch ${url} after ${maxRetries} attempts`)
+    })
   }
 
   private parseVehicleData(html: string, url: string, siteName: string): VehicleListing | null {
     try {
-      // This is a simplified parser - each site would need custom parsing logic
+      const $ = cheerio.load(html)
+      
       const listing: VehicleListing = {
         source_site: siteName,
         listing_url: url,
         scrape_metadata: {
           scraped_at: new Date().toISOString(),
-          html_length: html.length
+          html_length: html.length,
+          success: true
         }
       }
 
-      // Generic patterns for common vehicle data
-      const patterns = {
-        year: /(?:year|model year)[:\s]*(\d{4})/i,
-        make: /(?:make|manufacturer)[:\s]*([a-zA-Z]+)/i,
-        model: /(?:model)[:\s]*([a-zA-Z0-9\s]+)/i,
-        mileage: /(?:mileage|miles)[:\s]*([0-9,]+)/i,
-        current_bid: /(?:current bid|price)[:\s]*\$?([0-9,]+\.?\d*)/i,
-        location: /(?:location|city)[:\s]*([a-zA-Z\s,]+)/i,
-        vin: /(?:vin|vehicle identification)[:\s]*([a-zA-Z0-9]{17})/i
-      }
-
-      for (const [key, pattern] of Object.entries(patterns)) {
-        const match = html.match(pattern)
-        if (match) {
-          let value: any = match[1].trim()
-          
-          if (key === 'year' || key === 'mileage') {
-            value = parseInt(value.replace(/,/g, ''))
-          } else if (key === 'current_bid') {
-            value = parseFloat(value.replace(/,/g, ''))
+      // Site-specific parsing logic with CSS selectors
+      if (siteName === 'GovDeals') {
+        listing.year = this.parseNumber($('.item-year, .year, [class*="year"]').first().text())
+        listing.make = this.cleanText($('.item-make, .make, [class*="make"]').first().text())
+        listing.model = this.cleanText($('.item-model, .model, [class*="model"]').first().text())
+        listing.mileage = this.parseNumber($('.mileage, [class*="mile"]').first().text())
+        listing.current_bid = this.parseCurrency($('.current-bid, .bid, [class*="bid"]').first().text())
+        listing.location = this.cleanText($('.location, [class*="location"]').first().text())
+        listing.vin = this.cleanText($('.vin, [class*="vin"]').first().text())
+        listing.description = this.cleanText($('.description, .item-description').first().text())
+        
+        // Extract auction end date
+        const auctionEndText = $('.auction-end, .end-date, [class*="end"]').first().text()
+        if (auctionEndText) {
+          const endDate = new Date(auctionEndText)
+          if (!isNaN(endDate.getTime())) {
+            listing.auction_end = endDate.toISOString()
           }
-          
-          listing[key as keyof VehicleListing] = value
         }
+        
+      } else if (siteName === 'PublicSurplus') {
+        listing.year = this.parseNumber($('.vehicle-year, .year').first().text())
+        listing.make = this.cleanText($('.vehicle-make, .make').first().text())
+        listing.model = this.cleanText($('.vehicle-model, .model').first().text())
+        listing.mileage = this.parseNumber($('.vehicle-mileage, .mileage').first().text())
+        listing.current_bid = this.parseCurrency($('.current-bid, .high-bid').first().text())
+        listing.location = this.cleanText($('.item-location, .location').first().text())
+        listing.description = this.cleanText($('.item-description, .description').first().text())
+      }
+      
+      // Validate that we extracted some meaningful data
+      if (!listing.make && !listing.model && !listing.year) {
+        console.warn(`No vehicle data extracted from ${url}`)
+        return null
       }
 
       return listing
@@ -152,6 +253,26 @@ class VehicleScraper {
       console.error('Error parsing vehicle data:', error)
       return null
     }
+  }
+  
+  private parseNumber(text: string): number | undefined {
+    if (!text) return undefined
+    const cleaned = text.replace(/[^0-9]/g, '')
+    const num = parseInt(cleaned)
+    return isNaN(num) ? undefined : num
+  }
+  
+  private parseCurrency(text: string): number | undefined {
+    if (!text) return undefined
+    const cleaned = text.replace(/[^0-9.]/g, '')
+    const num = parseFloat(cleaned)
+    return isNaN(num) ? undefined : num
+  }
+  
+  private cleanText(text: string): string | undefined {
+    if (!text) return undefined
+    const cleaned = text.trim().replace(/\s+/g, ' ')
+    return cleaned || undefined
   }
 
   async scrapeGovDeals(): Promise<VehicleListing[]> {
@@ -249,54 +370,115 @@ class VehicleScraper {
   async saveListings(listings: VehicleListing[]): Promise<void> {
     if (listings.length === 0) return
 
+    // Batch inserts for better performance
+    const BATCH_SIZE = 100
+    let totalSaved = 0
+    
     try {
-      const { data, error } = await this.supabase
-        .from('public_listings')
-        .upsert(listings, { 
-          onConflict: 'listing_url',
-          ignoreDuplicates: false 
-        })
+      for (let i = 0; i < listings.length; i += BATCH_SIZE) {
+        const batch = listings.slice(i, i + BATCH_SIZE)
+        
+        const { data, error } = await this.supabase
+          .from('public_listings')
+          .upsert(batch, { 
+            onConflict: 'listing_url',
+            ignoreDuplicates: false 
+          })
 
-      if (error) {
-        console.error('Error saving listings:', error)
-      } else {
-        console.log(`Saved ${listings.length} listings to database`)
+        if (error) {
+          console.error(`Error saving batch ${Math.floor(i/BATCH_SIZE) + 1}:`, error)
+          // Continue with next batch instead of failing completely
+        } else {
+          totalSaved += batch.length
+          console.log(`Saved batch ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} listings`)
+        }
+        
+        // Small delay between batches to avoid overwhelming the database
+        if (i + BATCH_SIZE < listings.length) {
+          await this.delay(100)
+        }
       }
+      
+      console.log(`Successfully saved ${totalSaved}/${listings.length} listings to database`)
     } catch (error) {
       console.error('Database error:', error)
+      throw error
+    }
+  }
+
+  private async scrapeSite(site: string): Promise<VehicleListing[]> {
+    try {
+      switch (site) {
+        case 'GovDeals':
+          return await this.scrapeGovDeals()
+        case 'PublicSurplus':
+          return await this.scrapePublicSurplus()
+        default:
+          console.log(`Scraper for ${site} not implemented yet`)
+          return []
+      }
+    } catch (error) {
+      console.error(`Error scraping ${site}:`, error)
+      return []
     }
   }
 
   async startScraping(sites: string[] = ['GovDeals', 'PublicSurplus']) {
-    console.log('Starting vehicle scraping for sites:', sites)
+    console.log('Starting concurrent vehicle scraping for sites:', sites)
+    
+    // Process sites concurrently with limited concurrency
+    const BATCH_SIZE = 3
     const allListings: VehicleListing[] = []
-
-    for (const site of sites) {
-      try {
-        let listings: VehicleListing[] = []
-        
-        switch (site) {
-          case 'GovDeals':
-            listings = await this.scrapeGovDeals()
-            break
-          case 'PublicSurplus':
-            listings = await this.scrapePublicSurplus()
-            break
-          default:
-            console.log(`Scraper for ${site} not implemented yet`)
+    const results: { site: string, count: number, error?: string }[] = []
+    
+    for (let i = 0; i < sites.length; i += BATCH_SIZE) {
+      const batch = sites.slice(i, i + BATCH_SIZE)
+      const batchPromises = batch.map(async (site) => {
+        try {
+          const listings = await this.scrapeSite(site)
+          return { site, listings, error: null }
+        } catch (error) {
+          console.error(`Failed to scrape ${site}:`, error)
+          return { site, listings: [], error: error.message }
         }
-
-        allListings.push(...listings)
-        console.log(`Scraped ${listings.length} listings from ${site}`)
-      } catch (error) {
-        console.error(`Error scraping ${site}:`, error)
+      })
+      
+      const batchResults = await Promise.allSettled(batchPromises)
+      
+      batchResults.forEach((result, index) => {
+        const site = batch[index]
+        if (result.status === 'fulfilled') {
+          const { listings, error } = result.value
+          allListings.push(...listings)
+          results.push({ 
+            site, 
+            count: listings.length, 
+            error: error || undefined 
+          })
+          console.log(`Scraped ${listings.length} listings from ${site}`)
+        } else {
+          results.push({ 
+            site, 
+            count: 0, 
+            error: `Promise rejected: ${result.reason}` 
+          })
+          console.error(`Promise rejected for ${site}:`, result.reason)
+        }
+      })
+      
+      // Brief pause between batches to be respectful
+      if (i + BATCH_SIZE < sites.length) {
+        await this.delay(2000)
       }
     }
 
+    // Save all listings in batches
     await this.saveListings(allListings)
+    
     return {
       total_scraped: allListings.length,
       sites_processed: sites,
+      results: results,
       timestamp: new Date().toISOString()
     }
   }
@@ -394,20 +576,35 @@ serve(async (req) => {
       })
     }
 
-    // Authentication check
-    const authHeader = req.headers.get('Authorization')
-    const apiKey = req.headers.get('apikey')
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
     
-    if (!authHeader && !apiKey) {
-      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+    // Proper JWT authentication
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Authentication required - Bearer token missing' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    // Verify JWT token
+    const token = authHeader.substring(7)
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
     
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    if (authError || !user) {
+      console.error('Authentication failed:', authError)
+      return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
+    console.log(`Authenticated request from user: ${user.id}`)
+    
+    // Use service role key only for the scraper operations
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const scraper = new VehicleScraper(supabaseUrl, supabaseServiceKey)
     
     if (req.method === 'GET') {
@@ -423,8 +620,8 @@ serve(async (req) => {
         })
       }
       
-      const supabase = createClient(supabaseUrl, supabaseServiceKey)
-      const { data: listings, error } = await supabase
+      const supabaseService = createClient(supabaseUrl, supabaseServiceKey)
+      const { data: listings, error } = await supabaseService
         .from('public_listings')
         .select('*')
         .eq('is_active', true)

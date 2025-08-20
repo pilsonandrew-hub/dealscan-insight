@@ -1,336 +1,301 @@
 /**
- * Elite Performance Monitoring and Metrics Collection
- * Advanced performance tracking with predictive analytics and real-time monitoring
+ * Performance monitoring and optimization utilities
  */
 
-interface PerformanceMetric {
-  name: string;
-  value: number;
-  timestamp: number;
-  labels?: Record<string, string>;
-}
-
-interface PerformanceEntry {
-  operation: string;
+interface PerformanceMetrics {
+  operationName: string;
   duration: number;
+  timestamp: Date;
   success: boolean;
-  timestamp: number;
-  metadata?: any;
+  errorMessage?: string;
+  metadata?: Record<string, any>;
 }
 
-export interface ElitePerformanceMetrics {
-  timestamp: number;
-  operation: string;
-  duration: number;
-  memory?: number;
-  cpu?: number;
-  errorRate?: number;
-  throughput?: number;
-}
-
-export interface PerformanceThresholds {
-  responseTime: {
-    p50: number;
-    p95: number;
-    p99: number;
-  };
-  memory: {
-    warning: number;
-    critical: number;
-  };
-  errorRate: {
-    warning: number;
-    critical: number;
-  };
+interface SystemMetrics {
+  memoryUsage: number;
+  activeConnections: number;
+  queueLength: number;
+  errorRate: number;
+  averageResponseTime: number;
+  requestsPerMinute: number;
 }
 
 class PerformanceMonitor {
-  private metrics: Map<string, PerformanceMetric[]> = new Map();
-  private entries: PerformanceEntry[] = [];
-  private maxEntries = 1000;
-  private eliteMetrics: ElitePerformanceMetrics[] = [];
-  private observers: ((metrics: ElitePerformanceMetrics) => void)[] = [];
-  private thresholds: PerformanceThresholds = {
-    responseTime: { p50: 200, p95: 500, p99: 1000 },
-    memory: { warning: 100 * 1024 * 1024, critical: 500 * 1024 * 1024 },
-    errorRate: { warning: 0.05, critical: 0.1 }
+  private metrics: PerformanceMetrics[] = [];
+  private systemMetrics: SystemMetrics = {
+    memoryUsage: 0,
+    activeConnections: 0,
+    queueLength: 0,
+    errorRate: 0,
+    averageResponseTime: 0,
+    requestsPerMinute: 0
   };
+  private readonly MAX_METRICS = 1000;
 
-  constructor() {
-    this.setupPerformanceObserver();
-    this.startMemoryMonitoring();
-  }
+  public async measureOperation<T>(
+    operationName: string,
+    operation: () => Promise<T>,
+    metadata?: Record<string, any>
+  ): Promise<T> {
+    const startTime = Date.now();
+    let success = true;
+    let errorMessage: string | undefined;
 
-  private setupPerformanceObserver(): void {
-    if (typeof window !== 'undefined' && 'PerformanceObserver' in window) {
-      const observer = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          this.recordEliteMetric({
-            timestamp: Date.now(),
-            operation: entry.name,
-            duration: entry.duration,
-            memory: this.getMemoryUsage()
-          });
-        }
-      });
-
-      observer.observe({ entryTypes: ['measure', 'navigation', 'resource'] });
-    }
-  }
-
-  private startMemoryMonitoring(): void {
-    if (typeof window !== 'undefined') {
-      setInterval(() => {
-        const memory = this.getMemoryUsage();
-        if (memory > this.thresholds.memory.warning) {
-          this.triggerAlert('memory', memory > this.thresholds.memory.critical ? 'critical' : 'warning');
-        }
-      }, 30000);
-    }
-  }
-
-  private getMemoryUsage(): number {
-    if (typeof window !== 'undefined' && 'performance' in window && 'memory' in performance) {
-      return (performance as any).memory.usedJSHeapSize;
-    }
-    return 0;
-  }
-
-  public startTiming(operation: string): () => void {
-    const startTime = performance.now();
-    const startMemory = this.getMemoryUsage();
-
-    return () => {
-      const duration = performance.now() - startTime;
-      const endMemory = this.getMemoryUsage();
-      
-      this.recordEliteMetric({
-        timestamp: Date.now(),
-        operation,
+    try {
+      const result = await operation();
+      return result;
+    } catch (error) {
+      success = false;
+      errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw error;
+    } finally {
+      const duration = Date.now() - startTime;
+      this.recordMetric({
+        operationName,
         duration,
-        memory: endMemory - startMemory
+        timestamp: new Date(),
+        success,
+        errorMessage,
+        metadata
       });
-    };
-  }
-
-  private recordEliteMetric(metric: ElitePerformanceMetrics): void {
-    this.eliteMetrics.push(metric);
-    
-    if (this.eliteMetrics.length > 1000) {
-      this.eliteMetrics = this.eliteMetrics.slice(-1000);
-    }
-
-    this.checkThresholds(metric);
-    this.observers.forEach(observer => observer(metric));
-  }
-
-  private checkThresholds(metric: ElitePerformanceMetrics): void {
-    if (metric.duration > this.thresholds.responseTime.p99) {
-      this.triggerAlert('response_time', 'critical');
-    } else if (metric.duration > this.thresholds.responseTime.p95) {
-      this.triggerAlert('response_time', 'warning');
     }
   }
 
-  private triggerAlert(type: string, severity: 'warning' | 'critical'): void {
-    console.warn(`[Performance Alert] ${severity.toUpperCase()}: ${type} threshold exceeded`);
-  }
-
-  // Timer utility for measuring operation duration
-  startTimer(operation: string) {
-    const startTime = performance.now();
+  private recordMetric(metric: PerformanceMetrics): void {
+    this.metrics.push(metric);
     
-    return {
-      end: (success: boolean = true, metadata?: any) => {
-        const duration = performance.now() - startTime;
-        this.recordEntry({
-          operation,
-          duration,
-          success,
-          timestamp: Date.now(),
-          metadata
-        });
-        return duration;
-      }
-    };
-  }
-
-  // Record a performance entry
-  recordEntry(entry: PerformanceEntry) {
-    this.entries.push(entry);
-    
-    // Keep only recent entries
-    if (this.entries.length > this.maxEntries) {
-      this.entries = this.entries.slice(-this.maxEntries);
-    }
-
-    // Update aggregated metrics
-    this.updateMetrics(entry);
-  }
-
-  // Record a custom metric
-  recordMetric(name: string, value: number, labels?: Record<string, string>) {
-    const metric: PerformanceMetric = {
-      name,
-      value,
-      timestamp: Date.now(),
-      labels
-    };
-
-    if (!this.metrics.has(name)) {
-      this.metrics.set(name, []);
+    // Keep only recent metrics
+    if (this.metrics.length > this.MAX_METRICS) {
+      this.metrics = this.metrics.slice(-this.MAX_METRICS / 2);
     }
     
-    this.metrics.get(name)!.push(metric);
-    
-    // Keep only recent metrics (last 100)
-    const metrics = this.metrics.get(name)!;
-    if (metrics.length > 100) {
-      this.metrics.set(name, metrics.slice(-100));
-    }
+    this.updateSystemMetrics();
   }
 
-  private updateMetrics(entry: PerformanceEntry) {
-    // Update response time metrics
-    this.recordMetric(`${entry.operation}_duration_ms`, entry.duration);
+  private updateSystemMetrics(): void {
+    const recentMetrics = this.getRecentMetrics(60000); // Last minute
     
-    // Update success/failure counters
-    this.recordMetric(
-      `${entry.operation}_total`, 
-      1, 
-      { status: entry.success ? 'success' : 'error' }
-    );
+    if (recentMetrics.length === 0) return;
+    
+    const successful = recentMetrics.filter(m => m.success);
+    const failed = recentMetrics.filter(m => !m.success);
+    
+    this.systemMetrics.errorRate = failed.length / recentMetrics.length;
+    this.systemMetrics.averageResponseTime = 
+      successful.reduce((sum, m) => sum + m.duration, 0) / Math.max(successful.length, 1);
+    this.systemMetrics.requestsPerMinute = recentMetrics.length;
   }
 
-  // Get performance statistics
-  getStats() {
-    const now = Date.now();
-    const recentEntries = this.entries.filter(e => now - e.timestamp < 300000); // Last 5 minutes
-
-    const operationStats = new Map<string, {
-      count: number;
-      avgDuration: number;
-      successRate: number;
-      errorCount: number;
-    }>();
-
-    recentEntries.forEach(entry => {
-      if (!operationStats.has(entry.operation)) {
-        operationStats.set(entry.operation, {
-          count: 0,
-          avgDuration: 0,
-          successRate: 0,
-          errorCount: 0
-        });
-      }
-
-      const stats = operationStats.get(entry.operation)!;
-      stats.count++;
-      stats.avgDuration += entry.duration;
-      if (!entry.success) stats.errorCount++;
-    });
-
-    // Calculate averages and success rates
-    operationStats.forEach((stats, operation) => {
-      stats.avgDuration = stats.avgDuration / stats.count;
-      stats.successRate = ((stats.count - stats.errorCount) / stats.count) * 100;
-    });
-
-    return {
-      totalOperations: recentEntries.length,
-      uniqueOperations: operationStats.size,
-      averageResponseTime: recentEntries.reduce((sum, e) => sum + e.duration, 0) / recentEntries.length || 0,
-      overallSuccessRate: (recentEntries.filter(e => e.success).length / recentEntries.length) * 100 || 0,
-      operationBreakdown: Object.fromEntries(operationStats)
-    };
+  private getRecentMetrics(timeWindowMs: number): PerformanceMetrics[] {
+    const cutoffTime = Date.now() - timeWindowMs;
+    return this.metrics.filter(m => m.timestamp.getTime() > cutoffTime);
   }
 
-  // Get metrics for export (Prometheus-style format)
-  getMetrics() {
-    const metrics: Record<string, any> = {};
+  public getOperationStats(operationName: string, timeWindowMs = 300000): {
+    count: number;
+    successRate: number;
+    averageDuration: number;
+    p95Duration: number;
+    errorCount: number;
+  } {
+    const relevantMetrics = this.getRecentMetrics(timeWindowMs)
+      .filter(m => m.operationName === operationName);
     
-    this.metrics.forEach((values, name) => {
-      if (values.length === 0) return;
-      
-      const latest = values[values.length - 1];
-      const sum = values.reduce((s, v) => s + v.value, 0);
-      const avg = sum / values.length;
-      
-      metrics[name] = {
-        current: latest.value,
-        average: avg,
-        total: sum,
-        count: values.length,
-        timestamp: latest.timestamp
+    if (relevantMetrics.length === 0) {
+      return {
+        count: 0,
+        successRate: 0,
+        averageDuration: 0,
+        p95Duration: 0,
+        errorCount: 0
       };
-    });
-
-    return metrics;
-  }
-
-  // Monitor React Query operations
-  monitorQuery(queryKey: string[], operation: 'fetch' | 'mutation') {
-    const key = `react_query_${operation}_${queryKey.join('_')}`;
-    return this.startTimer(key);
-  }
-
-  // Monitor API calls
-  monitorAPI(endpoint: string, method: string = 'GET') {
-    const key = `api_${method.toLowerCase()}_${endpoint.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    return this.startTimer(key);
-  }
-
-  // Monitor component render times
-  monitorRender(componentName: string) {
-    const key = `component_render_${componentName}`;
-    return this.startTimer(key);
-  }
-
-  // Clear old data
-  cleanup() {
-    const cutoff = Date.now() - 3600000; // 1 hour ago
+    }
     
-    this.entries = this.entries.filter(e => e.timestamp > cutoff);
+    const successful = relevantMetrics.filter(m => m.success);
+    const durations = relevantMetrics.map(m => m.duration).sort((a, b) => a - b);
+    const p95Index = Math.floor(durations.length * 0.95);
     
-    this.metrics.forEach((values, name) => {
-      const filtered = values.filter(v => v.timestamp > cutoff);
-      if (filtered.length === 0) {
-        this.metrics.delete(name);
-      } else {
-        this.metrics.set(name, filtered);
+    return {
+      count: relevantMetrics.length,
+      successRate: successful.length / relevantMetrics.length,
+      averageDuration: successful.reduce((sum, m) => sum + m.duration, 0) / Math.max(successful.length, 1),
+      p95Duration: durations[p95Index] || 0,
+      errorCount: relevantMetrics.length - successful.length
+    };
+  }
+
+  public getSlowestOperations(limit = 10): PerformanceMetrics[] {
+    return [...this.metrics]
+      .sort((a, b) => b.duration - a.duration)
+      .slice(0, limit);
+  }
+
+  public getSystemHealth(): {
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    metrics: SystemMetrics;
+    issues: string[];
+  } {
+    const issues: string[] = [];
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    
+    // Check error rate
+    if (this.systemMetrics.errorRate > 0.1) {
+      issues.push(`High error rate: ${(this.systemMetrics.errorRate * 100).toFixed(1)}%`);
+      status = 'degraded';
+    }
+    
+    if (this.systemMetrics.errorRate > 0.25) {
+      status = 'unhealthy';
+    }
+    
+    // Check response time
+    if (this.systemMetrics.averageResponseTime > 5000) {
+      issues.push(`Slow response time: ${this.systemMetrics.averageResponseTime.toFixed(0)}ms`);
+      status = status === 'unhealthy' ? 'unhealthy' : 'degraded';
+    }
+    
+    if (this.systemMetrics.averageResponseTime > 10000) {
+      status = 'unhealthy';
+    }
+    
+    // Check memory usage (if available)
+    if (this.systemMetrics.memoryUsage > 0.8) {
+      issues.push(`High memory usage: ${(this.systemMetrics.memoryUsage * 100).toFixed(1)}%`);
+      status = status === 'unhealthy' ? 'unhealthy' : 'degraded';
+    }
+    
+    return {
+      status,
+      metrics: { ...this.systemMetrics },
+      issues
+    };
+  }
+
+  public generateReport(): string {
+    const health = this.getSystemHealth();
+    const recentMetrics = this.getRecentMetrics(300000); // Last 5 minutes
+    const operationTypes = [...new Set(recentMetrics.map(m => m.operationName))];
+    
+    let report = `Performance Report - ${new Date().toISOString()}\n`;
+    report += `System Status: ${health.status.toUpperCase()}\n`;
+    
+    if (health.issues.length > 0) {
+      report += `Issues: ${health.issues.join(', ')}\n`;
+    }
+    
+    report += `\nSystem Metrics:\n`;
+    report += `- Error Rate: ${(health.metrics.errorRate * 100).toFixed(1)}%\n`;
+    report += `- Avg Response Time: ${health.metrics.averageResponseTime.toFixed(0)}ms\n`;
+    report += `- Requests/min: ${health.metrics.requestsPerMinute}\n`;
+    
+    report += `\nOperation Breakdown:\n`;
+    for (const opName of operationTypes) {
+      const stats = this.getOperationStats(opName);
+      report += `- ${opName}: ${stats.count} calls, ${(stats.successRate * 100).toFixed(1)}% success, ${stats.averageDuration.toFixed(0)}ms avg\n`;
+    }
+    
+    return report;
+  }
+
+  public clearMetrics(): void {
+    this.metrics = [];
+    this.systemMetrics = {
+      memoryUsage: 0,
+      activeConnections: 0,
+      queueLength: 0,
+      errorRate: 0,
+      averageResponseTime: 0,
+      requestsPerMinute: 0
+    };
+  }
+
+  // Backward compatibility methods
+  public startTimer(operationName: string): { end: () => void } {
+    const startTime = Date.now();
+    return {
+      end: () => {
+        const duration = Date.now() - startTime;
+        this.recordMetric({
+          operationName,
+          duration,
+          timestamp: new Date(),
+          success: true
+        });
       }
-    });
+    };
+  }
+
+  public async monitorAPI<T>(operationName: string, operation: () => Promise<T>): Promise<T> {
+    return this.measureOperation(operationName, operation);
+  }
+
+  public getStats(operationName?: string) {
+    if (operationName) {
+      return this.getOperationStats(operationName);
+    }
+    return this.getSystemHealth();
+  }
+
+  public recordMetric(operationName: string, duration: number, success: boolean = true): void;
+  public recordMetric(metric: PerformanceMetrics): void;
+  public recordMetric(arg1: string | PerformanceMetrics, duration?: number, success?: boolean): void {
+    if (typeof arg1 === 'string') {
+      const metric: PerformanceMetrics = {
+        operationName: arg1,
+        duration: duration || 0,
+        timestamp: new Date(),
+        success: success !== undefined ? success : true
+      };
+      this.metrics.push(metric);
+    } else {
+      this.metrics.push(arg1);
+    }
+    
+    // Keep only recent metrics
+    if (this.metrics.length > this.MAX_METRICS) {
+      this.metrics = this.metrics.slice(-this.MAX_METRICS / 2);
+    }
+    
+    this.updateSystemMetrics();
   }
 }
 
-// Global performance monitor instance
+// Singleton instance
 export const performanceMonitor = new PerformanceMonitor();
 
-// Auto-cleanup every 10 minutes
-setInterval(() => {
-  performanceMonitor.cleanup();
-}, 600000);
-
-// Monitor page performance
-if (typeof window !== 'undefined') {
-  // Monitor page load
-  window.addEventListener('load', () => {
-    const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
-    if (navigation) {
-      performanceMonitor.recordMetric('page_load_time', navigation.loadEventEnd - navigation.fetchStart);
-      performanceMonitor.recordMetric('dom_content_loaded', navigation.domContentLoadedEventEnd - navigation.fetchStart);
-      performanceMonitor.recordMetric('first_byte', navigation.responseStart - navigation.fetchStart);
-    }
-  });
-
-  // Monitor resource loading
-  const observer = new PerformanceObserver((list) => {
-    list.getEntries().forEach((entry) => {
-      if (entry.entryType === 'measure') {
-        performanceMonitor.recordMetric(entry.name, entry.duration);
-      }
-    });
-  });
-  
-  observer.observe({ entryTypes: ['measure'] });
+// Decorator for automatic performance monitoring
+export function monitored(operationName?: string) {
+  return function <T extends (...args: any[]) => Promise<any>>(
+    target: any,
+    propertyName: string,
+    descriptor: TypedPropertyDescriptor<T>
+  ) {
+    const method = descriptor.value!;
+    const name = operationName || `${target.constructor.name}.${propertyName}`;
+    
+    descriptor.value = async function (...args: any[]) {
+      return performanceMonitor.measureOperation(
+        name,
+        () => method.apply(this, args),
+        { args: args.length }
+      );
+    } as any;
+  };
 }
+
+// Utility functions
+export const withPerformanceMonitoring = async <T>(
+  operationName: string,
+  operation: () => Promise<T>,
+  metadata?: Record<string, any>
+): Promise<T> => {
+  return performanceMonitor.measureOperation(operationName, operation, metadata);
+};
+
+export const getPerformanceReport = (): string => {
+  return performanceMonitor.generateReport();
+};
+
+export const clearPerformanceMetrics = (): void => {
+  performanceMonitor.clearMetrics();
+};
