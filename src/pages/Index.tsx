@@ -6,11 +6,15 @@ import { DashboardMetrics } from "@/components/DashboardMetrics";
 import { DealOpportunities } from "@/components/DealOpportunities";
 import { UploadInterface } from "@/components/UploadInterface";
 import { SystemMetrics } from "@/components/SystemMetrics";
+import { MarketAnalytics } from "@/components/MarketAnalytics";
+import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
+import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
   const [activeView, setActiveView] = useState("dashboard");
+  const { toast } = useToast();
 
   // Fetch initial opportunities and metrics
   const { data: initialOpportunities = [] } = useQuery({
@@ -66,6 +70,20 @@ const Index = () => {
             />
           </div>
         );
+      case "opportunities":
+        return (
+          <OptimizedOpportunityList 
+            opportunities={opportunities}
+            onSelectOpportunity={(opportunity) => {
+              toast({
+                title: "Opportunity Selected",
+                description: `${opportunity.vehicle.year} ${opportunity.vehicle.make} ${opportunity.vehicle.model} - $${opportunity.profit.toLocaleString()} profit`,
+              });
+            }}
+          />
+        );
+      case "analytics":
+        return <MarketAnalytics opportunities={opportunities} />;
       case "upload":
         return <UploadInterface onUploadSuccess={handleUploadSuccess} />;
       case "metrics":
