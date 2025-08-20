@@ -10,6 +10,9 @@ import { VINValidator } from "@/utils/vin-validator";
 import { performanceMonitor } from "@/utils/performance-monitor";
 import { rateLimiter } from "@/utils/rate-limiter";
 import { auditLogger } from "@/utils/audit-logger";
+import { dataValidator } from "@/utils/data-validator";
+import { batchUtils } from "@/utils/batch-processor";
+import { settings } from "@/config/settings";
 import apiService from "@/services/api";
 
 interface UploadFile {
@@ -17,10 +20,13 @@ interface UploadFile {
   name: string;
   size: number;
   type: string;
-  status: "pending" | "processing" | "success" | "error";
+  status: "pending" | "processing" | "validating" | "success" | "error";
   progress: number;
   records?: number;
+  validRecords?: number;
+  warnings?: number;
   error?: string;
+  validationReport?: any;
 }
 
 interface UploadInterfaceProps {
@@ -144,102 +150,167 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     }, 500);
 
     try {
-      // Enhanced security validation
-      const securityCheck = await performSecurityCheck(file);
-      
-      if (!securityCheck.isSecure) {
+        // Enhanced security validation with configuration
+        const securityCheck = await performSecurityCheck(file);
+        
+        if (!securityCheck.isSecure) {
+          clearInterval(progressInterval);
+          timer.end(false);
+          
+          const riskColor = securityCheck.riskLevel === 'high' ? 'destructive' : 
+                           securityCheck.riskLevel === 'medium' ? 'default' : 'secondary';
+          
+          setFiles(prev => prev.map(f => 
+            f.id === fileId 
+              ? { 
+                  ...f, 
+                  status: "error", 
+                  progress: 0, 
+                  error: `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}` 
+                }
+              : f
+          ));
+          
+          toast({
+            title: `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
+            description: `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
+            variant: riskColor as any
+          });
+          return;
+        }
+
+        // Show warning for medium risk files that are still processed
+        if (securityCheck.riskLevel === 'medium') {
+          auditLogger.log(
+            'medium_risk_file_processed',
+            'upload',
+            'warning',
+            { filename: file.name, issues: securityCheck.issues }
+          );
+          
+          toast({
+            title: "Security Notice",
+            description: "File flagged for review but proceeding with upload",
+            variant: "default"
+          });
+        }
+
+        // Data validation phase
+        setFiles(prev => prev.map(f => 
+          f.id === fileId ? { ...f, status: "validating", progress: 50 } : f
+        ));
+
+        // Parse and validate CSV data if it's a CSV file
+        if (file.name.toLowerCase().endsWith('.csv')) {
+          try {
+            const content = await file.text();
+            const lines = content.split('\n').filter(line => line.trim());
+            
+            if (lines.length > 1) {
+              // Parse CSV headers and sample data
+              const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+              const sampleData = lines.slice(1, Math.min(11, lines.length)).map(line => {
+                const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                const record: Record<string, any> = {};
+                headers.forEach((header, index) => {
+                  record[header.toLowerCase()] = values[index] || '';
+                });
+                return record;
+              });
+
+              // Validate sample data
+              const validationReport = await dataValidator.validateDataset(sampleData);
+              
+              auditLogger.log(
+                'file_validation_complete',
+                'upload',
+                validationReport.summary.overallValid ? 'info' : 'warning',
+                {
+                  filename: file.name,
+                  validationScore: validationReport.summary.validationScore,
+                  errors: validationReport.errors.length,
+                  warnings: validationReport.warnings.length
+                }
+              );
+
+              // Update file status with validation results
+              setFiles(prev => prev.map(f => 
+                f.id === fileId 
+                  ? { 
+                      ...f, 
+                      validationReport,
+                      validRecords: validationReport.validRecords,
+                      warnings: validationReport.warnings.length
+                    }
+                  : f
+              ));
+
+              // Show validation warnings if any
+              if (validationReport.warnings.length > 0) {
+                toast({
+                  title: "Data Quality Notice",
+                  description: `${validationReport.warnings.length} data quality warnings found`,
+                  variant: "default"
+                });
+              }
+            }
+          } catch (error) {
+            console.warn('CSV validation failed:', error);
+            auditLogger.logError(error as Error, 'csv_validation');
+          }
+        }
+
+        // Use API service for upload with performance monitoring
+        const apiTimer = performanceMonitor.monitorAPI('/upload', 'POST');
+        const result = await apiService.uploadCSV(file);
+        apiTimer.end(result.status === "success");
+        
         clearInterval(progressInterval);
-        timer.end(false);
-        
-        const riskColor = securityCheck.riskLevel === 'high' ? 'destructive' : 
-                         securityCheck.riskLevel === 'medium' ? 'default' : 'secondary';
-        
-        setFiles(prev => prev.map(f => 
-          f.id === fileId 
-            ? { 
-                ...f, 
-                status: "error", 
-                progress: 0, 
-                error: `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}` 
-              }
-            : f
-        ));
-        
-        toast({
-          title: `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
-          description: `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
-          variant: riskColor as any
-        });
-        return;
-      }
+        timer.end(result.status === "success");
 
-      // Show warning for medium risk files that are still processed
-      if (securityCheck.riskLevel === 'medium') {
-        auditLogger.log(
-          'medium_risk_file_processed',
-          'upload',
-          'warning',
-          { filename: file.name, issues: securityCheck.issues }
-        );
-        
-        toast({
-          title: "Security Notice",
-          description: "File flagged for review but proceeding with upload",
-          variant: "default"
-        });
-      }
-
-      // Use API service for upload with performance monitoring
-      const apiTimer = performanceMonitor.monitorAPI('/upload', 'POST');
-      const result = await apiService.uploadCSV(file);
-      apiTimer.end(result.status === "success");
-      
-      clearInterval(progressInterval);
-      timer.end(result.status === "success");
-
-      if (result.status === "success") {
-        // Log successful upload
-        auditLogger.logUpload(file.name, file.size, true);
-        auditLogger.logDataAccess('opportunities', 'write');
-        
-        setFiles(prev => prev.map(f => 
-          f.id === fileId 
-            ? { ...f, status: "success", progress: 100, records: result.rows_processed }
-            : f
-        ));
-        
-        toast({
-          title: "Upload Successful",
-          description: `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`,
-        });
-        
-        // Call success callback
-        onUploadSuccess?.(result);
-      } else {
-        auditLogger.log(
-          'upload_failed',
-          'upload',
-          'error',
-          { filename: file.name, errors: result.errors }
-        );
-        
-        setFiles(prev => prev.map(f => 
-          f.id === fileId 
-            ? { 
-                ...f, 
-                status: "error", 
-                progress: 0, 
-                error: result.errors?.join(', ') || "Failed to process file" 
-              }
-            : f
-        ));
-        
-        toast({
-          title: "Upload Failed",
-          description: `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
-          variant: "destructive"
-        });
-      }
+        if (result.status === "success") {
+          // Log successful upload
+          auditLogger.logUpload(file.name, file.size, true);
+          auditLogger.logDataAccess('opportunities', 'write');
+          
+          setFiles(prev => prev.map(f => 
+            f.id === fileId 
+              ? { ...f, status: "success", progress: 100, records: result.rows_processed }
+              : f
+          ));
+          
+          toast({
+            title: "Upload Successful",
+            description: `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`,
+          });
+          
+          // Call success callback
+          onUploadSuccess?.(result);
+        } else {
+          auditLogger.log(
+            'upload_failed',
+            'upload',
+            'error',
+            { filename: file.name, errors: result.errors }
+          );
+          
+          setFiles(prev => prev.map(f => 
+            f.id === fileId 
+              ? { 
+                  ...f, 
+                  status: "error", 
+                  progress: 0, 
+                  error: result.errors?.join(', ') || "Failed to process file" 
+                }
+              : f
+          ));
+          
+          toast({
+            title: "Upload Failed",
+            description: `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
+            variant: "destructive"
+          });
+        }
     } catch (error) {
       clearInterval(progressInterval);
       timer.end(false);
@@ -380,6 +451,16 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
                             {file.records.toLocaleString()} records
                           </Badge>
                         )}
+                        {file.status === "success" && file.validRecords && (
+                          <Badge variant="default">
+                            {file.validRecords} valid
+                          </Badge>
+                        )}
+                        {file.warnings && file.warnings > 0 && (
+                          <Badge variant="secondary">
+                            {file.warnings} warnings
+                          </Badge>
+                        )}
                         <Badge 
                           variant={file.status === "success" ? "default" : file.status === "error" ? "destructive" : "secondary"}
                         >
@@ -403,6 +484,13 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
                       <Progress value={file.progress} className="h-2" />
                     )}
                     
+                    {file.status === "validating" && (
+                      <div className="space-y-2">
+                        <Progress value={file.progress} className="h-2" />
+                        <p className="text-xs text-muted-foreground">Validating data quality...</p>
+                      </div>
+                    )}
+                    
                     {file.error && (
                       <p className="text-xs text-destructive mt-1">{file.error}</p>
                     )}
@@ -421,12 +509,16 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         <CardContent>
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li>• Supported formats: CSV, Excel (.xlsx, .xls)</li>
-            <li>• Maximum file size: 50MB</li>
-            <li>• Required columns: Year, Make, Model, Sale Price, Sale Date</li>
-            <li>• Optional columns: Mileage, Condition, Location</li>
+            <li>• Maximum file size: {Math.round(settings.security.maxFileSize / 1024 / 1024)}MB</li>
+            <li>• Required columns: VIN, Year, Make, Model, Sale Price, Sale Date</li>
+            <li>• Optional columns: Mileage, Condition, Location, State</li>
             <li className="flex items-center space-x-2">
               <Shield className="h-4 w-4 text-warning" />
-              <span>No formulas or macros allowed (security protection enabled)</span>
+              <span>Advanced security scanning and data validation enabled</span>
+            </li>
+            <li className="flex items-center space-x-2">
+              <CheckCircle className="h-4 w-4 text-success" />
+              <span>Real-time data quality checks and VIN validation</span>
             </li>
           </ul>
         </CardContent>
