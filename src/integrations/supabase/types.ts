@@ -32,6 +32,7 @@ export type Database = {
           title_status: string | null
           trim: string | null
           updated_at: string
+          user_id: string | null
           vin: string | null
           year: number
         }
@@ -52,6 +53,7 @@ export type Database = {
           title_status?: string | null
           trim?: string | null
           updated_at?: string
+          user_id?: string | null
           vin?: string | null
           year: number
         }
@@ -72,6 +74,7 @@ export type Database = {
           title_status?: string | null
           trim?: string | null
           updated_at?: string
+          user_id?: string | null
           vin?: string | null
           year?: number
         }
@@ -93,6 +96,7 @@ export type Database = {
           source_api: string
           state: string | null
           trim: string | null
+          user_id: string | null
           year: number
         }
         Insert: {
@@ -110,6 +114,7 @@ export type Database = {
           source_api: string
           state?: string | null
           trim?: string | null
+          user_id?: string | null
           year: number
         }
         Update: {
@@ -127,6 +132,7 @@ export type Database = {
           source_api?: string
           state?: string | null
           trim?: string | null
+          user_id?: string | null
           year?: number
         }
         Relationships: []
@@ -161,6 +167,7 @@ export type Database = {
           total_cost: number
           transportation_cost: number | null
           updated_at: string
+          user_id: string | null
           vin: string | null
           year: number
         }
@@ -193,6 +200,7 @@ export type Database = {
           total_cost: number
           transportation_cost?: number | null
           updated_at?: string
+          user_id?: string | null
           vin?: string | null
           year: number
         }
@@ -225,6 +233,7 @@ export type Database = {
           total_cost?: number
           transportation_cost?: number | null
           updated_at?: string
+          user_id?: string | null
           vin?: string | null
           year?: number
         }
@@ -237,6 +246,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       public_listings: {
         Row: {
@@ -326,6 +362,7 @@ export type Database = {
           status: string
           total_listings: number
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           completed_at?: string | null
@@ -339,6 +376,7 @@ export type Database = {
           status: string
           total_listings?: number
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           completed_at?: string | null
@@ -352,6 +390,7 @@ export type Database = {
           status?: string
           total_listings?: number
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
