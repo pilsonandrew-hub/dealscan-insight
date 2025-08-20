@@ -1,4 +1,4 @@
-import { TrendingUp, Upload, Settings, Bell } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -44,6 +44,15 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           >
             <Upload className="mr-2 h-4 w-4" />
             Upload Data
+          </Button>
+          
+          <Button
+            variant={activeView === "metrics" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("metrics")}
+          >
+            <BarChart3 className="mr-2 h-4 w-4" />
+            Metrics
           </Button>
           
           <Button

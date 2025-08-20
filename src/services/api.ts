@@ -6,6 +6,8 @@
 import { Opportunity, PipelineStatus, UploadResult, ApiResponse } from '@/types/dealerscope';
 import { CircuitBreaker } from '@/utils/circuit-breaker';
 import { apiCache } from '@/utils/api-cache';
+import { performanceMonitor } from '@/utils/performance-monitor';
+import { auditLogger } from '@/utils/audit-logger';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -26,36 +28,68 @@ const apiCircuitBreaker = new CircuitBreaker({
 async function fetchAPI<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   const cacheKey = `${endpoint}-${JSON.stringify(options)}`;
+  const timer = performanceMonitor.monitorAPI(endpoint, options.method || 'GET');
+  
+  // Log API call attempt
+  auditLogger.log(
+    'api_call_start',
+    'system',
+    'info',
+    { endpoint, method: options.method || 'GET' }
+  );
   
   // Try cache first for GET requests
   if (!options.method || options.method === 'GET') {
     const cached = apiCache.get<T>(cacheKey);
     if (cached) {
+      timer.end(true);
+      auditLogger.log('api_cache_hit', 'system', 'info', { endpoint });
       return cached;
     }
   }
 
   return apiCircuitBreaker.execute(async () => {
-    const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    });
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        ...options,
+      });
 
-    if (!response.ok) {
-      throw new APIError(response.status, `API Error: ${response.statusText}`);
-    }
+      if (!response.ok) {
+        timer.end(false);
+        auditLogger.log(
+          'api_call_error',
+          'system',
+          'error',
+          { endpoint, status: response.status, statusText: response.statusText }
+        );
+        throw new APIError(response.status, `API Error: ${response.statusText}`);
+      }
 
-    const data = await response.json();
-    
-    // Cache successful GET responses
-    if (!options.method || options.method === 'GET') {
-      apiCache.set(cacheKey, data, 300000); // 5 minutes TTL
+      const data = await response.json();
+      
+      // Cache successful GET responses
+      if (!options.method || options.method === 'GET') {
+        apiCache.set(cacheKey, data, 300000); // 5 minutes TTL
+      }
+      
+      timer.end(true);
+      auditLogger.log(
+        'api_call_success',
+        'system',
+        'info',
+        { endpoint, method: options.method || 'GET' }
+      );
+      
+      return data;
+    } catch (error) {
+      timer.end(false);
+      auditLogger.logError(error as Error, `api_call_${endpoint}`);
+      throw error;
     }
-    
-    return data;
   });
 }
 

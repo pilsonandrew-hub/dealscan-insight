@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { validateCSVSecurity, detectDangerousFormulas } from "@/utils/csv-security";
 import { VINValidator } from "@/utils/vin-validator";
+import { performanceMonitor } from "@/utils/performance-monitor";
+import { rateLimiter } from "@/utils/rate-limiter";
+import { auditLogger } from "@/utils/audit-logger";
 import apiService from "@/services/api";
 
 interface UploadFile {
@@ -39,40 +42,87 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     setIsDragOver(false);
   }, []);
 
-  // Enhanced security check for files
+  // Enhanced security check with performance monitoring and audit logging
   const performSecurityCheck = async (file: File): Promise<{ 
     isSecure: boolean; 
     issues: string[]; 
     riskLevel: 'low' | 'medium' | 'high' 
   }> => {
-    // Use enhanced security validation
-    const securityResult = validateCSVSecurity(file);
+    const timer = performanceMonitor.startTimer('file_security_check');
     
-    // Additional content checks for CSV files
-    if (file.name.toLowerCase().endsWith('.csv')) {
-      try {
-        const content = await file.text();
-        const dangerous = detectDangerousFormulas(content);
-        if (dangerous.length > 0) {
-          securityResult.issues.push(...dangerous.slice(0, 3));
-          securityResult.riskLevel = 'high';
-        }
-      } catch (error) {
-        console.error('Error reading file for security check:', error);
-        securityResult.issues.push('Unable to validate file content');
-        securityResult.riskLevel = 'medium';
+    try {
+      // Rate limiting for security checks
+      const rateLimitKey = `security_check_${Date.now()}`;
+      if (!rateLimiter.isAllowed(rateLimitKey, { maxRequests: 10, windowMs: 60000 })) {
+        auditLogger.log('security_check_rate_limited', 'system', 'warning', { filename: file.name });
+        throw new Error('Security check rate limit exceeded. Please wait before uploading more files.');
       }
+
+      // Use enhanced security validation
+      const securityResult = validateCSVSecurity(file);
+      
+      // Log security check
+      auditLogger.log(
+        'file_security_check',
+        'upload',
+        securityResult.isSecure ? 'info' : 'warning',
+        {
+          filename: file.name,
+          fileSize: file.size,
+          riskLevel: securityResult.riskLevel,
+          issuesFound: securityResult.issues.length
+        }
+      );
+      
+      // Additional content checks for CSV files
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        try {
+          const content = await file.text();
+          const dangerous = detectDangerousFormulas(content);
+          if (dangerous.length > 0) {
+            securityResult.issues.push(...dangerous.slice(0, 3));
+            securityResult.riskLevel = 'high';
+            
+            auditLogger.log(
+              'dangerous_formulas_detected',
+              'upload',
+              'error',
+              {
+                filename: file.name,
+                formulaCount: dangerous.length,
+                samples: dangerous.slice(0, 2)
+              }
+            );
+          }
+        } catch (error) {
+          console.error('Error reading file for security check:', error);
+          auditLogger.logError(error as Error, 'file_security_check');
+          securityResult.issues.push('Unable to validate file content');
+          securityResult.riskLevel = 'medium';
+        }
+      }
+      
+      timer.end(securityResult.isSecure);
+      
+      return {
+        isSecure: securityResult.isSecure && securityResult.issues.length === 0,
+        issues: securityResult.issues,
+        riskLevel: securityResult.riskLevel
+      };
+    } catch (error) {
+      timer.end(false);
+      auditLogger.logError(error as Error, 'file_security_check');
+      throw error;
     }
-    
-    return {
-      isSecure: securityResult.isSecure && securityResult.issues.length === 0,
-      issues: securityResult.issues,
-      riskLevel: securityResult.riskLevel
-    };
   };
 
   const processFile = async (file: File): Promise<void> => {
     const fileId = Math.random().toString(36).substr(2, 9);
+    const timer = performanceMonitor.startTimer('file_upload_process');
+    
+    // Log upload start
+    auditLogger.logUpload(file.name, file.size, false); // Will update on success
+    
     const uploadFile: UploadFile = {
       id: fileId,
       name: file.name,
@@ -99,6 +149,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
       
       if (!securityCheck.isSecure) {
         clearInterval(progressInterval);
+        timer.end(false);
         
         const riskColor = securityCheck.riskLevel === 'high' ? 'destructive' : 
                          securityCheck.riskLevel === 'medium' ? 'default' : 'secondary';
@@ -124,6 +175,13 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
       // Show warning for medium risk files that are still processed
       if (securityCheck.riskLevel === 'medium') {
+        auditLogger.log(
+          'medium_risk_file_processed',
+          'upload',
+          'warning',
+          { filename: file.name, issues: securityCheck.issues }
+        );
+        
         toast({
           title: "Security Notice",
           description: "File flagged for review but proceeding with upload",
@@ -131,12 +189,19 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         });
       }
 
-      // Use API service for upload
+      // Use API service for upload with performance monitoring
+      const apiTimer = performanceMonitor.monitorAPI('/upload', 'POST');
       const result = await apiService.uploadCSV(file);
+      apiTimer.end(result.status === "success");
       
       clearInterval(progressInterval);
+      timer.end(result.status === "success");
 
       if (result.status === "success") {
+        // Log successful upload
+        auditLogger.logUpload(file.name, file.size, true);
+        auditLogger.logDataAccess('opportunities', 'write');
+        
         setFiles(prev => prev.map(f => 
           f.id === fileId 
             ? { ...f, status: "success", progress: 100, records: result.rows_processed }
@@ -151,6 +216,13 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         // Call success callback
         onUploadSuccess?.(result);
       } else {
+        auditLogger.log(
+          'upload_failed',
+          'upload',
+          'error',
+          { filename: file.name, errors: result.errors }
+        );
+        
         setFiles(prev => prev.map(f => 
           f.id === fileId 
             ? { 
@@ -170,7 +242,11 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
       }
     } catch (error) {
       clearInterval(progressInterval);
+      timer.end(false);
+      
       const errorMessage = error instanceof Error ? error.message : "Network error occurred";
+      
+      auditLogger.logError(error as Error, 'file_upload');
       
       setFiles(prev => prev.map(f => 
         f.id === fileId 

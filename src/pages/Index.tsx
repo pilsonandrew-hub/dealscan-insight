@@ -5,6 +5,7 @@ import { DealerScopeHeader } from "@/components/DealerScopeHeader";
 import { DashboardMetrics } from "@/components/DashboardMetrics";
 import { DealOpportunities } from "@/components/DealOpportunities";
 import { UploadInterface } from "@/components/UploadInterface";
+import { SystemMetrics } from "@/components/SystemMetrics";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 
@@ -67,6 +68,8 @@ const Index = () => {
         );
       case "upload":
         return <UploadInterface onUploadSuccess={handleUploadSuccess} />;
+      case "metrics":
+        return <SystemMetrics />;
       case "settings":
         return (
           <div className="space-y-6">
