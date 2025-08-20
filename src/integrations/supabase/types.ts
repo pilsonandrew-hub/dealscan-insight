@@ -14,6 +14,230 @@ export type Database = {
   }
   public: {
     Tables: {
+      dealer_sales: {
+        Row: {
+          auction_house: string | null
+          condition_grade: string | null
+          created_at: string
+          id: string
+          location: string | null
+          make: string
+          metadata: Json | null
+          mileage: number | null
+          model: string
+          sale_date: string | null
+          sale_price: number
+          source_type: string | null
+          state: string | null
+          title_status: string | null
+          trim: string | null
+          updated_at: string
+          vin: string | null
+          year: number
+        }
+        Insert: {
+          auction_house?: string | null
+          condition_grade?: string | null
+          created_at?: string
+          id?: string
+          location?: string | null
+          make: string
+          metadata?: Json | null
+          mileage?: number | null
+          model: string
+          sale_date?: string | null
+          sale_price: number
+          source_type?: string | null
+          state?: string | null
+          title_status?: string | null
+          trim?: string | null
+          updated_at?: string
+          vin?: string | null
+          year: number
+        }
+        Update: {
+          auction_house?: string | null
+          condition_grade?: string | null
+          created_at?: string
+          id?: string
+          location?: string | null
+          make?: string
+          metadata?: Json | null
+          mileage?: number | null
+          model?: string
+          sale_date?: string | null
+          sale_price?: number
+          source_type?: string | null
+          state?: string | null
+          title_status?: string | null
+          trim?: string | null
+          updated_at?: string
+          vin?: string | null
+          year?: number
+        }
+        Relationships: []
+      }
+      market_prices: {
+        Row: {
+          avg_price: number
+          created_at: string
+          expires_at: string
+          high_price: number
+          id: string
+          last_updated: string
+          low_price: number
+          make: string
+          metadata: Json | null
+          model: string
+          sample_size: number | null
+          source_api: string
+          state: string | null
+          trim: string | null
+          year: number
+        }
+        Insert: {
+          avg_price: number
+          created_at?: string
+          expires_at?: string
+          high_price: number
+          id?: string
+          last_updated?: string
+          low_price: number
+          make: string
+          metadata?: Json | null
+          model: string
+          sample_size?: number | null
+          source_api: string
+          state?: string | null
+          trim?: string | null
+          year: number
+        }
+        Update: {
+          avg_price?: number
+          created_at?: string
+          expires_at?: string
+          high_price?: number
+          id?: string
+          last_updated?: string
+          low_price?: number
+          make?: string
+          metadata?: Json | null
+          model?: string
+          sample_size?: number | null
+          source_api?: string
+          state?: string | null
+          trim?: string | null
+          year?: number
+        }
+        Relationships: []
+      }
+      opportunities: {
+        Row: {
+          auction_end: string | null
+          buyer_premium: number | null
+          calculation_metadata: Json | null
+          confidence_score: number
+          created_at: string
+          current_bid: number
+          doc_fee: number | null
+          estimated_sale_price: number
+          fees_cost: number | null
+          id: string
+          is_active: boolean | null
+          listing_id: string | null
+          location: string | null
+          make: string
+          market_data: Json | null
+          mileage: number | null
+          model: string
+          potential_profit: number
+          profit_margin: number
+          risk_score: number
+          roi_percentage: number
+          score: number | null
+          source_site: string
+          state: string | null
+          status: string | null
+          total_cost: number
+          transportation_cost: number | null
+          updated_at: string
+          vin: string | null
+          year: number
+        }
+        Insert: {
+          auction_end?: string | null
+          buyer_premium?: number | null
+          calculation_metadata?: Json | null
+          confidence_score: number
+          created_at?: string
+          current_bid: number
+          doc_fee?: number | null
+          estimated_sale_price: number
+          fees_cost?: number | null
+          id?: string
+          is_active?: boolean | null
+          listing_id?: string | null
+          location?: string | null
+          make: string
+          market_data?: Json | null
+          mileage?: number | null
+          model: string
+          potential_profit: number
+          profit_margin: number
+          risk_score: number
+          roi_percentage: number
+          score?: number | null
+          source_site: string
+          state?: string | null
+          status?: string | null
+          total_cost: number
+          transportation_cost?: number | null
+          updated_at?: string
+          vin?: string | null
+          year: number
+        }
+        Update: {
+          auction_end?: string | null
+          buyer_premium?: number | null
+          calculation_metadata?: Json | null
+          confidence_score?: number
+          created_at?: string
+          current_bid?: number
+          doc_fee?: number | null
+          estimated_sale_price?: number
+          fees_cost?: number | null
+          id?: string
+          is_active?: boolean | null
+          listing_id?: string | null
+          location?: string | null
+          make?: string
+          market_data?: Json | null
+          mileage?: number | null
+          model?: string
+          potential_profit?: number
+          profit_margin?: number
+          risk_score?: number
+          roi_percentage?: number
+          score?: number | null
+          source_site?: string
+          state?: string | null
+          status?: string | null
+          total_cost?: number
+          transportation_cost?: number | null
+          updated_at?: string
+          vin?: string | null
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opportunities_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "public_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       public_listings: {
         Row: {
           auction_end: string | null
@@ -130,7 +354,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      clean_expired_market_prices: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
