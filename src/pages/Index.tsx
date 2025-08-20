@@ -4,6 +4,7 @@ import api from "@/services/api";
 import { DealerScopeHeader } from "@/components/DealerScopeHeader";
 import { DashboardMetrics } from "@/components/DashboardMetrics";
 import { DealOpportunities } from "@/components/DealOpportunities";
+import { DealInbox } from "@/components/DealInbox";
 import { UploadInterface } from "@/components/UploadInterface";
 import { SystemMetrics } from "@/components/SystemMetrics";
 import { MarketAnalytics } from "@/components/MarketAnalytics";
@@ -65,12 +66,18 @@ const Index = () => {
               pipelineStatus={pipelineStatus}
               isRealtime={isConnected}
             />
-            <DealOpportunities 
-              opportunities={opportunities}
-              isRealtime={isConnected}
-              onNewCountCleared={clearNewCount}
-            />
+            <DealInbox />
           </div>
+        );
+      case "deals":
+        return <DealInbox />;
+      case "opportunities": 
+        return (
+          <DealOpportunities 
+            opportunities={opportunities}
+            isRealtime={isConnected}
+            onNewCountCleared={clearNewCount}
+          />
         );
       case "opportunities":
         return (
