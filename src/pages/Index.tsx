@@ -8,6 +8,7 @@ import { UploadInterface } from "@/components/UploadInterface";
 import { SystemMetrics } from "@/components/SystemMetrics";
 import { MarketAnalytics } from "@/components/MarketAnalytics";
 import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList";
+import { SystemEvaluationPanel } from "@/components/SystemEvaluationPanel";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 import { useToast } from "@/hooks/use-toast";
@@ -88,6 +89,8 @@ const Index = () => {
         return <UploadInterface onUploadSuccess={handleUploadSuccess} />;
       case "metrics":
         return <SystemMetrics />;
+      case "evaluation":
+        return <SystemEvaluationPanel />;  
       case "settings":
         return (
           <div className="space-y-6">

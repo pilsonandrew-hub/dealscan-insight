@@ -1,4 +1,4 @@
-import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -71,6 +71,15 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           >
             <BarChart3 className="mr-2 h-4 w-4" />
             Metrics
+          </Button>
+
+          <Button
+            variant={activeView === "evaluation" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("evaluation")}
+          >
+            <Activity className="mr-2 h-4 w-4" />
+            Evaluation
           </Button>
           
           <Button
