@@ -5,7 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Opportunity } from "@/types/dealerscope";
-import apiService from "@/services/api";
+
+interface DealOpportunitiesProps {
+  opportunities?: Opportunity[];
+  isLoading?: boolean;
+  isRealtime?: boolean;
+  onNewCountCleared?: () => void;
+}
 
 // Extended interface for display purposes
 interface DealDisplay extends Opportunity {
@@ -20,28 +26,16 @@ const transformOpportunityToDisplay = (opp: Opportunity): DealDisplay => ({
   marginPercent: (opp.roi * 100),
 });
 
-export const DealOpportunities = () => {
-  const [deals, setDeals] = useState<DealDisplay[]>([]);
-  const [loading, setLoading] = useState(true);
+export const DealOpportunities = ({ 
+  opportunities = [], 
+  isLoading = false,
+  isRealtime = false,
+  onNewCountCleared
+}: DealOpportunitiesProps) => {
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchOpportunities = async () => {
-      try {
-        setLoading(true);
-        const opportunities = await apiService.getOpportunities();
-        const displayDeals = opportunities.map(transformOpportunityToDisplay);
-        setDeals(displayDeals);
-      } catch (err) {
-        setError('Failed to load opportunities');
-        console.error('Error fetching opportunities:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOpportunities();
-  }, []);
+  // Transform opportunities to display format
+  const deals: DealDisplay[] = opportunities.map(transformOpportunityToDisplay);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -59,7 +53,7 @@ export const DealOpportunities = () => {
     return "text-muted-foreground";
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -102,8 +96,13 @@ export const DealOpportunities = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Deal Opportunities</h2>
-          <p className="text-muted-foreground">High-potential arbitrage opportunities from government auctions</p>
+          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            Deal Opportunities
+            {isRealtime && <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />}
+          </h2>
+          <p className="text-muted-foreground">
+            {isRealtime ? 'Live updates enabled - ' : ''}High-potential arbitrage opportunities from government auctions
+          </p>
         </div>
         <div className="flex items-center space-x-4">
           <div className="text-right">

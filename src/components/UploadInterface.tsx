@@ -20,7 +20,11 @@ interface UploadFile {
   error?: string;
 }
 
-export const UploadInterface = () => {
+interface UploadInterfaceProps {
+  onUploadSuccess?: (result: any) => void;
+}
+
+export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) => {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const { toast } = useToast();
@@ -143,6 +147,9 @@ export const UploadInterface = () => {
           title: "Upload Successful",
           description: `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`,
         });
+        
+        // Call success callback
+        onUploadSuccess?.(result);
       } else {
         setFiles(prev => prev.map(f => 
           f.id === fileId 

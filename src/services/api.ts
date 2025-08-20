@@ -225,20 +225,19 @@ export const mockApi = {
     return { job_id: Math.random().toString(36).substr(2, 9) };
   },
 
-  async getPipelineStatus(jobId: string): Promise<PipelineStatus> {
-    await new Promise(resolve => setTimeout(resolve, 300));
+  async getDashboardMetrics(): Promise<{
+    active_opportunities: number;
+    avg_margin: number;
+    potential_revenue: number;
+    success_rate: number;
+  }> {
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     return {
-      id: jobId,
-      status: "running",
-      stage: "Scraping GovDeals",
-      progress: Math.floor(Math.random() * 80) + 20,
-      created_at: new Date().toISOString(),
-      results: {
-        scraped_count: 150,
-        analyzed_count: 89,
-        opportunities_found: 12
-      }
+      active_opportunities: 47,
+      avg_margin: 0.273,
+      potential_revenue: 423850,
+      success_rate: 0.89
     };
   }
 };

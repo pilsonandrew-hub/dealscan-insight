@@ -2,6 +2,22 @@ import { TrendingUp, DollarSign, Target, Activity } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
+interface DashboardMetricsProps {
+  metrics?: {
+    active_opportunities: number;
+    avg_margin: number;
+    potential_revenue: number;
+    success_rate: number;
+  };
+  pipelineStatus?: {
+    status: string;
+    stage: string;
+    progress: number;
+    opportunities_found: number;
+  } | null;
+  isRealtime?: boolean;
+}
+
 interface MetricCardProps {
   title: string;
   value: string | number;
@@ -11,7 +27,7 @@ interface MetricCardProps {
   description?: string;
 }
 
-const MetricCard = ({ title, value, change, changeType, icon, description }: MetricCardProps) => {
+const MetricCard = ({ title, value, change, changeType, icon, description, isRealtime }: MetricCardProps & { isRealtime?: boolean }) => {
   const getChangeColor = (type?: string) => {
     switch (type) {
       case "positive": return "text-success";
@@ -21,10 +37,11 @@ const MetricCard = ({ title, value, change, changeType, icon, description }: Met
   };
 
   return (
-    <Card>
+    <Card className="relative overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
         <div className="text-muted-foreground">{icon}</div>
+        {isRealtime && <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full animate-pulse" />}
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold">{value}</div>
@@ -41,19 +58,21 @@ const MetricCard = ({ title, value, change, changeType, icon, description }: Met
   );
 };
 
-export const DashboardMetrics = () => {
-  const metrics = [
+export const DashboardMetrics = ({ metrics, pipelineStatus, isRealtime = false }: DashboardMetricsProps) => {
+  const metricsData = [
     {
       title: "Active Opportunities",
-      value: "47",
-      change: "+12% from last week",
+      value: metrics?.active_opportunities?.toLocaleString() || "0",
+      change: pipelineStatus?.status === 'running' ? 
+        `+${pipelineStatus.opportunities_found || 0} this session` : 
+        "+12% from last week",
       changeType: "positive" as const,
       icon: <Target className="h-4 w-4" />,
       description: "High-confidence arbitrage opportunities"
     },
     {
       title: "Avg. Margin",
-      value: "27.3%",
+      value: `${((metrics?.avg_margin || 0.273) * 100).toFixed(1)}%`,
       change: "+2.1% from last month",
       changeType: "positive" as const,
       icon: <TrendingUp className="h-4 w-4" />,
@@ -61,7 +80,7 @@ export const DashboardMetrics = () => {
     },
     {
       title: "Potential Revenue",
-      value: "$423,850",
+      value: `$${(metrics?.potential_revenue || 423850).toLocaleString()}`,
       change: "+18% from last month",
       changeType: "positive" as const,
       icon: <DollarSign className="h-4 w-4" />,
@@ -69,8 +88,10 @@ export const DashboardMetrics = () => {
     },
     {
       title: "Success Rate",
-      value: "89%",
-      change: "Stable",
+      value: `${((metrics?.success_rate || 0.89) * 100).toFixed(1)}%`,
+      change: pipelineStatus?.status === 'running' ? 
+        `Pipeline: ${pipelineStatus.stage}` : 
+        "Stable",
       changeType: "neutral" as const,
       icon: <Activity className="h-4 w-4" />,
       description: "Percentage of tracked deals that closed profitably"
@@ -92,10 +113,42 @@ export const DashboardMetrics = () => {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {metrics.map((metric, index) => (
-          <MetricCard key={index} {...metric} />
+        {metricsData.map((metric, index) => (
+          <MetricCard key={index} {...metric} isRealtime={isRealtime} />
         ))}
       </div>
+
+      {/* Pipeline Status Card - shows when pipeline is active */}
+      {pipelineStatus && (
+        <Card className="md:col-span-2 lg:col-span-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Pipeline Status
+              {pipelineStatus.status === 'running' && (
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>{pipelineStatus.stage}</span>
+                <span>{pipelineStatus.progress}%</span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div 
+                  className="bg-primary h-2 rounded-full transition-all duration-500" 
+                  style={{ width: `${pipelineStatus.progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Found {pipelineStatus.opportunities_found} opportunities so far
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
