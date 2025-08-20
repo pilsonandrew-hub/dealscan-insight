@@ -1,1 +1,4 @@
 project_id = "lgpugcflvrqhslfnsjfh"
+
+[functions.vehicle-scraper]
+verify_jwt = false

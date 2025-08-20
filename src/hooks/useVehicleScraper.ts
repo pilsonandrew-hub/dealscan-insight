@@ -21,9 +21,9 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
   const fetchListings = useCallback(async (limit = 50) => {
     setIsLoading(true)
     try {
-      const { data, error } = await supabase.functions.invoke('vehicle-scraper', {
-        method: 'GET',
-        body: { limit }
+      // Use GET request with query parameters instead of body
+      const { data, error } = await supabase.functions.invoke(`vehicle-scraper?limit=${limit}`, {
+        method: 'GET'
       })
 
       if (error) {

@@ -12,6 +12,14 @@ interface ScrapingRequest {
   limit?: number
 }
 
+// Valid sites whitelist for security
+const VALID_SITES = ['GovDeals', 'PublicSurplus', 'GSAauctions'] as const
+const MAX_LIMIT = 1000
+const MAX_SITES_PER_REQUEST = 10
+
+// Rate limiting storage (in production, use Redis)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
+
 interface VehicleListing {
   source_site: string
   listing_url: string
@@ -54,6 +62,12 @@ class VehicleScraper {
   }
 
   private async fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3): Promise<Response | null> {
+    // Validate URL to prevent SSRF attacks
+    if (!isValidURL(url)) {
+      console.error(`Invalid URL rejected: ${url}`)
+      return null
+    }
+    
     for (let i = 0; i < maxRetries; i++) {
       try {
         const response = await fetch(url, {
@@ -288,6 +302,82 @@ class VehicleScraper {
   }
 }
 
+// Security helper functions
+function getClientIP(req: Request): string {
+  return req.headers.get('x-forwarded-for')?.split(',')[0] || 
+    req.headers.get('x-real-ip') || 
+    'unknown'
+}
+
+function isRateLimited(clientIP: string): boolean {
+  const now = Date.now()
+  const clientData = rateLimitMap.get(clientIP)
+  
+  if (!clientData || now > clientData.resetTime) {
+    rateLimitMap.set(clientIP, { count: 1, resetTime: now + 60000 })
+    return false
+  }
+  
+  if (clientData.count >= 100) { // 100 requests per minute
+    return true
+  }
+  
+  clientData.count++
+  return false
+}
+
+function validateScrapingRequest(body: any): { valid: boolean; error?: string; data?: ScrapingRequest } {
+  if (!body || typeof body !== 'object') {
+    return { valid: false, error: 'Invalid request body' }
+  }
+  
+  const { action, sites, limit } = body
+  
+  if (!action || typeof action !== 'string') {
+    return { valid: false, error: 'Missing or invalid action' }
+  }
+  
+  if (!['start_scraping', 'get_status', 'get_listings'].includes(action)) {
+    return { valid: false, error: 'Invalid action specified' }
+  }
+  
+  if (sites && (!Array.isArray(sites) || sites.length > MAX_SITES_PER_REQUEST)) {
+    return { valid: false, error: `Invalid sites array or too many sites (max ${MAX_SITES_PER_REQUEST})` }
+  }
+  
+  if (sites && sites.some(site => !VALID_SITES.includes(site))) {
+    return { valid: false, error: 'Invalid site specified' }
+  }
+  
+  if (limit && (typeof limit !== 'number' || limit > MAX_LIMIT || limit < 1)) {
+    return { valid: false, error: `Invalid limit (must be 1-${MAX_LIMIT})` }
+  }
+  
+  return { valid: true, data: { action, sites, limit } }
+}
+
+function isValidURL(url: string): boolean {
+  try {
+    const parsedUrl = new URL(url)
+    
+    // Only allow HTTPS for external sites
+    if (parsedUrl.protocol !== 'https:') {
+      return false
+    }
+    
+    // Whitelist allowed domains
+    const allowedDomains = [
+      'www.govdeals.com',
+      'www.publicsurplus.com',
+      'gsaauctions.gov'
+    ]
+    
+    return allowedDomains.some(domain => parsedUrl.hostname === domain)
+  } catch {
+    return false
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -295,15 +385,43 @@ serve(async (req) => {
   }
 
   try {
+    // Rate limiting
+    const clientIP = getClientIP(req)
+    if (isRateLimited(clientIP)) {
+      return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
+    // Authentication check
+    const authHeader = req.headers.get('Authorization')
+    const apiKey = req.headers.get('apikey')
+    
+    if (!authHeader && !apiKey) {
+      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     
     const scraper = new VehicleScraper(supabaseUrl, supabaseServiceKey)
     
     if (req.method === 'GET') {
-      // Get existing listings
+      // Get existing listings with input validation
       const url = new URL(req.url)
-      const limit = parseInt(url.searchParams.get('limit') || '50')
+      const limitParam = url.searchParams.get('limit')
+      const limit = limitParam ? Math.min(parseInt(limitParam) || 50, MAX_LIMIT) : 50
+      
+      if (isNaN(limit) || limit < 1) {
+        return new Response(JSON.stringify({ error: 'Invalid limit parameter' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
       
       const supabase = createClient(supabaseUrl, supabaseServiceKey)
       const { data: listings, error } = await supabase
@@ -314,7 +432,8 @@ serve(async (req) => {
         .limit(limit)
 
       if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
+        console.error('Database error:', error)
+        return new Response(JSON.stringify({ error: 'Database query failed' }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         })
@@ -326,10 +445,29 @@ serve(async (req) => {
     }
 
     if (req.method === 'POST') {
-      const body: ScrapingRequest = await req.json()
+      let body: any
       
-      if (body.action === 'start_scraping') {
-        const result = await scraper.startScraping(body.sites)
+      try {
+        body = await req.json()
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+      
+      const validation = validateScrapingRequest(body)
+      if (!validation.valid) {
+        return new Response(JSON.stringify({ error: validation.error }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+      
+      const scrapingRequest = validation.data!
+      
+      if (scrapingRequest.action === 'start_scraping') {
+        const result = await scraper.startScraping(scrapingRequest.sites)
         
         return new Response(JSON.stringify({
           success: true,
@@ -340,14 +478,14 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ error: 'Invalid request' }), {
-      status: 400,
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
   } catch (error) {
     console.error('Function error:', error)
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
