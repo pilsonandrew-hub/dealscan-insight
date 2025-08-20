@@ -1,15 +1,32 @@
-/**
- * CSV Security utilities to prevent formula injection attacks
- * Based on the Python CSVProcessor security measures
- */
+// CSV Security Utilities
+// Prevents formula injection and validates uploads
 
-// Dangerous prefixes that could be used for formula injection
-const DANGEROUS_PREFIXES = ["=", "+", "-", "@", "\t", "\r"];
+const DANGEROUS_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 
-/**
- * Sanitize CSV cell value to prevent formula injection
- * Prefixes dangerous characters with a single quote
- */
+// Additional security patterns
+const MALICIOUS_PATTERNS = [
+  /\bjavascript:/i,
+  /\bdata:/i,
+  /\bvbscript:/i,
+  /<script/i,
+  /\bcmd\s*\|/i,
+  /\bpowershell/i,
+  /\b(eval|exec|system)\s*\(/i
+];
+
+// SQL injection patterns for data validation
+const SQL_INJECTION_PATTERNS = [
+  /(\bor\b|\band\b).*['"]\s*=\s*['"].*['"].*['"]/i,
+  /union\s+select/i,
+  /drop\s+table/i,
+  /delete\s+from/i,
+  /insert\s+into/i,
+  /update\s+.+\bset\b/i,
+  /--/,
+  /\/\*/,
+  /\bexec\s*\(/i
+];
+
 export function sanitizeCSVValue(value: string): string {
   if (!value || typeof value !== 'string') {
     return value;
@@ -18,10 +35,27 @@ export function sanitizeCSVValue(value: string): string {
   const trimmed = value.trim();
   
   // Check if value starts with any dangerous prefix
-  for (const prefix of DANGEROUS_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return "'" + trimmed;
-    }
+  if (DANGEROUS_PREFIXES.some(prefix => trimmed.startsWith(prefix))) {
+    return "'" + trimmed;
+  }
+  
+  // Check for malicious patterns
+  if (MALICIOUS_PATTERNS.some(pattern => pattern.test(trimmed))) {
+    return "'" + trimmed.replace(/[<>"'&]/g, (char) => {
+      const entityMap: Record<string, string> = {
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#x27;',
+        '&': '&amp;'
+      };
+      return entityMap[char] || char;
+    });
+  }
+  
+  // Check for SQL injection patterns
+  if (SQL_INJECTION_PATTERNS.some(pattern => pattern.test(trimmed))) {
+    return "'" + trimmed.replace(/['";\\]/g, '\\$&');
   }
   
   return trimmed;

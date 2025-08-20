@@ -1,0 +1,35 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=10000']
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.63.2
+    hooks:
+      - id: trufflehog
+        args: ['--only-verified', '--fail']
+        exclude: ^(node_modules/|\.git/)
+
+  - repo: local
+    hooks:
+      - id: dependency-check
+        name: Check for vulnerable dependencies
+        entry: npm audit --audit-level=high
+        language: system
+        files: package\.json
+        pass_filenames: false
+      
+      - id: security-scan
+        name: Security vulnerability scan
+        entry: bash -c 'if [ -f "scripts/security-scan.sh" ]; then ./scripts/security-scan.sh; fi'
+        language: system
+        pass_filenames: false

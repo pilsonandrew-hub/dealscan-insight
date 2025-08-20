@@ -28,14 +28,17 @@ const EVALUATION_CONFIG = {
       'llama-3.1-sonar-large-128k-online'
     ]
   },
-  testSuites: [
-    'frontend-functionality',
-    'backend-api',
-    'data-processing',
-    'security-compliance',
-    'performance-metrics',
-    'error-handling'
-  ],
+    // Security Tests
+    securityTests: {
+      inputValidation: "Test input validation and sanitization",
+      xssProtection: "Check for XSS vulnerabilities", 
+      sqlInjection: "Test for SQL injection protection",
+      fileUploadSecurity: "Validate file upload restrictions",
+      rateLimit: "Test rate limiting functionality",
+      dependencyVulnerabilities: "Check for vulnerable dependencies",
+      secretsExposure: "Scan for hardcoded secrets",
+      cspHeaders: "Validate Content Security Policy"
+    },
   scoring: {
     maxScore: 100,
     weights: {
