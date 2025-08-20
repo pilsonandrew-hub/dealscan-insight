@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { SystemHealthIndicator } from "./SystemHealthIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -104,6 +105,9 @@ export function SystemMetrics() {
           Refresh
         </Button>
       </div>
+
+      {/* System Health Overview */}
+      <SystemHealthIndicator />
 
       <Tabs defaultValue="performance" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
