@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWebSocket } from './useWebSocket';
 import { Opportunity } from '@/types/dealerscope';
+import { useGracefulWebSocket } from '@/hooks/useGracefulWebSocket';
 import { useToast } from '@/hooks/use-toast';
 
 interface OpportunityUpdate {
@@ -30,11 +30,13 @@ export function useRealtimeOpportunities(initialOpportunities: Opportunity[] = [
   
   const { toast } = useToast();
 
-  const ws = useWebSocket({
-    url: `${WS_BASE_URL}/ws/opportunities`,
-    autoReconnect: true,
-    maxReconnectAttempts: 5,
-    reconnectInterval: 3000
+  // Enhanced WebSocket with graceful fallback
+  const ws = useGracefulWebSocket({
+    wsUrl: `${WS_BASE_URL}/ws/opportunities`,
+    fallbackPollUrl: '/api/opportunities',
+    pollInterval: 30000, // 30 seconds fallback polling
+    enableFallback: true,
+    maxConnectionAttempts: 3
   });
 
   // Handle new opportunities
@@ -100,18 +102,44 @@ export function useRealtimeOpportunities(initialOpportunities: Opportunity[] = [
     });
   }, [toast]);
 
-  // Subscribe to WebSocket events
+  // Subscribe to WebSocket events or handle polling data
   useEffect(() => {
-    const unsubscribeOpportunities = ws.subscribe('opportunity_update', handleOpportunityUpdate);
-    const unsubscribePipeline = ws.subscribe('pipeline_status', handlePipelineUpdate);
-    const unsubscribeAlerts = ws.subscribe('market_alert', handleMarketAlert);
+    if (ws.isConnected) {
+      // WebSocket mode - subscribe to real-time messages  
+      const unsubscribeOpportunities = ws.subscribe('opportunity_update', handleOpportunityUpdate);
+      const unsubscribePipeline = ws.subscribe('pipeline_status', handlePipelineUpdate);
+      const unsubscribeAlerts = ws.subscribe('market_alert', handleMarketAlert);
 
-    return () => {
-      unsubscribeOpportunities();
-      unsubscribePipeline();
-      unsubscribeAlerts();
-    };
-  }, [ws.subscribe, handleOpportunityUpdate, handlePipelineUpdate, handleMarketAlert]);
+      return () => {
+        unsubscribeOpportunities();
+        unsubscribePipeline();
+        unsubscribeAlerts();
+      };
+    } else if (ws.isUsingFallback && ws.lastData) {
+      // Polling mode - handle polled data
+      const polledOpportunities = Array.isArray(ws.lastData) 
+        ? ws.lastData 
+        : ws.lastData.opportunities || [];
+        
+      setOpportunities(prev => {
+        const newOpps = polledOpportunities.filter(
+          (newOpp: Opportunity) => !prev.some(existing => existing.id === newOpp.id)
+        );
+        
+        if (newOpps.length > 0) {
+          setNewOpportunitiesCount(count => count + newOpps.length);
+          
+          toast({
+            title: `${newOpps.length} New Opportunities`,
+            description: "Updated via background sync",
+            duration: 3000,
+          });
+        }
+        
+        return [...newOpps, ...prev];
+      });
+    }
+  }, [ws.isConnected, ws.isUsingFallback, ws.lastData, ws, handleOpportunityUpdate, handlePipelineUpdate, handleMarketAlert, toast]);
 
   // Update opportunities when initial data changes
   useEffect(() => {
@@ -140,9 +168,10 @@ export function useRealtimeOpportunities(initialOpportunities: Opportunity[] = [
     opportunities,
     pipelineStatus,
     newOpportunitiesCount,
-    connectionStatus: ws.status,
+    connectionStatus: ws.connectionStatus,
     isConnected: ws.isConnected,
-    isReconnecting: ws.isReconnecting,
+    isUsingFallback: ws.isUsingFallback,
+    connectionType: ws.getConnectionType(),
     connectionError: ws.connectionError,
     
     // Actions
@@ -152,7 +181,8 @@ export function useRealtimeOpportunities(initialOpportunities: Opportunity[] = [
     resumePipeline,
     
     // Connection management
-    connect: ws.connect,
-    disconnect: ws.disconnect
+    connect: ws.reconnect,
+    disconnect: ws.disconnect,
+    forceFallback: ws.forceFallback
   };
 }

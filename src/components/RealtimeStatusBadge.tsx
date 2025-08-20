@@ -45,7 +45,7 @@ export function RealtimeStatusBadge({
           variant: "default" as const,
           icon: <Wifi className="h-3 w-3" />,
           text: "Live",
-          description: "Connected to real-time updates"
+          description: "Real-time updates active"
         };
       case WebSocketStatus.CONNECTING:
         return {
@@ -70,10 +70,10 @@ export function RealtimeStatusBadge({
         };
       default:
         return {
-          variant: "outline" as const,
+          variant: "secondary" as const,
           icon: <WifiOff className="h-3 w-3" />,
-          text: "Offline",
-          description: "Real-time updates disabled"
+          text: "Periodic",
+          description: "Using periodic updates (backend unavailable)"
         };
     }
   };

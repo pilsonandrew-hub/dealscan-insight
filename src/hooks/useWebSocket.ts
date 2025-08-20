@@ -59,6 +59,14 @@ export function useWebSocket<T = any>(config: WebSocketConfig) {
       return;
     }
 
+    // Check if we're in development without backend
+    if (import.meta.env.MODE === 'development' && url.includes('localhost:8000')) {
+      log('Development mode: Backend not available, skipping WebSocket connection');
+      setStatus(WebSocketStatus.DISCONNECTED);
+      setConnectionError('Backend not deployed (development mode)');
+      return;
+    }
+
     try {
       setStatus(WebSocketStatus.CONNECTING);
       setConnectionError(null);
