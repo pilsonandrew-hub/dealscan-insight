@@ -32,7 +32,7 @@ export function ProfitDistributionChart({ opportunities }: ProfitDistributionCha
     
     return PROFIT_RANGES.map(range => {
       const count = opportunities.filter(op => 
-        op.potential_profit >= range.min && op.potential_profit < range.max
+        op.profit >= range.min && op.profit < range.max
       ).length;
       
       return {

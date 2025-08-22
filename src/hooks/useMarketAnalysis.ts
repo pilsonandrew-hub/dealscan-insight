@@ -126,8 +126,8 @@ export function useMarketMetrics(opportunities: Opportunity[]) {
     }
 
     const totalValue = opportunities.reduce((sum, opp) => sum + opp.estimated_sale_price, 0);
-    const totalProfit = opportunities.reduce((sum, opp) => sum + opp.potential_profit, 0);
-    const averageROI = opportunities.reduce((sum, opp) => sum + opp.roi_percentage, 0) / opportunities.length;
+    const totalProfit = opportunities.reduce((sum, opp) => sum + opp.profit, 0);
+    const averageROI = opportunities.reduce((sum, opp) => sum + opp.roi, 0) / opportunities.length;
 
     const riskDistribution = opportunities.reduce((acc, opp) => {
       if (opp.risk_score <= 30) acc.low++;
@@ -137,7 +137,7 @@ export function useMarketMetrics(opportunities: Opportunity[]) {
     }, { low: 0, medium: 0, high: 0 });
 
     const topPerformers = [...opportunities]
-      .sort((a, b) => b.potential_profit - a.potential_profit)
+      .sort((a, b) => b.profit - a.profit)
       .slice(0, 5);
 
     // Simple momentum calculation based on average ROI

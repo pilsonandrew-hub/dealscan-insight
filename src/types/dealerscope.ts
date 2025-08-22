@@ -51,16 +51,18 @@ export interface Opportunity {
   score?: number;
   market_price?: MarketPrice;
   total_cost: number;
-  potential_profit: number;
-  roi_percentage: number;
   risk_score: number;
-  confidence_score: number;
   transportation_cost: number;
   fees_cost: number;
   estimated_sale_price: number;
   profit_margin: number;
   source_site: string;
   current_bid: number;
+  vin?: string;
+  make: string;
+  model: string;
+  year: number;
+  mileage?: number;
 }
 
 export interface PipelineStatus {
