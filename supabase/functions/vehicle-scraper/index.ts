@@ -13,8 +13,16 @@ interface ScrapingRequest {
   limit?: number
 }
 
-// Valid sites whitelist for security
-const VALID_SITES = ['GovDeals', 'PublicSurplus', 'GSAauctions'] as const
+// Valid sites whitelist for security - matching frontend types
+const VALID_SITES = [
+  // Federal sites
+  'GovDeals', 'PublicSurplus', 'GSAauctions', 'TreasuryAuctions', 'USMarshals',
+  'MuniciBid', 'AllSurplus', 'HiBid', 'Proxibid', 'EquipmentFacts',
+  'GovPlanet', 'GovLiquidation', 'USGovBid', 'IRSAuctions',
+  // State sites
+  'California DGS', 'LA County', 'Washington State', 'New York State',
+  'Florida DMS', 'Oregon DAS', 'North Carolina DOA'
+] as const
 const MAX_LIMIT = 1000
 const MAX_SITES_PER_REQUEST = 10
 
@@ -608,35 +616,9 @@ serve(async (req) => {
     const scraper = new VehicleScraper(supabaseUrl, supabaseServiceKey)
     
     if (req.method === 'GET') {
-      // Get existing listings with input validation
-      const url = new URL(req.url)
-      const limitParam = url.searchParams.get('limit')
-      const limit = limitParam ? Math.min(parseInt(limitParam) || 50, MAX_LIMIT) : 50
-      
-      if (isNaN(limit) || limit < 1) {
-        return new Response(JSON.stringify({ error: 'Invalid limit parameter' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        })
-      }
-      
-      const supabaseService = createClient(supabaseUrl, supabaseServiceKey)
-      const { data: listings, error } = await supabaseService
-        .from('public_listings')
-        .select('*')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-        .limit(limit)
-
-      if (error) {
-        console.error('Database error:', error)
-        return new Response(JSON.stringify({ error: 'Database query failed' }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        })
-      }
-
-      return new Response(JSON.stringify({ listings }), {
+      // Redirect GET requests to use POST with action for consistency
+      return new Response(JSON.stringify({ error: 'Please use POST with action parameter' }), {
+        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
@@ -670,6 +652,30 @@ serve(async (req) => {
           success: true,
           result
         }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+      
+      if (scrapingRequest.action === 'get_listings') {
+        const limit = scrapingRequest.limit || 50
+        
+        const supabaseService = createClient(supabaseUrl, supabaseServiceKey)
+        const { data: listings, error } = await supabaseService
+          .from('public_listings')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(limit)
+
+        if (error) {
+          console.error('Database error:', error)
+          return new Response(JSON.stringify({ error: 'Database query failed' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          })
+        }
+
+        return new Response(JSON.stringify({ listings }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         })
       }

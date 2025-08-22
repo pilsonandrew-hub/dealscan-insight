@@ -32,8 +32,11 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
         throw new Error('Authentication required. Please log in.')
       }
 
-      const { data, error } = await supabase.functions.invoke(`vehicle-scraper?limit=${limit}`, {
-        method: 'GET',
+      const { data, error } = await supabase.functions.invoke('vehicle-scraper', {
+        body: {
+          action: 'get_listings',
+          limit
+        },
         headers: {
           Authorization: `Bearer ${session.access_token}`
         }

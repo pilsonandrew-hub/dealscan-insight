@@ -24,8 +24,9 @@ export const VehicleScraperPanel = () => {
   const [selectedSites, setSelectedSites] = useState<SiteName[]>(['GovDeals', 'PublicSurplus'])
 
   useEffect(() => {
+    // Only fetch on mount, not on every fetchListings change to prevent infinite loops
     fetchListings()
-  }, [fetchListings])
+  }, [])
 
   const handleSiteToggle = (site: SiteName, checked: boolean) => {
     if (checked) {
