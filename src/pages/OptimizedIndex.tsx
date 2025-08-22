@@ -1,12 +1,18 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { OptimizedDashboard } from '@/components/OptimizedDashboard';
 import { DealerScopeHeader } from '@/components/DealerScopeHeader';
 
 export default function OptimizedIndex() {
+  const [activeView, setActiveView] = useState('dashboard');
+  
   return (
     <div className="min-h-screen bg-background">
-      <DealerScopeHeader />
+      <DealerScopeHeader 
+        activeView={activeView}
+        onViewChange={setActiveView}
+        newDealsCount={0}
+      />
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
           <h1 className="text-4xl font-bold tracking-tight">DealerScope Elite v4.8</h1>

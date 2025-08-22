@@ -59,6 +59,8 @@ export function OptimizedDashboard() {
           roi: opportunity.roi_percentage,
           confidence: opportunity.confidence_score,
           score: opportunity.score || 0,
+          expected_price: opportunity.estimated_sale_price || 0,
+          acquisition_cost: opportunity.current_bid || 0,
           vehicle: {
             make: opportunity.make,
             model: opportunity.model,
@@ -66,7 +68,7 @@ export function OptimizedDashboard() {
             mileage: opportunity.mileage || 0,
             vin: opportunity.vin || ''
           },
-          status: opportunity.status || 'active'
+          status: (opportunity.status as "hot" | "good" | "moderate") || 'good'
         }),
         (progress) => console.log(`Processing: ${progress}%`)
       );
