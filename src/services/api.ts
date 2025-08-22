@@ -259,15 +259,15 @@ function transformOpportunity(row: any): Opportunity {
       year: row.year,
       mileage: row.mileage,
       trim: row.trim,
-      title_status: 'clean', // Default for now
+      title_status: 'clean',
       photo_url: row.photo_url,
       description: row.description
     },
     expected_price: row.estimated_sale_price,
     acquisition_cost: row.total_cost,
-    profit: row.potential_profit,
-    roi: row.roi_percentage,
-    confidence: row.confidence_score,
+    profit: row.potential_profit || 0,
+    roi: row.roi_percentage || 0,
+    confidence: row.confidence_score || 0,
     location: row.location,
     state: row.state,
     auction_end: row.auction_end,
@@ -275,13 +275,18 @@ function transformOpportunity(row: any): Opportunity {
     score: row.score || 0,
     market_price: row.market_data || {},
     total_cost: row.total_cost,
-    risk_score: row.risk_score,
-    transportation_cost: row.transportation_cost,
-    fees_cost: row.fees_cost,
+    risk_score: row.risk_score || 0,
+    transportation_cost: row.transportation_cost || 0,
+    fees_cost: row.fees_cost || 0,
     estimated_sale_price: row.estimated_sale_price,
-    profit_margin: row.profit_margin,
+    profit_margin: row.profit_margin || 0,
     source_site: row.source_site,
-    current_bid: row.current_bid
+    current_bid: row.current_bid,
+    vin: row.vin,
+    make: row.make,
+    model: row.model,
+    year: row.year,
+    mileage: row.mileage
   };
 }
 
@@ -313,7 +318,7 @@ export const mockApi = {
         location: "Phoenix, AZ",
         state: "AZ",
         auction_end: "2024-01-15T18:00:00Z",
-        status: "hot",
+        status: "hot" as const,
         score: 94,
         market_price: {
           make: "Ford",
@@ -327,16 +332,18 @@ export const mockApi = {
           last_updated: "2024-01-01T12:00:00Z"
         },
         total_cost: 28500,
-        profit: 8300,
-        roi: 29.1,
         risk_score: 25,
-        confidence: 94,
         transportation_cost: 950,
         fees_cost: 3200,
         estimated_sale_price: 36800,
         profit_margin: 22.6,
         source_site: "GovDeals",
-        current_bid: 24350
+        current_bid: 24350,
+        vin: "1FTFW1ET5CFC10312",
+        make: "Ford",
+        model: "F-150",
+        year: 2021,
+        mileage: 45230
       },
       {
         id: "2",
@@ -359,7 +366,7 @@ export const mockApi = {
         location: "Austin, TX",
         state: "TX",
         auction_end: "2024-01-16T19:30:00Z",
-        status: "hot",
+        status: "hot" as const,
         score: 88,
         market_price: {
           make: "Chevrolet",
@@ -373,16 +380,18 @@ export const mockApi = {
           last_updated: "2024-01-01T12:00:00Z"
         },
         total_cost: 24800,
-        profit: 7600,
-        roi: 30.6,
         risk_score: 28,
-        confidence: 88,
         transportation_cost: 2800,
         fees_cost: 2950,
         estimated_sale_price: 32400,
         profit_margin: 23.5,
         source_site: "PublicSurplus",
-        current_bid: 18050
+        current_bid: 18050,
+        vin: "1GCUYDED5LZ123456",
+        make: "Chevrolet",
+        model: "Silverado 1500",
+        year: 2020,
+        mileage: 52100
       },
       {
         id: "3",
@@ -405,7 +414,7 @@ export const mockApi = {
         location: "Las Vegas, NV",
         state: "NV",
         auction_end: "2024-01-17T16:00:00Z",
-        status: "good",
+        status: "good" as const,
         score: 76,
         market_price: {
           make: "Hyundai",
@@ -419,16 +428,18 @@ export const mockApi = {
           last_updated: "2024-01-01T12:00:00Z"
         },
         total_cost: 14500,
-        profit: 3700,
-        roi: 25.5,
         risk_score: 35,
-        confidence: 76,
         transportation_cost: 600,
         fees_cost: 1400,
         estimated_sale_price: 18200,
         profit_margin: 20.3,
         source_site: "Copart",
-        current_bid: 12500
+        current_bid: 12500,
+        vin: "5NPE34AF4JH123789",
+        make: "Hyundai",
+        model: "Sonata",
+        year: 2018,
+        mileage: 67800
       }
     ];
   },

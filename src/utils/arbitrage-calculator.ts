@@ -98,16 +98,18 @@ export class ArbitrageCalculator {
       score: this.calculateOpportunityScore(potentialProfit, roiPercentage, riskScore, confidenceScore),
       market_price: marketPrice,
       total_cost: totalCost,
-      potential_profit: potentialProfit,
-      roi_percentage: roiPercentage,
       risk_score: riskScore,
-      confidence_score: confidenceScore,
       transportation_cost: transportationCost,
       fees_cost: buyerPremium + docFee,
       estimated_sale_price: estimatedSalePrice,
       profit_margin: profitMargin,
       source_site: sourceSite,
-      current_bid: currentBid
+      current_bid: currentBid,
+      vin: vehicle.vin,
+      make: vehicle.make,
+      model: vehicle.model,
+      year: vehicle.year,
+      mileage: vehicle.mileage
     };
   }
 

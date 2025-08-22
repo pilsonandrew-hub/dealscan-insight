@@ -297,9 +297,9 @@ export class MarketIntelligenceEngine {
   }
 
   private assessCompetitivePosition(opportunity: Opportunity, marketScore: number): 'strong' | 'average' | 'weak' {
-    const roiThreshold = opportunity.roi_percentage > 25;
-    const profitThreshold = opportunity.potential_profit > 5000;
-    const confidenceThreshold = opportunity.confidence_score > 70;
+    const roiThreshold = opportunity.roi > 25;
+    const profitThreshold = opportunity.profit > 5000;
+    const confidenceThreshold = opportunity.confidence > 70;
     
     if (marketScore > 70 && roiThreshold && profitThreshold && confidenceThreshold) {
       return 'strong';
@@ -346,9 +346,9 @@ export class MarketIntelligenceEngine {
   ): { action: 'buy' | 'watch' | 'skip', reasoning: string[] } {
     const reasoning: string[] = [];
     
-    if (position === 'strong' && marketScore > 75 && opportunity.roi_percentage > 20) {
+    if (position === 'strong' && marketScore > 75 && opportunity.roi > 20) {
       reasoning.push(`Strong market position with ${marketScore.toFixed(0)} market score`);
-      reasoning.push(`High ROI potential of ${opportunity.roi_percentage.toFixed(1)}%`);
+      reasoning.push(`High ROI potential of ${opportunity.roi.toFixed(1)}%`);
       reasoning.push(`Favorable price prediction trend`);
       return { action: 'buy', reasoning };
     }
@@ -367,7 +367,7 @@ export class MarketIntelligenceEngine {
   private calculateMarketOverview(opportunities: Opportunity[]) {
     const totalValue = opportunities.reduce((sum, opp) => sum + opp.estimated_sale_price, 0);
     const avgVelocity = opportunities.length > 0 ? 
-      opportunities.reduce((sum, opp) => sum + (opp.confidence_score / 100), 0) / opportunities.length : 0;
+      opportunities.reduce((sum, opp) => sum + (opp.confidence / 100), 0) / opportunities.length : 0;
     
     return {
       totalMarketValue: totalValue,
@@ -458,7 +458,7 @@ export class MarketIntelligenceEngine {
   }
 
   private calculateRiskAdjustedReturn(opportunity: Opportunity, adjustmentFactors: Record<string, number>): number {
-    const baseReturn = opportunity.roi_percentage;
+    const baseReturn = opportunity.roi;
     const riskFactor = opportunity.risk_score / 100;
     const marketRisk = Math.abs(Object.values(adjustmentFactors).reduce((sum, factor) => sum + factor, 0)) / 10;
     

@@ -142,7 +142,7 @@ export class MarketAnalysisEngine {
       const marketShare = 1 / (competitorCount + 1); // Simplified market share
 
       let recommendedAction = 'Hold current position';
-      if (pricePosition === 'below' && opportunity.potential_profit > 0) {
+      if (pricePosition === 'below' && opportunity.profit > 0) {
         recommendedAction = 'Strong buy - below market with profit potential';
       } else if (pricePosition === 'above') {
         recommendedAction = 'Caution - priced above market average';
@@ -162,7 +162,7 @@ export class MarketAnalysisEngine {
   }
 
   private async generateProfitabilityForecast(opportunity: Opportunity): Promise<ProfitabilityForecast> {
-    const currentProfit = opportunity.potential_profit;
+    const currentProfit = opportunity.profit;
     const riskFactors: string[] = [];
 
     // Calculate risk factors
@@ -179,7 +179,7 @@ export class MarketAnalysisEngine {
       riskFactors.push('High mileage may limit buyer pool');
     }
 
-    if (opportunity.confidence_score < 50) {
+    if (opportunity.confidence < 50) {
       riskFactors.push('Low confidence in price estimation');
     }
 
@@ -319,7 +319,7 @@ export class MarketAnalysisEngine {
     else if (brandStrength < 0.5) momentum -= 1;
 
     // Check profit potential
-    const profitMargin = opportunity.potential_profit / opportunity.current_bid;
+    const profitMargin = opportunity.profit / opportunity.current_bid;
     if (profitMargin > 0.2) momentum += 1;
     else if (profitMargin < 0.05) momentum -= 1;
 
@@ -332,19 +332,19 @@ export class MarketAnalysisEngine {
     let score = 50; // Base score
 
     // Profit potential
-    const profitMargin = opportunity.potential_profit / opportunity.current_bid;
+    const profitMargin = opportunity.profit / opportunity.current_bid;
     score += profitMargin * 100;
 
     // Confidence factor
-    score += (opportunity.confidence_score - 50) * 0.5;
+    score += (opportunity.confidence - 50) * 0.5;
 
     // Risk penalty
     score -= riskFactorCount * 10;
 
     // ROI bonus
-    if (opportunity.roi_percentage > 20) score += 15;
-    else if (opportunity.roi_percentage > 15) score += 10;
-    else if (opportunity.roi_percentage > 10) score += 5;
+    if (opportunity.roi > 20) score += 15;
+    else if (opportunity.roi > 15) score += 10;
+    else if (opportunity.roi > 10) score += 5;
 
     return Math.max(0, Math.min(100, score));
   }

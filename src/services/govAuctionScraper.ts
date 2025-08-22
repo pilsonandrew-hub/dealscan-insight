@@ -310,7 +310,7 @@ export class GovernmentAuctionScraper {
         );
 
         // Only create opportunities with significant profit potential
-        if (opportunity.potential_profit > 2000 && opportunity.roi_percentage > 10) {
+        if (opportunity.profit > 2000 && opportunity.roi > 10) {
           await supabase
             .from('opportunities')
             .insert({
@@ -322,10 +322,10 @@ export class GovernmentAuctionScraper {
               current_bid: opportunity.current_bid,
               estimated_sale_price: opportunity.estimated_sale_price,
               total_cost: opportunity.total_cost,
-              potential_profit: opportunity.potential_profit,
-              roi_percentage: opportunity.roi_percentage,
+              potential_profit: opportunity.profit,
+              roi_percentage: opportunity.roi,
               risk_score: opportunity.risk_score,
-              confidence_score: opportunity.confidence_score,
+              confidence_score: opportunity.confidence,
               transportation_cost: opportunity.transportation_cost,
               fees_cost: opportunity.fees_cost,
               profit_margin: opportunity.profit_margin,
