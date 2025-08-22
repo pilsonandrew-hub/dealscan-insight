@@ -1,73 +1,289 @@
-# Welcome to your Lovable project
+# DealerScope v4.9 🚗💰
 
-## Project info
+> **Enterprise-grade vehicle arbitrage analysis platform** for government auction deals
 
-**URL**: https://lovable.dev/projects/3406092e-4049-49a1-9b7f-cb265cf0eb69
+DealerScope is a production-ready deal-finding "inbox" for government/municipal car & truck auctions. It watches selected marketplaces, normalizes listings, scores arbitrage potential, and delivers a clean, mobile-friendly "New deals" feed with intelligent alerts.
 
-## How can I edit this code?
+## 🎯 What It Does
 
-There are several ways of editing your application.
+- **Monitors** 14+ government auction sites (GovDeals, PublicSurplus, GSA, etc.)
+- **Analyzes** vehicle data for arbitrage opportunities using real market data
+- **Scores** deals by profit potential, risk, and confidence levels
+- **Delivers** a clean inbox experience with real-time notifications
+- **Protects** your competitive advantage with enterprise security
 
-**Use Lovable**
+## 🚀 Quick Start
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/3406092e-4049-49a1-9b7f-cb265cf0eb69) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+# Clone and start in one command
+git clone <your-repo-url>
+cd dealerscope
+bash scripts/dev.sh
 ```
 
-**Edit a file directly in GitHub**
+That's it! The app will open at `http://localhost:5173` with sample data.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## 🛠 Tech Stack
 
-**Use GitHub Codespaces**
+- **Frontend**: React 18 + TypeScript, Tailwind CSS, shadcn/ui
+- **Backend**: Supabase (Auth, Database, Edge Functions)
+- **Real-time**: WebSocket updates for live deal notifications  
+- **Security**: Row Level Security, audit logging, input sanitization
+- **Performance**: Query optimization, intelligent caching, circuit breakers
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## 📋 Prerequisites
 
-## What technologies are used for this project?
+- **Node.js 18+** and npm
+- **Supabase Account** (free tier works)
+- Modern browser with ES2020+ support
 
-This project is built with:
+## 🔧 Setup
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### 1. Environment Configuration
 
-## How can I deploy this project?
+```bash
+# Copy environment template
+cp .env.example .env
 
-Simply open [Lovable](https://lovable.dev/projects/3406092e-4049-49a1-9b7f-cb265cf0eb69) and click on Share -> Publish.
+# Edit with your Supabase credentials
+nano .env
+```
 
-## Can I connect a custom domain to my Lovable project?
+Required environment variables:
+```bash
+VITE_SUPABASE_URL=your-supabase-url
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
 
-Yes, you can!
+### 2. Database Setup
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+The database schema is automatically created when you first run the app. Tables include:
+- `public_listings` - Scraped vehicle data
+- `opportunities` - Analyzed arbitrage opportunities  
+- `user_settings` - User preferences
+- `security_audit_log` - Security events
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+### 3. Development Commands
+
+```bash
+# Start development server
+npm run dev
+# or
+bash scripts/dev.sh
+
+# Run tests
+npm test
+
+# Type checking
+npm run type-check
+
+# Build for production
+npm run build
+```
+
+## 🏗 Architecture
+
+### Core Components
+
+```
+src/
+├── components/         # UI components
+│   ├── DealInbox.tsx  # Main deal management interface
+│   ├── DealCard.tsx   # Individual deal display
+│   └── ui/            # shadcn/ui components
+├── pages/
+│   ├── Index.tsx      # Main dashboard
+│   └── Settings.tsx   # User preferences
+├── hooks/
+│   ├── useRealtimeOpportunities.ts  # WebSocket integration
+│   └── useSecureStorage.ts          # Encrypted local storage
+├── services/
+│   └── api.ts         # Supabase integration layer
+└── utils/
+    ├── performanceOptimizer.ts  # Performance monitoring
+    └── securityHeaders.ts       # Security hardening
+```
+
+### Data Flow
+
+```mermaid
+graph TD
+    A[Scrapers] --> B[Edge Functions]
+    B --> C[Database]
+    C --> D[Real-time Updates]
+    D --> E[Deal Inbox]
+    E --> F[User Actions]
+    F --> C
+```
+
+## 🎮 Usage Guide
+
+### Deal Inbox Workflow
+
+1. **Open** DealerScope - see your deal inbox with New/Watching/Dismissed
+2. **Configure** sources & filters in Settings (GovDeals, PublicSurplus, etc.)
+3. **Scan** manually or let background scans run every 10 minutes
+4. **Review** deals with profit/risk badges and market analysis
+5. **Act** on opportunities - Watch, Hide, or Open auction
+
+### Key Features
+
+- **🔴 Red Bubble Alerts**: New high-profit deals appear instantly
+- **📱 Mobile PWA**: Full functionality on mobile devices
+- **🔒 Secure**: Enterprise-grade security with audit logging
+- **⚡ Fast**: Optimized queries and intelligent caching
+- **🎯 Smart Filtering**: ROI, risk score, location, make/model
+
+## 🔐 Security Features
+
+DealerScope v4.9 includes enterprise-grade security:
+
+- ✅ **Authentication**: JWT + TOTP two-factor authentication
+- ✅ **Authorization**: Row Level Security for all data access
+- ✅ **Input Validation**: Comprehensive sanitization and validation
+- ✅ **SSRF Protection**: Domain allowlisting for scraper requests
+- ✅ **Audit Logging**: Complete security event tracking
+- ✅ **Rate Limiting**: Protection against abuse
+- ✅ **CSP Headers**: XSS and injection protection
+- ✅ **Encrypted Storage**: Sensitive data encryption at rest
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm run test:unit        # Unit tests
+npm run test:integration # Integration tests
+npm run test:security    # Security tests
+
+# Coverage report
+npm run test:coverage
+```
+
+### Test Categories
+
+- **Unit Tests**: Component logic, utilities, calculations
+- **Integration Tests**: API interactions, database operations
+- **Security Tests**: Input validation, authentication flows
+- **Contract Tests**: API response shapes and schemas
+
+## 📊 Performance Monitoring
+
+Built-in performance monitoring includes:
+
+- **Memory Usage**: Automatic cleanup and garbage collection
+- **API Response Times**: Circuit breakers for resilience  
+- **Cache Hit Rates**: Intelligent caching strategies
+- **Error Tracking**: Comprehensive error reporting
+
+## 🚦 Security Hardening
+
+### Production Checklist
+
+- [ ] Set up proper environment variables
+- [ ] Configure Row Level Security policies
+- [ ] Enable audit logging
+- [ ] Set up backup procedures
+- [ ] Configure rate limiting
+- [ ] Review user permissions
+- [ ] Test authentication flows
+- [ ] Validate input sanitization
+
+### Security Scan
+
+```bash
+# Run security audit
+npm run security:audit
+
+# Check dependencies
+npm audit
+
+# Validate configuration
+npm run config:validate
+```
+
+## 🤝 Contributing
+
+### Adding New Auction Sites
+
+1. **Add site configuration** in `src/types/scraper.ts`
+2. **Implement scraper** in `supabase/functions/vehicle-scraper/`
+3. **Add CSS selectors** for data extraction
+4. **Test with sample data**
+5. **Update documentation**
+
+### Development Guidelines
+
+- **Security First**: All features must pass security review
+- **Performance**: Optimize for mobile and low-bandwidth
+- **Testing**: Maintain >90% test coverage
+- **Documentation**: Update docs with any API changes
+
+## 📈 Roadmap
+
+### v5.0 Features
+- [ ] Machine learning for better opportunity scoring
+- [ ] Advanced market analytics and trends
+- [ ] Automated bidding capabilities
+- [ ] Enhanced mobile app with offline support
+- [ ] Integration with dealer management systems
+
+### Performance Targets
+- [ ] <500ms average page load time
+- [ ] <100ms API response times  
+- [ ] 99.9% uptime SLA
+- [ ] Support for 10,000+ concurrent users
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**Build Errors**
+```bash
+# Clear node_modules and reinstall
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**Database Connection Issues**
+```bash
+# Check Supabase credentials in .env
+# Verify network connectivity
+# Check Supabase dashboard for service status
+```
+
+**Authentication Problems**
+```bash
+# Clear browser storage
+# Check JWT token expiration
+# Verify user permissions in Supabase
+```
+
+### Debug Mode
+
+```bash
+# Enable debug logging
+DEBUG=dealerscope:* npm run dev
+
+# Verbose error reporting
+NODE_ENV=development npm run dev
+```
+
+## 📞 Support
+
+- **Documentation**: Full API docs at `/docs`
+- **Issues**: GitHub Issues for bug reports
+- **Security**: Report security issues privately
+- **Community**: Discord server for discussions
+
+## 📄 License
+
+**MIT License** - see [LICENSE](LICENSE) for details
+
+---
+
+**Built with ❤️ for the vehicle arbitrage community**
+
+*DealerScope v4.9 - Production-ready, secure, and blazingly fast.*

@@ -12,6 +12,7 @@ import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList"
 import { SystemEvaluationPanel } from "@/components/SystemEvaluationPanel";
 import { VehicleScraperPanel } from "@/components/VehicleScraperPanel";
 import { DealScoringPanel } from "@/components/DealScoringPanel";
+import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 import { useToast } from "@/hooks/use-toast";
@@ -91,17 +92,7 @@ const Index = () => {
       case "evaluation":
         return <SystemEvaluationPanel />;
       case "settings":
-        return (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-foreground">Settings</h2>
-              <p className="text-muted-foreground">Configure your DealerScope preferences and data sources</p>
-            </div>
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">Settings interface coming soon...</p>
-            </div>
-          </div>
-        );
+        return <Settings />;
       default:
         return null;
     }

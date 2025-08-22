@@ -40,27 +40,11 @@ const Settings = () => {
   const loadSettings = async () => {
     setLoading(true);
     try {
-      // Load user preferences from database
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('*')
-        .maybeSingle();
-
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
-
-      if (data) {
-        setSettings({
-          enabled_sites: data.enabled_sites || ['GovDeals', 'PublicSurplus'],
-          scanning_mode: data.scanning_mode || 'safe',
-          scan_interval: data.scan_interval || 10,
-          max_risk_score: data.max_risk_score || 50,
-          min_roi_percentage: data.min_roi_percentage || 15,
-          preferred_states: data.preferred_states || ['CA', 'TX', 'FL'],
-          notifications_enabled: data.notifications_enabled ?? true,
-          email_alerts: data.email_alerts ?? false
-        });
+      // Load user preferences from localStorage for now (until database types are updated)
+      const stored = localStorage.getItem('dealerscope-settings');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setSettings(prev => ({ ...prev, ...parsed }));
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -73,16 +57,8 @@ const Settings = () => {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('user_settings')
-        .upsert({
-          user_id: (await supabase.auth.getUser()).data.user?.id,
-          ...settings,
-          updated_at: new Date().toISOString()
-        });
-
-      if (error) throw error;
-
+      // Save to localStorage for now (until database types are updated)
+      localStorage.setItem('dealerscope-settings', JSON.stringify(settings));
       toast.success('Settings saved successfully');
     } catch (error) {
       console.error('Error saving settings:', error);

@@ -472,6 +472,51 @@ export type Database = {
         }
         Relationships: []
       }
+      user_settings: {
+        Row: {
+          created_at: string
+          email_alerts: boolean | null
+          enabled_sites: string[] | null
+          id: string
+          max_risk_score: number | null
+          min_roi_percentage: number | null
+          notifications_enabled: boolean | null
+          preferred_states: string[] | null
+          scan_interval: number | null
+          scanning_mode: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email_alerts?: boolean | null
+          enabled_sites?: string[] | null
+          id?: string
+          max_risk_score?: number | null
+          min_roi_percentage?: number | null
+          notifications_enabled?: boolean | null
+          preferred_states?: string[] | null
+          scan_interval?: number | null
+          scanning_mode?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email_alerts?: boolean | null
+          enabled_sites?: string[] | null
+          id?: string
+          max_risk_score?: number | null
+          min_roi_percentage?: number | null
+          notifications_enabled?: boolean | null
+          preferred_states?: string[] | null
+          scan_interval?: number | null
+          scanning_mode?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
