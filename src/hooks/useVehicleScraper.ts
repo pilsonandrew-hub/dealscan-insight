@@ -33,6 +33,7 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
       }
 
       const { data, error } = await supabase.functions.invoke('vehicle-scraper', {
+        method: 'POST',
         body: {
           action: 'get_listings',
           limit
@@ -83,6 +84,7 @@ export const useVehicleScraper = (): UseVehicleScraperReturn => {
       })
 
       const { data, error } = await supabase.functions.invoke('vehicle-scraper', {
+        method: 'POST',
         body: {
           action: 'start_scraping',
           sites
