@@ -436,6 +436,42 @@ export type Database = {
         }
         Relationships: []
       }
+      security_audit_log: {
+        Row: {
+          action: string
+          created_at: string
+          details: Json | null
+          id: string
+          ip_address: unknown | null
+          resource: string | null
+          status: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          ip_address?: unknown | null
+          resource?: string | null
+          status: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          ip_address?: unknown | null
+          resource?: string | null
+          status?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -443,6 +479,15 @@ export type Database = {
     Functions: {
       clean_expired_market_prices: {
         Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      log_security_event: {
+        Args: {
+          p_action: string
+          p_details?: Json
+          p_resource?: string
+          p_status?: string
+        }
         Returns: undefined
       }
     }

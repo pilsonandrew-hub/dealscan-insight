@@ -5,16 +5,22 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { AuthProvider } from '@/contexts/AuthContext';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { AuthProvider } from '@/contexts/SecureAuthContext';
+import { SecureProtectedRoute } from '@/components/SecureProtectedRoute';
+import { AuthPage } from '@/pages/SecureAuth';
 import Index from "./pages/Index";
-import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 3,
+      retry: (failureCount, error: any) => {
+        // Don't retry on 4xx errors except 408, 429
+        if (error?.status >= 400 && error?.status < 500 && ![408, 429].includes(error?.status)) {
+          return false;
+        }
+        return failureCount < 3;
+      },
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       staleTime: 5 * 60 * 1000, // 5 minutes
       refetchOnWindowFocus: false,
@@ -35,11 +41,11 @@ const App = () => (
           <Sonner />
           <BrowserRouter>
             <Routes>
-              <Route path="/auth" element={<Auth />} />
+              <Route path="/auth" element={<AuthPage />} />
               <Route path="/" element={
-                <ProtectedRoute>
+                <SecureProtectedRoute>
                   <Index />
-                </ProtectedRoute>
+                </SecureProtectedRoute>
               } />
               <Route path="*" element={<NotFound />} />
             </Routes>
