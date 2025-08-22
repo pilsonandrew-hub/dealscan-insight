@@ -48,11 +48,11 @@ const DEFAULT_CONFIG: ArbitrageConfig = {
 
 export class ArbitrageCalculator {
   private config: ArbitrageConfig;
-  private priceModel: SimpleLinearModel;
+  private priceModel: AdvancedPricePredictionModel;
 
   constructor(config: ArbitrageConfig = DEFAULT_CONFIG) {
     this.config = config;
-    this.priceModel = new SimpleLinearModel();
+    this.priceModel = new AdvancedPricePredictionModel();
   }
 
   calculateOpportunity(
@@ -135,29 +135,16 @@ export class ArbitrageCalculator {
   }
 
   private estimateSalePrice(vehicle: Vehicle, marketPrice?: MarketPrice): number {
-    let basePrice = 25000; // Default fallback
-
     if (marketPrice) {
-      // Use market data as primary source
-      const marketMedian = (marketPrice.avg_price + marketPrice.low_price + marketPrice.high_price) / 3;
-      basePrice = marketMedian;
-    } else {
-      // Fallback to ML estimation
-      basePrice = this.priceModel.predict(vehicle.year, vehicle.mileage);
+      // Use market price as base but adjust with our model's confidence
+      const modelPrice = this.priceModel.predict(vehicle.year, vehicle.mileage, vehicle.make, vehicle.model, vehicle.trim);
+      const confidence = this.priceModel.getConfidenceScore(vehicle.year, vehicle.mileage, vehicle.make, vehicle.model);
+      
+      // Weighted average based on confidence
+      return (marketPrice.avg_price * (1 - confidence)) + (modelPrice * confidence);
     }
-
-    // Apply mileage factor
-    const mileageFactor = Math.max(0.3, 1.0 - (vehicle.mileage / 200000));
     
-    // Apply age factor
-    const currentYear = new Date().getFullYear();
-    const ageFactor = Math.max(0.4, 1.0 - ((currentYear - vehicle.year) * 0.03));
-    
-    // Apply title status factor
-    const titleFactor = this.getTitleStatusFactor(vehicle.title_status);
-    
-    // Conservative pricing for arbitrage (95% of estimated value)
-    return basePrice * mileageFactor * ageFactor * titleFactor * 0.95;
+    return this.priceModel.predict(vehicle.year, vehicle.mileage, vehicle.make, vehicle.model, vehicle.trim);
   }
 
   private getTitleStatusFactor(titleStatus?: string): number {
@@ -206,36 +193,28 @@ export class ArbitrageCalculator {
   }
 
   private calculateConfidenceScore(vehicle: Vehicle, marketPrice?: MarketPrice, currentBid?: number): number {
-    const confidenceFactors: number[] = [];
-    
-    // Market data confidence
+    let confidence = this.priceModel.getConfidenceScore(vehicle.year, vehicle.mileage, vehicle.make, vehicle.model);
+
+    // Market data availability increases confidence
     if (marketPrice) {
-      if (marketPrice.sample_size > 100) confidenceFactors.push(95);
-      else if (marketPrice.sample_size > 50) confidenceFactors.push(80);
-      else if (marketPrice.sample_size > 20) confidenceFactors.push(65);
-      else confidenceFactors.push(40);
-    } else {
-      confidenceFactors.push(30); // Low confidence without market data
+      confidence += 0.2;
+      if (marketPrice.sample_size > 10) confidence += 0.05;
+      if (marketPrice.sample_size > 50) confidence += 0.05;
+      if (marketPrice.sample_size > 100) confidence += 0.05;
+      
+      // Price consistency check
+      const modelPrice = this.priceModel.predict(vehicle.year, vehicle.mileage, vehicle.make, vehicle.model, vehicle.trim);
+      const priceVariance = Math.abs(marketPrice.avg_price - modelPrice) / Math.max(marketPrice.avg_price, modelPrice);
+      if (priceVariance < 0.1) confidence += 0.1; // Prices align well
+      else if (priceVariance > 0.3) confidence -= 0.1; // Large discrepancy
     }
-    
-    // Data completeness confidence
-    let completeness = 0;
-    if (vehicle.vin && vehicle.vin.length === 17) completeness += 25;
-    if (vehicle.photo_url) completeness += 20;
-    if (vehicle.description && vehicle.description.length > 50) completeness += 25;
-    if (vehicle.trim) completeness += 15;
-    if (vehicle.title_status) completeness += 15;
-    confidenceFactors.push(completeness);
-    
-    // Bid position confidence (lower bids = higher confidence)
-    if (marketPrice && currentBid) {
-      if (currentBid < marketPrice.low_price * 0.7) confidenceFactors.push(95);
-      else if (currentBid < marketPrice.avg_price * 0.8) confidenceFactors.push(80);
-      else if (currentBid < marketPrice.avg_price) confidenceFactors.push(65);
-      else confidenceFactors.push(35);
-    }
-    
-    return confidenceFactors.reduce((sum, factor) => sum + factor, 0) / confidenceFactors.length;
+
+    // Title status impact
+    if (vehicle.title_status === 'clean') confidence += 0.05;
+    else if (vehicle.title_status === 'salvage') confidence -= 0.2;
+    else if (vehicle.title_status === 'flood') confidence -= 0.25;
+
+    return Math.max(0.1, Math.min(0.95, confidence));
   }
 
   private determineOpportunityStatus(
@@ -265,42 +244,210 @@ export class ArbitrageCalculator {
   }
 }
 
-// Simple linear regression model for price prediction
-class SimpleLinearModel {
-  private yearCoeff = -1000;
-  private mileageCoeff = -0.12;
-  private intercept = 2050000; // Base price for year 2025, 0 miles
+class AdvancedPricePredictionModel {
+  private models: Map<string, any> = new Map();
+  private marketFactors: Map<string, number> = new Map();
+  private seasonalAdjustments: Map<number, number> = new Map();
+  private brandMultipliers: Map<string, number> = new Map();
 
-  predict(year: number, mileage: number): number {
-    const predicted = this.intercept + (this.yearCoeff * (2025 - year)) + (this.mileageCoeff * mileage);
-    return Math.max(5000, predicted); // Minimum $5k value
+  constructor() {
+    this.initializeMarketFactors();
+    this.initializeSeasonalAdjustments();
+    this.initializeBrandMultipliers();
   }
 
-  // In a real implementation, this would train on historical sales data
-  train(salesData: Array<{year: number, mileage: number, price: number}>): void {
-    if (salesData.length < 10) return;
+  private initializeMarketFactors(): void {
+    // Market demand factors by vehicle type
+    this.marketFactors.set('luxury', 1.2);
+    this.marketFactors.set('suv', 1.15);
+    this.marketFactors.set('truck', 1.1);
+    this.marketFactors.set('sedan', 0.95);
+    this.marketFactors.set('coupe', 0.9);
+    this.marketFactors.set('convertible', 1.05);
+  }
+
+  private initializeSeasonalAdjustments(): void {
+    // Seasonal price adjustments by month
+    this.seasonalAdjustments.set(1, 0.95); // January
+    this.seasonalAdjustments.set(2, 0.93); // February
+    this.seasonalAdjustments.set(3, 1.02); // March
+    this.seasonalAdjustments.set(4, 1.05); // April
+    this.seasonalAdjustments.set(5, 1.08); // May
+    this.seasonalAdjustments.set(6, 1.1);  // June
+    this.seasonalAdjustments.set(7, 1.08); // July
+    this.seasonalAdjustments.set(8, 1.05); // August
+    this.seasonalAdjustments.set(9, 1.02); // September
+    this.seasonalAdjustments.set(10, 0.98); // October
+    this.seasonalAdjustments.set(11, 0.96); // November
+    this.seasonalAdjustments.set(12, 0.94); // December
+  }
+
+  private initializeBrandMultipliers(): void {
+    // Brand value multipliers
+    this.brandMultipliers.set('mercedes-benz', 1.3);
+    this.brandMultipliers.set('bmw', 1.25);
+    this.brandMultipliers.set('audi', 1.2);
+    this.brandMultipliers.set('lexus', 1.15);
+    this.brandMultipliers.set('tesla', 1.4);
+    this.brandMultipliers.set('porsche', 1.6);
+    this.brandMultipliers.set('toyota', 1.1);
+    this.brandMultipliers.set('honda', 1.05);
+    this.brandMultipliers.set('ford', 0.95);
+    this.brandMultipliers.set('chevrolet', 0.9);
+    this.brandMultipliers.set('nissan', 0.85);
+  }
+
+  predict(year: number, mileage: number, make: string, model: string, trim?: string): number {
+    const basePrice = this.calculateBasePrice(year, make, model);
+    const ageAdjustment = this.calculateAgeAdjustment(year);
+    const mileageAdjustment = this.calculateMileageAdjustment(mileage, year);
+    const brandAdjustment = this.calculateBrandAdjustment(make);
+    const seasonalAdjustment = this.calculateSeasonalAdjustment();
+    const marketAdjustment = this.calculateMarketAdjustment(make, model);
+    const conditionAdjustment = this.calculateConditionAdjustment(year, mileage);
+
+    let predictedPrice = basePrice * brandAdjustment * seasonalAdjustment * marketAdjustment;
+    predictedPrice += ageAdjustment + mileageAdjustment + conditionAdjustment;
+
+    return Math.max(predictedPrice, 1000);
+  }
+
+  private calculateBasePrice(year: number, make: string, model: string): number {
+    // Enhanced base price calculation with market intelligence
+    const makeLower = make.toLowerCase();
+    const modelLower = model.toLowerCase();
+
+    // Luxury brands base prices
+    if (['mercedes-benz', 'bmw', 'audi', 'lexus'].includes(makeLower)) {
+      return 45000 + (year - 2015) * 2000;
+    }
+
+    // Electric vehicles
+    if (makeLower === 'tesla' || modelLower.includes('electric') || modelLower.includes('ev')) {
+      return 50000 + (year - 2015) * 3000;
+    }
+
+    // Performance vehicles
+    if (['porsche', 'ferrari', 'lamborghini', 'maserati'].includes(makeLower)) {
+      return 80000 + (year - 2015) * 5000;
+    }
+
+    // Trucks and SUVs
+    if (modelLower.includes('truck') || modelLower.includes('suv') || 
+        ['f-150', 'silverado', 'ram', 'sierra'].includes(modelLower)) {
+      return 35000 + (year - 2015) * 1500;
+    }
+
+    // Standard vehicles
+    return 25000 + (year - 2015) * 1000;
+  }
+
+  private calculateAgeAdjustment(year: number): number {
+    const age = new Date().getFullYear() - year;
+    return -age * 1200; // $1200 depreciation per year
+  }
+
+  private calculateMileageAdjustment(mileage: number, year: number): number {
+    const age = new Date().getFullYear() - year;
+    const expectedMileage = age * 12000; // 12k miles per year expected
+    const mileageDifference = mileage - expectedMileage;
+    return -mileageDifference * 0.2; // $0.20 per mile over/under expected
+  }
+
+  private calculateBrandAdjustment(make: string): number {
+    return this.brandMultipliers.get(make.toLowerCase()) || 1.0;
+  }
+
+  private calculateSeasonalAdjustment(): number {
+    const currentMonth = new Date().getMonth() + 1;
+    return this.seasonalAdjustments.get(currentMonth) || 1.0;
+  }
+
+  private calculateMarketAdjustment(make: string, model: string): number {
+    const modelLower = model.toLowerCase();
     
-    // Simple calculation of coefficients (in production, use proper ML library)
-    const avgYear = salesData.reduce((sum, d) => sum + d.year, 0) / salesData.length;
-    const avgMileage = salesData.reduce((sum, d) => sum + d.mileage, 0) / salesData.length;
-    const avgPrice = salesData.reduce((sum, d) => sum + d.price, 0) / salesData.length;
+    if (modelLower.includes('suv')) return this.marketFactors.get('suv') || 1.0;
+    if (modelLower.includes('truck')) return this.marketFactors.get('truck') || 1.0;
+    if (modelLower.includes('convertible')) return this.marketFactors.get('convertible') || 1.0;
+    if (modelLower.includes('coupe')) return this.marketFactors.get('coupe') || 1.0;
     
-    let yearVariance = 0, mileageVariance = 0, yearPriceCovar = 0, mileagePriceCovar = 0;
+    return this.marketFactors.get('sedan') || 1.0;
+  }
+
+  private calculateConditionAdjustment(year: number, mileage: number): number {
+    const age = new Date().getFullYear() - year;
+    const averageMileagePerYear = mileage / Math.max(age, 1);
     
-    salesData.forEach(d => {
-      const yearDiff = d.year - avgYear;
-      const mileageDiff = d.mileage - avgMileage;
-      const priceDiff = d.price - avgPrice;
+    // Low mileage bonus
+    if (averageMileagePerYear < 8000) return 2000;
+    if (averageMileagePerYear < 12000) return 500;
+    
+    // High mileage penalty
+    if (averageMileagePerYear > 20000) return -3000;
+    if (averageMileagePerYear > 15000) return -1500;
+    
+    return 0;
+  }
+
+  train(salesData: Array<{year: number, mileage: number, price: number, make: string, model: string}>): void {
+    console.log(`Training advanced model with ${salesData.length} data points`);
+    
+    // Update brand multipliers based on actual sales data
+    const brandPerformance = new Map<string, {total: number, count: number}>();
+    
+    salesData.forEach(sale => {
+      const makeLower = sale.make.toLowerCase();
+      const existing = brandPerformance.get(makeLower) || {total: 0, count: 0};
+      const predicted = this.predict(sale.year, sale.mileage, sale.make, sale.model);
+      const actualVsPredicted = sale.price / predicted;
       
-      yearVariance += yearDiff * yearDiff;
-      mileageVariance += mileageDiff * mileageDiff;
-      yearPriceCovar += yearDiff * priceDiff;
-      mileagePriceCovar += mileageDiff * priceDiff;
+      brandPerformance.set(makeLower, {
+        total: existing.total + actualVsPredicted,
+        count: existing.count + 1
+      });
     });
-    
-    this.yearCoeff = yearVariance > 0 ? yearPriceCovar / yearVariance : -1000;
-    this.mileageCoeff = mileageVariance > 0 ? mileagePriceCovar / mileageVariance : -0.12;
-    this.intercept = avgPrice - (this.yearCoeff * avgYear) - (this.mileageCoeff * avgMileage);
+
+    // Update multipliers based on performance
+    brandPerformance.forEach((performance, brand) => {
+      const avgMultiplier = performance.total / performance.count;
+      const currentMultiplier = this.brandMultipliers.get(brand) || 1.0;
+      const updatedMultiplier = (currentMultiplier + avgMultiplier) / 2; // Smooth adjustment
+      this.brandMultipliers.set(brand, updatedMultiplier);
+    });
+  }
+
+  getModelAccuracy(testData: Array<{year: number, mileage: number, price: number, make: string, model: string}>): number {
+    if (testData.length === 0) return 0;
+
+    let totalError = 0;
+    testData.forEach(test => {
+      const predicted = this.predict(test.year, test.mileage, test.make, test.model);
+      const error = Math.abs(predicted - test.price) / test.price;
+      totalError += error;
+    });
+
+    return 1 - (totalError / testData.length); // Return accuracy as percentage
+  }
+
+  getConfidenceScore(year: number, mileage: number, make: string, model: string): number {
+    const age = new Date().getFullYear() - year;
+    let confidence = 0.8; // Base confidence
+
+    // Age factor
+    if (age <= 3) confidence += 0.1;
+    else if (age <= 7) confidence += 0.05;
+    else if (age > 15) confidence -= 0.2;
+
+    // Mileage factor
+    const avgMileagePerYear = mileage / Math.max(age, 1);
+    if (avgMileagePerYear < 15000) confidence += 0.05;
+    else if (avgMileagePerYear > 25000) confidence -= 0.15;
+
+    // Brand factor
+    const brandMultiplier = this.brandMultipliers.get(make.toLowerCase()) || 1.0;
+    if (brandMultiplier > 1.1) confidence += 0.05; // Popular brands
+
+    return Math.max(0.1, Math.min(0.99, confidence));
   }
 }
 
