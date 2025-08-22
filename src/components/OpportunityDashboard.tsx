@@ -87,6 +87,10 @@ export function OpportunityDashboard() {
           ...opportunity,
           expected_price: opportunity.estimated_sale_price || 0,
           acquisition_cost: opportunity.current_bid || 0,
+          profit: opportunity.potential_profit,
+          roi: opportunity.roi_percentage,
+          confidence: opportunity.confidence_score,
+          status: (opportunity.status as "hot" | "good" | "moderate") || 'moderate',
           vehicle: {
             make: opportunity.make,
             model: opportunity.model,
@@ -113,11 +117,11 @@ export function OpportunityDashboard() {
   };
 
   const calculateStats = (opps: Opportunity[]) => {
-    const totalProfit = opps.reduce((sum, opp) => sum + opp.potential_profit, 0);
+    const totalProfit = opps.reduce((sum, opp) => sum + opp.profit, 0);
     const averageROI = opps.length > 0 
-      ? opps.reduce((sum, opp) => sum + opp.roi_percentage, 0) / opps.length 
+      ? opps.reduce((sum, opp) => sum + opp.roi, 0) / opps.length 
       : 0;
-    const highValueDeals = opps.filter(opp => opp.potential_profit > 5000).length;
+    const highValueDeals = opps.filter(opp => opp.profit > 5000).length;
     const hotDeals = opps.filter(opp => opp.status === 'hot').length;
 
     setStats({
@@ -279,10 +283,10 @@ export function OpportunityDashboard() {
                     </div>
                     <div className="text-right">
                       <div className="text-2xl font-bold text-green-600">
-                        {formatCurrency(opportunity.potential_profit)}
+                        {formatCurrency(opportunity.profit)}
                       </div>
-                      <div className={`text-sm ${getROIColor(opportunity.roi_percentage)}`}>
-                        {opportunity.roi_percentage.toFixed(1)}% ROI
+                      <div className={`text-sm ${getROIColor(opportunity.roi)}`}>
+                        {opportunity.roi.toFixed(1)}% ROI
                       </div>
                     </div>
                   </div>
@@ -320,8 +324,8 @@ export function OpportunityDashboard() {
                     <div>
                       <div className="text-sm text-muted-foreground">Confidence</div>
                       <div className="flex items-center space-x-2">
-                        <Progress value={opportunity.confidence_score} className="flex-1" />
-                        <span className="text-sm">{opportunity.confidence_score}%</span>
+                        <Progress value={opportunity.confidence} className="flex-1" />
+                        <span className="text-sm">{opportunity.confidence}%</span>
                       </div>
                     </div>
                   </div>
@@ -494,7 +498,7 @@ export function OpportunityDashboard() {
                         <span className="text-sm">{opp.vehicle.year} {opp.vehicle.make}</span>
                       </div>
                       <span className="text-sm font-medium text-green-600">
-                        {formatCurrency(opp.potential_profit)}
+                        {formatCurrency(opp.profit)}
                       </span>
                     </div>
                   ))}
