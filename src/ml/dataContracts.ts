@@ -3,7 +3,7 @@
  * AJV JSON Schema validation with VIN checksums and field validation
  */
 
-import Ajv, { JSONSchemaType, ValidateFunction } from 'ajv';
+import Ajv, { ValidateFunction } from 'ajv';
 import addFormats from 'ajv-formats';
 import productionLogger from '@/utils/productionLogger';
 import { validators } from '@/utils/normalize';
@@ -62,8 +62,8 @@ interface ContractStats {
   averageScore: number;
 }
 
-// JSON Schema for VehicleListing
-const vehicleListingSchema: JSONSchemaType<VehicleListing> = {
+// JSON Schema for VehicleListing  
+const vehicleListingSchema = {
   type: 'object',
   properties: {
     vin: { 
@@ -192,7 +192,7 @@ const vehicleListingSchema: JSONSchemaType<VehicleListing> = {
 
 export class DataContractValidator {
   private ajv: Ajv;
-  private vehicleValidator: ValidateFunction<VehicleListing>;
+  private vehicleValidator: ValidateFunction;
   private stats: ContractStats;
 
   constructor() {
