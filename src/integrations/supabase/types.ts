@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      canary_tests: {
+        Row: {
+          created_at: string | null
+          expected_fields: Json
+          id: string
+          last_run: string | null
+          pass_rate: number | null
+          site_name: string
+          test_url: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          expected_fields: Json
+          id?: string
+          last_run?: string | null
+          pass_rate?: number | null
+          site_name: string
+          test_url: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          expected_fields?: Json
+          id?: string
+          last_run?: string | null
+          pass_rate?: number | null
+          site_name?: string
+          test_url?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       dealer_sales: {
         Row: {
           auction_house: string | null
@@ -77,6 +110,93 @@ export type Database = {
           user_id?: string | null
           vin?: string | null
           year?: number
+        }
+        Relationships: []
+      }
+      extraction_strategies: {
+        Row: {
+          cluster_id: string | null
+          confidence_threshold: number | null
+          created_at: string | null
+          fallback_order: number
+          field_name: string
+          id: string
+          llm_config: Json | null
+          ml_config: Json | null
+          selector_config: Json | null
+          site_name: string
+          strategy: string
+          success_rate: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          cluster_id?: string | null
+          confidence_threshold?: number | null
+          created_at?: string | null
+          fallback_order: number
+          field_name: string
+          id?: string
+          llm_config?: Json | null
+          ml_config?: Json | null
+          selector_config?: Json | null
+          site_name: string
+          strategy: string
+          success_rate?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          cluster_id?: string | null
+          confidence_threshold?: number | null
+          created_at?: string | null
+          fallback_order?: number
+          field_name?: string
+          id?: string
+          llm_config?: Json | null
+          ml_config?: Json | null
+          selector_config?: Json | null
+          site_name?: string
+          strategy?: string
+          success_rate?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      labels: {
+        Row: {
+          cluster_id: string | null
+          created_at: string | null
+          css_path: string | null
+          field: string
+          id: string
+          new_value: string
+          old_value: string | null
+          updated_at: string | null
+          url: string
+          user_id: string | null
+        }
+        Insert: {
+          cluster_id?: string | null
+          created_at?: string | null
+          css_path?: string | null
+          field: string
+          id?: string
+          new_value: string
+          old_value?: string | null
+          updated_at?: string | null
+          url: string
+          user_id?: string | null
+        }
+        Update: {
+          cluster_id?: string | null
+          created_at?: string | null
+          css_path?: string | null
+          field?: string
+          id?: string
+          new_value?: string
+          old_value?: string | null
+          updated_at?: string | null
+          url?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -304,11 +424,15 @@ export type Database = {
       public_listings: {
         Row: {
           auction_end: string | null
+          compliance_result: Json | null
+          content_hash: string | null
           created_at: string | null
           current_bid: number | null
           description: string | null
+          etag: string | null
           id: string
           is_active: boolean | null
+          last_modified: string | null
           listing_url: string
           location: string | null
           make: string | null
@@ -328,11 +452,15 @@ export type Database = {
         }
         Insert: {
           auction_end?: string | null
+          compliance_result?: Json | null
+          content_hash?: string | null
           created_at?: string | null
           current_bid?: number | null
           description?: string | null
+          etag?: string | null
           id?: string
           is_active?: boolean | null
+          last_modified?: string | null
           listing_url: string
           location?: string | null
           make?: string | null
@@ -352,11 +480,15 @@ export type Database = {
         }
         Update: {
           auction_end?: string | null
+          compliance_result?: Json | null
+          content_hash?: string | null
           created_at?: string | null
           current_bid?: number | null
           description?: string | null
+          etag?: string | null
           id?: string
           is_active?: boolean | null
+          last_modified?: string | null
           listing_url?: string
           location?: string | null
           make?: string | null

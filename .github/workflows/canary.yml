@@ -1,0 +1,123 @@
+name: Canary Validation
+on: 
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+
+jobs:
+  canary-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build application
+        run: npm run build --if-present
+        
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        
+      - name: Run canary tests
+        run: |
+          echo "Running canary validation against production sites..."
+          node tools/canary_runner.js \
+            --urls-file=contracts/canaries/top_sites.json \
+            --out=artifacts \
+            --timeout=30000 \
+            --retries=2
+        env:
+          NODE_ENV: test
+          
+      - name: Validate extraction contracts
+        run: |
+          echo "Validating extraction results against schemas..."
+          node tools/validate_provenance.js \
+            artifacts/**/*.json \
+            --schema=schemas/provenance.schema.json \
+            --min-pass=0.95 \
+            --fail-on-breach
+            
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-artifacts-${{ github.run_number }}
+          path: artifacts/
+          retention-days: 7
+          
+      - name: Generate canary report
+        if: always()
+        run: |
+          echo "## Canary Validation Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Site | Status | Pass Rate | Issues |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|-----------|---------|" >> $GITHUB_STEP_SUMMARY
+          node tools/generate_canary_report.js artifacts/ >> $GITHUB_STEP_SUMMARY
+          
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Read canary results
+            const artifactsPath = path.join(process.env.GITHUB_WORKSPACE, 'artifacts');
+            const summaryPath = path.join(artifactsPath, 'summary.json');
+            
+            if (fs.existsSync(summaryPath)) {
+              const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+              
+              const comment = `## 🧪 Canary Validation Results
+              
+              **Overall Pass Rate**: ${summary.passRate}%
+              **Sites Tested**: ${summary.sitesCount}
+              **Status**: ${summary.passRate >= 95 ? '✅ PASS' : '❌ FAIL'}
+              
+              ${summary.passRate < 95 ? '⚠️ **Blocking merge**: Canary pass rate below 95% threshold' : ''}
+              
+              <details>
+              <summary>View detailed results</summary>
+              
+              ${summary.details.map(site => 
+                `- **${site.name}**: ${site.passRate}% (${site.passed}/${site.total} fields)`
+              ).join('\n')}
+              
+              </details>`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+            
+      - name: Fail if pass rate below threshold
+        run: |
+          if [ -f "artifacts/summary.json" ]; then
+            PASS_RATE=$(node -p "JSON.parse(require('fs').readFileSync('artifacts/summary.json', 'utf8')).passRate")
+            if [ "$PASS_RATE" -lt 95 ]; then
+              echo "❌ Canary pass rate ($PASS_RATE%) below 95% threshold"
+              exit 1
+            fi
+            echo "✅ Canary pass rate ($PASS_RATE%) meets threshold"
+          else
+            echo "❌ No canary summary found"
+            exit 1
+          fi
