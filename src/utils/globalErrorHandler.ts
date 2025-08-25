@@ -429,6 +429,10 @@ export class GlobalErrorHandler {
           } catch {
             return false;
           }
+        },
+        fallback: () => {
+          // Redirect to login or show auth modal
+          window.location.href = '/auth';
         }
       }
     ]);

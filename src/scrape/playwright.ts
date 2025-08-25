@@ -108,11 +108,9 @@ class PlaywrightScraper {
         // Set viewport and user agent
         await page.setViewportSize(viewport);
         if (userAgent) {
-          await page.context().addInitScript(`
-            Object.defineProperty(navigator, 'userAgent', {
-              get: () => '${userAgent}'
-            });
-          `);
+          await page.setExtraHTTPHeaders({
+            'User-Agent': userAgent
+          });
         }
 
         // Set extra headers
