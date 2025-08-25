@@ -1,4 +1,4 @@
-import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -18,7 +18,7 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           </div>
           <div>
             <h1 className="text-xl font-bold text-foreground">DealerScope</h1>
-            <p className="text-xs text-muted-foreground">v4.8 Professional</p>
+            <p className="text-xs text-muted-foreground">v5.0 Professional</p>
           </div>
         </div>
 
@@ -89,6 +89,17 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           >
             <Activity className="mr-2 h-4 w-4" />
             Evaluation
+          </Button>
+
+          <Button
+            variant={activeView === "v5features" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("v5features")}
+            className="relative"
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            v5.0 Features
+            <Badge variant="secondary" className="ml-2 text-xs">NEW</Badge>
           </Button>
           
           <Button

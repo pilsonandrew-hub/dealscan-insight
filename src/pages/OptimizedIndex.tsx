@@ -15,7 +15,7 @@ export default function OptimizedIndex() {
       />
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold tracking-tight">DealerScope Elite v4.8</h1>
+          <h1 className="text-4xl font-bold tracking-tight">DealerScope Elite v5.0</h1>
           <p className="text-xl text-muted-foreground mt-2">
             Advanced automotive arbitrage intelligence with next-level performance optimizations
           </p>

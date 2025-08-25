@@ -221,7 +221,7 @@ export const environmentInfo = {
   isDevelopment: settings.environment === 'development',
   isStaging: settings.environment === 'staging',
   isProduction: settings.environment === 'production',
-  version: import.meta.env.VITE_APP_VERSION || '4.8.0',
+  version: import.meta.env.VITE_APP_VERSION || '5.0.0',
   buildTime: import.meta.env.VITE_BUILD_TIME || new Date().toISOString(),
   gitCommit: import.meta.env.VITE_GIT_COMMIT || 'unknown'
 };

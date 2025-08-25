@@ -72,7 +72,7 @@ class SystemTester {
       metrics: this.metrics as SystemMetrics,
       summary,
       timestamp: new Date().toISOString(),
-      version: '4.8-elite'
+      version: '5.0-elite'
     };
   }
 
@@ -373,7 +373,7 @@ class SystemTester {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DealerScope v4.8 Elite Evaluation Report</title>
+    <title>DealerScope v5.0 Elite Evaluation Report</title>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8fafc; }
         .container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 30px; }
@@ -392,7 +392,7 @@ class SystemTester {
 </head>
 <body>
     <div class="container">
-        <h1>🎯 DealerScope v4.8 Elite System Evaluation</h1>
+        <h1>🎯 DealerScope v5.0 Elite System Evaluation</h1>
         <p class="timestamp">Generated: ${report.timestamp}</p>
         
         <div style="display: flex; align-items: center; gap: 20px; margin: 30px 0;">
@@ -463,7 +463,7 @@ class SystemTester {
         </div>
 
         <footer style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
-            <p class="timestamp">DealerScope v4.8 Elite - Advanced System Evaluation Framework</p>
+            <p class="timestamp">DealerScope v5.0 Elite - Advanced System Evaluation Framework</p>
         </footer>
     </div>
 </body>

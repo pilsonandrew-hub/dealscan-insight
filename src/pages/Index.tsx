@@ -12,6 +12,8 @@ import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList"
 import { SystemEvaluationPanel } from "@/components/SystemEvaluationPanel";
 import { VehicleScraperPanel } from "@/components/VehicleScraperPanel";
 import { DealScoringPanel } from "@/components/DealScoringPanel";
+import { V5FeaturesShowcase } from "@/components/V5FeaturesShowcase";
+import { ProductionReadinessSummary } from "@/components/ProductionReadinessSummary";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
@@ -91,6 +93,13 @@ const Index = () => {
         return <DealScoringPanel />;
       case "evaluation":
         return <SystemEvaluationPanel />;
+      case "v5features":
+        return (
+          <div className="space-y-8">
+            <V5FeaturesShowcase />
+            <ProductionReadinessSummary />
+          </div>
+        );
       case "settings":
         return <Settings />;
       default:
