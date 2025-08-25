@@ -3,6 +3,10 @@
  * Centralized feature flag management with environment overrides
  */
 
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('FeatureFlags');
+
 export interface FeatureFlagConfig {
   // Performance Features
   ENABLE_CURSOR_PAGINATION: boolean;
@@ -165,7 +169,7 @@ class FeatureFlagManager {
    */
   set<K extends keyof FeatureFlagConfig>(flag: K, value: FeatureFlagConfig[K]): void {
     (this.overrides as any)[flag] = value;
-    console.log(`Feature flag ${flag} overridden to:`, value);
+    logger.info('Feature flag overridden', { flag, value });
   }
   
   /**
@@ -210,7 +214,7 @@ class FeatureFlagManager {
       if (response.ok) {
         const remoteFlags = await response.json();
         Object.assign(this.overrides, remoteFlags);
-        console.log('Feature flags refreshed from remote config');
+        logger.info('Feature flags refreshed from remote config');
       }
     } catch (error) {
       console.warn('Failed to refresh feature flags from remote:', error);

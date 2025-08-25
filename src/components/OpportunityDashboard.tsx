@@ -21,6 +21,7 @@ import { Opportunity } from '@/types/dealerscope';
 import { useMarketAnalysis, useMarketMetrics } from '@/hooks/useMarketAnalysis';
 import { useAdvancedOptimizer } from '@/hooks/useAdvancedOptimizer';
 import { useToast } from '@/hooks/use-toast';
+import { createLogger } from '@/utils/productionLogger';
 
 interface DashboardStats {
   totalOpportunities: number;
@@ -31,6 +32,7 @@ interface DashboardStats {
 }
 
 export function OpportunityDashboard() {
+  const logger = createLogger('OpportunityDashboard');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [stats, setStats] = useState<DashboardStats>({
     totalOpportunities: 0,
@@ -99,7 +101,7 @@ export function OpportunityDashboard() {
             vin: opportunity.vin || ''
           }
         }),
-        (progress) => console.log(`Processing opportunities: ${progress}%`)
+        (progress) => logger.info('Processing opportunities', { progress: `${progress}%` })
       );
 
       setOpportunities(processedOpportunities);

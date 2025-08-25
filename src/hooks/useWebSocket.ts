@@ -5,6 +5,9 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('WebSocket');
 
 export enum WebSocketStatus {
   CONNECTING = 'CONNECTING',
@@ -48,9 +51,9 @@ export function useWebSocket<T = any>(config: WebSocketConfig) {
     enableLogging = process.env.NODE_ENV === 'development'
   } = config;
 
-  const log = useCallback((message: string, ...args: any[]) => {
+  const log = useCallback((message: string, data?: any) => {
     if (enableLogging) {
-      console.log(`[WebSocket] ${message}`, ...args);
+      logger.debug('WebSocket', { message, data });
     }
   }, [enableLogging]);
 
@@ -104,7 +107,7 @@ export function useWebSocket<T = any>(config: WebSocketConfig) {
       };
 
       wsRef.current.onclose = (event) => {
-        log('Connection closed:', event.code, event.reason);
+        log('Connection closed', { code: event.code, reason: event.reason });
         setStatus(WebSocketStatus.DISCONNECTED);
         
         if (autoReconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {

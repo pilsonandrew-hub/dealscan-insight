@@ -1,5 +1,8 @@
 import { Opportunity, Vehicle, MarketPrice } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('MarketAnalysis');
 
 export interface MarketTrend {
   period: string;
@@ -43,7 +46,7 @@ export class MarketAnalysisEngine {
 
   private initializeMarketData(): void {
     // Initialize with current market conditions
-    console.log('Market Analysis Engine initialized');
+    logger.info('Market Analysis Engine initialized');
   }
 
   async analyzeMarketOpportunity(opportunity: Opportunity): Promise<{

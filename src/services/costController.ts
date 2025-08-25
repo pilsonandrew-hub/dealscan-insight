@@ -1,4 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('CostController');
 
 export interface StrategyBudget {
   dailyHttpRequests: number;
@@ -164,10 +167,15 @@ export class CostController {
   async downgradeSiteStrategy(siteName: string, newStrategy: 'http' | 'headless' | 'hybrid'): Promise<void> {
     const siteBudget = this.siteBudgets.get(siteName);
     if (siteBudget) {
+      const oldStrategy = siteBudget.strategy;
       siteBudget.strategy = newStrategy;
       
       // Log the downgrade
-      console.log(`Downgraded ${siteName} strategy to ${newStrategy} due to budget constraints`);
+      logger.info('Strategy downgraded due to budget constraints', { 
+        siteName, 
+        oldStrategy, 
+        newStrategy 
+      });
       
       // Create alert for strategy change
       await this.createBudgetAlert(siteName, 'strategy_downgrade', {
@@ -189,7 +197,7 @@ export class CostController {
       budget.strategy = 'http'; // Reset to cheapest strategy
     }
 
-    console.log('Daily usage counters reset for all sites');
+    logger.info('Daily usage counters reset for all sites');
   }
 
   /**

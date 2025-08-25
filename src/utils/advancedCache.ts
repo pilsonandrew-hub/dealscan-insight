@@ -3,6 +3,10 @@
  * Improved cache for system evaluation
  */
 
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('AdvancedCache');
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -46,7 +50,7 @@ export class AdvancedCache {
       if (oldestKey) {
         this.cache.delete(oldestKey);
         if (this.config.enableLogging) {
-          console.log(`Cache evicted: ${oldestKey}`);
+          logger.info('Cache evicted oldest entry', { key: oldestKey });
         }
       }
     }
@@ -61,7 +65,7 @@ export class AdvancedCache {
     this.accessOrder.push(key);
     
     if (this.config.enableLogging) {
-      console.log(`Cache set: ${key}, TTL: ${ttl}ms`);
+      logger.debug('Cache set', { key, ttl: `${ttl}ms` });
     }
   }
 
@@ -71,7 +75,7 @@ export class AdvancedCache {
     if (!entry) {
       this.stats.misses++;
       if (this.config.enableLogging) {
-        console.log(`Cache miss: ${key}`);
+        logger.debug('Cache miss', { key });
       }
       return null;
     }
@@ -82,7 +86,7 @@ export class AdvancedCache {
       this.accessOrder = this.accessOrder.filter(k => k !== key);
       this.stats.misses++;
       if (this.config.enableLogging) {
-        console.log(`Cache expired: ${key}`);
+        logger.debug('Cache expired', { key });
       }
       return null;
     }
@@ -96,7 +100,7 @@ export class AdvancedCache {
     this.accessOrder.push(key);
 
     if (this.config.enableLogging) {
-      console.log(`Cache hit: ${key}`);
+      logger.debug('Cache hit', { key });
     }
     
     return entry.data;

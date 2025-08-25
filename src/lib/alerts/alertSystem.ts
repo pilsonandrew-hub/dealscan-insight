@@ -5,6 +5,9 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('AlertSystem');
 
 // ---- Types -------------------------------------------------
 export type AlertType = 'hot_deal' | 'price_drop' | 'ending_soon' | 'new_opportunity';
@@ -107,7 +110,11 @@ export class InHouseAlertSystem {
       
       if (filteredAlerts.length !== alerts.length) {
         this.alerts.set(userId, filteredAlerts);
-        console.log(`Cleaned up ${alerts.length - filteredAlerts.length} old alerts for user ${userId}`);
+        logger.info('Cleaned up old alerts', { 
+          oldCount: alerts.length, 
+          newCount: filteredAlerts.length,
+          userId 
+        });
       }
       
       // Also enforce per-user limit

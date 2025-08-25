@@ -4,10 +4,12 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
-import { logger } from '@/lib/logger';
+import { createLogger } from '@/utils/productionLogger';
 import { batchUpsertPublicListings } from '@/utils/store';
 import { safeConcurrentExecution } from '@/utils/asyncHelpers';
 import { contentHash } from '@/utils/contentHash';
+
+const logger = createLogger('AdvancedScraper');
 
 export interface ScraperSite {
   id: string;
@@ -330,7 +332,11 @@ export class AdvancedVehicleScraper {
     // Simulate sophisticated scraping with Playwright/Puppeteer
     // In production, this would use actual browser automation
     
-    console.log(`Scraping ${site.name} (attempt ${config.attempt}) with proxy: ${config.proxy?.ip || 'none'}`);
+    logger.info('Scraping started', { 
+      siteName: site.name,
+      attempt: config.attempt, 
+      proxy: config.proxy?.ip || 'none' 
+    });
     
     // Simulate network delay and processing
     await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));

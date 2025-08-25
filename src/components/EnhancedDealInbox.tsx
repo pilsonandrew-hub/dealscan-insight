@@ -20,6 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Opportunity } from "@/types/dealerscope";
 import { useEnhancedDealScoring } from "@/hooks/useEnhancedDealScoring";
+import { createLogger } from "@/utils/productionLogger";
 
 interface DealFilters {
   status: string;
@@ -33,6 +34,7 @@ interface DealFilters {
 }
 
 export const EnhancedDealInbox = () => {
+  const logger = createLogger('EnhancedDealInbox');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDeals, setSelectedDeals] = useState<Set<string>>(new Set());
@@ -152,7 +154,7 @@ export const EnhancedDealInbox = () => {
           table: 'opportunities'
         },
         (payload) => {
-          console.log('New deal received:', payload);
+          logger.info('New deal received', { payload });
           fetchOpportunities();
           
           const newDeal = payload.new as Opportunity;

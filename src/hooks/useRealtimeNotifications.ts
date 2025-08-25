@@ -6,6 +6,9 @@ import { useEffect, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Opportunity } from '@/types/dealerscope';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('RealtimeNotifications');
 
 interface NotificationSettings {
   enabled: boolean;
@@ -235,7 +238,7 @@ export function useRealtimeNotifications() {
       if (Notification.permission === 'default') {
         Notification.requestPermission().then(permission => {
           if (permission === 'granted') {
-            console.log('Notifications enabled');
+            logger.info('Notifications enabled');
           }
         });
       }

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { createLogger } from "@/utils/productionLogger";
 
 interface Deal {
   id: string;
@@ -40,6 +41,7 @@ interface DealInboxProps {
 }
 
 export const DealInbox = ({ className = "" }: DealInboxProps) => {
+  const logger = createLogger('DealInbox');
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDeals, setSelectedDeals] = useState<Set<string>>(new Set());
@@ -65,7 +67,7 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
           table: 'opportunities'
         },
         (payload) => {
-          console.log('New deal received:', payload);
+          logger.info('New deal received', { payload });
           fetchDeals(); // Refresh deals list
           toast.success('New profitable deal found!', {
             description: `ROI: ${(payload.new.roi_percentage || 0).toFixed(1)}% - Check your inbox`,

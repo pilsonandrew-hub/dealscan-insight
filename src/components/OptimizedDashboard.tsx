@@ -12,8 +12,10 @@ import { useOptimizedOpportunities } from '@/hooks/useOptimizedOpportunities';
 import { supabase } from '@/integrations/supabase/client';
 import { Opportunity } from '@/types/dealerscope';
 import { RefreshCw, TrendingUp, DollarSign, Target, AlertCircle } from 'lucide-react';
+import { createLogger } from '@/utils/productionLogger';
 
 export function OptimizedDashboard() {
+  const logger = createLogger('OptimizedDashboard');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function OptimizedDashboard() {
           },
           status: (opportunity.status as "hot" | "good" | "moderate") || 'good'
         }),
-        (progress) => console.log(`Processing: ${progress}%`)
+        (progress) => logger.info('Processing dashboard data', { progress: `${progress}%` })
       );
 
       setOpportunities(processedData);

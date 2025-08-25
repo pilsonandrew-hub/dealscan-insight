@@ -1,4 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('GovAuctionScraper');
 
 export interface ScrapedVehicle {
   vin?: string;
@@ -135,7 +138,7 @@ export class GovernmentAuctionScraper {
         }
 
         try {
-          console.log(`Starting scraping for ${config.name}...`);
+          logger.info('GovDeals scraping started', { name: config.name });
           const result = await this.scrapeSite(config);
           
           totalVehicles += result.vehiclesFound;
@@ -278,7 +281,7 @@ export class GovernmentAuctionScraper {
         .from('public_listings')
         .upsert(publicListings);
 
-      console.log(`Stored ${vehicles.length} scraped vehicles`);
+      logger.info('Scraped vehicles stored', { count: vehicles.length });
     } catch (error) {
       console.error('Failed to store scraped vehicles:', error);
       throw error;

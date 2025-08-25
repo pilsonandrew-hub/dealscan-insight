@@ -3,6 +3,10 @@
  * Inspired by the config.py in the bootstrap script
  */
 
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('Settings');
+
 interface DatabaseConfig {
   url: string;
   poolSize: number;
@@ -228,7 +232,7 @@ export const environmentInfo = {
 
 // Log configuration on startup
 if (settings.debug) {
-  console.log('DealerScope Configuration:', {
+  logger.info('DealerScope Configuration initialized', {
     environment: settings.environment,
     features: settings.features,
     api: { baseUrl: settings.api.baseUrl },

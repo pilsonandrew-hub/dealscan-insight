@@ -1,4 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('ManheimAPI');
 
 export interface ManheimVehicle {
   vin: string;
@@ -43,7 +46,7 @@ export class ManheimAPIConnector {
   private async initializeAPI(): Promise<void> {
     try {
       await this.authenticate();
-      console.log('Manheim API initialized successfully');
+      logger.info('Manheim API initialized successfully');
     } catch (error) {
       console.error('Failed to initialize Manheim API:', error);
     }
@@ -54,7 +57,7 @@ export class ManheimAPIConnector {
       // In production, this would use actual Manheim OAuth2 flow
       // For now, we'll simulate authentication
       this.authToken = 'simulated_manheim_token_' + Date.now();
-      console.log('Manheim API authentication successful');
+      logger.info('Manheim API authentication successful');
     } catch (error) {
       throw new Error(`Manheim authentication failed: ${error}`);
     }
@@ -298,7 +301,7 @@ export class ManheimAPIConnector {
         .from('public_listings')
         .upsert(publicListings);
 
-      console.log(`Stored ${listings.length} Manheim listings`);
+      logger.info('Manheim listings stored', { count: listings.length });
     } catch (error) {
       console.error('Failed to store auction listings:', error);
     }

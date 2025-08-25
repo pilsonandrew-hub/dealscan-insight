@@ -5,6 +5,9 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('ComprehensiveScraper');
 
 export interface ScraperSite {
   id: string;
@@ -338,7 +341,7 @@ export class ComprehensiveScraper {
     }
 
     // Log scraping job start
-    console.log(`Starting comprehensive scraping job: ${jobId}`, {
+    logger.info('Comprehensive scraping job started', {
       sites: enabledSites.map(s => s.id),
       config: defaultConfig
     });
@@ -407,7 +410,7 @@ export class ComprehensiveScraper {
     }
 
     // Log final results
-    console.log(`Comprehensive scraping completed: ${jobId}`, {
+    logger.info('Comprehensive scraping job completed', {
       total_sites: sites.length,
       successful_sites: successfulSites,
       total_vehicles_found: totalVehiclesFound,
@@ -598,7 +601,7 @@ export class ComprehensiveScraper {
         throw error;
       }
 
-      console.log(`Stored ${vehicles.length} vehicles from site ${siteId}`);
+      logger.info('Vehicles stored in database', { count: vehicles.length, table: 'public_listings' });
     } catch (error) {
       console.error('Error storing vehicles:', error);
       throw error;
@@ -664,7 +667,7 @@ export class ComprehensiveScraper {
       site.vehiclesFound = result.vehiclesFound;
       
       // Log site stats update
-      console.log(`Updated site stats for ${siteId}:`, {
+      logger.info('Site stats updated', {
         name: site.name,
         lastScrape: site.lastScrape,
         vehiclesFound: site.vehiclesFound
@@ -673,7 +676,7 @@ export class ComprehensiveScraper {
   }
 
   private async updateJobStatus(jobId: string, status: string, error?: string): Promise<void> {
-    console.log(`Job ${jobId} status updated to ${status}`, { error });
+    logger.info('Job status updated', { jobId, status, error });
   }
 
   // Public API methods

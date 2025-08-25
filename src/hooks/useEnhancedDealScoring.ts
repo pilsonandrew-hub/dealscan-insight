@@ -5,6 +5,9 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Opportunity } from '@/types/dealerscope';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('EnhancedDealScoring');
 
 interface MLPrediction {
   predicted_prices: {
@@ -162,7 +165,7 @@ export function useEnhancedDealScoring() {
       if (error) throw error;
 
       // In a real implementation, this would feed into a personalization model
-      console.log(`Recorded user feedback: ${action} for opportunity ${opportunityId}`);
+      logger.info('User feedback recorded', { action, opportunityId });
     } catch (error) {
       console.error('Error recording user feedback:', error);
     }
