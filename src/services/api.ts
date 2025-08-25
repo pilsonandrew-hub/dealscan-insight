@@ -9,7 +9,7 @@ import { performanceMonitor } from '@/utils/performance-monitor';
 import { auditLogger } from '@/utils/audit-logger';
 import { supabaseCircuitBreaker } from '@/utils/circuitBreakerEnhanced';
 import { buildCursorQuery, processCursorResults, CursorPaginationParams, CursorPaginationResult } from '@/utils/cursorPagination';
-import { logger } from '@/utils/productionLogger';
+import productionLogger from '@/utils/productionLogger';
 
 // Transform database row to Opportunity type
 function transformOpportunity(row: any): Opportunity & { created_at: string; id: string } {
@@ -130,7 +130,12 @@ export const api = {
             const { data, error } = await query;
             
             if (error) {
-              logger.error('Supabase query failed', error, { endpoint: 'opportunities', cursor, limit: cursorLimit });
+              productionLogger.error('Supabase query failed', { 
+                endpoint: 'opportunities', 
+                cursor, 
+                limit: cursorLimit,
+                error: (error as Error).message 
+              });
               throw error;
             }
             

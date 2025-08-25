@@ -3,7 +3,7 @@
  * Centralized, structured logging with correlation IDs
  */
 
-import { logger as productionLogger } from '@/utils/productionLogger';
+import productionLogger from '@/utils/productionLogger';
 
 export interface LogMeta {
   [key: string]: unknown;
@@ -47,28 +47,29 @@ export const logger = {
   /**
    * Error level - errors and exceptions
    */
-  error: (message: string, error?: Error | unknown, meta?: LogMeta): void => {
-    productionLogger.error(message, error as Error, {
+  error: (message: string, context?: LogMeta, error?: Error): void => {
+    productionLogger.error(message, {
       component: getCurrentComponent(),
-      ...meta
-    });
+      ...context
+    }, error);
   },
 
   /**
    * Fatal level - critical errors
    */
-  fatal: (message: string, error?: Error | unknown, meta?: LogMeta): void => {
-    productionLogger.fatal(message, error as Error, {
+  fatal: (message: string, context?: LogMeta, error?: Error): void => {
+    productionLogger.error(message, {
       component: getCurrentComponent(),
-      ...meta
-    });
+      severity: 'fatal',
+      ...context
+    }, error);
   },
 
   /**
    * Create a scoped logger for a specific component
    */
   scope: (component: string, additionalContext?: LogMeta) => {
-    return productionLogger.scope(component, additionalContext);
+    return productionLogger.child(component);
   },
 
   /**
@@ -82,7 +83,7 @@ export const logger = {
    * Generate new correlation ID
    */
   newCorrelation: (): string => {
-    return productionLogger.newCorrelation();
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 };
 
@@ -129,14 +130,14 @@ export function withCorrelation<T extends (...args: unknown[]) => unknown>(
       // Handle async functions
       if (result instanceof Promise) {
         return result.catch((error) => {
-          logger.error('Async function failed', error, { correlationId: id });
+          logger.error('Async function failed', { correlationId: id }, error);
           throw error;
         });
       }
       
       return result;
     } catch (error) {
-      logger.error('Function failed', error, { correlationId: id });
+      logger.error('Function failed', { correlationId: id }, error);
       throw error;
     }
   }) as T;
@@ -171,11 +172,11 @@ export function withTiming<T extends (...args: unknown[]) => unknown>(
           })
           .catch((error) => {
             const duration = performance.now() - startTime;
-            logger.error(`Failed ${operationName}`, error, {
+            logger.error(`Failed ${operationName}`, { 
               correlationId,
               operationName,
               duration: `${duration.toFixed(2)}ms`
-            });
+            }, error);
             throw error;
           });
       }
@@ -190,11 +191,11 @@ export function withTiming<T extends (...args: unknown[]) => unknown>(
       return result;
     } catch (error) {
       const duration = performance.now() - startTime;
-      logger.error(`Failed ${operationName}`, error, {
+      logger.error(`Failed ${operationName}`, {
         correlationId,
         operationName,
         duration: `${duration.toFixed(2)}ms`
-      });
+      }, error);
       throw error;
     }
   }) as T;

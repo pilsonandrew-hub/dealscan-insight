@@ -14,7 +14,7 @@ import { circuitBreakerManager } from '@/utils/circuitBreakerEnhanced';
 import { apiRateLimiter, scraperRateLimiter } from '@/utils/rateLimiter';
 import { memoryManager } from '@/utils/memoryManager';
 import { performanceMonitor } from '@/utils/performance-monitor';
-import { logger } from '@/utils/productionLogger';
+import productionLogger from '@/utils/productionLogger';
 
 interface SLOMetric {
   name: string;
@@ -129,13 +129,13 @@ export const SREConsole: React.FC = () => {
 
       setAlerts(newAlerts);
 
-      logger.info('SRE metrics refreshed', {
+      productionLogger.info('SRE metrics refreshed', {
         metricsCount: updatedMetrics.length,
         servicesCount: updatedServices.length,
         alertsCount: newAlerts.length
       });
     } catch (error) {
-      logger.error('Failed to refresh SRE metrics', error as Error);
+      productionLogger.error('Failed to refresh SRE metrics', error as Error);
     } finally {
       setIsRefreshing(false);
     }

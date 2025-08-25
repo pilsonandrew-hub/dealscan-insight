@@ -72,7 +72,7 @@ export class RateLimiter {
       retryAfter: allowed ? undefined : this.calculateRetryAfter(bucket, tokens)
     };
 
-    logger.debug('Rate limit check', {
+    productionLogger.debug('Rate limit check', {
       key: bucketKey,
       allowed,
       tokensRemaining: result.tokensRemaining,
@@ -134,7 +134,7 @@ export class RateLimiter {
 
         next();
       } catch (error) {
-        logger.error('Rate limiter middleware error', error as Error);
+        productionLogger.error('Rate limiter middleware error', {}, error as Error);
         next(); // Don't block on rate limiter errors
       }
     };
@@ -190,7 +190,7 @@ export class RateLimiter {
     }
 
     if (cleaned > 0) {
-      logger.debug('Rate limiter cleanup', { cleaned, remaining: this.buckets.size });
+      productionLogger.debug('Rate limiter cleanup', { cleaned, remaining: this.buckets.size });
     }
   }
 

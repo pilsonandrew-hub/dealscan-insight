@@ -247,7 +247,7 @@ export async function checkDuplicateContent(contentHash: string): Promise<{
   try {
     const { data, error } = await supabase
       .from('public_listings')
-      .select('id, ingested_at')
+      .select('id, created_at')
       .eq('content_hash', contentHash)
       .single();
     
@@ -262,7 +262,7 @@ export async function checkDuplicateContent(contentHash: string): Promise<{
     return {
       exists: !!data,
       existingId: data?.id,
-      lastSeen: data?.ingested_at
+      lastSeen: data?.created_at
     };
     
   } catch (error) {
@@ -289,14 +289,14 @@ export async function getContentStats(): Promise<{
       supabase.from('public_listings').select('id', { count: 'exact', head: true }),
       supabase.from('public_listings').select('vin', { count: 'exact', head: true }).not('vin', 'is', null),
       supabase.from('public_listings').select('source_site', { count: 'exact', head: true }),
-      supabase.from('public_listings').select('ingested_at').order('ingested_at', { ascending: false }).limit(1).single()
+      supabase.from('public_listings').select('created_at').order('created_at', { ascending: false }).limit(1).single()
     ]);
     
     return {
       total_listings: totalResult.count || 0,
       unique_vins: vinResult.count || 0,
       unique_sources: sourceResult.count || 0,
-      latest_ingestion: latestResult.data?.ingested_at || null
+      latest_ingestion: latestResult.data?.created_at || null
     };
     
   } catch (error) {

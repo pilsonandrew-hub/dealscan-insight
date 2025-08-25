@@ -2,7 +2,7 @@
  * Production API route handler with 404, compression, and monitoring
  */
 
-import { logger } from '@/utils/productionLogger';
+import productionLogger from '@/utils/productionLogger';
 import { apiRateLimiter } from '@/utils/rateLimiter';
 import { productionCache } from '@/utils/productionCache';
 
@@ -48,7 +48,7 @@ export function createAPIError(
 ): Response {
   const errorResponse = createAPIResponse(undefined, message, undefined, requestId);
   
-  logger.warn('API error response', {
+  productionLogger.warn('API error response', {
     statusCode,
     message,
     code,
@@ -68,7 +68,7 @@ export function createAPIError(
  * Handle API 404 responses
  */
 export function handle404(path: string, requestId: string = generateRequestId()): Response {
-  logger.info('API 404 response', { path, requestId });
+  productionLogger.info('API 404 response', { path, requestId });
   
   return createAPIError(404, `Endpoint not found: ${path}`, 'NOT_FOUND', requestId);
 }
@@ -92,7 +92,7 @@ export async function handleAPIRoute(
   try {
     // Add request ID to headers
     const url = new URL(request.url);
-    logger.info('API request started', {
+    productionLogger.info('API request started', {
       method: request.method,
       path: url.pathname,
       requestId
@@ -133,7 +133,7 @@ export async function handleAPIRoute(
       
       const conditionalResult = productionCache.checkConditionalGet(cacheKey, ifNoneMatch || undefined);
       if (conditionalResult.hit) {
-        logger.debug('Cache conditional GET hit', { cacheKey, requestId });
+        productionLogger.debug('Cache conditional GET hit', { cacheKey, requestId });
         return new Response(null, {
           status: 304,
           headers: {
@@ -157,7 +157,7 @@ export async function handleAPIRoute(
       response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=600');
     }
 
-    logger.info('API request completed', {
+    productionLogger.info('API request completed', {
       method: request.method,
       path: url.pathname,
       status: response.status,
@@ -169,7 +169,7 @@ export async function handleAPIRoute(
 
   } catch (error) {
     const duration = Date.now() - startTime;
-    logger.error('API request failed', error as Error, {
+    productionLogger.error('API request failed', {
       method: request.method,
       path: new URL(request.url).pathname,
       duration,
@@ -230,7 +230,7 @@ export function setupAPIRouteHandling() {
       
       return response;
     } catch (error) {
-      logger.error('Fetch error for API route', error as Error, { url });
+      productionLogger.error('Fetch error for API route', { url });
       return createAPIError(503, 'Service unavailable', 'FETCH_ERROR');
     }
   };

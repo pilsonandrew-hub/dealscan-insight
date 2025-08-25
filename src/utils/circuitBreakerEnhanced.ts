@@ -60,7 +60,7 @@ export class EnhancedCircuitBreaker {
       }
       this.state = CircuitState.HALF_OPEN;
       this.halfOpenSuccesses = 0;
-      logger.info('Circuit breaker transitioning to HALF_OPEN', { name: this.name });
+      productionLogger.info('Circuit breaker transitioning to HALF_OPEN', { name: this.name });
     }
 
     this.totalRequests++;
@@ -92,7 +92,7 @@ export class EnhancedCircuitBreaker {
         
         if (attempt < retries && this.state !== CircuitState.OPEN) {
           const backoffDelay = Math.min(1000 * Math.pow(2, attempt), 10000);
-          logger.warn('Circuit breaker retry attempt', {
+          productionLogger.warn('Circuit breaker retry attempt', {
             name: this.name,
             attempt: attempt + 1,
             maxRetries: retries,
@@ -151,7 +151,7 @@ export class EnhancedCircuitBreaker {
       this.nextRetryTime = Date.now() + this.config.recoveryTimeout;
     }
     
-    logger.info('Circuit breaker state forced', {
+    productionLogger.info('Circuit breaker state forced', {
       name: this.name,
       oldState,
       newState: state
@@ -168,7 +168,7 @@ export class EnhancedCircuitBreaker {
     this.halfOpenSuccesses = 0;
     this.nextRetryTime = undefined;
     
-    logger.info('Circuit breaker reset', { name: this.name });
+    productionLogger.info('Circuit breaker reset', { name: this.name });
   }
 
   /**
@@ -185,7 +185,7 @@ export class EnhancedCircuitBreaker {
         this.state = CircuitState.CLOSED;
         this.failures = 0;
         this.halfOpenSuccesses = 0;
-        logger.info('Circuit breaker closed after successful recovery', { name: this.name });
+        productionLogger.info('Circuit breaker closed after successful recovery', { name: this.name });
       }
     } else if (this.state === CircuitState.CLOSED) {
       // Reset failure count on success in closed state
@@ -204,13 +204,13 @@ export class EnhancedCircuitBreaker {
       // Immediately return to OPEN state on failure in HALF_OPEN
       this.state = CircuitState.OPEN;
       this.nextRetryTime = Date.now() + this.config.recoveryTimeout;
-      logger.warn('Circuit breaker returned to OPEN from HALF_OPEN', { name: this.name });
+      productionLogger.warn('Circuit breaker returned to OPEN from HALF_OPEN', { name: this.name });
     } else if (this.state === CircuitState.CLOSED) {
       // Check if we should trip the circuit
       if (this.failures >= this.config.failureThreshold) {
         this.state = CircuitState.OPEN;
         this.nextRetryTime = Date.now() + this.config.recoveryTimeout;
-        logger.error('Circuit breaker OPENED due to failures', undefined, {
+        productionLogger.error('Circuit breaker OPENED due to failures', {
           name: this.name,
           failures: this.failures,
           threshold: this.config.failureThreshold
@@ -309,7 +309,7 @@ export class CircuitBreakerManager {
     for (const breaker of this.breakers.values()) {
       breaker.reset();
     }
-    logger.info('All circuit breakers reset');
+    productionLogger.info('All circuit breakers reset');
   }
 
   /**

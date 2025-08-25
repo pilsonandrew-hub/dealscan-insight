@@ -112,7 +112,7 @@ export class ProductionCache {
       this.stats.size++;
     }
 
-    logger.debug('Cache set', { key, ttl: jitteredTTL, etag, size: this.stats.size });
+    productionLogger.debug('Cache set', { key, ttl: jitteredTTL, etag, size: this.stats.size });
   }
 
   /**
@@ -131,7 +131,7 @@ export class ProductionCache {
     // Check if already in flight
     const inFlight = this.singleFlightPromises.get(key);
     if (inFlight) {
-      logger.debug('Single-flight hit', { key });
+      productionLogger.debug('Single-flight hit', { key });
       return inFlight;
     }
 
@@ -162,7 +162,7 @@ export class ProductionCache {
       this.set(key, data, ttl, etag);
       return data;
     } catch (error) {
-      logger.error('Cache fetcher failed', error as Error, { key });
+      productionLogger.error('Cache fetcher failed', { key }, error as Error);
       throw error;
     }
   }
@@ -195,7 +195,7 @@ export class ProductionCache {
       this.singleFlightPromises.clear();
       this.stats.size = 0;
       this.stats.evictions += size;
-      logger.info('Cache cleared', { evicted: size });
+      productionLogger.info('Cache cleared', { evicted: size });
       return;
     }
 
@@ -211,7 +211,7 @@ export class ProductionCache {
     
     this.stats.size -= evicted;
     this.stats.evictions += evicted;
-    logger.info('Cache invalidated by pattern', { pattern, evicted });
+    productionLogger.info('Cache invalidated by pattern', { pattern, evicted });
   }
 
   /**
@@ -239,7 +239,7 @@ export class ProductionCache {
     this.stats.evictions += cleaned;
     
     if (cleaned > 0) {
-      logger.debug('Cache cleanup completed', { cleaned, remaining: this.stats.size });
+      productionLogger.debug('Cache cleanup completed', { cleaned, remaining: this.stats.size });
     }
     
     return cleaned;
@@ -278,7 +278,7 @@ export class ProductionCache {
       this.cache.delete(oldestKey);
       this.stats.size--;
       this.stats.evictions++;
-      logger.debug('Cache LRU eviction', { key: oldestKey });
+      productionLogger.debug('Cache LRU eviction', { key: oldestKey });
     }
   }
 
