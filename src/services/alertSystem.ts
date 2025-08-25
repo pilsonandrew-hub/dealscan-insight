@@ -69,54 +69,48 @@ export class AlertSystem {
         name: 'High Profit Opportunity',
         type: 'high_profit',
         subject: '🚨 HIGH PROFIT ALERT: {{make}} {{model}} - ${{profit}} profit potential',
-        emailTemplate: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center;">
-              <h1>🚨 HIGH PROFIT OPPORTUNITY 🚨</h1>
-              <h2>{{year}} {{make}} {{model}}</h2>
-            </div>
-            
-            <div style="padding: 20px; background: #f8f9fa;">
-              <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <h3 style="color: #28a745; margin-top: 0;">💰 Profit Estimate: ${{profit}}</h3>
-                <div style="display: flex; justify-content: space-between; margin: 15px 0;">
-                  <div>
-                    <strong>ROI:</strong> {{roi}}%<br>
-                    <strong>Current Bid:</strong> ${{currentBid}}<br>
-                    <strong>Estimated Sale:</strong> ${{estimatedSale}}
-                  </div>
-                  <div>
-                    <strong>Risk Score:</strong> {{riskScore}}/100<br>
-                    <strong>Confidence:</strong> {{confidence}}%<br>
-                    <strong>Location:</strong> {{location}}
-                  </div>
-                </div>
-                
-                <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0;">
-                  <h4 style="margin-top: 0;">📊 Deal Details</h4>
-                  <p><strong>Year:</strong> {{year}}</p>
-                  <p><strong>Mileage:</strong> {{mileage}} miles</p>
-                  <p><strong>Auction Ends:</strong> {{auctionEnd}}</p>
-                  <p><strong>Source:</strong> {{sourceSite}}</p>
-                </div>
-
-                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">
-                  <h4 style="margin-top: 0;">🎯 Why This is a Good Deal</h4>
-                  <p>{{dealRationale}}</p>
-                </div>
-
-                <div style="text-align: center; margin: 25px 0;">
-                  <a href="{{listingUrl}}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">VIEW LISTING</a>
-                </div>
-
-                <div style="font-size: 12px; color: #6c757d; text-align: center; border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px;">
-                  This alert was sent because this opportunity meets your criteria: Min Profit ${{minProfit}}, Min ROI {{minROI}}%
-                  <br><a href="{{unsubscribeUrl}}">Unsubscribe</a> | <a href="{{settingsUrl}}">Alert Settings</a>
-                </div>
-              </div>
-            </div>
-          </div>
-        `,
+        emailTemplate: 
+          '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">' +
+            '<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center;">' +
+              '<h1>🚨 HIGH PROFIT OPPORTUNITY 🚨</h1>' +
+              '<h2>{{year}} {{make}} {{model}}</h2>' +
+            '</div>' +
+            '<div style="padding: 20px; background: #f8f9fa;">' +
+              '<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">' +
+                '<h3 style="color: #28a745; margin-top: 0;">💰 Profit Estimate: ${{profit}}</h3>' +
+                '<div style="display: flex; justify-content: space-between; margin: 15px 0;">' +
+                  '<div>' +
+                    '<strong>ROI:</strong> {{roi}}%<br>' +
+                    '<strong>Current Bid:</strong> ${{currentBid}}<br>' +
+                    '<strong>Estimated Sale:</strong> ${{estimatedSale}}' +
+                  '</div>' +
+                  '<div>' +
+                    '<strong>Risk Score:</strong> {{riskScore}}/100<br>' +
+                    '<strong>Confidence:</strong> {{confidence}}%<br>' +
+                    '<strong>Location:</strong> {{location}}' +
+                  '</div>' +
+                '</div>' +
+                '<div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0;">' +
+                  '<h4 style="margin-top: 0;">📊 Deal Details</h4>' +
+                  '<p><strong>Year:</strong> {{year}}</p>' +
+                  '<p><strong>Mileage:</strong> {{mileage}} miles</p>' +
+                  '<p><strong>Auction Ends:</strong> {{auctionEnd}}</p>' +
+                  '<p><strong>Source:</strong> {{sourceSite}}</p>' +
+                '</div>' +
+                '<div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">' +
+                  '<h4 style="margin-top: 0;">🎯 Why This is a Good Deal</h4>' +
+                  '<p>{{dealRationale}}</p>' +
+                '</div>' +
+                '<div style="text-align: center; margin: 25px 0;">' +
+                  '<a href="{{listingUrl}}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">VIEW LISTING</a>' +
+                '</div>' +
+                '<div style="font-size: 12px; color: #6c757d; text-align: center; border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px;">' +
+                  'This alert was sent because this opportunity meets your criteria: Min Profit ${{minProfit}}, Min ROI {{minROI}}%' +
+                  '<br><a href="{{unsubscribeUrl}}">Unsubscribe</a> | <a href="{{settingsUrl}}">Alert Settings</a>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>',
         smsTemplate: '🚨 HIGH PROFIT: {{year}} {{make}} {{model}} - ${{profit}} profit ({{roi}}% ROI) in {{location}}. Ends {{auctionEnd}}. View: {{shortUrl}}',
         pushTemplate: '{{year}} {{make}} {{model}} - ${{profit}} profit potential ({{roi}}% ROI)'
       },
