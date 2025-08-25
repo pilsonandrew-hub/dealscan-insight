@@ -5,6 +5,9 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { inHouseAlertSystem } from '@/lib/alerts/alertSystem';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('MetricsCollector');
 
 export interface PerformanceMetric {
   name: string;
@@ -173,7 +176,7 @@ export class MetricsCollector {
 
     try {
       // For now, just log metrics. In production, send to external monitoring service
-      console.log('Metrics flush:', metricsToFlush);
+      logger.debug('Metrics flush', { count: metricsToFlush.length, metrics: metricsToFlush });
       
       // TODO: Implement actual metrics storage after types are regenerated
       // const { error } = await supabase

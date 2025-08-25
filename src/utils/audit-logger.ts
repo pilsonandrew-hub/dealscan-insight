@@ -3,6 +3,10 @@
  * Inspired by the audit logging in the bootstrap script
  */
 
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('AuditLogger');
+
 export interface AuditEvent {
   id: string;
   timestamp: number;
@@ -177,7 +181,7 @@ class AuditLogger {
           throw new Error(`Audit flush failed: ${response.statusText}`);
         }
 
-        console.log(`Flushed ${eventsToFlush.length} audit events to remote endpoint`);
+        logger.info('Audit events flushed to remote', { count: eventsToFlush.length });
       } catch (error) {
         console.error('Failed to flush audit events:', error);
         // Put events back if remote flush failed

@@ -111,7 +111,7 @@ export class AdvancedCache {
       this.cache.clear();
       this.accessOrder = [];
       if (this.config.enableLogging) {
-        console.log('Cache cleared completely');
+        logger.info('Cache cleared completely');
       }
       return;
     }
@@ -126,7 +126,7 @@ export class AdvancedCache {
     });
 
     if (this.config.enableLogging) {
-      console.log(`Cache invalidated pattern: ${keyPattern}, deleted: ${keysToDelete.length}`);
+      logger.info('Cache invalidated by pattern', { pattern: keyPattern, deletedCount: keysToDelete.length });
     }
   }
 

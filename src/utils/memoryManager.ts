@@ -3,6 +3,10 @@
  * Prevents memory leaks and monitors usage in production
  */
 
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('MemoryManager');
+
 interface MemoryStats {
   usedJSHeapSize: number;
   totalJSHeapSize: number;
@@ -112,7 +116,7 @@ class MemoryManager {
    * Perform standard cleanup
    */
   private performCleanup(): void {
-    console.log('🧹 Performing memory cleanup...');
+    logger.info('🧹 Performing memory cleanup...');
     
     // Run all registered cleanup callbacks
     this.cleanupCallbacks.forEach(callback => {
@@ -137,7 +141,7 @@ class MemoryManager {
    * Perform aggressive cleanup when memory is critical
    */
   private performAggressiveCleanup(): void {
-    console.log('🚨 Performing aggressive memory cleanup...');
+    logger.warn('🚨 Performing aggressive memory cleanup...');
     
     // Clear global caches more aggressively
     this.performCleanup();

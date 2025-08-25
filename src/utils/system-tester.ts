@@ -6,6 +6,9 @@
 import api from '@/services/api';
 import { performanceMonitor } from './performance-monitor';
 import { auditLogger } from './audit-logger';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('SystemTester');
 
 export interface TestResult {
   name: string;
@@ -50,7 +53,7 @@ class SystemTester {
    * Run comprehensive system evaluation
    */
   async runFullEvaluation(): Promise<EvaluationReport> {
-    console.log('🚀 Starting DealerScope System Evaluation...');
+    logger.info('🚀 Starting DealerScope System Evaluation...');
     
     this.results = [];
     this.metrics = {};

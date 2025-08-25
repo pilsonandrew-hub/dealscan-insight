@@ -3,6 +3,9 @@
  */
 
 import { Opportunity, Vehicle, MarketPrice } from '@/types/dealerscope';
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('ArbitrageCalculator');
 
 interface FeeStructure {
   buyers_premium_pct: number;
@@ -415,7 +418,7 @@ class AdvancedPricePredictionModel {
   }
 
   train(salesData: Array<{year: number, mileage: number, price: number, make: string, model: string}>): void {
-    console.log(`Training advanced model with ${salesData.length} data points`);
+    logger.info('Training advanced ML model', { dataPoints: salesData.length });
     
     // Update brand multipliers based on actual sales data
     const brandPerformance = new Map<string, {total: number, count: number}>();
