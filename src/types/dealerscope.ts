@@ -47,7 +47,7 @@ export interface Opportunity {
   location?: string;
   state?: string;
   auction_end?: string;
-  status?: "hot" | "good" | "moderate";
+  status?: "hot" | "good" | "moderate" | "new" | "read" | "flagged" | "dismissed";
   score?: number;
   market_price?: MarketPrice;
   total_cost: number;
@@ -63,6 +63,18 @@ export interface Opportunity {
   model: string;
   year: number;
   mileage?: number;
+  // Enhanced ML predictions
+  predicted_prices?: {
+    p10: number;
+    p50: number;
+    p90: number;
+  };
+  days_to_sell?: number;
+  deal_rationale?: string;
+  user_sentiment?: "interested" | "ignored" | "saved";
+  bid_cap?: number;
+  market_position?: "below" | "market" | "above";
+  last_updated?: string;
 }
 
 export interface PipelineStatus {
