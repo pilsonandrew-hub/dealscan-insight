@@ -68,7 +68,8 @@ def _validate_listing(listing: PublicListing) -> None:
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
 
-def upsert_public_listing(conn: sqlite3.Connection, listing: PublicListing) -> None:
+def upsert_public_listing(listing: PublicListing) -> None:
+    """Upsert a public listing using internal transaction management."""
     _validate_listing(listing)
     data = asdict(listing)
     sql = (
@@ -97,7 +98,46 @@ def upsert_public_listing(conn: sqlite3.Connection, listing: PublicListing) -> N
         """
     )
     try:
-        conn.execute(sql, data)
+        with db_connection() as conn:
+            conn.execute(sql, data)
     except sqlite3.Error as e:
         logger.error("DB error upserting listing %s: %s", listing.listing_url, e.__class__.__name__)
         raise
+
+
+def batch_upsert_public_listings(listings: Iterable[PublicListing]) -> None:
+    """Batch upsert multiple listings in a single transaction."""
+    with db_connection() as conn:
+        for listing in listings:
+            _validate_listing(listing)
+            data = asdict(listing)
+            sql = (
+                """
+                INSERT INTO public_listings (
+                    source_site, listing_url, auction_end, year, make, model, trim,
+                    mileage, current_bid, location, state, vin, photo_url, description
+                ) VALUES (
+                    :source_site, :listing_url, :auction_end, :year, :make, :model, :trim,
+                    :mileage, :current_bid, :location, :state, :vin, :photo_url, :description
+                )
+                ON CONFLICT(listing_url) DO UPDATE SET
+                    source_site=excluded.source_site,
+                    auction_end=excluded.auction_end,
+                    year=excluded.year,
+                    make=excluded.make,
+                    model=excluded.model,
+                    trim=excluded.trim,
+                    mileage=excluded.mileage,
+                    current_bid=excluded.current_bid,
+                    location=excluded.location,
+                    state=excluded.state,
+                    vin=excluded.vin,
+                    photo_url=excluded.photo_url,
+                    description=excluded.description
+                """
+            )
+            try:
+                conn.execute(sql, data)
+            except sqlite3.Error as e:
+                logger.error("DB error upserting listing %s: %s", listing.listing_url, e.__class__.__name__)
+                raise
