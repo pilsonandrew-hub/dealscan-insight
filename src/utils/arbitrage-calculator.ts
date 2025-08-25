@@ -63,6 +63,9 @@ export class ArbitrageCalculator {
     state: string,
     marketPrice?: MarketPrice
   ): Opportunity {
+    // Import state classification for geographic adjustments
+    const { StateClassificationService } = require('@/services/stateClassification');
+
     // Calculate all costs
     const buyerPremium = this.calculateBuyerPremium(currentBid, sourceSite);
     const docFee = this.getDocFee(sourceSite);
@@ -70,16 +73,36 @@ export class ArbitrageCalculator {
     const totalCost = currentBid + buyerPremium + docFee + transportationCost;
 
     // Estimate sale price using multiple methods
-    const estimatedSalePrice = this.estimateSalePrice(vehicle, marketPrice);
+    let estimatedSalePrice = this.estimateSalePrice(vehicle, marketPrice);
+    
+    // Apply geographic adjustments for rust states and distance
+    const geoAdjustment = StateClassificationService.calculateGeographicAdjustment(
+      estimatedSalePrice,
+      state,
+      new Date().getFullYear() - vehicle.year,
+      vehicle.mileage || 100000
+    );
+    estimatedSalePrice = geoAdjustment.adjusted_value;
     
     // Calculate profitability metrics
     const potentialProfit = estimatedSalePrice - totalCost;
     const roiPercentage = totalCost > 0 ? (potentialProfit / totalCost) * 100 : 0;
     const profitMargin = estimatedSalePrice > 0 ? (potentialProfit / estimatedSalePrice) * 100 : 0;
 
-    // Calculate risk and confidence scores
-    const riskScore = this.calculateRiskScore(vehicle, marketPrice, currentBid);
-    const confidenceScore = this.calculateConfidenceScore(vehicle, marketPrice, currentBid);
+    // Calculate risk and confidence scores (adjusted for geographic factors)
+    let riskScore = this.calculateRiskScore(vehicle, marketPrice, currentBid);
+    let confidenceScore = this.calculateConfidenceScore(vehicle, marketPrice, currentBid);
+    
+    // Apply geographic risk and confidence adjustments
+    const stateClassification = StateClassificationService.classifyState(state);
+    if (stateClassification.category === 'rust') {
+      riskScore += 15; // Increase risk for rust states
+      confidenceScore -= geoAdjustment.confidence_reduction * 100; // Reduce confidence
+    }
+    
+    // Ensure scores stay within bounds
+    riskScore = Math.min(100, Math.max(0, riskScore));
+    confidenceScore = Math.min(100, Math.max(10, confidenceScore));
 
     // Determine status based on multiple factors
     const status = this.determineOpportunityStatus(potentialProfit, roiPercentage, riskScore, confidenceScore);
