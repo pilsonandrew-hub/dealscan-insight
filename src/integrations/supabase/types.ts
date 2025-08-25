@@ -206,6 +206,48 @@ export type Database = {
         }
         Relationships: []
       }
+      field_provenance: {
+        Row: {
+          confidence_score: number | null
+          created_at: string
+          error_count: number | null
+          extraction_method: string
+          field_name: string
+          id: string
+          last_validated: string | null
+          metadata: Json | null
+          source_table: string
+          updated_at: string
+          validation_count: number | null
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string
+          error_count?: number | null
+          extraction_method: string
+          field_name: string
+          id?: string
+          last_validated?: string | null
+          metadata?: Json | null
+          source_table: string
+          updated_at?: string
+          validation_count?: number | null
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string
+          error_count?: number | null
+          extraction_method?: string
+          field_name?: string
+          id?: string
+          last_validated?: string | null
+          metadata?: Json | null
+          source_table?: string
+          updated_at?: string
+          validation_count?: number | null
+        }
+        Relationships: []
+      }
       health_checks: {
         Row: {
           created_at: string | null
@@ -329,6 +371,93 @@ export type Database = {
           trim?: string | null
           user_id?: string | null
           year?: number
+        }
+        Relationships: []
+      }
+      ml_models: {
+        Row: {
+          accuracy: number | null
+          created_at: string
+          deployed_at: string | null
+          features_used: string[] | null
+          hyperparameters: Json | null
+          id: string
+          metadata: Json | null
+          model_type: string
+          name: string
+          status: string
+          training_data_size: number | null
+          updated_at: string
+          version: string
+        }
+        Insert: {
+          accuracy?: number | null
+          created_at?: string
+          deployed_at?: string | null
+          features_used?: string[] | null
+          hyperparameters?: Json | null
+          id?: string
+          metadata?: Json | null
+          model_type: string
+          name: string
+          status?: string
+          training_data_size?: number | null
+          updated_at?: string
+          version: string
+        }
+        Update: {
+          accuracy?: number | null
+          created_at?: string
+          deployed_at?: string | null
+          features_used?: string[] | null
+          hyperparameters?: Json | null
+          id?: string
+          metadata?: Json | null
+          model_type?: string
+          name?: string
+          status?: string
+          training_data_size?: number | null
+          updated_at?: string
+          version?: string
+        }
+        Relationships: []
+      }
+      model_performance_metrics: {
+        Row: {
+          created_at: string
+          dataset_size: number | null
+          evaluated_at: string
+          id: string
+          metadata: Json | null
+          metric_type: string
+          metric_value: number
+          model_name: string
+          model_version: string
+          test_split: number | null
+        }
+        Insert: {
+          created_at?: string
+          dataset_size?: number | null
+          evaluated_at?: string
+          id?: string
+          metadata?: Json | null
+          metric_type: string
+          metric_value: number
+          model_name: string
+          model_version: string
+          test_split?: number | null
+        }
+        Update: {
+          created_at?: string
+          dataset_size?: number | null
+          evaluated_at?: string
+          id?: string
+          metadata?: Json | null
+          metric_type?: string
+          metric_value?: number
+          model_name?: string
+          model_version?: string
+          test_split?: number | null
         }
         Relationships: []
       }
