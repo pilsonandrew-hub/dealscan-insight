@@ -174,7 +174,7 @@ class SLOMonitor {
       if (breach.severity === 'critical') {
         try {
           // Log critical SLO breach for now - alert system integration pending
-          logger.error('Critical SLO breach detected', undefined, {
+          logger.error('Critical SLO breach detected', {
             siteId,
             metric: breach.metric,
             currentValue: breach.currentValue,
@@ -189,10 +189,10 @@ class SLOMonitor {
             severity: breach.severity
           });
         } catch (error) {
-          logger.error('Failed to create SLO breach alert', error, {
+          logger.error('Failed to create SLO breach alert', {
             siteId,
             breach: breach.metric
-          });
+          }, error as Error);
         }
       }
     }

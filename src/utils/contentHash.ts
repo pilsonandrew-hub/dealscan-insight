@@ -56,7 +56,10 @@ export async function contentHash(data: Record<string, unknown>): Promise<string
     
     return hashHex;
   } catch (error) {
-    logger.error('Failed to compute content hash', error, { data });
+    logger.error('Failed to compute content hash', { 
+      dataType: typeof data,
+      dataLength: JSON.stringify(data).length 
+    }, error as Error);
     throw new Error('Content hash computation failed');
   }
 }

@@ -260,7 +260,7 @@ class PlaywrightScraper {
           return { url, result };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          logger.error('Failed to scrape URL in batch', error, { url });
+          logger.error('Failed to scrape URL in batch', { url }, error as Error);
           return { url, error: errorMessage };
         }
       });

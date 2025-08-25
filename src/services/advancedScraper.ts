@@ -7,6 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { logger } from '@/lib/logger';
 import { batchUpsertPublicListings } from '@/utils/store';
 import { safeConcurrentExecution } from '@/utils/asyncHelpers';
+import { contentHash } from '@/utils/contentHash';
 
 export interface ScraperSite {
   id: string;
@@ -486,23 +487,25 @@ export class AdvancedVehicleScraper {
   }
 
   private async storeVehicles(vehicles: any[], siteId: string): Promise<void> {
-    const publicListings = vehicles.map(vehicle => ({
+    const publicListings = await Promise.all(vehicles.map(async (vehicle) => ({
       vin: vehicle.vin || this.generateRandomVIN(),
-      make: vehicle.make,
-      model: vehicle.model,
-      year: vehicle.year,
-      mileage: vehicle.mileage,
-      current_bid: vehicle.currentBid,
-      source_site: vehicle.sourceSite,
-      listing_url: `https://example.com/listing/${vehicle.id}`,
-      location: vehicle.location,
-      auction_end: vehicle.auctionEnd,
-      scrape_metadata: {
+      make: vehicle.make || '',
+      model: vehicle.model || '',
+      year: vehicle.year || 0,
+      mileage: vehicle.mileage || 0,
+      title: vehicle.title || `${vehicle.year || 'Unknown'} ${vehicle.make || 'Vehicle'} ${vehicle.model || ''}`.trim(),
+      current_price: vehicle.currentBid || vehicle.current_bid || 0,
+      source_site: siteId,
+      listing_url: `https://example.com/listing/${vehicle.id}` || vehicle.listing_url || '',
+      location: vehicle.location || '',
+      auction_end: vehicle.auctionEnd || vehicle.auction_end || null,
+      content_hash: await contentHash(vehicle),
+      extraction_metadata: {
         scrapedAt: new Date().toISOString(),
         sourceId: siteId,
         scraperVersion: 'v4.9_advanced'
       }
-    }));
+    })));
 
     // Use the centralized store utility for consistent upserts
     await batchUpsertPublicListings(publicListings);
