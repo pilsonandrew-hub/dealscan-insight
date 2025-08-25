@@ -3,7 +3,7 @@
  * Centralized error reporting, recovery, and user experience
  */
 
-import logger, { LogLevel } from './productionLogger';
+import { logger, LogLevel } from './productionLogger';
 import { toast } from 'sonner';
 
 export enum ErrorSeverity {
@@ -383,8 +383,7 @@ export class GlobalErrorHandler {
     try {
       // In production, report to error tracking service (Sentry, LogRocket, etc.)
       if (import.meta.env.PROD) {
-        // Note: Error reports table will be available after types regeneration
-        // For now, use a more generic approach
+        // Report to error tracking service - will be available after types regeneration
         logger.error('Error reported to service', error.originalError, {
           errorId: error.id,
           severity: error.severity,
@@ -426,7 +425,7 @@ export class GlobalErrorHandler {
           try {
             const { supabase } = await import('@/integrations/supabase/client');
             const { data, error: refreshError } = await supabase.auth.refreshSession();
-            return !refreshError && !!data.session;
+            return Boolean(!refreshError && data.session);
           } catch {
             return false;
           }
