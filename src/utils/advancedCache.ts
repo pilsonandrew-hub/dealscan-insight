@@ -146,9 +146,9 @@ export class AdvancedCache {
   }
 }
 
-// Global enhanced cache instance
+// Global enhanced cache instance with memory-conscious settings
 export const advancedCache = new AdvancedCache({
-  defaultTTL: 5 * 60 * 1000, // 5 minutes
-  maxSize: 100,
-  enableLogging: process.env.NODE_ENV === 'development'
+  defaultTTL: 2 * 60 * 1000, // 2 minutes (shorter to reduce memory)
+  maxSize: 50, // Reduced from 100 to manage memory
+  enableLogging: false // Disable to reduce memory overhead
 });

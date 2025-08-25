@@ -308,20 +308,24 @@ const mockHealthCheck = async () => {
 // Mock data for development when backend is not available
 export const mockApi = {
   healthCheck: mockHealthCheck,
-  getCacheStats: () => ({ 
-    size: 5, 
-    maxSize: 100, 
-    entries: ['opportunities-all'], 
-    hits: 12, 
-    misses: 3, 
-    hitRate: 80 
-  }),
-  clearCache: () => {},
+  getCacheStats: () => advancedCache.getStats(),
+  clearCache: () => advancedCache.invalidate(),
   async getOpportunities(): Promise<Opportunity[]> {
+    const cacheKey = 'opportunities-mock';
+    const cached = advancedCache.get<Opportunity[]>(cacheKey);
+    if (cached) return cached;
+
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1000));
+    const result = mockOpportunities;
+    advancedCache.set(cacheKey, result, 30000); // 30 second cache
+    return result;
+  }
+};
 
-    return [
+const mockOpportunities: Opportunity[] = [
+
+    
       {
         id: "1",
         vehicle: {
@@ -466,9 +470,10 @@ export const mockApi = {
         year: 2018,
         mileage: 67800
       }
-    ];
-  },
+];
 
+export const mockApiExtended = {
+  ...mockApi,
   async uploadCSV(file: File): Promise<UploadResult> {
     await new Promise(resolve => setTimeout(resolve, 2000));
     
@@ -512,4 +517,4 @@ export const mockApi = {
 };
 
 // Use mock API in development
-export default import.meta.env.MODE === 'development' ? mockApi : api;
+export default import.meta.env.MODE === 'development' ? mockApiExtended : api;

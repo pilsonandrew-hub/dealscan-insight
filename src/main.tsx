@@ -3,12 +3,16 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
 import { validateDealerScopeEnv } from './utils/envValidator'
+import { setupApiHandling } from './middleware/apiHandler'
 
 // Initialize production logger to override console methods
 import '@/utils/productionLogger';
 
 // Initialize secure configuration
 import '@/config/secureConfig';
+
+// Setup API handling for proper 404 responses
+setupApiHandling();
 
 // Validate environment before app initialization
 try {
