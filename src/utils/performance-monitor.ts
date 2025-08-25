@@ -30,7 +30,30 @@ class PerformanceMonitor {
     averageResponseTime: 0,
     requestsPerMinute: 0
   };
-  private readonly MAX_METRICS = 1000;
+  private readonly MAX_METRICS = 500; // Reduced from 1000
+  private cleanupInterval: number | null = null;
+
+  constructor() {
+    this.startCleanupInterval();
+  }
+
+  private startCleanupInterval(): void {
+    // Clean up metrics every 5 minutes
+    this.cleanupInterval = window.setInterval(() => {
+      this.performCleanup();
+    }, 5 * 60 * 1000);
+  }
+
+  private performCleanup(): void {
+    // Keep only recent metrics (last hour)
+    const cutoffTime = Date.now() - (60 * 60 * 1000);
+    this.metrics = this.metrics.filter(m => m.timestamp.getTime() > cutoffTime);
+    
+    // Also enforce max size more aggressively
+    if (this.metrics.length > this.MAX_METRICS) {
+      this.metrics = this.metrics.slice(-this.MAX_METRICS / 2);
+    }
+  }
 
   public async measureOperation<T>(
     operationName: string,
@@ -64,9 +87,10 @@ class PerformanceMonitor {
   private addMetric(metric: PerformanceMetrics): void {
     this.metrics.push(metric);
     
-    // Keep only recent metrics
+    // Keep only recent metrics with more aggressive cleanup
     if (this.metrics.length > this.MAX_METRICS) {
-      this.metrics = this.metrics.slice(-this.MAX_METRICS / 2);
+      // Remove oldest 50% when we hit the limit
+      this.metrics = this.metrics.slice(-Math.floor(this.MAX_METRICS * 0.5));
     }
     
     this.updateSystemMetrics();
@@ -207,6 +231,14 @@ class PerformanceMonitor {
       averageResponseTime: 0,
       requestsPerMinute: 0
     };
+  }
+
+  public cleanup(): void {
+    this.performCleanup();
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
   }
 
   // Backward compatibility methods

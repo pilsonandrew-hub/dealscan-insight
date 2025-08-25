@@ -18,36 +18,48 @@ const apiCircuitBreaker = new CircuitBreaker({
 });
 
 export const api = {
-  // Get all opportunities with enhanced caching - now using Supabase
-  async getOpportunities(): Promise<Opportunity[]> {
-    const cacheKey = 'opportunities-all';
+  // Get all opportunities with enhanced caching and pagination - now using Supabase
+  async getOpportunities(page: number = 1, limit: number = 100): Promise<{ data: Opportunity[]; total: number; hasMore: boolean }> {
+    const cacheKey = `opportunities-${page}-${limit}`;
     const timer = performanceMonitor.monitorAPI('getOpportunities', 'GET');
     
     auditLogger.log('api_call_start', 'system', 'info', { endpoint: 'opportunities' });
     
     // Try cache first
-    const cached = advancedCache.get<Opportunity[]>(cacheKey);
+    const cached = advancedCache.get<{ data: Opportunity[]; total: number; hasMore: boolean }>(cacheKey);
     if (cached) {
       timer.end(true);
-      auditLogger.log('api_cache_hit', 'system', 'info', { endpoint: 'opportunities' });
+      auditLogger.log('api_cache_hit', 'system', 'info', { endpoint: 'opportunities', page, limit });
       return cached;
     }
 
     return apiCircuitBreaker.execute(async () => {
       try {
+        // Get total count first
+        const { count } = await supabase
+          .from('opportunities')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true);
+        
+        // Get paginated data
         const { data, error } = await supabase
           .from('opportunities')
           .select('*')
           .eq('is_active', true)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .range((page - 1) * limit, page * limit - 1);
         
         if (error) throw error;
         
         const opportunities = data?.map(transformOpportunity) || [];
-        advancedCache.set(cacheKey, opportunities, 300000); // 5 minutes TTL
+        const total = count || 0;
+        const hasMore = (page * limit) < total;
+        
+        const result = { data: opportunities, total, hasMore };
+        advancedCache.set(cacheKey, result, 300000); // 5 minutes TTL
         timer.end(true);
-        auditLogger.log('api_call_success', 'system', 'info', { endpoint: 'opportunities' });
-        return opportunities;
+        auditLogger.log('api_call_success', 'system', 'info', { endpoint: 'opportunities', page, limit, total });
+        return result;
       } catch (error) {
         timer.end(false);
         auditLogger.logError(error as Error, 'getOpportunities');
@@ -310,14 +322,25 @@ export const mockApi = {
   healthCheck: mockHealthCheck,
   getCacheStats: () => advancedCache.getStats(),
   clearCache: () => advancedCache.invalidate(),
-  async getOpportunities(): Promise<Opportunity[]> {
-    const cacheKey = 'opportunities-mock';
-    const cached = advancedCache.get<Opportunity[]>(cacheKey);
+  async getOpportunities(page: number = 1, limit: number = 100): Promise<{ data: Opportunity[]; total: number; hasMore: boolean }> {
+    const cacheKey = `opportunities-mock-${page}-${limit}`;
+    const cached = advancedCache.get<{ data: Opportunity[]; total: number; hasMore: boolean }>(cacheKey);
     if (cached) return cached;
 
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1000));
-    const result = mockOpportunities;
+    
+    // Paginate the mock data
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedData = mockOpportunities.slice(startIndex, endIndex);
+    
+    const result = {
+      data: paginatedData,
+      total: mockOpportunities.length,
+      hasMore: endIndex < mockOpportunities.length
+    };
+    
     advancedCache.set(cacheKey, result, 30000); // 30 second cache
     return result;
   }

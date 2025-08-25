@@ -24,9 +24,9 @@ const Index = () => {
   const { toast } = useToast();
 
   // Fetch initial opportunities and metrics
-  const { data: initialOpportunities = [] } = useQuery({
+  const { data: initialOpportunities = { data: [], total: 0, hasMore: false } } = useQuery({
     queryKey: ["opportunities"],
-    queryFn: api.getOpportunities,
+    queryFn: () => api.getOpportunities(1, 100),
     refetchInterval: 30000, // Fallback polling
   });
 
@@ -53,7 +53,7 @@ const Index = () => {
     resumePipeline,
     connect,
     disconnect
-  } = useRealtimeOpportunities(initialOpportunities);
+  } = useRealtimeOpportunities(initialOpportunities.data);
 
   const handleUploadSuccess = () => {
     // Real-time updates will handle new opportunities automatically

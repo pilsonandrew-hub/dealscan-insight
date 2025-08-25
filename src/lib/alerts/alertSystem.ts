@@ -62,6 +62,8 @@ export class InHouseAlertSystem {
   private rateLimitAt: Map<string, number> = new Map();
   private audioContext: AudioContext | null = null;
   private soundEnabledGate = false; // enable after first user gesture
+  private readonly MAX_ALERTS_PER_USER = 50; // Reduced from 100
+  private readonly MAX_RATE_LIMIT_ENTRIES = 100;
 
   constructor() {
     // Lazy init audio on first user gesture to satisfy autoplay policies
@@ -78,6 +80,62 @@ export class InHouseAlertSystem {
         this.soundEnabledGate = true;
       }
     }, { once: true });
+
+    // Setup memory cleanup
+    this.setupMemoryCleanup();
+  }
+
+  private setupMemoryCleanup(): void {
+    // Cleanup old alerts every 5 minutes
+    setInterval(() => {
+      this.cleanupOldAlerts();
+    }, 5 * 60 * 1000);
+
+    // Cleanup rate limit entries every 10 minutes
+    setInterval(() => {
+      this.cleanupRateLimitEntries();
+    }, 10 * 60 * 1000);
+  }
+
+  private cleanupOldAlerts(): void {
+    const cutoffTime = Date.now() - (24 * 60 * 60 * 1000); // 24 hours ago
+    
+    for (const [userId, alerts] of this.alerts.entries()) {
+      const filteredAlerts = alerts.filter(alert => 
+        new Date(alert.timestamp).getTime() > cutoffTime
+      );
+      
+      if (filteredAlerts.length !== alerts.length) {
+        this.alerts.set(userId, filteredAlerts);
+        console.log(`Cleaned up ${alerts.length - filteredAlerts.length} old alerts for user ${userId}`);
+      }
+      
+      // Also enforce per-user limit
+      if (filteredAlerts.length > this.MAX_ALERTS_PER_USER) {
+        const trimmedAlerts = filteredAlerts.slice(-this.MAX_ALERTS_PER_USER);
+        this.alerts.set(userId, trimmedAlerts);
+      }
+    }
+  }
+
+  private cleanupRateLimitEntries(): void {
+    const cutoffTime = Date.now() - (60 * 60 * 1000); // 1 hour ago
+    
+    for (const [key, timestamp] of this.rateLimitAt.entries()) {
+      if (timestamp < cutoffTime) {
+        this.rateLimitAt.delete(key);
+      }
+    }
+    
+    // Enforce max entries
+    if (this.rateLimitAt.size > this.MAX_RATE_LIMIT_ENTRIES) {
+      const entries = Array.from(this.rateLimitAt.entries());
+      entries.sort(([, a], [, b]) => b - a); // Sort by timestamp desc
+      this.rateLimitAt.clear();
+      entries.slice(0, this.MAX_RATE_LIMIT_ENTRIES).forEach(([key, timestamp]) => {
+        this.rateLimitAt.set(key, timestamp);
+      });
+    }
   }
 
   async createAlert(
@@ -140,10 +198,15 @@ export class InHouseAlertSystem {
   }
 
   private async storeAlert(alert: InHouseAlert): Promise<void> {
-    // memory (fast UI)
+    // memory (fast UI) - with bounds
     const list = this.alerts.get(alert.userId) ?? [];
     list.unshift(alert);
-    if (list.length > 100) list.length = 100;
+    
+    // Enforce per-user limit immediately
+    if (list.length > this.MAX_ALERTS_PER_USER) {
+      list.length = this.MAX_ALERTS_PER_USER;
+    }
+    
     this.alerts.set(alert.userId, list);
 
     // db (persistence)

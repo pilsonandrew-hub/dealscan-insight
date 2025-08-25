@@ -4,6 +4,7 @@ import App from './App.tsx'
 import './index.css'
 import { validateDealerScopeEnv } from './utils/envValidator'
 import { setupApiHandling } from './middleware/apiHandler'
+import { memoryManager } from './utils/memoryManager'
 
 // Initialize production logger to override console methods
 import '@/utils/productionLogger';
@@ -13,6 +14,9 @@ import '@/config/secureConfig';
 
 // Setup API handling for proper 404 responses
 setupApiHandling();
+
+// Start memory monitoring
+memoryManager.startMonitoring();
 
 // Validate environment before app initialization
 try {
