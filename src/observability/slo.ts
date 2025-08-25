@@ -4,7 +4,6 @@
  */
 
 import { logger } from '@/lib/logger';
-import { inHouseAlertSystem } from '@/lib/alerts/inHouseAlertSystem';
 
 export interface SLOMetrics {
   p50ResponseTime: number;
@@ -174,30 +173,15 @@ class SLOMonitor {
     for (const breach of breaches) {
       if (breach.severity === 'critical') {
         try {
-          // Create alert using existing alert system
-          await inHouseAlertSystem.createInHouseAlert(
-            {
-              id: `slo-${siteId}-${breach.metric}`,
-              make: 'SRE',
-              model: siteId,
-              year: new Date().getFullYear(),
-              profit: 0,
-              roi: 0,
-              risk_score: 100, // High risk for SLO breach
-              confidence: 100
-            },
-            'system',
-            'new_opportunity', // Reuse UI component
-            {
-              kind: 'slo_breach',
-              siteId,
-              metric: breach.metric,
-              currentValue: breach.currentValue,
-              threshold: breach.thresholdValue,
-              description: breach.description,
-              timestamp: breach.timestamp
-            }
-          );
+          // Log critical SLO breach for now - alert system integration pending
+          logger.error('Critical SLO breach detected', undefined, {
+            siteId,
+            metric: breach.metric,
+            currentValue: breach.currentValue,
+            threshold: breach.thresholdValue,
+            description: breach.description,
+            timestamp: breach.timestamp
+          });
 
           logger.info('SLO breach alert created', {
             siteId,
