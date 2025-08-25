@@ -1,0 +1,338 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dealerscope.com/schemas/vehicle.schema.json",
+  "title": "Vehicle Data Schema",
+  "description": "Comprehensive schema for vehicle listing data with provenance tracking",
+  "type": "object",
+  "required": ["id", "make", "model", "year", "source", "provenance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Unique identifier for the vehicle listing"
+    },
+    "vin": {
+      "type": ["string", "null"],
+      "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
+      "description": "17-character Vehicle Identification Number"
+    },
+    "make": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "^[A-Za-z0-9\\s-]+$",
+      "description": "Vehicle manufacturer"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9\\s-/]+$",
+      "description": "Vehicle model name"
+    },
+    "year": {
+      "type": "integer",
+      "minimum": 1886,
+      "maximum": 2030,
+      "description": "Model year"
+    },
+    "trim": {
+      "type": ["string", "null"],
+      "maxLength": 100,
+      "description": "Vehicle trim level"
+    },
+    "mileage": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 999999,
+      "description": "Odometer reading in miles"
+    },
+    "price": {
+      "type": "object",
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000000,
+          "description": "Price amount"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD", "CAD", "EUR", "GBP"],
+          "default": "USD",
+          "description": "Currency code"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["starting_bid", "current_bid", "buy_now", "reserve", "sold"],
+          "description": "Type of price"
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "properties": {
+        "grade": {
+          "type": ["string", "null"],
+          "enum": ["excellent", "good", "fair", "poor", "salvage", "unknown"],
+          "description": "Overall condition grade"
+        },
+        "title_status": {
+          "type": ["string", "null"],
+          "enum": ["clean", "salvage", "rebuilt", "lemon", "flood", "unknown"],
+          "description": "Title status"
+        },
+        "damage": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "description": "List of damage descriptions"
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z]{2}$",
+          "description": "US state abbreviation"
+        },
+        "city": {
+          "type": ["string", "null"],
+          "maxLength": 100,
+          "description": "City name"
+        },
+        "zip": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+          "description": "ZIP code"
+        },
+        "country": {
+          "type": "string",
+          "enum": ["US", "CA"],
+          "default": "US",
+          "description": "Country code"
+        }
+      }
+    },
+    "auction": {
+      "type": "object",
+      "properties": {
+        "house": {
+          "type": ["string", "null"],
+          "maxLength": 100,
+          "description": "Auction house name"
+        },
+        "start_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Auction start time"
+        },
+        "end_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Auction end time"
+        },
+        "lot_number": {
+          "type": ["string", "null"],
+          "maxLength": 50,
+          "description": "Auction lot number"
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Image URL"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["exterior", "interior", "engine", "damage", "document"],
+            "description": "Image category"
+          },
+          "thumbnail": {
+            "type": ["string", "null"],
+            "format": "uri",
+            "description": "Thumbnail URL"
+          }
+        }
+      },
+      "maxItems": 50
+    },
+    "source": {
+      "type": "object",
+      "required": ["site", "url", "scraped_at"],
+      "properties": {
+        "site": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Source website name"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Original listing URL"
+        },
+        "scraped_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the data was scraped"
+        },
+        "page_title": {
+          "type": ["string", "null"],
+          "maxLength": 200,
+          "description": "Original page title"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["extractor_version", "fields"],
+      "properties": {
+        "extractor_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Version of extraction software"
+        },
+        "cluster_id": {
+          "type": ["string", "null"],
+          "description": "Page template cluster identifier"
+        },
+        "render_mode": {
+          "type": "string",
+          "enum": ["http", "headless"],
+          "description": "How the page was rendered"
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Number of extraction retries"
+        },
+        "limits_hit": {
+          "type": "object",
+          "properties": {
+            "timeout": {
+              "type": "boolean",
+              "description": "Whether timeout was reached"
+            },
+            "max_body": {
+              "type": "boolean",
+              "description": "Whether max body size was hit"
+            },
+            "rate_limit": {
+              "type": "boolean",
+              "description": "Whether rate limit was hit"
+            }
+          }
+        },
+        "fields": {
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "object",
+              "required": ["extraction_strategy", "confidence"],
+              "properties": {
+                "extraction_strategy": {
+                  "type": "string",
+                  "enum": ["selector", "ml", "llm", "manual"],
+                  "description": "How this field was extracted"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 1.0,
+                  "description": "Confidence score for extraction"
+                },
+                "provenance": {
+                  "type": "string",
+                  "description": "CSS selector, model name, or extraction source"
+                },
+                "drift_decision": {
+                  "type": "string",
+                  "enum": ["none", "selector_failed", "ml_failed", "llm_fallback"],
+                  "description": "If extraction strategy was changed due to drift"
+                },
+                "validator_results": {
+                  "type": "object",
+                  "properties": {
+                    "valid": {
+                      "type": "boolean",
+                      "description": "Whether field passed validation"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Validation error messages"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "quality_scores": {
+      "type": "object",
+      "properties": {
+        "completeness": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Fraction of required fields populated"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Overall extraction confidence"
+        },
+        "anomaly_score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Anomaly detection score (0=normal, 1=anomalous)"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 hash of original content"
+        },
+        "processing_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Time taken to process in milliseconds"
+        },
+        "html_preserved": {
+          "type": "boolean",
+          "description": "Whether original HTML was preserved"
+        },
+        "pii_redacted": {
+          "type": "boolean",
+          "description": "Whether PII was detected and redacted"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
