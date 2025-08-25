@@ -436,6 +436,78 @@ export type Database = {
         }
         Relationships: []
       }
+      scraper_sites: {
+        Row: {
+          base_url: string
+          category: string
+          enabled: boolean
+          id: string
+          last_scrape: string | null
+          name: string
+          priority: number
+          status: string
+          updated_at: string | null
+          vehicles_found: number | null
+        }
+        Insert: {
+          base_url: string
+          category: string
+          enabled?: boolean
+          id: string
+          last_scrape?: string | null
+          name: string
+          priority?: number
+          status?: string
+          updated_at?: string | null
+          vehicles_found?: number | null
+        }
+        Update: {
+          base_url?: string
+          category?: string
+          enabled?: boolean
+          id?: string
+          last_scrape?: string | null
+          name?: string
+          priority?: number
+          status?: string
+          updated_at?: string | null
+          vehicles_found?: number | null
+        }
+        Relationships: []
+      }
+      scraping_jobs: {
+        Row: {
+          completed_at: string | null
+          config: Json | null
+          error_message: string | null
+          id: string
+          results: Json | null
+          sites_targeted: string[] | null
+          started_at: string | null
+          status: string
+        }
+        Insert: {
+          completed_at?: string | null
+          config?: Json | null
+          error_message?: string | null
+          id: string
+          results?: Json | null
+          sites_targeted?: string[] | null
+          started_at?: string | null
+          status: string
+        }
+        Update: {
+          completed_at?: string | null
+          config?: Json | null
+          error_message?: string | null
+          id?: string
+          results?: Json | null
+          sites_targeted?: string[] | null
+          started_at?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
       security_audit_log: {
         Row: {
           action: string
@@ -472,6 +544,48 @@ export type Database = {
         }
         Relationships: []
       }
+      user_alerts: {
+        Row: {
+          created_at: string
+          dismissed: boolean
+          id: string
+          message: string
+          opportunity_data: Json | null
+          opportunity_id: string | null
+          priority: string
+          title: string
+          type: string
+          user_id: string
+          viewed: boolean
+        }
+        Insert: {
+          created_at?: string
+          dismissed?: boolean
+          id: string
+          message: string
+          opportunity_data?: Json | null
+          opportunity_id?: string | null
+          priority: string
+          title: string
+          type: string
+          user_id: string
+          viewed?: boolean
+        }
+        Update: {
+          created_at?: string
+          dismissed?: boolean
+          id?: string
+          message?: string
+          opportunity_data?: Json | null
+          opportunity_id?: string | null
+          priority?: string
+          title?: string
+          type?: string
+          user_id?: string
+          viewed?: boolean
+        }
+        Relationships: []
+      }
       user_settings: {
         Row: {
           created_at: string
@@ -480,10 +594,12 @@ export type Database = {
           id: string
           max_risk_score: number | null
           min_roi_percentage: number | null
+          notification_duration: number | null
           notifications_enabled: boolean | null
           preferred_states: string[] | null
           scan_interval: number | null
           scanning_mode: string | null
+          sound_enabled: boolean | null
           updated_at: string
           user_id: string
         }
@@ -494,10 +610,12 @@ export type Database = {
           id?: string
           max_risk_score?: number | null
           min_roi_percentage?: number | null
+          notification_duration?: number | null
           notifications_enabled?: boolean | null
           preferred_states?: string[] | null
           scan_interval?: number | null
           scanning_mode?: string | null
+          sound_enabled?: boolean | null
           updated_at?: string
           user_id: string
         }
@@ -508,10 +626,12 @@ export type Database = {
           id?: string
           max_risk_score?: number | null
           min_roi_percentage?: number | null
+          notification_duration?: number | null
           notifications_enabled?: boolean | null
           preferred_states?: string[] | null
           scan_interval?: number | null
           scanning_mode?: string | null
+          sound_enabled?: boolean | null
           updated_at?: string
           user_id?: string
         }
