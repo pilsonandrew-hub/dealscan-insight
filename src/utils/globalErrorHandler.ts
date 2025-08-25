@@ -1,525 +1,323 @@
 /**
- * Global Error Handler - Production-grade error management
- * Centralized error reporting, recovery, and user experience
+ * Global Error Handler - Phase 1 Core Fix
+ * Centralized error handling with structured logging
  */
 
-import { logger, LogLevel } from './productionLogger';
-import { toast } from 'sonner';
+import productionLogger from '@/utils/productionLogger';
 
-export enum ErrorSeverity {
-  LOW = 'low',
-  MEDIUM = 'medium',
-  HIGH = 'high',
-  CRITICAL = 'critical'
-}
-
-export enum ErrorCategory {
-  NETWORK = 'network',
-  VALIDATION = 'validation',
-  AUTHENTICATION = 'authentication',
-  AUTHORIZATION = 'authorization',
-  BUSINESS_LOGIC = 'business_logic',
-  SYSTEM = 'system',
-  UNKNOWN = 'unknown'
-}
-
-export interface ErrorContext {
+interface ErrorContext {
   component?: string;
-  action?: string;
-  userId?: string;
+  operation?: string;
   url?: string;
-  timestamp?: string;
-  userAgent?: string;
-  stackTrace?: string;
-  additionalData?: Record<string, any>;
+  userId?: string;
+  additionalInfo?: Record<string, any>;
 }
 
-export interface AppError {
-  id: string;
-  severity: ErrorSeverity;
-  category: ErrorCategory;
-  message: string;
-  userMessage: string;
-  context: ErrorContext;
-  originalError?: Error;
-  timestamp: string;
-  resolved?: boolean;
-  retryCount?: number;
+interface ErrorMetrics {
+  errorCounts: Map<string, number>;
+  lastErrors: Array<{
+    timestamp: Date;
+    type: string;
+    message: string;
+    context?: ErrorContext;
+  }>;
 }
 
-export interface ErrorRecoveryStrategy {
-  canRecover: (error: AppError) => boolean;
-  recover: (error: AppError) => Promise<boolean>;
-  fallback?: () => void;
-}
-
-/**
- * Global Error Handler with recovery strategies
- */
-export class GlobalErrorHandler {
-  private static instance: GlobalErrorHandler;
-  private recoveryStrategies: Map<ErrorCategory, ErrorRecoveryStrategy[]> = new Map();
-  private errorHistory: AppError[] = [];
-  private maxErrorHistory = 100;
-
-  private constructor() {
-    this.initializeRecoveryStrategies();
-    this.setupGlobalErrorHandlers();
+class GlobalErrorHandler {
+  private metrics: ErrorMetrics = {
+    errorCounts: new Map(),
+    lastErrors: []
+  };
+  
+  private readonly MAX_LAST_ERRORS = 100;
+  
+  constructor() {
+    this.setupGlobalHandlers();
   }
-
-  static getInstance(): GlobalErrorHandler {
-    if (!GlobalErrorHandler.instance) {
-      GlobalErrorHandler.instance = new GlobalErrorHandler();
-    }
-    return GlobalErrorHandler.instance;
-  }
-
+  
   /**
-   * Handle any error with categorization and recovery
+   * Setup global error handlers for unhandled exceptions
    */
-  async handleError(
-    error: Error | unknown, 
-    context: ErrorContext = {},
-    userMessage?: string
-  ): Promise<void> {
-    const appError = this.createAppError(error, context, userMessage);
-    
-    // Log the error
-    logger.error(appError.message, appError.originalError, {
-      errorId: appError.id,
-      severity: appError.severity,
-      category: appError.category,
-      ...appError.context
-    });
-
-    // Add to history
-    this.addToHistory(appError);
-
-    // Attempt recovery
-    const recovered = await this.attemptRecovery(appError);
-    
-    if (!recovered) {
-      // Show user-friendly error message
-      this.showUserError(appError);
+  private setupGlobalHandlers(): void {
+    // Handle unhandled promise rejections
+    window.addEventListener('unhandledrejection', (event) => {
+      this.handleError(
+        event.reason instanceof Error ? event.reason : new Error(String(event.reason)),
+        {
+          component: 'global',
+          operation: 'unhandled_promise_rejection'
+        }
+      );
       
-      // Report to external service in production
-      await this.reportToService(appError);
-    }
-  }
-
-  /**
-   * Handle network errors with retry logic
-   */
-  async handleNetworkError(
-    error: Error,
-    context: ErrorContext = {},
-    retryFn?: () => Promise<any>
-  ): Promise<any> {
-    const appError = this.createAppError(error, context);
-    appError.category = ErrorCategory.NETWORK;
+      // Prevent console error spam
+      event.preventDefault();
+    });
     
-    logger.warn('Network error occurred', { error: error.message, ...context });
-
-    // Retry logic for network errors
-    if (retryFn && (appError.retryCount || 0) < 3) {
-      appError.retryCount = (appError.retryCount || 0) + 1;
-      
-      try {
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, appError.retryCount!) * 1000));
-        return await retryFn();
-      } catch (retryError) {
-        return this.handleNetworkError(retryError as Error, context, retryFn);
-      }
-    }
-
-    await this.handleError(error, context, 'Network connection issue. Please check your internet connection.');
-    throw error;
-  }
-
-  /**
-   * Handle validation errors
-   */
-  handleValidationError(
-    message: string,
-    context: ErrorContext = {},
-    fieldErrors?: Record<string, string>
-  ): void {
-    const appError = this.createAppError(new Error(message), context, message);
-    appError.category = ErrorCategory.VALIDATION;
-    appError.severity = ErrorSeverity.LOW;
-    appError.context.additionalData = { fieldErrors };
-
-    logger.info('Validation error', {
-      errorId: appError.id,
-      fieldErrors,
-      ...context
+    // Handle uncaught errors
+    window.addEventListener('error', (event) => {
+      this.handleError(
+        event.error || new Error(event.message),
+        {
+          component: 'global',
+          operation: 'uncaught_error',
+          url: event.filename,
+          additionalInfo: {
+            line: event.lineno,
+            column: event.colno
+          }
+        }
+      );
     });
-
-    // Show field-specific errors
-    if (fieldErrors) {
-      Object.entries(fieldErrors).forEach(([field, error]) => {
-        toast.error(`${field}: ${error}`, { duration: 5000 });
-      });
-    } else {
-      toast.error(message, { duration: 5000 });
-    }
-  }
-
-  /**
-   * Handle authentication errors
-   */
-  async handleAuthError(
-    error: Error,
-    context: ErrorContext = {}
-  ): Promise<void> {
-    const appError = this.createAppError(error, context, 'Authentication required. Please log in again.');
-    appError.category = ErrorCategory.AUTHENTICATION;
-    appError.severity = ErrorSeverity.HIGH;
-
-    logger.warn('Authentication error', { error: error.message, ...context });
-
-    // Clear auth state and redirect to login
-    try {
-      const { supabase } = await import('@/integrations/supabase/client');
-      await supabase.auth.signOut();
-      
-      // Redirect to login
-      if (typeof window !== 'undefined') {
-        window.location.href = '/auth';
-      }
-    } catch (signOutError) {
-      logger.error('Failed to sign out user', signOutError as Error);
-    }
-
-    toast.error('Session expired. Please log in again.', { duration: 5000 });
-  }
-
-  /**
-   * Handle business logic errors
-   */
-  handleBusinessError(
-    message: string,
-    context: ErrorContext = {},
-    severity: ErrorSeverity = ErrorSeverity.MEDIUM
-  ): void {
-    const appError = this.createAppError(new Error(message), context, message);
-    appError.category = ErrorCategory.BUSINESS_LOGIC;
-    appError.severity = severity;
-
-    logger.info('Business logic error', {
-      errorId: appError.id,
-      ...context
-    });
-
-    toast.error(message, { 
-      duration: severity === ErrorSeverity.HIGH ? 10000 : 5000 
-    });
-  }
-
-  /**
-   * Create standardized app error
-   */
-  private createAppError(
-    error: Error | unknown,
-    context: ErrorContext = {},
-    userMessage?: string
-  ): AppError {
-    const originalError = error instanceof Error ? error : new Error(String(error));
-    const timestamp = new Date().toISOString();
     
-    return {
-      id: `err_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      severity: this.determineSeverity(originalError),
-      category: this.categorizeError(originalError),
-      message: originalError.message,
-      userMessage: userMessage || this.createUserMessage(originalError),
-      context: {
-        timestamp,
-        url: typeof window !== 'undefined' ? window.location.href : undefined,
-        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-        stackTrace: originalError.stack,
+    // Handle React error boundaries (if needed)
+    if (typeof window !== 'undefined') {
+      const originalConsoleError = console.error;
+      console.error = (...args) => {
+        // Check if this is a React error boundary error
+        const errorMessage = args[0];
+        if (typeof errorMessage === 'string' && errorMessage.includes('React')) {
+          this.handleError(
+            new Error(errorMessage),
+            {
+              component: 'react',
+              operation: 'error_boundary',
+              additionalInfo: { args }
+            }
+          );
+        }
+        
+        // Call original console.error
+        originalConsoleError.apply(console, args);
+      };
+    }
+  }
+  
+  /**
+   * Main error handling method
+   */
+  handleError(error: Error, context: ErrorContext = {}): void {
+    const errorType = error.name || 'UnknownError';
+    const timestamp = new Date();
+    
+    // Update metrics
+    this.updateMetrics(errorType, error.message, context);
+    
+    // Log structured error
+    productionLogger.error(
+      `${errorType}: ${error.message}`,
+      {
+        error_type: errorType,
+        stack_trace: error.stack,
         ...context
       },
-      originalError,
-      timestamp,
-      retryCount: 0
+      error
+    );
+    
+    // Handle specific error types
+    this.handleSpecificError(error, context);
+    
+    // Notify error monitoring service (if configured)
+    this.notifyErrorMonitoring(error, context);
+  }
+  
+  /**
+   * Update error metrics
+   */
+  private updateMetrics(errorType: string, message: string, context: ErrorContext): void {
+    // Increment error count
+    const currentCount = this.metrics.errorCounts.get(errorType) || 0;
+    this.metrics.errorCounts.set(errorType, currentCount + 1);
+    
+    // Add to recent errors
+    this.metrics.lastErrors.push({
+      timestamp: new Date(),
+      type: errorType,
+      message,
+      context
+    });
+    
+    // Keep only last N errors
+    if (this.metrics.lastErrors.length > this.MAX_LAST_ERRORS) {
+      this.metrics.lastErrors = this.metrics.lastErrors.slice(-this.MAX_LAST_ERRORS);
+    }
+  }
+  
+  /**
+   * Handle specific error types with custom logic
+   */
+  private handleSpecificError(error: Error, context: ErrorContext): void {
+    switch (error.name) {
+      case 'NetworkError':
+      case 'TypeError':
+        if (error.message.includes('fetch')) {
+          this.handleNetworkError(error, context);
+        }
+        break;
+        
+      case 'ChunkLoadError':
+        this.handleChunkLoadError(error, context);
+        break;
+        
+      case 'SecurityError':
+        this.handleSecurityError(error, context);
+        break;
+        
+      case 'QuotaExceededError':
+        this.handleQuotaError(error, context);
+        break;
+        
+      default:
+        // Generic error handling
+        break;
+    }
+  }
+  
+  /**
+   * Handle network-related errors
+   */
+  private handleNetworkError(error: Error, context: ErrorContext): void {
+    productionLogger.warn('Network error detected', {
+      ...context,
+      error_category: 'network',
+      retry_suggested: true
+    });
+    
+    // Could trigger retry logic or offline mode
+  }
+  
+  /**
+   * Handle chunk loading errors (common in SPAs)
+   */
+  private handleChunkLoadError(error: Error, context: ErrorContext): void {
+    productionLogger.warn('Chunk load error - suggesting page reload', {
+      ...context,
+      error_category: 'chunk_load',
+      action: 'reload_suggested'
+    });
+    
+    // Could show user notification to reload
+  }
+  
+  /**
+   * Handle security errors
+   */
+  private handleSecurityError(error: Error, context: ErrorContext): void {
+    productionLogger.logSecurityEvent('security_error', 'medium', {
+      error_message: error.message,
+      ...context
+    });
+  }
+  
+  /**
+   * Handle quota exceeded errors (localStorage, etc.)
+   */
+  private handleQuotaError(error: Error, context: ErrorContext): void {
+    productionLogger.warn('Storage quota exceeded', {
+      ...context,
+      error_category: 'quota',
+      action: 'cleanup_suggested'
+    });
+    
+    // Could trigger storage cleanup
+  }
+  
+  /**
+   * Notify external error monitoring service (Sentry, etc.)
+   */
+  private notifyErrorMonitoring(error: Error, context: ErrorContext): void {
+    // Integration point for external error monitoring
+    // Could send to Sentry, LogRocket, etc.
+    
+    if (typeof window !== 'undefined' && (window as any).Sentry) {
+      (window as any).Sentry.captureException(error, {
+        tags: {
+          component: context.component,
+          operation: context.operation
+        },
+        extra: context.additionalInfo
+      });
+    }
+  }
+  
+  /**
+   * Get error metrics for monitoring dashboard
+   */
+  getMetrics(): {
+    errorCounts: Record<string, number>;
+    recentErrors: Array<{
+      timestamp: Date;
+      type: string;
+      message: string;
+    }>;
+    totalErrors: number;
+  } {
+    return {
+      errorCounts: Object.fromEntries(this.metrics.errorCounts),
+      recentErrors: this.metrics.lastErrors.map(({ context, ...rest }) => rest),
+      totalErrors: Array.from(this.metrics.errorCounts.values()).reduce((sum, count) => sum + count, 0)
     };
   }
-
+  
   /**
-   * Determine error severity
-   */
-  private determineSeverity(error: Error): ErrorSeverity {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('network') || message.includes('fetch')) {
-      return ErrorSeverity.MEDIUM;
-    }
-    
-    if (message.includes('unauthorized') || message.includes('forbidden')) {
-      return ErrorSeverity.HIGH;
-    }
-    
-    if (message.includes('validation') || message.includes('invalid')) {
-      return ErrorSeverity.LOW;
-    }
-    
-    if (message.includes('critical') || message.includes('fatal')) {
-      return ErrorSeverity.CRITICAL;
-    }
-    
-    return ErrorSeverity.MEDIUM;
-  }
-
-  /**
-   * Categorize error type
-   */
-  private categorizeError(error: Error): ErrorCategory {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('network') || message.includes('fetch') || message.includes('connection')) {
-      return ErrorCategory.NETWORK;
-    }
-    
-    if (message.includes('validation') || message.includes('invalid') || message.includes('required')) {
-      return ErrorCategory.VALIDATION;
-    }
-    
-    if (message.includes('unauthorized') || message.includes('authentication') || message.includes('login')) {
-      return ErrorCategory.AUTHENTICATION;
-    }
-    
-    if (message.includes('forbidden') || message.includes('permission') || message.includes('access')) {
-      return ErrorCategory.AUTHORIZATION;
-    }
-    
-    if (message.includes('business') || message.includes('rule') || message.includes('constraint')) {
-      return ErrorCategory.BUSINESS_LOGIC;
-    }
-    
-    return ErrorCategory.UNKNOWN;
-  }
-
-  /**
-   * Create user-friendly error message
-   */
-  private createUserMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('network') || message.includes('fetch')) {
-      return 'Connection problem. Please check your internet connection and try again.';
-    }
-    
-    if (message.includes('unauthorized')) {
-      return 'You need to log in to access this feature.';
-    }
-    
-    if (message.includes('forbidden')) {
-      return 'You don\'t have permission to perform this action.';
-    }
-    
-    if (message.includes('validation')) {
-      return 'Please check your input and try again.';
-    }
-    
-    return 'Something went wrong. Please try again or contact support if the problem persists.';
-  }
-
-  /**
-   * Attempt error recovery
-   */
-  private async attemptRecovery(error: AppError): Promise<boolean> {
-    const strategies = this.recoveryStrategies.get(error.category) || [];
-    
-    for (const strategy of strategies) {
-      if (strategy.canRecover(error)) {
-        try {
-          const recovered = await strategy.recover(error);
-          if (recovered) {
-            error.resolved = true;
-            logger.info('Error recovered successfully', {
-              errorId: error.id,
-              category: error.category
-            });
-            return true;
-          }
-        } catch (recoveryError) {
-          logger.warn('Recovery strategy failed', { error: (recoveryError as Error).message,
-            errorId: error.id,
-            category: error.category
-          });
-          
-          // Try fallback if available
-          if (strategy.fallback) {
-            strategy.fallback();
-          }
-        }
-      }
-    }
-    
-    return false;
-  }
-
-  /**
-   * Show user-friendly error
-   */
-  private showUserError(error: AppError): void {
-    const duration = error.severity === ErrorSeverity.CRITICAL ? 15000 : 
-                    error.severity === ErrorSeverity.HIGH ? 10000 : 5000;
-    
-    toast.error(error.userMessage, { 
-      duration,
-      action: error.category === ErrorCategory.NETWORK ? {
-        label: 'Retry',
-        onClick: () => window.location.reload()
-      } : undefined
-    });
-  }
-
-  /**
-   * Report error to external service
-   */
-  private async reportToService(error: AppError): Promise<void> {
-    try {
-      // In production, report to error tracking service (Sentry, LogRocket, etc.)
-      if (import.meta.env.PROD) {
-        // Report to error tracking service - will be available after types regeneration
-        logger.error('Error reported to service', error.originalError, {
-          errorId: error.id,
-          severity: error.severity,
-          category: error.category,
-          userMessage: error.userMessage
-        });
-      }
-    } catch (reportError) {
-      // Silent fail - don't break the app for error reporting issues
-      logger.warn('Failed to report error to service', { error: (reportError as Error).message });
-    }
-  }
-
-  /**
-   * Initialize recovery strategies
-   */
-  private initializeRecoveryStrategies(): void {
-    // Network error recovery
-    this.recoveryStrategies.set(ErrorCategory.NETWORK, [
-      {
-        canRecover: (error) => error.category === ErrorCategory.NETWORK && (error.retryCount || 0) < 3,
-        recover: async (error) => {
-          // Simple retry strategy
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          return true; // Assume retry succeeds for now
-        },
-        fallback: () => {
-          toast.info('Working offline. Some features may be limited.', { duration: 5000 });
-        }
-      }
-    ]);
-
-    // Authentication error recovery
-    this.recoveryStrategies.set(ErrorCategory.AUTHENTICATION, [
-      {
-        canRecover: (error) => error.category === ErrorCategory.AUTHENTICATION,
-        recover: async (error) => {
-          // Try to refresh the session
-          try {
-            const { supabase } = await import('@/integrations/supabase/client');
-            const { data, error: refreshError } = await supabase.auth.refreshSession();
-            return Boolean(!refreshError && data.session);
-          } catch {
-            return false;
-          }
-        },
-        fallback: () => {
-          // Redirect to login or show auth modal
-          window.location.href = '/auth';
-        }
-      }
-    ]);
-  }
-
-  /**
-   * Setup global error handlers
-   */
-  private setupGlobalErrorHandlers(): void {
-    if (typeof window === 'undefined') return;
-
-    // Unhandled promise rejections
-    window.addEventListener('unhandledrejection', (event) => {
-      this.handleError(event.reason, {
-        component: 'global',
-        action: 'unhandled_promise_rejection'
-      });
-    });
-
-    // Unhandled errors
-    window.addEventListener('error', (event) => {
-      this.handleError(event.error, {
-        component: 'global',
-        action: 'unhandled_error',
-        additionalData: {
-          filename: event.filename,
-          lineno: event.lineno,
-          colno: event.colno
-        }
-      });
-    });
-  }
-
-  /**
-   * Add error to history
-   */
-  private addToHistory(error: AppError): void {
-    this.errorHistory.unshift(error);
-    
-    if (this.errorHistory.length > this.maxErrorHistory) {
-      this.errorHistory = this.errorHistory.slice(0, this.maxErrorHistory);
-    }
-  }
-
-  /**
-   * Get error statistics
+   * Get error statistics (alias for getMetrics for backward compatibility)
    */
   getErrorStats(): {
-    total: number;
-    bySeverity: Record<ErrorSeverity, number>;
-    byCategory: Record<ErrorCategory, number>;
-    resolved: number;
+    errorCounts: Record<string, number>;
+    recentErrors: Array<{
+      timestamp: Date;
+      type: string;
+      message: string;
+    }>;
+    totalErrors: number;
   } {
-    const stats = {
-      total: this.errorHistory.length,
-      bySeverity: Object.values(ErrorSeverity).reduce((acc, severity) => ({ ...acc, [severity]: 0 }), {}) as Record<ErrorSeverity, number>,
-      byCategory: Object.values(ErrorCategory).reduce((acc, category) => ({ ...acc, [category]: 0 }), {}) as Record<ErrorCategory, number>,
-      resolved: 0
-    };
-
-    this.errorHistory.forEach(error => {
-      stats.bySeverity[error.severity]++;
-      stats.byCategory[error.category]++;
-      if (error.resolved) stats.resolved++;
-    });
-
-    return stats;
+    return this.getMetrics();
+  }
+  
+  /**
+   * Handle async operation with error catching
+   */
+  async wrapAsync<T>(
+    operation: () => Promise<T>,
+    context: ErrorContext
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      this.handleError(error as Error, context);
+      throw error; // Re-throw for caller to handle
+    }
+  }
+  
+  /**
+   * Handle sync operation with error catching
+   */
+  wrapSync<T>(
+    operation: () => T,
+    context: ErrorContext
+  ): T {
+    try {
+      return operation();
+    } catch (error) {
+      this.handleError(error as Error, context);
+      throw error; // Re-throw for caller to handle
+    }
   }
 }
 
-// Global error handler instance
-export const globalErrorHandler = GlobalErrorHandler.getInstance();
+// Global instance
+export const globalErrorHandler = new GlobalErrorHandler();
 
-// Convenience functions
-export const handleError = (error: Error | unknown, context?: ErrorContext, userMessage?: string) =>
-  globalErrorHandler.handleError(error, context, userMessage);
+// Convenience methods
+export const handleError = (error: Error, context?: ErrorContext) => 
+  globalErrorHandler.handleError(error, context);
 
-export const handleNetworkError = (error: Error, context?: ErrorContext, retryFn?: () => Promise<any>) =>
-  globalErrorHandler.handleNetworkError(error, context, retryFn);
+export const wrapAsync = <T>(operation: () => Promise<T>, context: ErrorContext) =>
+  globalErrorHandler.wrapAsync(operation, context);
 
-export const handleValidationError = (message: string, context?: ErrorContext, fieldErrors?: Record<string, string>) =>
-  globalErrorHandler.handleValidationError(message, context, fieldErrors);
+export const wrapSync = <T>(operation: () => T, context: ErrorContext) =>
+  globalErrorHandler.wrapSync(operation, context);
 
-export const handleAuthError = (error: Error, context?: ErrorContext) =>
-  globalErrorHandler.handleAuthError(error, context);
+export const getErrorMetrics = () => globalErrorHandler.getMetrics();
 
-export const handleBusinessError = (message: string, context?: ErrorContext, severity?: ErrorSeverity) =>
-  globalErrorHandler.handleBusinessError(message, context, severity);
-
+// Export as default
 export default globalErrorHandler;

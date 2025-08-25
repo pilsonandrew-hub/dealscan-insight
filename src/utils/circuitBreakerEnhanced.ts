@@ -2,7 +2,7 @@
  * Enhanced Circuit Breaker with per-service state and metrics
  */
 
-import { logger } from './productionLogger';
+import productionLogger from '@/utils/productionLogger';
 
 export enum CircuitState {
   CLOSED = 'closed',

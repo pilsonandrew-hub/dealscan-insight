@@ -2,7 +2,7 @@
  * Production-grade rate limiting with Redis fallback and token bucket
  */
 
-import { logger } from './productionLogger';
+import productionLogger from './productionLogger';
 
 export interface RateLimitConfig {
   maxTokens: number;

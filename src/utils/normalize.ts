@@ -1,154 +1,217 @@
 /**
- * Data Normalization Utilities - Consistent canonical forms
- * Fixes dedupe misses by ensuring consistent data representation
+ * Data Normalization Utilities - Phase 1 Core Fix
+ * Canonical normalization with proper regex handling
  */
 
+// Alias mappings for common field variations
+const FIELD_ALIASES: Record<string, string> = {
+  // Vehicle identifiers
+  'vin_number': 'vin',
+  'vehicle_identification_number': 'vin',
+  'chassis_number': 'vin',
+  
+  // Price fields
+  'price': 'current_price',
+  'asking_price': 'current_price',
+  'listing_price': 'current_price',
+  'sale_price': 'current_price',
+  'current_bid': 'current_price',
+  
+  // Year fields
+  'model_year': 'year',
+  'year_made': 'year',
+  'manufacture_year': 'year',
+  
+  // Mileage fields
+  'odometer': 'mileage',
+  'miles': 'mileage',
+  'kilometers': 'mileage',
+  'km': 'mileage',
+  
+  // Location fields
+  'location': 'address',
+  'city_state': 'address',
+  'auction_location': 'address',
+  
+  // Title fields
+  'vehicle_title': 'title',
+  'listing_title': 'title',
+  'vehicle_name': 'title',
+  'description': 'title'
+};
+
 /**
- * Normalize text to canonical form for consistent deduplication
+ * Canonical string normalization
+ * Handles whitespace, case, and special characters
  */
-export function canonical(text: string | null | undefined): string {
-  if (!text) return '';
-  
-  // Unicode normalization to canonical composition
-  let normalized = text.normalize('NFKC').trim().toLowerCase();
-  
-  // Collapse multiple whitespace to single space
-  normalized = normalized.replace(/\s+/g, ' ');
-  
-  // Normalize different dash types to standard hyphen
-  normalized = normalized.replace(/[–—]/g, '-');
-  
-  // Remove common noise characters
-  normalized = normalized.replace(/['"'""`]/g, '');
-  
-  // Normalize common abbreviations
-  const abbreviations: Record<string, string> = {
-    'w/': 'with',
-    'w/o': 'without',
-    '&': 'and',
-    '+': 'plus',
-    '#': 'number',
-    '@': 'at'
-  };
-  
-  for (const [abbrev, full] of Object.entries(abbreviations)) {
-    normalized = normalized.replace(new RegExp(`\\b${abbrev.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'), full);
+export function canonical(input: string): string {
+  if (!input || typeof input !== 'string') {
+    return '';
   }
   
-  return normalized.trim();
-}
-
-/**
- * Normalize vehicle model name for consistent matching
- */
-export function normalizeModel(model: string | null | undefined): string {
-  const normalized = canonical(model);
-  
-  // Common model name normalizations
-  const modelMappings: Record<string, string> = {
-    'f-150': 'f150',
-    'f-250': 'f250',
-    'f-350': 'f350',
-    'e-class': 'eclass',
-    'c-class': 'cclass',
-    's-class': 'sclass',
-    'x-trail': 'xtrail',
-    'x-terra': 'xterra'
-  };
-  
-  let result = normalized;
-  for (const [variant, standard] of Object.entries(modelMappings)) {
-    result = result.replace(new RegExp(`\\b${variant}\\b`, 'g'), standard);
-  }
-  
-  return result;
-}
-
-/**
- * Normalize VIN to uppercase, remove spaces/dashes
- */
-export function normalizeVIN(vin: string | null | undefined): string {
-  if (!vin) return '';
-  return vin.replace(/[\s-]/g, '').toUpperCase();
-}
-
-/**
- * Normalize location string for consistent matching
- */
-export function normalizeLocation(location: string | null | undefined): string {
-  const normalized = canonical(location);
-  
-  // Common location abbreviations
-  const locationMappings: Record<string, string> = {
-    'st': 'street',
-    'ave': 'avenue',
-    'blvd': 'boulevard',
-    'rd': 'road',
-    'dr': 'drive',
-    'ct': 'court',
-    'pl': 'place',
-    'n': 'north',
-    's': 'south',
-    'e': 'east',
-    'w': 'west'
-  };
-  
-  let result = normalized;
-  for (const [abbrev, full] of Object.entries(locationMappings)) {
-    result = result.replace(new RegExp(`\\b${abbrev}\\b`, 'g'), full);
-  }
-  
-  return result;
-}
-
-/**
- * Normalize monetary amount (remove currency symbols, normalize decimals)
- */
-export function normalizeAmount(amount: string | number | null | undefined): number {
-  if (typeof amount === 'number') return amount;
-  if (!amount) return 0;
-  
-  // Remove currency symbols and whitespace
-  const cleaned = String(amount).replace(/[$,\s]/g, '');
-  
-  // Parse as float
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? 0 : parsed;
-}
-
-/**
- * Normalize mileage (handle various formats)
- */
-export function normalizeMileage(mileage: string | number | null | undefined): number {
-  if (typeof mileage === 'number') return mileage;
-  if (!mileage) return 0;
-  
-  // Remove common mileage suffixes and separators
-  const cleaned = String(mileage)
+  return input
+    .trim()
+    .replace(/\s+/g, ' ')  // Multiple whitespace to single space
+    .replace(/[^\w\s-]/g, '') // Remove special chars except hyphens
     .toLowerCase()
-    .replace(/[,\s]/g, '')
-    .replace(/mi(les?)?$/, '')
-    .replace(/k$/, '000');
-  
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? 0 : parsed;
+    .replace(/\s/g, '-'); // Spaces to hyphens
 }
 
 /**
- * Comprehensive normalization for vehicle data
+ * Normalize field names using alias mappings
  */
-export function normalizeVehicleData(data: Record<string, any>): Record<string, any> {
+export function normalizeFieldName(fieldName: string): string {
+  const canonical_name = canonical(fieldName);
+  return FIELD_ALIASES[canonical_name] || canonical_name;
+}
+
+/**
+ * Normalize VIN - uppercase, remove spaces/dashes
+ */
+export function normalizeVIN(vin: string): string {
+  if (!vin) return '';
+  
+  return vin
+    .toString()
+    .replace(/[\s-]/g, '') // Remove spaces and dashes
+    .toUpperCase()
+    .substring(0, 17); // VIN is max 17 characters
+}
+
+/**
+ * Normalize price values - extract numeric value
+ */
+export function normalizePrice(price: string | number): number {
+  if (typeof price === 'number') return Math.max(0, price);
+  if (!price) return 0;
+  
+  // Extract numeric value from string
+  const numericString = price.toString().replace(/[^\d.]/g, '');
+  const parsed = parseFloat(numericString);
+  
+  return isNaN(parsed) ? 0 : Math.max(0, parsed);
+}
+
+/**
+ * Normalize year - ensure 4-digit year in valid range
+ */
+export function normalizeYear(year: string | number): number {
+  const numYear = typeof year === 'number' ? year : parseInt(year?.toString() || '0');
+  const currentYear = new Date().getFullYear();
+  
+  // Valid range: 1900 to current year + 2
+  if (numYear >= 1900 && numYear <= currentYear + 2) {
+    return numYear;
+  }
+  
+  return 0; // Invalid year
+}
+
+/**
+ * Normalize mileage - handle various units
+ */
+export function normalizeMileage(mileage: string | number, unit?: string): number {
+  let numMileage = typeof mileage === 'number' ? mileage : 
+                   parseFloat(mileage?.toString().replace(/[^\d.]/g, '') || '0');
+  
+  if (isNaN(numMileage) || numMileage < 0) return 0;
+  
+  // Convert kilometers to miles if needed
+  const unitLower = unit?.toLowerCase() || '';
+  if (unitLower.includes('km') || unitLower.includes('kilometer')) {
+    numMileage = numMileage * 0.621371; // km to miles
+  }
+  
+  return Math.round(numMileage);
+}
+
+/**
+ * Normalize address - clean and standardize
+ */
+export function normalizeAddress(address: string): string {
+  if (!address) return '';
+  
+  return address
+    .trim()
+    .replace(/\s+/g, ' ') // Multiple spaces to single
+    .replace(/,\s*,/g, ',') // Remove double commas
+    .replace(/^,|,$/, '') // Remove leading/trailing commas
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1)) // Title case
+    .join(' ');
+}
+
+/**
+ * Extract and normalize vehicle make/model
+ */
+export function normalizeMakeModel(makeModel: string): { make: string; model: string } {
+  if (!makeModel) return { make: '', model: '' };
+  
+  const parts = makeModel.trim().split(/\s+/);
+  
+  if (parts.length === 1) {
+    return { make: parts[0], model: '' };
+  }
+  
   return {
-    ...data,
-    vin: normalizeVIN(data.vin),
-    make: canonical(data.make),
-    model: normalizeModel(data.model),
-    location: normalizeLocation(data.location),
-    current_bid: normalizeAmount(data.current_bid),
-    price: normalizeAmount(data.price),
-    mileage: normalizeMileage(data.mileage),
-    title: canonical(data.title),
-    description: canonical(data.description),
-    condition: canonical(data.condition)
+    make: parts[0],
+    model: parts.slice(1).join(' ')
   };
 }
+
+/**
+ * Normalize data object with field aliasing
+ */
+export function normalizeDataObject(data: Record<string, any>): Record<string, any> {
+  const normalized: Record<string, any> = {};
+  
+  for (const [key, value] of Object.entries(data)) {
+    const normalizedKey = normalizeFieldName(key);
+    
+    // Apply field-specific normalization
+    switch (normalizedKey) {
+      case 'vin':
+        normalized[normalizedKey] = normalizeVIN(value);
+        break;
+      case 'current_price':
+        normalized[normalizedKey] = normalizePrice(value);
+        break;
+      case 'year':
+        normalized[normalizedKey] = normalizeYear(value);
+        break;
+      case 'mileage':
+        normalized[normalizedKey] = normalizeMileage(value);
+        break;
+      case 'address':
+        normalized[normalizedKey] = normalizeAddress(value);
+        break;
+      default:
+        normalized[normalizedKey] = value;
+    }
+  }
+  
+  return normalized;
+}
+
+/**
+ * Validation helpers
+ */
+export const validators = {
+  isValidVIN: (vin: string): boolean => {
+    return /^[A-HJ-NPR-Z0-9]{17}$/.test(vin);
+  },
+  
+  isValidYear: (year: number): boolean => {
+    const currentYear = new Date().getFullYear();
+    return year >= 1900 && year <= currentYear + 2;
+  },
+  
+  isValidPrice: (price: number): boolean => {
+    return price >= 0 && price <= 10000000; // Max $10M
+  },
+  
+  isValidMileage: (mileage: number): boolean => {
+    return mileage >= 0 && mileage <= 1000000; // Max 1M miles
+  }
+};

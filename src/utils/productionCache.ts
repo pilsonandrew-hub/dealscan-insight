@@ -2,7 +2,7 @@
  * Production-grade caching with ETag, TTL jitter, and single-flight
  */
 
-import { logger } from './productionLogger';
+import productionLogger from '@/utils/productionLogger';
 
 export interface CacheConfig {
   maxSize: number;

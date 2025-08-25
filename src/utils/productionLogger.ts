@@ -1,360 +1,289 @@
 /**
- * Production-Grade Centralized Logging System
- * Replaces all console.* calls with structured, level-based logging
+ * Production Logger - Phase 1 Core Fix
+ * Structured JSON logging with correlation IDs and levels
  */
 
-export enum LogLevel {
-  DEBUG = 'debug',
-  INFO = 'info',
-  WARN = 'warn',
-  ERROR = 'error',
-  FATAL = 'fatal'
-}
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-export interface LogContext {
-  component?: string;
-  action?: string;
-  userId?: string;
-  correlationId?: string;
-  timestamp?: string;
-  url?: string;
-  userAgent?: string;
-  sessionId?: string;
+interface LogContext {
   [key: string]: any;
 }
 
-export interface LogEntry {
+interface LogEntry {
+  timestamp: string;
   level: LogLevel;
   message: string;
-  context: LogContext;
-  timestamp: string;
-  correlationId: string;
-  stack?: string;
+  context?: LogContext;
+  correlationId?: string;
+  component?: string;
+  error?: {
+    name: string;
+    message: string;
+    stack?: string;
+  };
 }
 
-/**
- * Production Logger - Centralized logging with correlation tracking
- */
-export class ProductionLogger {
-  private static instance: ProductionLogger;
-  private logLevel: LogLevel;
-  private correlationId: string;
-  private baseContext: LogContext;
-  private logBuffer: LogEntry[] = [];
-  private maxBufferSize: number = 1000;
-  private isProduction: boolean;
-
-  private constructor() {
-    this.isProduction = import.meta.env.PROD || import.meta.env.MODE === 'production';
-    this.logLevel = this.isProduction ? LogLevel.WARN : LogLevel.DEBUG;
-    this.correlationId = this.generateCorrelationId();
-    this.baseContext = this.createBaseContext();
-    
-    // Flush logs periodically in production
-    if (this.isProduction) {
-      setInterval(() => this.flushLogs(), 30000); // Every 30 seconds
-    }
+class ProductionLogger {
+  private correlationId: string = '';
+  private component: string = '';
+  
+  constructor() {
+    this.generateCorrelationId();
   }
-
-  static getInstance(): ProductionLogger {
-    if (!ProductionLogger.instance) {
-      ProductionLogger.instance = new ProductionLogger();
-    }
-    return ProductionLogger.instance;
-  }
-
+  
   /**
-   * Debug level logging (development only)
+   * Generate unique correlation ID for request tracing
    */
-  debug(message: string, context: LogContext = {}): void {
-    this.log(LogLevel.DEBUG, message, context);
+  private generateCorrelationId(): void {
+    this.correlationId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
-
+  
+  /**
+   * Set correlation ID for request tracing
+   */
+  setCorrelationId(id: string): void {
+    this.correlationId = id;
+  }
+  
+  /**
+   * Set component name for better log organization
+   */
+  setComponent(name: string): void {
+    this.component = name;
+  }
+  
+  /**
+   * Create new logger instance with component context
+   */
+  child(component: string): ProductionLogger {
+    const childLogger = new ProductionLogger();
+    childLogger.correlationId = this.correlationId;
+    childLogger.component = component;
+    return childLogger;
+  }
+  
+  /**
+   * Format and output log entry
+   */
+  private log(level: LogLevel, message: string, context?: LogContext, error?: Error): void {
+    const entry: LogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      correlationId: this.correlationId,
+      component: this.component || 'unknown'
+    };
+    
+    if (context) {
+      entry.context = context;
+    }
+    
+    if (error) {
+      entry.error = {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      };
+    }
+    
+    // Output structured JSON
+    const logLine = JSON.stringify(entry);
+    
+    // Route to appropriate console method based on level
+    switch (level) {
+      case 'debug':
+        console.debug(logLine);
+        break;
+      case 'info':
+        console.info(logLine);
+        break;
+      case 'warn':
+        console.warn(logLine);
+        break;
+      case 'error':
+        console.error(logLine);
+        break;
+    }
+  }
+  
+  /**
+   * Debug level logging
+   */
+  debug(message: string, context?: LogContext): void {
+    this.log('debug', message, context);
+  }
+  
   /**
    * Info level logging
    */
-  info(message: string, context: LogContext = {}): void {
-    this.log(LogLevel.INFO, message, context);
+  info(message: string, context?: LogContext): void {
+    this.log('info', message, context);
   }
-
+  
   /**
    * Warning level logging
    */
-  warn(message: string, context: LogContext = {}): void {
-    this.log(LogLevel.WARN, message, context);
+  warn(message: string, context?: LogContext): void {
+    this.log('warn', message, context);
   }
-
+  
   /**
    * Error level logging
    */
-  error(message: string, error?: Error, context: LogContext = {}): void {
-    const enrichedContext = {
-      ...context,
-      stack: error?.stack,
-      errorName: error?.name,
-      errorMessage: error?.message
-    };
-    this.log(LogLevel.ERROR, message, enrichedContext);
+  error(message: string, context?: LogContext, error?: Error): void {
+    this.log('error', message, context, error);
   }
-
+  
   /**
-   * Fatal level logging
+   * Log API request
    */
-  fatal(message: string, error?: Error, context: LogContext = {}): void {
-    const enrichedContext = {
-      ...context,
-      stack: error?.stack,
-      errorName: error?.name,
-      errorMessage: error?.message
-    };
-    this.log(LogLevel.FATAL, message, enrichedContext);
-  }
-
-  /**
-   * Create scoped logger for specific component
-   */
-  scope(component: string, additionalContext: LogContext = {}): ScopedLogger {
-    return new ScopedLogger(this, component, additionalContext);
-  }
-
-  /**
-   * Set correlation ID for request tracking
-   */
-  setCorrelationId(correlationId: string): void {
-    this.correlationId = correlationId;
-  }
-
-  /**
-   * Generate new correlation ID
-   */
-  newCorrelation(): string {
-    this.correlationId = this.generateCorrelationId();
-    return this.correlationId;
-  }
-
-  /**
-   * Core logging method
-   */
-  private log(level: LogLevel, message: string, context: LogContext = {}): void {
-    if (level < this.logLevel) return;
-
-    const logEntry: LogEntry = {
-      level,
-      message,
-      context: { ...this.baseContext, ...context },
-      timestamp: new Date().toISOString(),
-      correlationId: this.correlationId,
-      stack: level >= LogLevel.ERROR ? new Error().stack : undefined
-    };
-
-    // In development, also log to console for debugging
-    if (!this.isProduction) {
-      this.logToConsole(logEntry);
-    }
-
-    // Buffer for production logging
-    this.addToBuffer(logEntry);
-
-    // Immediate flush for fatal errors
-    if (level === LogLevel.FATAL) {
-      this.flushLogs();
-    }
-  }
-
-  /**
-   * Log to console in development
-   */
-  private logToConsole(entry: LogEntry): void {
-    const { level, message, context, timestamp, correlationId } = entry;
-    const prefix = `[${timestamp}] [${LogLevel[level]}] [${correlationId}]`;
-    
-    switch (level) {
-      case LogLevel.DEBUG:
-        console.debug(prefix, message, context);
-        break;
-      case LogLevel.INFO:
-        console.info(prefix, message, context);
-        break;
-      case LogLevel.WARN:
-        console.warn(prefix, message, context);
-        break;
-      case LogLevel.ERROR:
-      case LogLevel.FATAL:
-        console.error(prefix, message, context, entry.stack);
-        break;
-    }
-  }
-
-  /**
-   * Add entry to buffer
-   */
-  private addToBuffer(entry: LogEntry): void {
-    this.logBuffer.push(entry);
-    
-    // Prevent memory overflow
-    if (this.logBuffer.length > this.maxBufferSize) {
-      this.logBuffer.shift(); // Remove oldest entry
-    }
-  }
-
-  /**
-   * Flush logs to external service in production
-   */
-  private async flushLogs(): Promise<void> {
-    if (this.logBuffer.length === 0) return;
-
-    const logsToFlush = [...this.logBuffer];
-    this.logBuffer = [];
-
-    try {
-      // In production, send to logging service (e.g., Supabase, LogRocket, Sentry)
-      if (this.isProduction) {
-        await this.sendToLoggingService(logsToFlush);
-      }
-    } catch (error) {
-      // Fallback: store in localStorage for later retry
-      this.storeLogsLocally(logsToFlush);
-    }
-  }
-
-  /**
-   * Send logs to external logging service
-   */
-  private async sendToLoggingService(logs: LogEntry[]): Promise<void> {
-    // Implementation would depend on chosen logging service
-    // For now, we'll use Supabase for simplicity
-    
-    try {
-      const { supabase } = await import('@/integrations/supabase/client');
-      
-      // Note: This will be available after types are regenerated
-      await supabase.from('system_logs' as any).insert(
-        logs.map(log => ({
-          level: LogLevel[log.level],
-          message: log.message,
-          context: log.context,
-          timestamp: log.timestamp,
-          correlation_id: log.correlationId,
-          stack_trace: log.stack
-        }))
-      );
-    } catch (error) {
-      // Silent fail - don't break the app for logging issues
-    }
-  }
-
-  /**
-   * Store logs locally for retry
-   */
-  private storeLogsLocally(logs: LogEntry[]): void {
-    try {
-      const existingLogs = localStorage.getItem('pending_logs');
-      const pendingLogs = existingLogs ? JSON.parse(existingLogs) : [];
-      pendingLogs.push(...logs);
-      
-      // Limit local storage size
-      if (pendingLogs.length > 500) {
-        pendingLogs.splice(0, pendingLogs.length - 500);
-      }
-      
-      localStorage.setItem('pending_logs', JSON.stringify(pendingLogs));
-    } catch (error) {
-      // Silent fail - don't break the app
-    }
-  }
-
-  /**
-   * Generate correlation ID
-   */
-  private generateCorrelationId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Create base context
-   */
-  private createBaseContext(): LogContext {
-    return {
-      url: typeof window !== 'undefined' ? window.location.href : undefined,
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-      timestamp: new Date().toISOString(),
-      sessionId: this.getSessionId()
-    };
-  }
-
-  /**
-   * Get or create session ID
-   */
-  private getSessionId(): string {
-    if (typeof window === 'undefined') return 'server';
-    
-    let sessionId = sessionStorage.getItem('session_id');
-    if (!sessionId) {
-      sessionId = this.generateCorrelationId();
-      sessionStorage.setItem('session_id', sessionId);
-    }
-    return sessionId;
-  }
-
-  /**
-   * Get current logs (for debugging)
-   */
-  getLogs(): LogEntry[] {
-    return [...this.logBuffer];
-  }
-
-  /**
-   * Clear logs (for testing)
-   */
-  clearLogs(): void {
-    this.logBuffer = [];
-  }
-}
-
-/**
- * Scoped logger for specific components
- */
-export class ScopedLogger {
-  constructor(
-    private logger: ProductionLogger,
-    private component: string,
-    private additionalContext: LogContext = {}
-  ) {}
-
-  debug(message: string, context: LogContext = {}): void {
-    this.logger.debug(message, this.mergeContext(context));
-  }
-
-  info(message: string, context: LogContext = {}): void {
-    this.logger.info(message, this.mergeContext(context));
-  }
-
-  warn(message: string, context: LogContext = {}): void {
-    this.logger.warn(message, this.mergeContext(context));
-  }
-
-  error(message: string, error?: Error, context: LogContext = {}): void {
-    this.logger.error(message, error, this.mergeContext(context));
-  }
-
-  fatal(message: string, error?: Error, context: LogContext = {}): void {
-    this.logger.fatal(message, error, this.mergeContext(context));
-  }
-
-  private mergeContext(context: LogContext): LogContext {
-    return {
-      component: this.component,
-      ...this.additionalContext,
+  logRequest(method: string, url: string, context?: LogContext): void {
+    this.info(`${method} ${url}`, {
+      type: 'api_request',
+      method,
+      url,
       ...context
-    };
+    });
+  }
+  
+  /**
+   * Log API response
+   */
+  logResponse(method: string, url: string, statusCode: number, duration: number, context?: LogContext): void {
+    this.info(`${method} ${url} - ${statusCode}`, {
+      type: 'api_response',
+      method,
+      url,
+      status_code: statusCode,
+      duration_ms: duration,
+      ...context
+    });
+  }
+  
+  /**
+   * Log database operation
+   */
+  logDatabaseOperation(operation: string, table: string, duration: number, context?: LogContext): void {
+    this.info(`DB ${operation} on ${table}`, {
+      type: 'database_operation',
+      operation,
+      table,
+      duration_ms: duration,
+      ...context
+    });
+  }
+  
+  /**
+   * Log scraping operation
+   */
+  logScrapingOperation(site: string, operation: string, context?: LogContext): void {
+    this.info(`Scraping ${operation} for ${site}`, {
+      type: 'scraping_operation',
+      site,
+      operation,
+      ...context
+    });
+  }
+  
+  /**
+   * Log cache operation
+   */
+  logCacheOperation(operation: 'hit' | 'miss' | 'set' | 'delete', key: string, context?: LogContext): void {
+    this.debug(`Cache ${operation}: ${key}`, {
+      type: 'cache_operation',
+      operation,
+      key,
+      ...context
+    });
+  }
+  
+  /**
+   * Log performance metric
+   */
+  logPerformanceMetric(metric: string, value: number, unit: string, context?: LogContext): void {
+    this.info(`Performance: ${metric} = ${value}${unit}`, {
+      type: 'performance_metric',
+      metric,
+      value,
+      unit,
+      ...context
+    });
+  }
+  
+  /**
+   * Log security event
+   */
+  logSecurityEvent(event: string, severity: 'low' | 'medium' | 'high' | 'critical', context?: LogContext): void {
+    this.warn(`Security event: ${event}`, {
+      type: 'security_event',
+      event,
+      severity,
+      ...context
+    });
+  }
+  
+  /**
+   * Log circuit breaker state change
+   */
+  logCircuitBreakerStateChange(name: string, oldState: string, newState: string, context?: LogContext): void {
+    this.warn(`Circuit breaker ${name}: ${oldState} -> ${newState}`, {
+      type: 'circuit_breaker_state_change',
+      circuit_breaker: name,
+      old_state: oldState,
+      new_state: newState,
+      ...context
+    });
+  }
+  
+  /**
+   * Log rate limit event
+   */
+  logRateLimitEvent(identifier: string, limit: number, current: number, context?: LogContext): void {
+    this.warn(`Rate limit approached for ${identifier}`, {
+      type: 'rate_limit_event',
+      identifier,
+      limit,
+      current,
+      utilization: (current / limit) * 100,
+      ...context
+    });
   }
 }
 
 // Global logger instance
-export const logger = ProductionLogger.getInstance();
+export const productionLogger = new ProductionLogger();
 
-// Component-specific loggers
-export const createComponentLogger = (component: string, context?: LogContext) => 
-  logger.scope(component, context);
+// Export as default for easier imports
+export default productionLogger;
 
-export default logger;
+// Helper function to create child loggers
+export function createLogger(component: string): ProductionLogger {
+  return productionLogger.child(component);
+}
+
+// Performance timing helper
+export function timeFunction<T>(
+  logger: ProductionLogger,
+  operation: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  return new Promise(async (resolve, reject) => {
+    const startTime = Date.now();
+    
+    try {
+      const result = await fn();
+      const duration = Date.now() - startTime;
+      
+      logger.logPerformanceMetric(`${operation}_duration`, duration, 'ms');
+      resolve(result);
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      
+      logger.error(`${operation} failed`, {
+        duration_ms: duration
+      }, error as Error);
+      
+      reject(error);
+    }
+  });
+}

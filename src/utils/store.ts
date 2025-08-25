@@ -1,137 +1,372 @@
 /**
- * Database Store Utilities - Production-ready data persistence
- * Single source of truth for upsert operations with content hashing
+ * Database Store Utilities - Phase 1 Core Fix
+ * Atomic upsert operations with proper error handling
  */
 
 import { supabase } from '@/integrations/supabase/client';
-import { contentHash } from './contentHash';
-import { logger } from '@/lib/logger';
+import productionLogger from '@/utils/productionLogger';
+import type { Json } from '@/integrations/supabase/types';
 
-export interface PublicListing extends Record<string, unknown> {
+interface PublicListing {
   id?: string;
-  content_hash?: string;
   vin: string;
+  title: string;
+  current_price: number;
+  year?: number;
   make?: string;
   model?: string;
-  year?: number;
   mileage?: number;
-  current_bid?: number;
-  source_site: string;
-  listing_url: string;
   location?: string;
+  listing_url: string;
+  source_site: string;
+  content_hash: string;
+  ingested_at?: string;
   auction_end?: string;
-  scrape_metadata?: Record<string, any>;
-  created_at?: string;
-  updated_at?: string;
+  raw_data?: Json;
+  extraction_metadata?: Json;
+}
+
+interface UpsertResult {
+  success: boolean;
+  id?: string;
+  error?: string;
+  conflictResolution?: 'inserted' | 'updated' | 'ignored';
 }
 
 /**
- * Upsert public listing with content hash deduplication
- * Single source of truth implementation
+ * Atomic upsert for public listings with proper conflict resolution
  */
-export async function upsertPublicListing(item: PublicListing): Promise<void> {
+export async function upsertPublicListing(listing: PublicListing): Promise<UpsertResult> {
+  const startTime = Date.now();
+  
   try {
-    // Generate content hash for deduplication
-    item.content_hash = await contentHash(item);
-    
-    const { error } = await supabase
-      .from('public_listings')
-      .upsert(item, {
-        onConflict: 'content_hash',
-        ignoreDuplicates: false
-      });
-
-    if (error) {
-      logger.error('Failed to upsert public listing', { error, item: { vin: item.vin, source_site: item.source_site } });
-      throw error;
-    }
-
-    logger.debug('Successfully upserted public listing', { 
-      vin: item.vin, 
-      source_site: item.source_site,
-      content_hash: item.content_hash 
+    productionLogger.info('Upserting public listing', {
+      vin: listing.vin,
+      content_hash: listing.content_hash,
+      source_site: listing.source_site
     });
-  } catch (error) {
-    logger.error('Upsert operation failed', { error, item });
-    throw error;
-  }
-}
-
-/**
- * Batch upsert with proper error handling and deduplication
- */
-export async function batchUpsertPublicListings(items: PublicListing[]): Promise<{
-  successful: number;
-  failed: number;
-  duplicates: number;
-}> {
-  const results = { successful: 0, failed: 0, duplicates: 0 };
-  
-  // Add content hashes
-  const itemsWithHashes = await Promise.all(
-    items.map(async (item) => ({
-      ...item,
-      content_hash: await contentHash(item)
-    }))
-  );
-
-  // Deduplicate by content hash
-  const uniqueItems = new Map<string, PublicListing>();
-  for (const item of itemsWithHashes) {
-    if (item.content_hash && uniqueItems.has(item.content_hash)) {
-      results.duplicates++;
-    } else if (item.content_hash) {
-      uniqueItems.set(item.content_hash, item);
-    }
-  }
-
-  // Batch upsert unique items
-  const uniqueItemsArray = Array.from(uniqueItems.values());
-  
-  try {
-    const { error, count } = await supabase
-      .from('public_listings')
-      .upsert(uniqueItemsArray, {
-        onConflict: 'content_hash',
-        ignoreDuplicates: false,
-        count: 'exact'
-      });
-
-    if (error) {
-      logger.error('Batch upsert failed', { error, itemCount: uniqueItemsArray.length });
-      results.failed = uniqueItemsArray.length;
-    } else {
-      results.successful = count || uniqueItemsArray.length;
-    }
-  } catch (error) {
-    logger.error('Batch upsert operation failed', { error });
-    results.failed = uniqueItemsArray.length;
-  }
-
-  logger.info('Batch upsert completed', results);
-  return results;
-}
-
-/**
- * Check if listing exists by content hash
- */
-export async function listingExists(item: PublicListing): Promise<boolean> {
-  try {
-    const hash = await contentHash(item);
+    
+    // Prepare data with defaults
+    const listingData = {
+      ...listing,
+      ingested_at: listing.ingested_at || new Date().toISOString(),
+      raw_data: listing.raw_data || {},
+      extraction_metadata: listing.extraction_metadata || {}
+    };
+    
+    // Use upsert with conflict resolution on content_hash
     const { data, error } = await supabase
       .from('public_listings')
+      .upsert(listingData, {
+        onConflict: 'content_hash',
+        ignoreDuplicates: false
+      })
       .select('id')
-      .eq('content_hash', hash)
       .single();
-
-    if (error && error.code !== 'PGRST116') {
-      logger.error('Failed to check listing existence', { error, hash });
-      return false;
+    
+    if (error) {
+      productionLogger.error('Failed to upsert public listing', {
+        error: error.message,
+        code: error.code,
+        vin: listing.vin,
+        duration_ms: Date.now() - startTime
+      });
+      
+      return {
+        success: false,
+        error: error.message
+      };
     }
-
-    return !!data;
+    
+    productionLogger.info('Successfully upserted public listing', {
+      id: data.id,
+      vin: listing.vin,
+      duration_ms: Date.now() - startTime
+    });
+    
+    return {
+      success: true,
+      id: data.id,
+      conflictResolution: 'updated' // Supabase upsert doesn't distinguish, assume update
+    };
+    
   } catch (error) {
-    logger.error('Listing existence check failed', { error });
-    return false;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    productionLogger.error('Exception during public listing upsert', {
+      error: errorMessage,
+      vin: listing.vin,
+      duration_ms: Date.now() - startTime
+    });
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Batch upsert with transaction-like behavior
+ */
+export async function batchUpsertPublicListings(listings: PublicListing[]): Promise<{
+  success: boolean;
+  results: UpsertResult[];
+  summary: {
+    total: number;
+    successful: number;
+    failed: number;
+  };
+}> {
+  const startTime = Date.now();
+  const results: UpsertResult[] = [];
+  
+  productionLogger.info('Starting batch upsert', {
+    count: listings.length
+  });
+  
+  try {
+    // Process in smaller batches to avoid timeout
+    const batchSize = 50;
+    let successful = 0;
+    let failed = 0;
+    
+    for (let i = 0; i < listings.length; i += batchSize) {
+      const batch = listings.slice(i, i + batchSize);
+      
+      // Prepare batch data
+      const batchData = batch.map(listing => ({
+        ...listing,
+        ingested_at: listing.ingested_at || new Date().toISOString(),
+        raw_data: listing.raw_data || {},
+        extraction_metadata: listing.extraction_metadata || {}
+      }));
+      
+      try {
+        const { data, error } = await supabase
+          .from('public_listings')
+          .upsert(batchData, {
+            onConflict: 'content_hash',
+            ignoreDuplicates: false
+          })
+          .select('id');
+        
+        if (error) {
+          // If batch fails, try individual upserts
+          productionLogger.warn('Batch upsert failed, falling back to individual upserts', {
+            error: error.message,
+            batch_size: batch.length
+          });
+          
+          for (const listing of batch) {
+            const result = await upsertPublicListing(listing);
+            results.push(result);
+            
+            if (result.success) {
+              successful++;
+            } else {
+              failed++;
+            }
+          }
+        } else {
+          // Batch succeeded
+          const batchResults: UpsertResult[] = (data || []).map((item, index) => ({
+            success: true,
+            id: item.id,
+            conflictResolution: 'updated'
+          }));
+          
+          results.push(...batchResults);
+          successful += batchResults.length;
+        }
+        
+      } catch (batchError) {
+        productionLogger.error('Batch processing failed', {
+          error: batchError instanceof Error ? batchError.message : 'Unknown error',
+          batch_start: i,
+          batch_size: batch.length
+        });
+        
+        // Add failed results for this batch
+        for (let j = 0; j < batch.length; j++) {
+          results.push({
+            success: false,
+            error: batchError instanceof Error ? batchError.message : 'Unknown error'
+          });
+          failed++;
+        }
+      }
+    }
+    
+    const summary = {
+      total: listings.length,
+      successful,
+      failed
+    };
+    
+    productionLogger.info('Completed batch upsert', {
+      ...summary,
+      duration_ms: Date.now() - startTime
+    });
+    
+    return {
+      success: failed === 0,
+      results,
+      summary
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    productionLogger.error('Exception during batch upsert', {
+      error: errorMessage,
+      count: listings.length,
+      duration_ms: Date.now() - startTime
+    });
+    
+    return {
+      success: false,
+      results: listings.map(() => ({ success: false, error: errorMessage })),
+      summary: {
+        total: listings.length,
+        successful: 0,
+        failed: listings.length
+      }
+    };
+  }
+}
+
+/**
+ * Check for duplicate content by hash
+ */
+export async function checkDuplicateContent(contentHash: string): Promise<{
+  exists: boolean;
+  existingId?: string;
+  lastSeen?: string;
+}> {
+  try {
+    const { data, error } = await supabase
+      .from('public_listings')
+      .select('id, ingested_at')
+      .eq('content_hash', contentHash)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      productionLogger.error('Error checking duplicate content', {
+        error: error.message,
+        content_hash: contentHash
+      });
+      return { exists: false };
+    }
+    
+    return {
+      exists: !!data,
+      existingId: data?.id,
+      lastSeen: data?.ingested_at
+    };
+    
+  } catch (error) {
+    productionLogger.error('Exception checking duplicate content', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      content_hash: contentHash
+    });
+    
+    return { exists: false };
+  }
+}
+
+/**
+ * Get content statistics
+ */
+export async function getContentStats(): Promise<{
+  total_listings: number;
+  unique_vins: number;
+  unique_sources: number;
+  latest_ingestion: string | null;
+}> {
+  try {
+    const [totalResult, vinResult, sourceResult, latestResult] = await Promise.all([
+      supabase.from('public_listings').select('id', { count: 'exact', head: true }),
+      supabase.from('public_listings').select('vin', { count: 'exact', head: true }).not('vin', 'is', null),
+      supabase.from('public_listings').select('source_site', { count: 'exact', head: true }),
+      supabase.from('public_listings').select('ingested_at').order('ingested_at', { ascending: false }).limit(1).single()
+    ]);
+    
+    return {
+      total_listings: totalResult.count || 0,
+      unique_vins: vinResult.count || 0,
+      unique_sources: sourceResult.count || 0,
+      latest_ingestion: latestResult.data?.ingested_at || null
+    };
+    
+  } catch (error) {
+    productionLogger.error('Error getting content stats', {
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    
+    return {
+      total_listings: 0,
+      unique_vins: 0,
+      unique_sources: 0,
+      latest_ingestion: null
+    };
+  }
+}
+
+/**
+ * Clean up old content based on retention policy
+ */
+export async function cleanupOldContent(retentionDays: number = 90): Promise<{
+  success: boolean;
+  deletedCount: number;
+  error?: string;
+}> {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+  
+  try {
+    productionLogger.info('Starting content cleanup', {
+      retention_days: retentionDays,
+      cutoff_date: cutoffDate.toISOString()
+    });
+    
+    const { count, error } = await supabase
+      .from('public_listings')
+      .delete({ count: 'exact' })
+      .lt('ingested_at', cutoffDate.toISOString());
+    
+    if (error) {
+      productionLogger.error('Failed to cleanup old content', {
+        error: error.message
+      });
+      
+      return {
+        success: false,
+        deletedCount: 0,
+        error: error.message
+      };
+    }
+    
+    productionLogger.info('Completed content cleanup', {
+      deleted_count: count || 0
+    });
+    
+    return {
+      success: true,
+      deletedCount: count || 0
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    productionLogger.error('Exception during content cleanup', {
+      error: errorMessage
+    });
+    
+    return {
+      success: false,
+      deletedCount: 0,
+      error: errorMessage
+    };
   }
 }
