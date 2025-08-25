@@ -113,6 +113,51 @@ export type Database = {
         }
         Relationships: []
       }
+      error_reports: {
+        Row: {
+          category: string
+          context: Json | null
+          created_at: string | null
+          error_id: string
+          id: string
+          message: string
+          resolved: boolean | null
+          severity: string
+          stack_trace: string | null
+          timestamp: string
+          updated_at: string | null
+          user_message: string
+        }
+        Insert: {
+          category: string
+          context?: Json | null
+          created_at?: string | null
+          error_id: string
+          id?: string
+          message: string
+          resolved?: boolean | null
+          severity: string
+          stack_trace?: string | null
+          timestamp: string
+          updated_at?: string | null
+          user_message: string
+        }
+        Update: {
+          category?: string
+          context?: Json | null
+          created_at?: string | null
+          error_id?: string
+          id?: string
+          message?: string
+          resolved?: boolean | null
+          severity?: string
+          stack_trace?: string | null
+          timestamp?: string
+          updated_at?: string | null
+          user_message?: string
+        }
+        Relationships: []
+      }
       extraction_strategies: {
         Row: {
           cluster_id: string | null
@@ -158,6 +203,36 @@ export type Database = {
           strategy?: string
           success_rate?: number | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      health_checks: {
+        Row: {
+          created_at: string | null
+          details: Json | null
+          id: string
+          response_time_ms: number | null
+          service_name: string
+          status: string
+          timestamp: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          response_time_ms?: number | null
+          service_name: string
+          status: string
+          timestamp?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          response_time_ms?: number | null
+          service_name?: string
+          status?: string
+          timestamp?: string | null
         }
         Relationships: []
       }
@@ -700,6 +775,39 @@ export type Database = {
           status?: string
           user_agent?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      system_logs: {
+        Row: {
+          context: Json | null
+          correlation_id: string | null
+          created_at: string | null
+          id: string
+          level: string
+          message: string
+          stack_trace: string | null
+          timestamp: string | null
+        }
+        Insert: {
+          context?: Json | null
+          correlation_id?: string | null
+          created_at?: string | null
+          id?: string
+          level: string
+          message: string
+          stack_trace?: string | null
+          timestamp?: string | null
+        }
+        Update: {
+          context?: Json | null
+          correlation_id?: string | null
+          created_at?: string | null
+          id?: string
+          level?: string
+          message?: string
+          stack_trace?: string | null
+          timestamp?: string | null
         }
         Relationships: []
       }
