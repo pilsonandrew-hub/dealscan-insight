@@ -4,6 +4,9 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { logger } from '@/lib/logger';
+import { batchUpsertPublicListings } from '@/utils/store';
+import { safeConcurrentExecution } from '@/utils/asyncHelpers';
 
 export interface ScraperSite {
   id: string;
@@ -501,9 +504,8 @@ export class AdvancedVehicleScraper {
       }
     }));
 
-    await supabase
-      .from('public_listings')
-      .upsert(publicListings);
+    // Use the centralized store utility for consistent upserts
+    await batchUpsertPublicListings(publicListings);
   }
 
   private generateRandomVIN(): string {
