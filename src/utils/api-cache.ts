@@ -3,6 +3,10 @@
  * Prevents expensive recalculations and reduces API load
  */
 
+import { createLogger } from '@/utils/productionLogger';
+
+const logger = createLogger('ApiCache');
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -39,7 +43,7 @@ export class APICache {
       if (oldestKey) {
         this.cache.delete(oldestKey);
         if (this.config.enableLogging) {
-          console.log(`Cache evicted: ${oldestKey}`);
+          logger.info('Cache evicted oldest entry', { key: oldestKey });
         }
       }
     }
@@ -53,7 +57,7 @@ export class APICache {
     this.accessOrder.push(key);
     
     if (this.config.enableLogging) {
-      console.log(`Cache set: ${key}, TTL: ${ttl}ms`);
+      logger.debug('Cache set', { key, ttl: `${ttl}ms` });
     }
   }
 
@@ -62,7 +66,7 @@ export class APICache {
     
     if (!entry) {
       if (this.config.enableLogging) {
-        console.log(`Cache miss: ${key}`);
+        logger.debug('Cache miss', { key });
       }
       return null;
     }
@@ -72,7 +76,7 @@ export class APICache {
       this.cache.delete(key);
       this.accessOrder = this.accessOrder.filter(k => k !== key);
       if (this.config.enableLogging) {
-        console.log(`Cache expired: ${key}`);
+        logger.debug('Cache expired', { key });
       }
       return null;
     }
@@ -82,7 +86,7 @@ export class APICache {
     this.accessOrder.push(key);
 
     if (this.config.enableLogging) {
-      console.log(`Cache hit: ${key}`);
+      logger.debug('Cache hit', { key });
     }
     
     return entry.data;
@@ -93,7 +97,7 @@ export class APICache {
       this.cache.clear();
       this.accessOrder = [];
       if (this.config.enableLogging) {
-        console.log('Cache cleared completely');
+        logger.info('Cache cleared completely');
       }
       return;
     }
@@ -108,7 +112,7 @@ export class APICache {
     });
 
     if (this.config.enableLogging) {
-      console.log(`Cache invalidated pattern: ${keyPattern}, deleted: ${keysToDelete.length}`);
+      logger.info('Cache invalidated by pattern', { pattern: keyPattern, deletedCount: keysToDelete.length });
     }
   }
 

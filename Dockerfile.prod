@@ -1,0 +1,83 @@
+# Production-Ready Multi-Stage Docker Build
+# Optimized for security, performance, and minimal size
+
+# Stage 1: Build Stage
+FROM node:18-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    && npm install -g npm@latest
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies with clean install
+RUN npm ci --only=production --no-audit --no-fund
+
+# Copy source code
+COPY . .
+
+# Build application
+ENV NODE_ENV=production
+ENV VITE_BUILD_HASH=$BUILD_HASH
+ENV VITE_DEPLOYED_AT=$DEPLOYED_AT
+RUN npm run build
+
+# Stage 2: Production Stage
+FROM nginx:1.25-alpine AS production
+
+# Install security updates
+RUN apk update && apk upgrade && apk add --no-cache \
+    curl \
+    ca-certificates \
+    tzdata
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S dealerscope -u 1001 -G nodejs
+
+# Copy built application
+COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.prod.conf /etc/nginx/nginx.conf
+
+# Copy health check script
+COPY --chown=nginx:nginx docker-healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+# Security hardening
+RUN rm -rf /var/cache/apk/* && \
+    rm -rf /tmp/* && \
+    find /usr/share/nginx/html -name "*.map" -delete && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chown -R nginx:nginx /var/log/nginx && \
+    chown -R nginx:nginx /etc/nginx/conf.d && \
+    touch /var/run/nginx.pid && \
+    chown -R nginx:nginx /var/run/nginx.pid
+
+# Switch to non-root user
+USER nginx
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD /usr/local/bin/healthcheck.sh
+
+# Expose port
+EXPOSE 8080
+
+# Labels for metadata
+LABEL maintainer="DealerScope Team" \
+      version="5.0-production" \
+      description="DealerScope Production Application" \
+      security.scan="enabled" \
+      monitoring.enabled="true"
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
