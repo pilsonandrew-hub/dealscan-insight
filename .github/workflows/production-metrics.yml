@@ -1,0 +1,155 @@
+name: Production Metrics Enforcement
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run metrics validation every hour in production
+    - cron: '0 * * * *'
+
+env:
+  NODE_VERSION: '18'
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+jobs:
+  # Phase 1: Performance Metrics
+  performance-validation:
+    runs-on: ubuntu-latest
+    name: 'Phase 1: Performance Validation'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build application
+        run: npm run build
+      
+      - name: Start test server
+        run: |
+          npm run preview &
+          sleep 10
+        
+      - name: Performance Tests
+        run: |
+          # API P95 Latency Test
+          node scripts/test-api-performance.js
+          
+          # Memory Usage Test  
+          node scripts/test-memory-usage.js
+          
+          # Cache Hit Rate Test
+          node scripts/test-cache-performance.js
+        
+      - name: Validate Performance SLOs
+        run: |
+          # Fail if any metric exceeds threshold
+          node scripts/validate-performance-slos.js
+        
+      - name: Upload Performance Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report
+          path: reports/performance-*.json
+
+  # Phase 2: Security Validation
+  security-validation:
+    runs-on: ubuntu-latest
+    name: 'Phase 2: Security Validation'
+    needs: performance-validation
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Security Audit
+        run: |
+          npm audit --audit-level high
+          
+      - name: OWASP ZAP Security Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'http://localhost:4173'
+          
+      - name: Rate Limiting Tests
+        run: |
+          node scripts/test-rate-limiting.js
+          
+      - name: Input Validation Tests  
+        run: |
+          node scripts/test-input-validation.js
+          
+      - name: Circuit Breaker Tests
+        run: |
+          node scripts/test-circuit-breakers.js
+
+  # Phase 3: Data Quality Validation
+  data-quality-validation:
+    runs-on: ubuntu-latest
+    name: 'Phase 3: Data Quality Validation'
+    needs: security-validation
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Schema Validation Tests
+        run: |
+          node scripts/test-schema-validation.js
+          
+      - name: Data Contract Tests
+        run: |
+          node scripts/test-data-contracts.js
+          
+      - name: Anomaly Detection Tests
+        run: |
+          node scripts/test-anomaly-detection.js
+
+  # Phase 4: Observability Validation
+  observability-validation:
+    runs-on: ubuntu-latest
+    name: 'Phase 4: Observability Validation'
+    needs: data-quality-validation
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Metrics Collection Test
+        run: |
+          node scripts/test-metrics-collection.js
+          
+      - name: Alert System Test
+        run: |
+          node scripts/test-alert-system.js
+          
+      - name: Dashboard Validation
+        run: |
+          node scripts/test-dashboard-endpoints.js
+
+  # Production Deployment Gate
+  production-gate:
+    runs-on: ubuntu-latest
+    name: 'Production Deployment Gate'
+    needs: [performance-validation, security-validation, data-quality-validation, observability-validation]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Validate All Metrics
+        run: |
+          echo "✅ Performance: API P95 < 200ms, Memory < 120MB, Cache > 70%"
+          echo "✅ Security: Rate limiting, Input validation, Circuit breakers"
+          echo "✅ Data Quality: Schema validation, Contracts, Anomaly detection"
+          echo "✅ Observability: Metrics, Alerts, Dashboards"
+          echo "🚀 APPROVED FOR PRODUCTION DEPLOYMENT"
+          
+      - name: Deploy to Production
+        if: success()
+        run: |
+          # Trigger production deployment
+          curl -X POST "${{ secrets.DEPLOY_WEBHOOK_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"environment": "production", "commit": "${{ github.sha }}"}'
