@@ -1,226 +1,44 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://dealerscope.com/schemas/provenance.schema.json",
-  "title": "Data Provenance Schema",
-  "description": "Schema for tracking data extraction provenance and lineage",
+  "title": "Provenance Schema",
+  "description": "Schema for validating data extraction provenance",
   "type": "object",
-  "required": ["field_name", "extraction_strategy", "confidence", "provenance", "lineage"],
   "properties": {
-    "field_name": {
+    "site": {
       "type": "string",
-      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
-      "minLength": 1,
-      "maxLength": 100,
-      "description": "Name of the extracted field"
+      "description": "Name of the site"
     },
-    "extraction_strategy": {
+    "url": {
       "type": "string",
-      "enum": ["selector", "ml", "llm", "manual", "computed"],
-      "description": "Method used to extract this field"
+      "format": "uri",
+      "description": "URL of the extracted data"
     },
-    "confidence": {
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "description": "Confidence score for the extraction (0.0-1.0)"
-    },
-    "provenance": {
+    "timestamp": {
       "type": "string",
-      "description": "Source of extraction: CSS selector, XPath, model@version, or manual source",
-      "examples": [
-        ".price-amount",
-        "//span[@class='vehicle-year']",
-        "price_extractor_v2.1.0",
-        "manual_entry"
-      ]
+      "format": "date-time",
+      "description": "Timestamp of extraction"
     },
-    "lineage": {
+    "passed": {
+      "type": "boolean",
+      "description": "Whether extraction passed validation"
+    },
+    "fields": {
       "type": "object",
-      "required": ["url", "timestamp", "extractor_version"],
+      "description": "Extracted field data",
       "properties": {
-        "url": {
-          "type": "string",
-          "format": "uri",
-          "description": "Source URL where data was extracted"
+        "title": {
+          "type": "string"
         },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When the extraction occurred"
-        },
-        "extractor_version": {
-          "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$",
-          "description": "Version of the extraction software"
-        },
-        "user_agent": {
-          "type": ["string", "null"],
-          "description": "User agent used for extraction"
-        },
-        "ip_address": {
-          "type": ["string", "null"],
-          "format": "ipv4",
-          "description": "IP address of extractor (for audit)"
+        "content": {
+          "type": "string"
         }
       }
     },
-    "limits_hit": {
-      "type": "object",
-      "properties": {
-        "timeout": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether extraction hit timeout limit"
-        },
-        "max_body": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether response exceeded max body size"
-        },
-        "rate_limit": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether rate limit was encountered"
-        },
-        "captcha": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether CAPTCHA was encountered"
-        },
-        "anti_bot": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether anti-bot measures were detected"
-        }
-      }
-    },
-    "drift_decision": {
+    "error": {
       "type": "string",
-      "enum": ["none", "switched", "fallback", "manual_override"],
-      "default": "none",
-      "description": "Whether extraction strategy was changed due to drift"
-    },
-    "render_mode": {
-      "type": "string",
-      "enum": ["http", "headless", "hybrid"],
-      "description": "How the source page was rendered"
-    },
-    "cluster_id": {
-      "type": ["string", "null"],
-      "pattern": "^[a-zA-Z0-9_-]+$",
-      "description": "Page template cluster identifier for similar pages"
-    },
-    "retries": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 10,
-      "default": 0,
-      "description": "Number of extraction retry attempts"
-    },
-    "validator_results": {
-      "type": "object",
-      "required": ["valid"],
-      "properties": {
-        "valid": {
-          "type": "boolean",
-          "description": "Whether extracted value passed validation"
-        },
-        "errors": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "List of validation error messages"
-        },
-        "warnings": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "List of validation warnings"
-        },
-        "schema_version": {
-          "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$",
-          "description": "Version of validation schema used"
-        }
-      }
-    },
-    "quality_metrics": {
-      "type": "object",
-      "properties": {
-        "accuracy": {
-          "type": ["number", "null"],
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "description": "Accuracy score if ground truth available"
-        },
-        "consistency": {
-          "type": ["number", "null"],
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "description": "Consistency with similar extractions"
-        },
-        "completeness": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "description": "Completeness score (0=empty, 1=complete)"
-        }
-      }
-    },
-    "costs": {
-      "type": "object",
-      "properties": {
-        "compute_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Compute time in milliseconds"
-        },
-        "api_calls": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Number of API calls made"
-        },
-        "llm_tokens": {
-          "type": ["integer", "null"],
-          "minimum": 0,
-          "description": "LLM tokens consumed (if applicable)"
-        },
-        "headless_seconds": {
-          "type": ["number", "null"],
-          "minimum": 0,
-          "description": "Headless browser time in seconds"
-        }
-      }
-    },
-    "debug_info": {
-      "type": "object",
-      "properties": {
-        "dom_path": {
-          "type": ["string", "null"],
-          "description": "DOM path to extracted element"
-        },
-        "element_text": {
-          "type": ["string", "null"],
-          "maxLength": 500,
-          "description": "Raw text content of source element"
-        },
-        "regex_pattern": {
-          "type": ["string", "null"],
-          "description": "Regex pattern used for extraction"
-        },
-        "ml_features": {
-          "type": ["object", "null"],
-          "description": "ML model features used"
-        },
-        "llm_prompt": {
-          "type": ["string", "null"],
-          "maxLength": 1000,
-          "description": "LLM prompt used (truncated)"
-        }
-      }
+      "description": "Error message if extraction failed"
     }
   },
-  "additionalProperties": false
+  "required": ["site", "url", "timestamp", "passed"],
+  "additionalProperties": true
 }

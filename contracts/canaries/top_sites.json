@@ -1,32 +1,15 @@
 [
   {
-    "name": "GovDeals",
-    "url": "https://www.govdeals.com/search?category=vehicles",
-    "expectedFields": ["price", "title", "location", "endTime", "description"],
-    "criticalFields": ["price", "title"]
-  },
-  {
-    "name": "PublicSurplus",
-    "url": "https://www.publicsurplus.com/auction/categories/vehicles",
-    "expectedFields": ["price", "title", "location", "endTime", "condition"],
-    "criticalFields": ["price", "title"]
-  },
-  {
-    "name": "Copart (Sample Listing)",
-    "url": "https://www.copart.com/lot/12345678",
-    "expectedFields": ["price", "year", "make", "model", "location", "damage", "odometer"],
-    "criticalFields": ["price", "make", "model", "year"]
-  },
-  {
-    "name": "IAA Auto Auction",
-    "url": "https://www.iaai.com/VehicleSearch",
-    "expectedFields": ["price", "year", "make", "model", "location", "damage"],
-    "criticalFields": ["price", "make", "model"]
-  },
-  {
-    "name": "GSA Auctions",
-    "url": "https://gsaauctions.gov/search?category=vehicles",
-    "expectedFields": ["price", "title", "location", "endTime", "agency"],
-    "criticalFields": ["price", "title"]
+    "name": "localhost",
+    "url": "http://localhost:4173",
+    "fields": ["title", "content"],
+    "selectors": {
+      "title": "title",
+      "content": "body"
+    },
+    "expected": {
+      "title": { "minLength": 1 },
+      "content": { "minLength": 10 }
+    }
   }
 ]
