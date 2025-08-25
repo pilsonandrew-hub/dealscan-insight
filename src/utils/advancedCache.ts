@@ -1,29 +1,36 @@
 /**
- * Intelligent API response caching with TTL and memory management
- * Prevents expensive recalculations and reduces API load
+ * Advanced caching system with hit/miss tracking
+ * Improved cache for system evaluation
  */
 
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
   ttl: number;
+  accessCount: number;
 }
 
-interface CacheConfig {
-  defaultTTL: number;
+interface CacheStats {
+  size: number;
   maxSize: number;
-  enableLogging: boolean;
+  entries: string[];
+  hits: number;
+  misses: number;
+  hitRate: number;
 }
 
-export class APICache {
+export class AdvancedCache {
   private cache = new Map<string, CacheEntry<any>>();
   private accessOrder: string[] = [];
+  private stats = { hits: 0, misses: 0 };
 
-  constructor(private config: CacheConfig = {
-    defaultTTL: 5 * 60 * 1000, // 5 minutes
-    maxSize: 100,
-    enableLogging: false
-  }) {}
+  constructor(
+    private config = {
+      defaultTTL: 5 * 60 * 1000, // 5 minutes
+      maxSize: 100,
+      enableLogging: false
+    }
+  ) {}
 
   set<T>(key: string, data: T, customTTL?: number): void {
     const ttl = customTTL || this.config.defaultTTL;
@@ -47,7 +54,8 @@ export class APICache {
     this.cache.set(key, {
       data,
       timestamp: Date.now(),
-      ttl
+      ttl,
+      accessCount: 0
     });
     
     this.accessOrder.push(key);
@@ -61,6 +69,7 @@ export class APICache {
     const entry = this.cache.get(key);
     
     if (!entry) {
+      this.stats.misses++;
       if (this.config.enableLogging) {
         console.log(`Cache miss: ${key}`);
       }
@@ -71,11 +80,16 @@ export class APICache {
     if (Date.now() - entry.timestamp > entry.ttl) {
       this.cache.delete(key);
       this.accessOrder = this.accessOrder.filter(k => k !== key);
+      this.stats.misses++;
       if (this.config.enableLogging) {
         console.log(`Cache expired: ${key}`);
       }
       return null;
     }
+
+    // Update access stats
+    entry.accessCount++;
+    this.stats.hits++;
 
     // Update access order for LRU
     this.accessOrder = this.accessOrder.filter(k => k !== key);
@@ -112,23 +126,28 @@ export class APICache {
     }
   }
 
-  getStats() {
-    const totalHits = Array.from(this.cache.entries()).length;
-    const totalMisses = this.accessOrder.length - totalHits;
+  getStats(): CacheStats {
+    const total = this.stats.hits + this.stats.misses;
+    const hitRate = total > 0 ? (this.stats.hits / total) * 100 : 0;
     
     return {
       size: this.cache.size,
       maxSize: this.config.maxSize,
       entries: Array.from(this.cache.keys()),
-      hits: totalHits,
-      misses: Math.max(0, totalMisses),
-      hitRate: totalHits > 0 ? (totalHits / (totalHits + totalMisses)) * 100 : 0
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      hitRate: Math.round(hitRate * 100) / 100
     };
+  }
+
+  // Reset stats (useful for testing)
+  resetStats(): void {
+    this.stats = { hits: 0, misses: 0 };
   }
 }
 
-// Global cache instance
-export const apiCache = new APICache({
+// Global enhanced cache instance
+export const advancedCache = new AdvancedCache({
   defaultTTL: 5 * 60 * 1000, // 5 minutes
   maxSize: 100,
   enableLogging: process.env.NODE_ENV === 'development'

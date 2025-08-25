@@ -123,8 +123,17 @@ class SystemTester {
     for (const endpoint of endpoints) {
       try {
         const startTime = performance.now();
-        // @ts-ignore - Dynamic method call
-        const result = await api[endpoint.method]();
+        
+        // Type-safe method calling
+        let result;
+        if (endpoint.method === 'healthCheck' && 'healthCheck' in api) {
+          result = await (api as any).healthCheck();
+        } else if (endpoint.method === 'getOpportunities') {
+          result = await api.getOpportunities();
+        } else if (endpoint.method === 'getDashboardMetrics') {
+          result = await api.getDashboardMetrics();
+        }
+        
         const duration = performance.now() - startTime;
         
         if (result) {
@@ -256,9 +265,9 @@ class SystemTester {
 
       // Test cache stats (if available)
       const cacheStats = 'getCacheStats' in api ? (api as any).getCacheStats() : null;
-      if (cacheStats && cacheStats.hits !== undefined) {
+      if (cacheStats && cacheStats.size !== undefined) {
         this.addResult('cache-statistics', 'pass', 
-          `Cache stats available (${cacheStats.hits} hits, ${cacheStats.misses} misses)`);
+          `Cache stats available (${cacheStats.size}/${cacheStats.maxSize} entries)`);
       } else {
         this.addResult('cache-statistics', 'fail', 'Cache statistics not available');
       }

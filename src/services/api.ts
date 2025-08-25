@@ -6,7 +6,7 @@
 import { Opportunity, PipelineStatus, UploadResult } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
 import { CircuitBreaker } from '@/utils/circuit-breaker';
-import { apiCache } from '@/utils/api-cache';
+import { advancedCache } from '@/utils/advancedCache';
 import { performanceMonitor } from '@/utils/performance-monitor';
 import { auditLogger } from '@/utils/audit-logger';
 
@@ -26,7 +26,7 @@ export const api = {
     auditLogger.log('api_call_start', 'system', 'info', { endpoint: 'opportunities' });
     
     // Try cache first
-    const cached = apiCache.get<Opportunity[]>(cacheKey);
+    const cached = advancedCache.get<Opportunity[]>(cacheKey);
     if (cached) {
       timer.end(true);
       auditLogger.log('api_cache_hit', 'system', 'info', { endpoint: 'opportunities' });
@@ -44,7 +44,7 @@ export const api = {
         if (error) throw error;
         
         const opportunities = data?.map(transformOpportunity) || [];
-        apiCache.set(cacheKey, opportunities, 300000); // 5 minutes TTL
+        advancedCache.set(cacheKey, opportunities, 300000); // 5 minutes TTL
         timer.end(true);
         auditLogger.log('api_call_success', 'system', 'info', { endpoint: 'opportunities' });
         return opportunities;
@@ -198,12 +198,12 @@ export const api = {
 
   // Clear API cache manually
   clearCache(pattern?: string): void {
-    apiCache.invalidate(pattern);
+    advancedCache.invalidate(pattern);
   },
 
   // Get API cache statistics
   getCacheStats() {
-    return apiCache.getStats();
+    return advancedCache.getStats();
   },
 
   // Get dashboard metrics from Supabase
@@ -290,8 +290,33 @@ function transformOpportunity(row: any): Opportunity {
   };
 }
 
+// Add healthCheck method to mockApi
+const mockHealthCheck = async () => {
+  await new Promise(resolve => setTimeout(resolve, 100));
+  return {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    components: {
+      database: 'ok',
+      cache: 'ok',
+      scrapers: 'ok'
+    },
+    circuit_breaker_state: 'CLOSED'
+  };
+};
+
 // Mock data for development when backend is not available
 export const mockApi = {
+  healthCheck: mockHealthCheck,
+  getCacheStats: () => ({ 
+    size: 5, 
+    maxSize: 100, 
+    entries: ['opportunities-all'], 
+    hits: 12, 
+    misses: 3, 
+    hitRate: 80 
+  }),
+  clearCache: () => {},
   async getOpportunities(): Promise<Opportunity[]> {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1000));
