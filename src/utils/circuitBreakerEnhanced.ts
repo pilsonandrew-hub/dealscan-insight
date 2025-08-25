@@ -210,7 +210,7 @@ export class EnhancedCircuitBreaker {
       if (this.failures >= this.config.failureThreshold) {
         this.state = CircuitState.OPEN;
         this.nextRetryTime = Date.now() + this.config.recoveryTimeout;
-        logger.error('Circuit breaker OPENED due to failures', {
+        logger.error('Circuit breaker OPENED due to failures', undefined, {
           name: this.name,
           failures: this.failures,
           threshold: this.config.failureThreshold

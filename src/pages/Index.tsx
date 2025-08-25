@@ -30,6 +30,9 @@ const Index = () => {
     refetchInterval: 30000, // Fallback polling
   });
 
+  // Extract data safely from either response format
+  const initialData = 'data' in initialOpportunities ? initialOpportunities.data : initialOpportunities.items || [];
+
   const { data: metrics = {
     active_opportunities: 0,
     avg_margin: 0,
@@ -53,7 +56,7 @@ const Index = () => {
     resumePipeline,
     connect,
     disconnect
-  } = useRealtimeOpportunities(initialOpportunities.data);
+  } = useRealtimeOpportunities(initialData);
 
   const handleUploadSuccess = () => {
     // Real-time updates will handle new opportunities automatically
