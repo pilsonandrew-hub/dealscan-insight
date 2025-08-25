@@ -247,6 +247,33 @@ export type Database = {
           },
         ]
       }
+      pipeline_metrics: {
+        Row: {
+          created_at: string
+          id: string
+          metric_name: string
+          metric_unit: string
+          metric_value: number
+          tags: Json | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric_name: string
+          metric_unit?: string
+          metric_value: number
+          tags?: Json | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric_name?: string
+          metric_unit?: string
+          metric_value?: number
+          tags?: Json | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
