@@ -81,11 +81,8 @@ export class MemoryManager {
 
   private checkMemoryPressure(stats: MemoryStats): void {
     if (stats.usagePercentage > this.memoryPressureThreshold) {
-      logger.warn(`High memory pressure detected: ${Math.round(stats.usagePercentage * 100)}%`, {
-        used: stats.usedMB,
-        total: stats.totalMB,
-        limit: stats.limitMB
-      });
+      logger.warn(`High memory pressure detected: ${Math.round(stats.usagePercentage * 100)}%`, 
+        `Used: ${stats.usedMB}MB, Total: ${stats.totalMB}MB, Limit: ${stats.limitMB}MB`);
       
       this.triggerGarbageCollection();
     }
@@ -181,12 +178,12 @@ export const useMemoryCleanup = (cleanupFn: () => void) => {
   }, [manager, cleanupFn]);
 };
 
-export const useWeakRef = <T extends object>(obj: T | null): React.MutableRefObject<WeakRef<T> | null> => {
-  const weakRef = useRef<WeakRef<T> | null>(null);
+export const useWeakRef = <T extends object>(obj: T | null): React.MutableRefObject<any | null> => {
+  const weakRef = useRef<any | null>(null);
 
   useEffect(() => {
-    if (obj) {
-      weakRef.current = new WeakRef(obj);
+    if (obj && typeof globalThis !== 'undefined' && 'WeakRef' in globalThis) {
+      weakRef.current = new (globalThis as any).WeakRef(obj);
     } else {
       weakRef.current = null;
     }
