@@ -316,18 +316,18 @@ class AdvancedMetricsCollector {
         const response = await originalFetch(...args);
         const duration = Date.now() - startTime;
         
-        this.recordBusiness('api_calls_total');
+        this.recordBusiness('api_calls_total', 1);
         this.recordPerformance('api_response_time', duration);
         
         if (response.ok) {
-          this.recordBusiness('api_calls_success');
+          this.recordBusiness('api_calls_success', 1);
         } else {
-          this.recordBusiness('api_calls_error');
+          this.recordBusiness('api_calls_error', 1);
         }
         
         return response;
       } catch (error) {
-        this.recordBusiness('api_calls_error');
+        this.recordBusiness('api_calls_error', 1);
         throw error;
       }
     };
