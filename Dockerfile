@@ -32,12 +32,12 @@ COPY . .
 RUN useradd -m -u 1000 dealerscope && chown -R dealerscope:dealerscope /app
 USER dealerscope
 
-# Expose port
-EXPOSE 8000
+# Expose port (Cloud Run uses PORT env var, default 8080)
+EXPOSE 8080
 
 # Enhanced health check with meaningful error reporting
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f --connect-timeout 5 --max-time 8 http://localhost:8000/healthz || \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f --connect-timeout 5 --max-time 8 http://localhost:${PORT:-8080}/healthz || \
         (echo "Health check failed at $(date)" && exit 1)
 
 # Security and performance labels
@@ -48,10 +48,4 @@ LABEL maintainer="DealerScope Team" \
       org.opencontainers.image.source="https://github.com/pilsonandrew-hub/DealerScope"
 
 # Run application with production optimizations
-CMD ["uvicorn", "webapp.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "1", \
-     "--log-level", "info", \
-     "--access-log", \
-     "--use-colors"]
+CMD ["sh", "-c", "uvicorn webapp.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level info --access-log --timeout-keep-alive 120 --timeout-graceful-shutdown 30"]
