@@ -14,12 +14,13 @@ jobs:
   # Security and Quality Checks
   security-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -32,15 +33,32 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
+      - name: Set up Python for security scans
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
       - name: Run Bandit security scan
         run: |
           pip install bandit[toml]
-          bandit -r webapp/ -f json -o bandit-report.json || true
+          bandit -r webapp/ -f json -o bandit-report.json
+          if [ $? -ne 0 ]; then echo "::error::Critical security issues found by Bandit"; exit 1; fi
 
       - name: Run Safety dependency check
         run: |
           pip install safety
-          safety check --json --output safety-report.json || true
+          safety check --json --output safety-report.json
+          if [ $? -ne 0 ]; then echo "::error::Vulnerable dependencies found"; exit 1; fi
+
+      - name: Upload security scan artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
 
   # Backend Testing
   backend-test:
