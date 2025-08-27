@@ -7,6 +7,7 @@
 import { logger } from '@/utils/secureLogger';
 import { globalErrorHandler } from '@/utils/globalErrorHandler';
 import { supabase } from '@/integrations/supabase/client';
+import { cloudLogger } from '@/utils/cloudLogger';
 
 export type ErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type ErrorCategory = 
@@ -313,6 +314,29 @@ class CentralizedErrorHandler {
         context: errorReport.context
       }
     );
+
+    // Also send to cloud logging
+    const cloudLogLevel = this.getCloudLogLevel(errorReport.severity);
+    cloudLogger[cloudLogLevel](errorReport.message, {
+      errorId: errorReport.id,
+      category: errorReport.category,
+      severity: errorReport.severity,
+      component: errorReport.context.component,
+      stack: errorReport.stack,
+      url: errorReport.context.url,
+      userId: errorReport.context.userId,
+      type: 'centralized_error'
+    });
+  }
+
+  private getCloudLogLevel(severity: ErrorSeverity): 'logDebug' | 'logInfo' | 'logWarning' | 'logError' {
+    switch (severity) {
+      case 'low': return 'logInfo';
+      case 'medium': return 'logWarning';
+      case 'high':
+      case 'critical': return 'logError';
+      default: return 'logInfo';
+    }
   }
 
   private getLogLevel(severity: ErrorSeverity): 'debug' | 'info' | 'warn' | 'error' {

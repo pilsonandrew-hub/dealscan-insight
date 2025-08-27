@@ -12,11 +12,26 @@ import '@/utils/productionLogger';
 // Initialize secure configuration
 import '@/config/secureConfig';
 
+// Initialize cloud logging and performance monitoring
+import { cloudLogger } from '@/utils/cloudLogger';
+import { performanceMonitor } from '@/utils/performanceMonitor';
+
 // Setup API handling for proper 404 responses
 setupApiHandling();
 
 // Start memory monitoring
 memoryManager.startMonitoring();
+
+// Initialize performance monitoring
+performanceMonitor.initialize();
+
+// Log application startup
+cloudLogger.logInfo('Application starting', {
+  timestamp: new Date().toISOString(),
+  environment: import.meta.env.MODE,
+  user_agent: navigator.userAgent,
+  type: 'app_startup'
+});
 
 // Validate environment before app initialization
 try {

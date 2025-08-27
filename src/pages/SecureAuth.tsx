@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/SecureAuthContext';
+import { useAuth } from '@/contexts/UnifiedAuthContext';
 import { inputValidator } from '@/utils/inputValidator';
 import { logger } from '@/utils/secureLogger';
 import { Button } from '@/components/ui/button';
