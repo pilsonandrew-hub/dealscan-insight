@@ -1,43 +1,89 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# DealerScope Elite Evaluation Script
-# Tests current frontend application with comprehensive metrics
+# DealerScope Elite Evaluation Script v2.0
+# Enhanced frontend evaluation with configurable settings and improved error handling
 
-PORT=5173  # Vite dev server default
-OUTDIR="evaluation-reports"
-mkdir -p "$OUTDIR"
+# Configuration - can be overridden via environment variables
+PORT=${EVAL_PORT:-5173}  # Configurable port
+OUTDIR=${EVAL_OUTDIR:-"evaluation-reports"}
+STARTUP_TIMEOUT=${EVAL_STARTUP_TIMEOUT:-45}  # Configurable startup timeout
+PERFORMANCE_RUNS=${EVAL_PERF_RUNS:-5}  # Number of performance test runs
+CURL_TIMEOUT=${EVAL_CURL_TIMEOUT:-10}  # Curl timeout in seconds
+
+# Create output directory with enhanced error handling
+if ! mkdir -p "$OUTDIR"; then
+    echo "❌ Failed to create output directory: $OUTDIR" >&2
+    exit 1
+fi
 
 bold(){ printf "\033[1m%s\033[0m\n" "$*"; }
 log(){ echo "[$(date +'%F %T')] $*"; }
 fail(){ echo "❌ $*"; exit 1; }
 pass(){ echo "✅ $*"; }
 
-# Check if frontend is running
+# Enhanced frontend availability check with configurable timeout
 bold "Checking DealerScope Frontend (port $PORT)..."
-if ! curl -fsS "http://localhost:$PORT" >/dev/null 2>&1; then
-  bold "Starting DealerScope frontend..."
-  npm run dev &
+log "Testing connectivity to http://localhost:$PORT..."
+
+# Test with enhanced error reporting
+CURL_RESULT=$(curl -fsS --connect-timeout 5 --max-time "$CURL_TIMEOUT" "http://localhost:$PORT" 2>&1) || CURL_EXIT_CODE=$?
+
+if [ "${CURL_EXIT_CODE:-0}" -ne 0 ]; then
+  log "Frontend not accessible (curl exit code: ${CURL_EXIT_CODE:-0})"
+  bold "Starting DealerScope frontend with enhanced monitoring..."
+  
+  # Start with port specification
+  npm run dev -- --port "$PORT" &
   DEV_PID=$!
   
+  # Enhanced cleanup function with better process management
   cleanup() {
-    if kill -0 "$DEV_PID" 2>/dev/null; then
-      kill "$DEV_PID" || true
-      sleep 1
-      kill -9 "$DEV_PID" 2>/dev/null || true
+    if [ -n "${DEV_PID:-}" ] && kill -0 "$DEV_PID" 2>/dev/null; then
+      log "Terminating development server (PID: $DEV_PID)..."
+      kill "$DEV_PID" 2>/dev/null || true
+      
+      # Wait for graceful shutdown
+      local attempts=0
+      while [ $attempts -lt 10 ] && kill -0 "$DEV_PID" 2>/dev/null; do
+        sleep 1
+        attempts=$((attempts + 1))
+      done
+      
+      # Force kill if still running
+      if kill -0 "$DEV_PID" 2>/dev/null; then
+        log "Force terminating development server..."
+        kill -9 "$DEV_PID" 2>/dev/null || true
+      fi
+      
+      log "Development server cleanup completed"
     fi
   }
-  trap cleanup EXIT
+  trap cleanup EXIT INT TERM
   
-  # Wait for frontend to be ready
+  # Enhanced startup monitoring with configurable timeout
+  log "Waiting for frontend startup (timeout: ${STARTUP_TIMEOUT}s)..."
   ATTEMPTS=0
-  until curl -fsS "http://localhost:$PORT" >/dev/null 2>&1; do
-    ATTEMPTS=$((ATTEMPTS+1))
-    if [ "$ATTEMPTS" -gt 30 ]; then
-      fail "Frontend did not start within 30s"
+  SLEEP_INTERVAL=2
+  MAX_ATTEMPTS=$((STARTUP_TIMEOUT / SLEEP_INTERVAL))
+  
+  until curl -fsS --connect-timeout 3 --max-time 5 "http://localhost:$PORT" >/dev/null 2>&1; do
+    ATTEMPTS=$((ATTEMPTS + 1))
+    if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
+      log "Last curl attempt error log:"
+      curl -fsS --connect-timeout 3 --max-time 5 "http://localhost:$PORT" 2>&1 || true
+      fail "Frontend did not start within ${STARTUP_TIMEOUT}s (attempted $ATTEMPTS times)"
     fi
-    sleep 1
+    
+    # Progress indicator
+    if [ $((ATTEMPTS % 5)) -eq 0 ]; then
+      log "Still waiting... (attempt $ATTEMPTS/$MAX_ATTEMPTS)"
+    fi
+    
+    sleep $SLEEP_INTERVAL
   done
+  
+  log "Frontend startup completed after $((ATTEMPTS * SLEEP_INTERVAL))s"
 fi
 
 pass "Frontend is accessible"
@@ -97,13 +143,44 @@ else
   add_result "security-headers" "warn" "Security headers missing (dev mode expected)"
 fi
 
-# 3. Performance Test - Page Load Times
-bold "Testing page load performance..."
+# 3. Enhanced Performance Test - Page Load Times with error handling
+bold "Testing page load performance (${PERFORMANCE_RUNS} runs)..."
 LOAD_TIMES=()
-for i in $(seq 1 5); do
-  TIME_MS=$(curl -s -w "%{time_total}" -o /dev/null "http://localhost:$PORT" | awk '{printf("%.0f",$1*1000)}')
-  LOAD_TIMES+=("$TIME_MS")
+FAILED_REQUESTS=0
+
+for i in $(seq 1 "$PERFORMANCE_RUNS"); do
+  log "Performance test run $i/$PERFORMANCE_RUNS..."
+  
+  # Enhanced curl with timeout and error handling
+  if TIME_OUTPUT=$(curl -s --connect-timeout 5 --max-time "$CURL_TIMEOUT" \
+                     -w "%{time_total},%{http_code},%{size_download}" \
+                     -o /dev/null "http://localhost:$PORT" 2>&1); then
+    
+    TIME_TOTAL=$(echo "$TIME_OUTPUT" | cut -d',' -f1)
+    HTTP_CODE=$(echo "$TIME_OUTPUT" | cut -d',' -f2)
+    SIZE_BYTES=$(echo "$TIME_OUTPUT" | cut -d',' -f3)
+    
+    if [ "$HTTP_CODE" = "200" ]; then
+      TIME_MS=$(awk "BEGIN {printf(\"%.0f\", $TIME_TOTAL * 1000)}")
+      LOAD_TIMES+=("$TIME_MS")
+      log "Run $i: ${TIME_MS}ms (${SIZE_BYTES} bytes)"
+    else
+      log "Run $i failed: HTTP $HTTP_CODE"
+      FAILED_REQUESTS=$((FAILED_REQUESTS + 1))
+    fi
+  else
+    log "Run $i failed: Network error"
+    FAILED_REQUESTS=$((FAILED_REQUESTS + 1))
+  fi
 done
+
+# Report failed requests
+if [ "$FAILED_REQUESTS" -gt 0 ]; then
+  set_metric "failed_requests" "$FAILED_REQUESTS"
+  add_result "network-reliability" "warn" "$FAILED_REQUESTS/$PERFORMANCE_RUNS requests failed"
+else
+  add_result "network-reliability" "pass" "All $PERFORMANCE_RUNS requests successful"
+fi
 
 # Calculate average
 TOTAL=0

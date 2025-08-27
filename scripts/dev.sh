@@ -2,19 +2,63 @@
 set -euo pipefail
 
 # DealerScope v4.9 Development Script
-# Single-command setup and development environment
+# Single-command setup and development environment with enhanced configuration
+
+# Configurable settings - can be overridden via environment variables
+DEFAULT_PORT=${VITE_PORT:-5173}
+DEV_PORT=${DEV_PORT:-$DEFAULT_PORT}
+STARTUP_TIMEOUT=${STARTUP_TIMEOUT:-60}
+HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-2}
+LOG_LEVEL=${LOG_LEVEL:-INFO}
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1" ; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" ; }
-log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" ; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1" ; }
+# Enhanced logging functions with timestamps and levels
+log_info() { 
+    [[ "$LOG_LEVEL" =~ ^(DEBUG|INFO)$ ]] && echo -e "${BLUE}[INFO $(date +'%H:%M:%S')]${NC} $1" 
+}
+log_debug() { 
+    [[ "$LOG_LEVEL" == "DEBUG" ]] && echo -e "${CYAN}[DEBUG $(date +'%H:%M:%S')]${NC} $1" 
+}
+log_success() { echo -e "${GREEN}[SUCCESS $(date +'%H:%M:%S')]${NC} $1" ; }
+log_warning() { echo -e "${YELLOW}[WARNING $(date +'%H:%M:%S')]${NC} $1" ; }
+log_error() { echo -e "${RED}[ERROR $(date +'%H:%M:%S')]${NC} $1" ; }
+
+# Utility functions
+is_port_available() {
+    local port=$1
+    ! nc -z localhost "$port" 2>/dev/null
+}
+
+wait_for_service() {
+    local url=$1
+    local timeout=${2:-$STARTUP_TIMEOUT}
+    local interval=${3:-$HEALTH_CHECK_INTERVAL}
+    local attempts=0
+    local max_attempts=$((timeout / interval))
+    
+    log_info "Waiting for service at $url (timeout: ${timeout}s)"
+    
+    while [ $attempts -lt $max_attempts ]; do
+        if curl -fsS --connect-timeout 5 --max-time 10 "$url" >/dev/null 2>&1; then
+            log_success "Service is ready at $url"
+            return 0
+        fi
+        
+        attempts=$((attempts + 1))
+        log_debug "Attempt $attempts/$max_attempts failed, retrying in ${interval}s..."
+        sleep "$interval"
+    done
+    
+    log_error "Service at $url failed to start within ${timeout}s"
+    return 1
+}
 
 # Check if we're in the right directory
 if [[ ! -f "package.json" ]]; then
@@ -65,28 +109,79 @@ if [[ -f ".env" ]]; then
     fi
 fi
 
-# Function to start the development server
+# Function to start the development server with enhanced monitoring
 start_dev_server() {
-    log_info "Starting development server..."
-    npm run dev &
-    DEV_SERVER_PID=$!
+    local server_url="http://localhost:$DEV_PORT"
     
-    # Wait for server to start
-    sleep 3
-    
-    # Try to open browser
-    if command -v open &> /dev/null; then
-        open http://localhost:5173
-    elif command -v xdg-open &> /dev/null; then
-        xdg-open http://localhost:5173
-    else
-        log_info "Please open http://localhost:5173 in your browser"
+    # Check if port is already in use
+    if ! is_port_available "$DEV_PORT"; then
+        log_warning "Port $DEV_PORT is already in use"
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Aborted by user"
+            exit 0
+        fi
     fi
     
-    log_success "Development server started! Press Ctrl+C to stop."
+    log_info "Starting development server on port $DEV_PORT..."
     
-    # Wait for the dev server process
-    wait $DEV_SERVER_PID
+    # Start the development server
+    npm run dev -- --port "$DEV_PORT" &
+    DEV_SERVER_PID=$!
+    
+    # Enhanced cleanup function
+    cleanup_dev_server() {
+        if [ -n "${DEV_SERVER_PID:-}" ] && kill -0 "$DEV_SERVER_PID" 2>/dev/null; then
+            log_info "Shutting down development server (PID: $DEV_SERVER_PID)..."
+            kill "$DEV_SERVER_PID" 2>/dev/null || true
+            
+            # Give it time to shut down gracefully
+            sleep 3
+            
+            # Force kill if still running
+            if kill -0 "$DEV_SERVER_PID" 2>/dev/null; then
+                log_warning "Force killing development server..."
+                kill -9 "$DEV_SERVER_PID" 2>/dev/null || true
+            fi
+            
+            log_success "Development server stopped"
+        fi
+    }
+    
+    # Set up cleanup trap
+    trap cleanup_dev_server EXIT INT TERM
+    
+    # Wait for server to be ready with enhanced error handling
+    if wait_for_service "$server_url" "$STARTUP_TIMEOUT" "$HEALTH_CHECK_INTERVAL"; then
+        # Try to open browser
+        if command -v open &> /dev/null; then
+            log_info "Opening browser..."
+            open "$server_url"
+        elif command -v xdg-open &> /dev/null; then
+            log_info "Opening browser..."
+            xdg-open "$server_url"
+        else
+            log_info "Please open $server_url in your browser"
+        fi
+        
+        log_success "Development server started successfully!"
+        log_info "Server URL: $server_url"
+        log_info "Press Ctrl+C to stop the server"
+        
+        # Monitor the server process
+        while kill -0 "$DEV_SERVER_PID" 2>/dev/null; do
+            sleep 5
+            # Optional: Add health check here
+            if ! curl -fsS --connect-timeout 2 --max-time 5 "$server_url" >/dev/null 2>&1; then
+                log_warning "Development server appears unresponsive"
+            fi
+        done
+    else
+        log_error "Failed to start development server"
+        cleanup_dev_server
+        exit 1
+    fi
 }
 
 # Function to run tests

@@ -90,6 +90,20 @@ class Settings(BaseSettings):
     def validate_secret_key(cls, v: str) -> str:
         if len(v) < 32:
             raise ValueError("Secret key must be at least 32 characters long")
+        
+        # Additional security checks for production
+        if v == "CHANGE_ME_IN_PRODUCTION":
+            import os
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if env in ("production", "staging"):
+                raise ValueError("Secret key must be changed in production/staging environments")
+        
+        # Check for common weak patterns
+        weak_patterns = ["password", "secret", "key", "123", "abc", "test"]
+        if any(pattern in v.lower() for pattern in weak_patterns):
+            import warnings
+            warnings.warn("Secret key contains common patterns - consider using a more secure key")
+        
         return v
     
     @property
@@ -107,20 +121,64 @@ class Settings(BaseSettings):
 # Global settings instance
 settings = Settings()
 
-# Validate settings on startup
-try:
-    validation_errors = []
-    
-    if settings.is_production and settings.secret_key == "CHANGE_ME_IN_PRODUCTION":
-        validation_errors.append("Secret key must be changed in production")
-    
-    if settings.ml_enabled and not os.path.exists(settings.ml_model_path):
-        os.makedirs(settings.ml_model_path, exist_ok=True)
-    
-    if validation_errors:
-        raise ValueError(f"Configuration errors: {validation_errors}")
+# Enhanced settings validation on startup
+def validate_settings_on_startup():
+    """Comprehensive settings validation with detailed error reporting"""
+    try:
+        from .environment_validator import validate_environment
         
-except Exception as e:
-    print(f"Settings validation failed: {e}")
-    if settings.is_production:
-        raise
+        # Run comprehensive validation
+        validation_result = validate_environment()
+        
+        if not validation_result['valid']:
+            error_msg = "Configuration validation failed:\n"
+            for error in validation_result['errors']:
+                error_msg += f"  ❌ {error}\n"
+            
+            if validation_result['warnings']:
+                error_msg += "Warnings:\n"
+                for warning in validation_result['warnings']:
+                    error_msg += f"  ⚠️  {warning}\n"
+            
+            if settings.is_production:
+                raise ValueError(error_msg)
+            else:
+                print(f"⚠️  {error_msg}")
+        
+        # Create required directories
+        if settings.ml_enabled and not os.path.exists(settings.ml_model_path):
+            try:
+                os.makedirs(settings.ml_model_path, exist_ok=True)
+            except (OSError, PermissionError) as e:
+                error_msg = f"Cannot create ML model directory '{settings.ml_model_path}': {e}"
+                if settings.is_production:
+                    raise ValueError(error_msg)
+                else:
+                    print(f"⚠️  {error_msg}")
+        
+        # Log successful validation
+        if validation_result['valid'] and not validation_result['warnings']:
+            print("✅ Configuration validation passed")
+        elif validation_result['valid']:
+            print(f"✅ Configuration valid with {len(validation_result['warnings'])} warnings")
+            
+    except ImportError:
+        # Fallback to basic validation if environment_validator is not available
+        validation_errors = []
+        
+        if settings.is_production and settings.secret_key == "CHANGE_ME_IN_PRODUCTION":
+            validation_errors.append("Secret key must be changed in production")
+        
+        if settings.ml_enabled and not os.path.exists(settings.ml_model_path):
+            os.makedirs(settings.ml_model_path, exist_ok=True)
+        
+        if validation_errors:
+            raise ValueError(f"Configuration errors: {validation_errors}")
+            
+    except Exception as e:
+        print(f"Settings validation failed: {e}")
+        if settings.is_production:
+            raise
+
+# Run validation on import
+validate_settings_on_startup()

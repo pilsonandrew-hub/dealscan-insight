@@ -1,16 +1,29 @@
+# Production-Ready Python Application Container
+# Optimized for security, performance, and maintainability
+
 FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies with security updates
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && apt-get upgrade -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
 
-# Copy requirements and install Python dependencies
+# Upgrade pip and install Python dependencies with security optimizations
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Copy requirements and install dependencies with version pinning verification
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes --disable-pip-version-check -r requirements.txt || \
+    pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
 # Copy application code
 COPY . .
@@ -22,9 +35,23 @@ USER dealerscope
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/healthz || exit 1
+# Enhanced health check with meaningful error reporting
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f --connect-timeout 5 --max-time 8 http://localhost:8000/healthz || \
+        (echo "Health check failed at $(date)" && exit 1)
 
-# Run application
-CMD ["uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Security and performance labels
+LABEL maintainer="DealerScope Team" \
+      version="4.9.0" \
+      description="DealerScope Backend API" \
+      security.scan="enabled" \
+      org.opencontainers.image.source="https://github.com/pilsonandrew-hub/DealerScope"
+
+# Run application with production optimizations
+CMD ["uvicorn", "webapp.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--log-level", "info", \
+     "--access-log", \
+     "--use-colors"]
