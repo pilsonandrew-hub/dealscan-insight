@@ -13,16 +13,20 @@ const AllProviders = ({ children }: { children: ReactNode }) => (
 const customRender = (ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) =>
   render(ui, { wrapper: AllProviders, ...options });
 
+const createMockUser = (overrides = {}) => ({
+  id: 'test-user-id',
+  email: 'test@example.com',
+  ...overrides,
+});
+
+const createMockSession = (user?: any) => ({
+  access_token: 'mock-token',
+  user: user || createMockUser(),
+});
+
 export const testUtils = {
-  createMockUser: (overrides = {}) => ({
-    id: 'test-user-id',
-    email: 'test@example.com',
-    ...overrides,
-  }),
-  createMockSession: (user = testUtils.createMockUser()) => ({
-    access_token: 'mock-token',
-    user,
-  }),
+  createMockUser,
+  createMockSession,
 };
 
 export * from '@testing-library/react';

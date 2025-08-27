@@ -333,7 +333,7 @@ class CentralizedErrorHandler {
         severity: errorReport.severity,
         message: errorReport.message,
         stack_trace: errorReport.stack,
-        context: errorReport.context,
+        context: errorReport.context as any,
         timestamp: errorReport.created_at,
         user_message: this.generateUserFriendlyMessage(errorReport),
         resolved: false
