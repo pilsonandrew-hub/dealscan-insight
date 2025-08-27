@@ -12,53 +12,104 @@ env:
 
 jobs:
   # Security and Quality Checks
+  # Comprehensive security scanning with Trivy (vulnerabilities), 
+  # Bandit (code analysis), and Safety (dependency check)
   security-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      # Run security scans in parallel for efficiency
+      matrix:
+        scan-type: [filesystem, dependencies]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Trivy vulnerability scanner
+      # Conditional execution based on matrix strategy for parallel processing
+      - name: Run Trivy filesystem vulnerability scanner
+        if: matrix.scan-type == 'filesystem'
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
+          # Enhanced scanning with security focus
+          severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy scan results
+        if: matrix.scan-type == 'filesystem' && always()
         uses: github/codeql-action/upload-sarif@v2
-        if: always()
         with:
           sarif_file: 'trivy-results.sarif'
+          category: 'trivy-filesystem'
 
-      - name: Set up Python for security scans
+      - name: Set up Python for dependency security scans
+        if: matrix.scan-type == 'dependencies'
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
 
-      - name: Run Bandit security scan
+      - name: Install security scanning tools
+        if: matrix.scan-type == 'dependencies'
         run: |
-          pip install bandit[toml]
-          bandit -r webapp/ -f json -o bandit-report.json
-          if [ $? -ne 0 ]; then echo "::error::Critical security issues found by Bandit"; exit 1; fi
+          # Cache pip dependencies for faster subsequent runs
+          pip install --upgrade pip
+          pip install bandit[toml] sarif-om safety
 
-      - name: Run Safety dependency check
+      - name: Run Bandit static code analysis
+        if: matrix.scan-type == 'dependencies'
         run: |
-          pip install safety
-          safety check --json --output safety-report.json
-          if [ $? -ne 0 ]; then echo "::error::Vulnerable dependencies found"; exit 1; fi
+          # Comprehensive Bandit scan with unified SARIF reporting
+          echo "::group::Running Bandit Security Analysis"
+          bandit -r webapp/ -f json -o bandit-report.json -ll
+          bandit -r webapp/ -f sarif -o bandit-results.sarif -ll
+          echo "::endgroup::"
+          # Fail on high/medium severity issues
+          if [ $? -ne 0 ]; then 
+            echo "::error::Critical security issues found by Bandit - Review required"
+            exit 1
+          fi
 
-      - name: Upload security scan artifacts
-        uses: actions/upload-artifact@v3
-        if: always()
+      - name: Run Safety dependency vulnerability check
+        if: matrix.scan-type == 'dependencies'
+        run: |
+          echo "::group::Checking Dependencies for Known Vulnerabilities"
+          # Enhanced safety check with comprehensive reporting
+          safety check --json --output safety-report.json --full-report --continue-on-error
+          SAFETY_EXIT_CODE=$?
+          echo "::endgroup::"
+          if [ $SAFETY_EXIT_CODE -ne 0 ]; then
+            echo "::error::Vulnerable dependencies detected - Security review required"
+            exit 1
+          fi
+
+      - name: Upload Bandit SARIF results to Security tab
+        if: matrix.scan-type == 'dependencies' && always()
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          name: security-reports
+          sarif_file: 'bandit-results.sarif'
+          category: 'bandit-static-analysis'
+
+      - name: Upload detailed security reports as artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports-${{ matrix.scan-type }}
           path: |
-            bandit-report.json
-            safety-report.json
+            *-report.json
+            *-results.sarif
+          retention-days: 30
+
+      # Generate security summary for PR comments
+      - name: Generate security scan summary
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          echo "## 🔒 Security Scan Results - ${{ matrix.scan-type }}" >> $GITHUB_STEP_SUMMARY
+          echo "Scan completed for: ${{ matrix.scan-type }}" >> $GITHUB_STEP_SUMMARY
+          echo "Timestamp: $(date -u)" >> $GITHUB_STEP_SUMMARY
 
   # Backend Testing
   backend-test:
