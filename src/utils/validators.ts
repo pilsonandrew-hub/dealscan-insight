@@ -5,9 +5,30 @@
 
 import Ajv, { ErrorObject } from 'ajv';
 import addFormats from 'ajv-formats';
-// TODO: Import schemas when build supports JSON imports
-// import vehicleSchema from '../../schemas/vehicle.schema.json';
-// import provenanceSchema from '../../schemas/provenance.schema.json';
+// Define schemas inline until JSON imports are fully supported
+const vehicleSchema = {
+  type: 'object',
+  required: ['vin', 'make', 'model', 'year'],
+  properties: {
+    vin: { type: 'string', pattern: '^[A-HJ-NPR-Z0-9]{17}$' },
+    make: { type: 'string', minLength: 1, maxLength: 50 },
+    model: { type: 'string', minLength: 1, maxLength: 50 },
+    year: { type: 'integer', minimum: 1900, maximum: new Date().getFullYear() + 2 },
+    mileage: { type: 'number', minimum: 0 },
+    price: { type: 'number', minimum: 0 }
+  }
+};
+
+const provenanceSchema = {
+  type: 'object',
+  required: ['source', 'timestamp', 'method'],
+  properties: {
+    source: { type: 'string', minLength: 1 },
+    timestamp: { type: 'string', format: 'date-time' },
+    method: { type: 'string', enum: ['scraper', 'manual', 'api'] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 }
+  }
+};
 
 // Initialize AJV with formats
 const ajv = new Ajv({ 
@@ -18,9 +39,7 @@ const ajv = new Ajv({
 });
 addFormats(ajv);
 
-// Mock schemas until build supports JSON imports
-const vehicleSchema = { type: 'object', properties: {} };
-const provenanceSchema = { type: 'object', properties: {} };
+// Remove duplicate schema definitions - using the inline schemas above
 
 // Compile schemas
 const validateVehicle = ajv.compile(vehicleSchema);

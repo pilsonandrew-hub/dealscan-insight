@@ -1,6 +1,12 @@
 /**
  * ScraperOrchestrator - Main coordinator for multi-site scraping operations
  * Manages scraping jobs, site coordination, and result aggregation
+ * 
+ * @fileoverview This file is large (276 lines) and should be refactored into smaller modules:
+ * - ScraperManager: Core orchestration logic
+ * - BatchProcessor: Batch processing utilities  
+ * - ResultHandler: Result storage and processing
+ * - StatsUpdater: Site statistics management
  */
 
 import { supabase } from '@/integrations/supabase/client';

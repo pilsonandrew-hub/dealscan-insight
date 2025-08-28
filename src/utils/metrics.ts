@@ -175,19 +175,26 @@ export class MetricsCollector {
     this.metrics = [];
 
     try {
-      // For now, just log metrics. In production, send to external monitoring service
+      // Log metrics locally and store for production monitoring
       logger.debug('Metrics flush', { count: metricsToFlush.length, metrics: metricsToFlush });
       
-      // TODO: Implement actual metrics storage after types are regenerated
-      // const { error } = await supabase
-      //   .from('pipeline_metrics')
-      //   .insert(metricsToFlush.map(metric => ({
-      //     metric_name: metric.name,
-      //     metric_value: metric.value,
-      //     metric_unit: metric.unit,
-      //     tags: metric.tags,
-      //     created_at: metric.timestamp
-      //   })));
+      // Store metrics in local storage for development and edge function processing
+      try {
+        const existingMetrics = JSON.parse(localStorage.getItem('dealerscope_metrics') || '[]');
+        const combinedMetrics = [...existingMetrics, ...metricsToFlush].slice(-1000); // Keep last 1000 metrics
+        localStorage.setItem('dealerscope_metrics', JSON.stringify(combinedMetrics));
+        
+        // Send to cloud logging for production monitoring
+        if (import.meta.env.PROD) {
+          await fetch('/api/metrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ metrics: metricsToFlush })
+          }).catch(err => logger.error('Failed to send metrics to cloud:', err));
+        }
+      } catch (storageError) {
+        logger.error('Failed to store metrics locally:', storageError);
+      }
 
     } catch (error) {
       console.error('Error flushing metrics:', error);
