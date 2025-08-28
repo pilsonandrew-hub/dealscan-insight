@@ -1,27 +1,21 @@
-# DealerScope v4.9 🚗💰
+# DealerScope - Vehicle Arbitrage Platform
 
-> **Enterprise-grade vehicle arbitrage analysis platform** for government auction deals
+A production-ready FastAPI application for intelligent vehicle arbitrage analysis.
 
-DealerScope is a production-ready deal-finding "inbox" for government/municipal car & truck auctions. It watches selected marketplaces, normalizes listings, scores arbitrage potential, and delivers a clean, mobile-friendly "New deals" feed with intelligent alerts.
+**Status**: Refactored for production deployment with Docker support.
 
-## 🎯 What It Does
+## Quick Start
 
-- **Monitors** 14+ government auction sites (GovDeals, PublicSurplus, GSA, etc.)
-- **Analyzes** vehicle data for arbitrage opportunities using real market data
-- **Scores** deals by profit potential, risk, and confidence levels
-- **Delivers** a clean inbox experience with real-time notifications
-- **Protects** your competitive advantage with enterprise security
-
-## 🚀 Quick Start
+### Docker (Recommended)
 
 ```bash
-# Clone and start in one command
-git clone <your-repo-url>
+# Clone and start with Docker Compose
+git clone <repository>
 cd dealerscope
-bash scripts/dev.sh
+docker-compose up --build
 ```
 
-That's it! The app will open at `http://localhost:5173` with sample data.
+The API will be available at: http://localhost:8080
 
 ## 🛠 Tech Stack
 

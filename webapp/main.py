@@ -101,7 +101,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     # Get port from environment variable (Cloud Run provides PORT=8080)
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8080))
     uvicorn.run(
         "webapp.main:app",
         host="0.0.0.0",

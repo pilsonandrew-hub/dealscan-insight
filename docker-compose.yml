@@ -4,18 +4,20 @@ services:
   api:
     build: .
     environment:
+      - PORT=8080
       - DATABASE_URL=postgresql://dealerscope:dealerscope@db:5432/dealerscope
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-change_me_in_production}
-      - ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY:-development-secret-key-change-in-production-32chars}
+      - ENVIRONMENT=development
+      - DEBUG=true
     ports:
-      - "8000:8000"
+      - "8080:8080"
     depends_on:
       - db
       - redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3

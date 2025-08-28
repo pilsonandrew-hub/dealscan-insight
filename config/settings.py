@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     environment: str = "production"
     
     # Security
-    secret_key: str = "CHANGE_ME_IN_PRODUCTION"
+    secret_key: str = "development-secret-key-change-in-production-32chars"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
