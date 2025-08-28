@@ -172,6 +172,38 @@ Built-in performance monitoring includes:
 - **Cache Hit Rates**: Intelligent caching strategies
 - **Error Tracking**: Comprehensive error reporting
 
+## 🚀 Validation Dashboard (GitHub Pages)
+
+DealerScope includes a comprehensive validation dashboard deployed via GitHub Pages:
+
+- **📋 Live Dashboard**: Real-time production readiness reports
+- **🔄 Auto-Updates**: Daily validation runs at 6 AM UTC
+- **📊 Multi-Category**: Security, performance, resilience, observability
+- **📱 Mobile-Friendly**: Responsive design for all devices
+
+### Access the Dashboard
+
+```bash
+# View live reports (after GitHub Pages setup)
+https://[username].github.io/[repository]/
+
+# Run validation locally
+./scripts/run-validation-suite.sh
+
+# Manual deployment trigger
+gh workflow run deploy-validation-reports.yml
+```
+
+### Available Reports
+- **Security**: Vulnerability scans, auth testing, RLS validation
+- **Performance**: Load testing, bundle analysis, DB optimization  
+- **Resilience**: Chaos engineering, circuit breaker testing
+- **Observability**: Logging, metrics, distributed tracing
+- **CI/CD**: Pipeline health, test coverage, deployments
+- **Frontend**: Lighthouse scores, accessibility, SEO
+
+See [Validation Dashboard Guide](docs/VALIDATION_DASHBOARD.md) for complete documentation.
+
 ## 🚦 Security Hardening
 
 ### Production Checklist

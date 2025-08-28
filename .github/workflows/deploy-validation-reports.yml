@@ -1,0 +1,203 @@
+name: Deploy Validation Reports to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if validation fails'
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [ main ]
+    paths:
+      - 'validation-reports/**'
+      - 'scripts/run-validation-suite.sh'
+  schedule:
+    # Run validation and deploy daily at 6 AM UTC
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  run-validation-suite:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        npm ci
+        pip install -r requirements.txt
+        
+    - name: Setup environment
+      run: |
+        cp .env.example .env
+        # Add any required test environment variables
+        echo "VALIDATION_MODE=ci" >> .env
+        
+    - name: Run comprehensive validation suite
+      run: |
+        chmod +x scripts/run-validation-suite.sh
+        ./scripts/run-validation-suite.sh
+      continue-on-error: true
+      
+    - name: Archive validation artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: validation-reports-${{ github.run_id }}
+        path: validation-reports/
+        retention-days: 30
+        
+    - name: Prepare Pages deployment
+      run: |
+        # Create pages directory structure
+        mkdir -p pages
+        
+        # Find the latest validation report
+        LATEST_HTML=$(find validation-reports/final -name "*.html" -type f | head -1)
+        LATEST_JSON=$(find validation-reports/final -name "validation-summary-*.json" -type f | head -1)
+        
+        if [ -n "$LATEST_HTML" ]; then
+          cp "$LATEST_HTML" pages/index.html
+          echo "✅ Copied HTML report: $LATEST_HTML"
+        else
+          echo "❌ No HTML report found, creating placeholder"
+          cat > pages/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>DealerScope Validation Reports</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .error { color: #d73027; background: #fff2f2; padding: 20px; border-radius: 8px; }
+          </style>
+        </head>
+        <body>
+          <h1>DealerScope Validation Reports</h1>
+          <div class="error">
+            <h2>No validation reports available</h2>
+            <p>The validation suite has not run successfully yet. Check the Actions tab for build logs.</p>
+          </div>
+        </body>
+        </html>
+        EOF
+        fi
+        
+        if [ -n "$LATEST_JSON" ]; then
+          cp "$LATEST_JSON" pages/summary.json
+          echo "✅ Copied JSON summary: $LATEST_JSON"
+        fi
+        
+        # Copy all reports for browsing
+        if [ -d "validation-reports" ]; then
+          cp -r validation-reports pages/reports
+        fi
+        
+        # Create index page with links to all reports
+        cat > pages/reports.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>All Validation Reports - DealerScope</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 20px 0; }
+            .report-card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; background: #f9f9f9; }
+            .report-card h3 { margin-top: 0; color: #333; }
+            .report-link { color: #0366d6; text-decoration: none; }
+            .report-link:hover { text-decoration: underline; }
+            .timestamp { color: #666; font-size: 0.9em; }
+          </style>
+        </head>
+        <body>
+          <h1>🔍 DealerScope Validation Reports</h1>
+          <p><a href="index.html">← Back to Latest Report</a> | <a href="summary.json">📄 JSON Summary</a></p>
+          
+          <div class="report-grid">
+        EOF
+        
+        # Add links to all validation categories
+        for category in security auth resilience performance observability cicd dbops frontend; do
+          if [ -d "pages/reports/$category" ]; then
+            cat >> pages/reports.html << EOF
+            <div class="report-card">
+              <h3>📊 ${category^} Reports</h3>
+              <div>
+        EOF
+            find "pages/reports/$category" -name "*.json" -o -name "*.html" -o -name "*.txt" | sort -r | head -5 | while read file; do
+              basename_file=$(basename "$file")
+              rel_path="reports/$category/$basename_file"
+              cat >> pages/reports.html << EOF
+                <a href="$rel_path" class="report-link">$basename_file</a><br>
+        EOF
+            done
+            cat >> pages/reports.html << 'EOF'
+              </div>
+            </div>
+        EOF
+          fi
+        done
+        
+        cat >> pages/reports.html << 'EOF'
+          </div>
+          
+          <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; color: #666;">
+            <p>Reports generated by DealerScope Validation Suite</p>
+          </footer>
+        </body>
+        </html>
+        EOF
+        
+        echo "📁 Pages directory prepared:"
+        ls -la pages/
+        
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+      
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: pages/
+        
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: run-validation-suite
+    
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+      
+    - name: Post deployment summary
+      run: |
+        echo "## 🚀 Validation Reports Deployed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📋 **Main Report**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+        echo "📊 **All Reports**: ${{ steps.deployment.outputs.page_url }}reports.html" >> $GITHUB_STEP_SUMMARY
+        echo "📄 **JSON Summary**: ${{ steps.deployment.outputs.page_url }}summary.json" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The validation suite runs daily at 6 AM UTC and deploys updated reports automatically." >> $GITHUB_STEP_SUMMARY
