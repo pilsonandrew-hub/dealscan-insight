@@ -236,23 +236,34 @@ jobs:
           
           echo "✅ Python dependencies and security tools installed successfully"
 
-      - name: Install validation and security tools
+      - name: Install validation tools
         run: |
-          set -euo pipefail
+          echo "Installing comprehensive validation tools..."
           
-          # Install Node.js security tools if package.json exists
-          if [ -f package.json ] || [ -f frontend/package.json ]; then
-            echo "📦 Installing Node.js security tools..."
-            npm install -g snyk@latest audit-ci@latest --no-fund --no-audit || echo "⚠️ Some Node security tools failed to install"
-          fi
+          # Security scanning tools
+          npm install -g snyk@latest --no-audit --no-fund
+          pip install safety bandit semgrep
           
-          # Install additional system tools for validation
-          sudo apt-get install -y --no-install-recommends \
-            wget \
-            gnupg \
-            software-properties-common || echo "⚠️ Some system tools failed to install"
+          # Performance tools - k6 for real load testing
+          curl -L https://github.com/grafana/k6/releases/download/v0.45.0/k6-v0.45.0-linux-amd64.tar.gz | tar xz --strip-components=1 -C /usr/local/bin/
+          chmod +x /usr/local/bin/k6
           
-          echo "✅ Validation and security tools installed"
+          # Web testing tools
+          pip install pytest pytest-cov requests playwright
+          npm install -g lighthouse@latest --no-audit --no-fund
+          
+          # OWASP ZAP for security testing
+          wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.sh
+          chmod +x ZAP_2_14_0_unix.sh
+          sudo ./ZAP_2_14_0_unix.sh -q -dir /opt/zap/
+          
+          # Verify installations
+          k6 version || exit 1
+          safety --version || exit 1
+          bandit --version || exit 1
+          lighthouse --version || exit 1
+          
+          echo "✅ All validation tools successfully installed and verified"
 
       - name: Run backend tests with monitoring
         env:

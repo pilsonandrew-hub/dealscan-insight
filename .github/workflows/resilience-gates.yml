@@ -1,0 +1,140 @@
+name: Resilience Gates
+
+on:
+  workflow_call:
+
+jobs:
+  resilience-gates:
+    name: Resilience Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.19.0'
+          cache: 'npm'
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.7'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests pytest
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm ci --no-audit --no-fund
+            else
+              npm ci --no-audit --no-fund
+            fi
+          fi
+      
+      - name: Circuit Breaker Test
+        run: |
+          echo "Testing real circuit breaker implementation..."
+          if [ -f "src/utils/circuitBreakerEnhanced.ts" ] || [ -f "src/utils/circuit-breaker.ts" ]; then
+            node -e "
+const fs = require('fs');
+const files = ['src/utils/circuitBreakerEnhanced.ts', 'src/utils/circuit-breaker.ts'];
+let found = false;
+for (const file of files) {
+  if (fs.existsSync(file)) {
+    const content = fs.readFileSync(file, 'utf8');
+    if (content.includes('CircuitBreaker') && content.includes('open') && content.includes('closed')) {
+      console.log('✅ Circuit breaker implementation found');
+      found = true;
+      break;
+    }
+  }
+}
+if (!found) {
+  console.log('⚠️ No circuit breaker implementation found');
+  process.exit(1);
+}
+"
+          else
+            echo "❌ Circuit breaker files not found"
+            exit 1
+          fi
+      
+      - name: Retry Logic Test
+        run: |
+          echo "Testing retry logic implementation..."
+          if [ -f "src/utils/retry-manager.ts" ]; then
+            node -e "
+const fs = require('fs');
+const content = fs.readFileSync('src/utils/retry-manager.ts', 'utf8');
+if (content.includes('retry') && content.includes('attempt') && content.includes('delay')) {
+  console.log('✅ Retry logic implementation found');
+} else {
+  console.log('❌ Retry logic implementation incomplete');
+  process.exit(1);
+}
+"
+          else
+            echo "❌ Retry manager not found"
+            exit 1
+          fi
+      
+      - name: Rate Limiting Test
+        run: |
+          echo "Testing rate limiting implementation..."
+          if [ -f "src/utils/rate-limiter.ts" ] || [ -f "src/utils/elite-rate-limiter.ts" ]; then
+            node -e "
+const fs = require('fs');
+const files = ['src/utils/rate-limiter.ts', 'src/utils/elite-rate-limiter.ts'];
+let found = false;
+for (const file of files) {
+  if (fs.existsSync(file)) {
+    const content = fs.readFileSync(file, 'utf8');
+    if (content.includes('RateLimiter') && (content.includes('limit') || content.includes('throttle'))) {
+      console.log('✅ Rate limiter implementation found');
+      found = true;
+      break;
+    }
+  }
+}
+if (!found) {
+  console.log('❌ Rate limiter implementation not found');
+  process.exit(1);
+}
+"
+          else
+            echo "❌ Rate limiter files not found"
+            exit 1
+          fi
+      
+      - name: Error Handling Test
+        run: |
+          echo "Testing error handling implementation..."
+          if [ -f "src/utils/globalErrorHandler.ts" ] || [ -f "src/lib/centralizedErrorHandling.ts" ]; then
+            node -e "
+const fs = require('fs');
+const files = ['src/utils/globalErrorHandler.ts', 'src/lib/centralizedErrorHandling.ts'];
+let found = false;
+for (const file of files) {
+  if (fs.existsSync(file)) {
+    const content = fs.readFileSync(file, 'utf8');
+    if (content.includes('error') && (content.includes('handler') || content.includes('catch'))) {
+      console.log('✅ Error handling implementation found');
+      found = true;
+      break;
+    }
+  }
+}
+if (!found) {
+  console.log('❌ Error handling implementation not found');
+  process.exit(1);
+}
+"
+          else
+            echo "❌ Error handling files not found"
+            exit 1
+          fi

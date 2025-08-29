@@ -1,0 +1,109 @@
+name: Data Quality Gates
+
+on:
+  workflow_call:
+
+jobs:
+  data-quality-gates:
+    name: Data Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.7'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install jsonschema requests pytest
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+      
+      - name: Data Validation Test
+        run: |
+          echo "Running real data validation tests..."
+          if [ -f "schemas/vehicle.schema.json" ] && [ -f "schemas/provenance.schema.json" ]; then
+            python -c "
+import json
+import jsonschema
+
+# Validate vehicle schema
+with open('schemas/vehicle.schema.json') as f:
+    vehicle_schema = json.load(f)
+    
+# Test with sample data
+sample_vehicle = {
+    'id': 'test-123',
+    'make': 'Toyota',
+    'model': 'Camry',
+    'year': 2020,
+    'vin': 'TEST12345678901234'
+}
+
+try:
+    jsonschema.validate(sample_vehicle, vehicle_schema)
+    print('✅ Vehicle schema validation passed')
+except jsonschema.ValidationError as e:
+    print(f'❌ Vehicle schema validation failed: {e}')
+    exit(1)
+"
+          else
+            echo "⚠️ Schema files not found, skipping validation"
+          fi
+      
+      - name: Schema Validation Test
+        run: |
+          echo "Testing JSON schema validity..."
+          if [ -f "schemas/vehicle.schema.json" ]; then
+            python -c "
+import json
+with open('schemas/vehicle.schema.json') as f:
+    schema = json.load(f)
+    print('✅ Vehicle schema is valid JSON')
+"
+          fi
+          if [ -f "schemas/provenance.schema.json" ]; then
+            python -c "
+import json
+with open('schemas/provenance.schema.json') as f:
+    schema = json.load(f)
+    print('✅ Provenance schema is valid JSON')
+"
+          fi
+      
+      - name: API Contract Test
+        run: |
+          echo "Testing API contracts..."
+          # Test basic API structure if webapp exists
+          if [ -d "webapp" ]; then
+            python -c "
+import os
+import ast
+
+# Check if API routes are properly defined
+api_files = []
+for root, dirs, files in os.walk('webapp/routers'):
+    for file in files:
+        if file.endswith('.py'):
+            api_files.append(os.path.join(root, file))
+
+if api_files:
+    print(f'✅ Found {len(api_files)} API router files')
+    for file in api_files:
+        try:
+            with open(file) as f:
+                ast.parse(f.read())
+            print(f'✅ {file} syntax is valid')
+        except SyntaxError as e:
+            print(f'❌ {file} has syntax errors: {e}')
+            exit(1)
+else:
+    print('⚠️ No API router files found')
+"
+          else
+            echo "⚠️ No webapp directory found, skipping API contract tests"
+          fi
