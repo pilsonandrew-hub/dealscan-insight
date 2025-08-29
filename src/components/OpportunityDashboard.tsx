@@ -21,7 +21,7 @@ import { Opportunity } from '@/types/dealerscope';
 import { useMarketAnalysis, useMarketMetrics } from '@/hooks/useMarketAnalysis';
 import { useAdvancedOptimizer } from '@/hooks/useAdvancedOptimizer';
 import { useToast } from '@/hooks/use-toast';
-import { createLogger } from '@/utils/productionLogger';
+import { logger } from '@/core/UnifiedLogger';
 
 interface DashboardStats {
   totalOpportunities: number;
@@ -32,7 +32,6 @@ interface DashboardStats {
 }
 
 export function OpportunityDashboard() {
-  const logger = createLogger('OpportunityDashboard');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [stats, setStats] = useState<DashboardStats>({
     totalOpportunities: 0,
@@ -107,7 +106,7 @@ export function OpportunityDashboard() {
       setOpportunities(processedOpportunities);
       calculateStats(processedOpportunities);
     } catch (error) {
-      console.error('Error fetching opportunities:', error);
+      logger.error('Error fetching opportunities', { error });
       toast({
         title: "Error",
         description: "Failed to fetch opportunities",

@@ -25,6 +25,7 @@ import {
   Upload,
   Users
 } from "lucide-react";
+import { logger } from '@/core/UnifiedLogger';
 
 export function SystemMetrics() {
   const [performanceStats, setPerformanceStats] = useState<any>(null);
@@ -48,7 +49,7 @@ export function SystemMetrics() {
       setRecentEvents(recent);
 
     } catch (error) {
-      console.error('Failed to refresh metrics:', error);
+      logger.error('Failed to refresh metrics', { error });
     } finally {
       setRefreshing(false);
     }

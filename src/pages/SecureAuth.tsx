@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/UnifiedAuthContext';
+import { useAuth } from '@/contexts/ModernAuthContext';
 import { inputValidator } from '@/utils/inputValidator';
 import { logger } from '@/utils/secureLogger';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Eye, EyeOff, Shield, Lock, UserPlus, LogIn } from 'lucide-react';
 
 export function AuthPage() {
-  const { signIn, signUp, resetPassword, isAuthenticated, loading } = useAuth();
+  const { signIn, signUp, resetPassword, user, loading } = useAuth();
+  const isAuthenticated = !!user;
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -112,7 +113,7 @@ export function AuthPage() {
           break;
 
         case 'signup':
-          result = await signUp(formData.email, formData.password, formData.displayName);
+          result = await signUp(formData.email, formData.password);
           if (result.error) {
             if (result.error.message.includes('User already registered')) {
               setMessage({ type: 'error', text: 'Account already exists. Please sign in instead.' });

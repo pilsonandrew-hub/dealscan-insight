@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useDealScoring } from "@/hooks/useDealScoring";
 import { toast } from "sonner";
+import { logger } from "@/core/UnifiedLogger";
 
 export const DealScoringPanel = () => {
   const { isScoring, progress, scoreAllListings, cancelScoring } = useDealScoring();
@@ -14,7 +15,7 @@ export const DealScoringPanel = () => {
     try {
       await scoreAllListings();
     } catch (error) {
-      console.error('Error starting scoring:', error);
+      logger.error('Error starting scoring', { error });
       toast.error('Failed to start scoring');
     }
   };

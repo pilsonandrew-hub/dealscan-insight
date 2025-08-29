@@ -12,10 +12,9 @@ import { useOptimizedOpportunities } from '@/hooks/useOptimizedOpportunities';
 import { supabase } from '@/integrations/supabase/client';
 import { Opportunity } from '@/types/dealerscope';
 import { RefreshCw, TrendingUp, DollarSign, Target, AlertCircle } from 'lucide-react';
-import { createLogger } from '@/utils/productionLogger';
+import { logger } from '@/core/UnifiedLogger';
 
 export function OptimizedDashboard() {
-  const logger = createLogger('OptimizedDashboard');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +76,7 @@ export function OptimizedDashboard() {
 
       setOpportunities(processedData);
     } catch (err) {
-      console.error('Error loading opportunities:', err);
+      logger.error('Error loading opportunities', { error: err });
       setError(err instanceof Error ? err.message : 'Failed to load opportunities');
     } finally {
       setIsLoading(false);

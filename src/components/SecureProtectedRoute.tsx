@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/UnifiedAuthContext';
+import { useAuth } from '@/contexts/ModernAuthContext';
 import { logger } from '@/utils/secureLogger';
 
 interface ProtectedRouteProps {
@@ -14,7 +14,8 @@ interface ProtectedRouteProps {
 }
 
 export function SecureProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
-  const { isAuthenticated, user, loading } = useAuth();
+  const { user, loading } = useAuth();
+  const isAuthenticated = !!user;
   const location = useLocation();
 
   // Show loading state while checking authentication

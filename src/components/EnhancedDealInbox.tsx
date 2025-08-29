@@ -20,7 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Opportunity } from "@/types/dealerscope";
 import { useEnhancedDealScoring } from "@/hooks/useEnhancedDealScoring";
-import { createLogger } from "@/utils/productionLogger";
+import { logger } from "@/core/UnifiedLogger";
 
 interface DealFilters {
   status: string;
@@ -34,7 +34,6 @@ interface DealFilters {
 }
 
 export const EnhancedDealInbox = () => {
-  const logger = createLogger('EnhancedDealInbox');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDeals, setSelectedDeals] = useState<Set<string>>(new Set());
@@ -131,7 +130,7 @@ export const EnhancedDealInbox = () => {
 
       setOpportunities(enhancedOpportunities);
     } catch (error) {
-      console.error('Error fetching opportunities:', error);
+      logger.error('Error fetching opportunities', { error });
       toast.error('Failed to load opportunities');
     } finally {
       setLoading(false);
@@ -225,7 +224,7 @@ export const EnhancedDealInbox = () => {
 
       setSelectedDeals(new Set());
     } catch (error) {
-      console.error('Error performing bulk action:', error);
+      logger.error('Error performing bulk action', { error });
       toast.error('Failed to update deals');
     }
   };

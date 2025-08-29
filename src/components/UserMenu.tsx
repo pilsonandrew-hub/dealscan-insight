@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAuth } from '@/contexts/UnifiedAuthContext';
+import { useAuth } from '@/contexts/ModernAuthContext';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
