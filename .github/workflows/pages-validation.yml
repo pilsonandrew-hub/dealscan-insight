@@ -349,7 +349,7 @@ jobs:
           
           echo "✅ Pre-flight security checks passed"
 
-      - name: Run production-ready validation suite
+      - name: Run REAL production validation suite
         env:
           APP_ENV: ci
           CI: true
@@ -357,131 +357,65 @@ jobs:
         run: |
           set -euo pipefail
           
-          echo "🚀 Starting DealerScope validation suite..."
+          echo "🚀 Starting REAL DealerScope validation..."
+          chmod +x scripts/run-real-validation.sh
           
-          # Run with timeout but always generate some kind of report
-          if timeout 1800 ./scripts/run-validation-suite.sh; then
-            echo "✅ Validation suite completed successfully"
+          # Run the REAL validation script that can actually FAIL
+          if ./scripts/run-real-validation.sh; then
+            echo "✅ REAL validation suite completed successfully"
           else
             exit_code=$?
-            echo "⚠️ Validation suite completed with issues (exit code: ${exit_code})"
+            echo "⚠️ REAL validation suite failed with exit code: ${exit_code}"
             
-            # Generate fallback reports if none exist
+            # Still generate fallback reports if validation fails catastrophically
             if [[ ! -f "validation-reports/final/index.html" ]] || [[ ! -f "validation-reports/final/summary.json" ]]; then
-              echo "📋 Generating fallback reports..."
+              echo "📋 Generating emergency fallback reports..."
               mkdir -p validation-reports/final
               
-              # Generate comprehensive error report
+              # Emergency error report
               cat > validation-reports/final/summary.json << EOF
 {
   "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "source_commit": "${GITHUB_SHA:-unknown}",
   "workflow_run": "${GITHUB_RUN_NUMBER:-unknown}",
-  "status": "$([ $exit_code -eq 124 ] && echo "timeout" || echo "error")",
+  "overall_status": "CATASTROPHIC_FAILURE",
   "exit_code": $exit_code,
-  "critical_failures": $([ $exit_code -eq 124 ] && echo "1" || echo "0"),
-  "total_tests": 1,
-  "passed_tests": 0,
-  "failed_tests": 1,
-  "warned_tests": 0,
-  "message": "$([ $exit_code -eq 124 ] && echo "Validation suite timed out" || echo "Validation suite encountered errors")",
-  "next_steps": [
-    "Review validation script logs",
-    "Check dependency installation",
-    "Verify script permissions and integrity"
-  ]
+  "critical_failures": 999,
+  "p95_api_ms": 999999,
+  "memory_mb": 999,
+  "security_issues": 999,
+  "success_rate": 0.0,
+  "error": "Validation script failed to complete"
 }
 EOF
 
-              # Generate comprehensive error HTML report
+              # Emergency error HTML
               cat > validation-reports/final/index.html << 'HTML'
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DealerScope Validation Dashboard - Issues Detected</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
-        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        .card { background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); padding: 40px; }
-        h1 { color: #dc2626; margin: 0 0 20px 0; font-size: 2.5rem; }
-        .status-badge { display: inline-block; padding: 10px 20px; border-radius: 25px; font-weight: 600; margin: 15px 0; }
-        .error { background: #fee2e2; color: #dc2626; border: 2px solid #f87171; }
-        .warning { background: #fef3c7; color: #d97706; border: 2px solid #fbbf24; }
-        .info { background: #dbeafe; color: #2563eb; border: 2px solid #60a5fa; }
-        .section { margin: 30px 0; padding: 20px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #e2e8f0; }
-        .section h3 { margin: 0 0 15px 0; color: #1e40af; }
-        .links { margin-top: 30px; }
-        .link { display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin: 10px 10px 10px 0; transition: all 0.2s; }
-        .link:hover { background: #1d4ed8; transform: translateY(-2px); }
-        ul { padding-left: 20px; }
-        li { margin: 8px 0; }
-    </style>
-</head>
+<html>
+<head><title>VALIDATION FAILURE</title>
+<style>body{font-family:Arial;margin:20px;color:#d32f2f;}</style></head>
 <body>
-    <div class="container">
-        <div class="card">
-            <h1>🚨 DealerScope Validation Dashboard</h1>
-            <div class="status-badge error">
-                ❌ Validation Issues Detected
-            </div>
-            
-            <div class="section">
-                <h3>🔍 What Happened?</h3>
-                <p>The validation suite encountered issues during execution. This could be due to:</p>
-                <ul>
-                    <li>Timeout during long-running validation processes</li>
-                    <li>Missing dependencies or configuration issues</li>
-                    <li>Network connectivity problems</li>
-                    <li>Resource constraints on the CI runner</li>
-                    <li>Code quality issues that failed validation checks</li>
-                </ul>
-            </div>
-            
-            <div class="section">
-                <h3>🔧 Next Steps</h3>
-                <ul>
-                    <li><strong>Check Logs:</strong> Review the GitHub Actions logs for detailed error messages</li>
-                    <li><strong>Verify Dependencies:</strong> Ensure all required packages are properly installed</li>
-                    <li><strong>Review Code Changes:</strong> Check if recent changes introduced validation issues</li>
-                    <li><strong>Re-run Validation:</strong> Manual re-trigger might resolve transient issues</li>
-                </ul>
-            </div>
-            
-            <div class="section">
-                <h3>📊 Expected Validations</h3>
-                <p>When working properly, this dashboard shows results for:</p>
-                <ul>
-                    <li>🛡️ Security scanning (dependency vulnerabilities, SAST)</li>
-                    <li>⚡ Performance testing (load tests, bundle analysis)</li>
-                    <li>🔄 Resilience checks (circuit breakers, retry mechanisms)</li>
-                    <li>👁️ Observability (logging, monitoring, tracing)</li>
-                    <li>🗄️ Database validation (migrations, RLS policies)</li>
-                    <li>🎨 Frontend quality (TypeScript, linting, accessibility)</li>
-                </ul>
-            </div>
-            
-            <div class="links">
-                <a href="./summary.json" class="link">📄 View Error Details (JSON)</a>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
+<h1>🚨 CRITICAL VALIDATION FAILURE</h1>
+<p><strong>The validation script failed to complete.</strong></p>
+<p>This indicates serious infrastructure issues that must be resolved before deployment.</p>
+<ul>
+<li>Backend may have failed to start</li>
+<li>Dependencies may be missing</li>
+<li>System resources may be insufficient</li>
+<li>Security tools may have failed</li>
+</ul>
+<p><strong>DO NOT DEPLOY TO PRODUCTION</strong></p>
+</body></html>
 HTML
-              echo "📋 Fallback error reports generated"
             fi
             
-            # In CI mode, don't exit with error to allow report deployment
-            if [ "${CI:-false}" = "true" ]; then
-              echo "🔧 CI mode: continuing to deploy reports despite validation issues"
-            else
-              exit $exit_code
-            fi
+            # In CI mode, deploy the failure report but exit with error
+            echo "🔧 CI mode: deploying failure report for analysis"
+            exit $exit_code
           fi
           
-          # Verify required outputs were created (should always exist now)
+          # Verify required outputs were created by REAL tests
           required_files=(
             "validation-reports/final/index.html"
             "validation-reports/final/summary.json"
@@ -490,14 +424,28 @@ HTML
           for file in "${required_files[@]}"; do
             if [[ ! -f "$file" ]]; then
               echo "❌ Required output file missing: $file"
-              # List what was actually created
               echo "📋 Available files in validation-reports/:"
               find validation-reports -type f 2>/dev/null || echo "No validation-reports directory found"
               exit 1
             fi
           done
           
-          echo "✅ All required validation outputs verified"
+          # ENFORCE REAL SLO GATES - this will FAIL if metrics are bad
+          echo "🚪 Enforcing SLO gates..."
+          jq -e '
+            (.overall_status == "PASS") and
+            (.p95_api_ms <= 200) and
+            (.memory_mb <= 120) and
+            (.security_issues <= 5) and
+            (.success_rate >= 80)
+          ' validation-reports/final/summary.json || {
+            echo "❌ SLO GATE FAILURE - Metrics do not meet production requirements"
+            echo "📊 Current metrics:"
+            jq '.' validation-reports/final/summary.json
+            exit 1
+          }
+          
+          echo "✅ All SLO gates passed - Ready for production deployment"
 
       # ---------- Secure Artifact Collection ----------
       - name: Collect and prepare site (with resilient fallback)
