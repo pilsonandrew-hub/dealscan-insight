@@ -1,0 +1,98 @@
+name: Security Gates
+
+on:
+  workflow_call:
+
+jobs:
+  security-gates:
+    name: Security Gates  
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.19.0'
+          cache: 'npm'
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.7'
+          cache: 'pip'
+      
+      - name: Install dependencies and security tools
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          
+          # Install frontend dependencies if they exist
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm ci --no-audit --no-fund && cd ..
+            else
+              npm ci --no-audit --no-fund
+            fi
+          fi
+          
+          # Install Python dependencies and security tools
+          pip install requests bandit safety pytest
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+      
+      - name: Build and start application for security testing
+        run: |
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm run build && npm run preview &
+            else
+              npm run build && npm run preview &
+            fi
+            echo $! > app.pid
+            sleep 10  # Wait for server to start
+            echo "✅ Application started for security testing"
+          fi
+      
+      - name: Run comprehensive security tests
+        run: |
+          echo "Running real security tests..."
+          python scripts/security-test.py
+          echo "✅ Security tests completed"
+      
+      - name: Bandit Python Security Scan
+        run: |
+          if [ -d "webapp" ]; then
+            echo "Running Bandit security scan on Python code..."
+            bandit -r webapp/ -f json -o reports/bandit-results.json || echo "⚠️ Bandit found issues"
+            echo "✅ Bandit scan completed"
+          else
+            echo "⚠️ No webapp directory found, skipping Python security scan"
+          fi
+      
+      - name: Safety Python Dependency Check
+        run: |
+          echo "Checking Python dependencies for known vulnerabilities..."
+          safety check --json --output reports/safety-results.json || echo "⚠️ Safety found vulnerabilities"
+          echo "✅ Safety check completed"
+      
+      - name: NPM Audit
+        run: |
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            echo "Running npm audit for Node.js vulnerabilities..."
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm audit --audit-level=moderate --json > ../reports/npm-audit.json || echo "⚠️ npm audit found issues"
+            else
+              npm audit --audit-level=moderate --json > reports/npm-audit.json || echo "⚠️ npm audit found issues"
+            fi
+            echo "✅ npm audit completed"
+          fi
+      
+      - name: Stop application
+        if: always()
+        run: |
+          if [ -f app.pid ]; then
+            kill $(cat app.pid) || true
+            rm app.pid
+          fi

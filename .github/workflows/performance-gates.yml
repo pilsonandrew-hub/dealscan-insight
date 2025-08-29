@@ -1,0 +1,133 @@
+name: Performance Gates
+
+on:
+  workflow_call:
+
+env:
+  NODE_ENV: ci
+
+jobs:
+  performance-gates:
+    name: Performance Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.19.0'
+          cache: 'npm'
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.7'
+          cache: 'pip'
+      
+      - name: Install dependencies with validation
+        run: |
+          set -euo pipefail
+          mkdir -p validation-reports/raw reports
+          
+          # Install and validate frontend dependencies
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm ci --no-audit --no-fund && cd ..
+            else
+              npm ci --no-audit --no-fund
+            fi
+            echo "✅ Frontend dependencies installed"
+          else
+            echo "⚠️ No package.json found, skipping npm install"
+          fi
+          
+          # Install and validate Python dependencies
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+            echo "✅ Python dependencies installed"
+          else
+            echo "⚠️ No requirements.txt found, installing basic packages"
+            pip install requests pytest || true
+          fi
+          
+          # Install k6 for performance testing
+          curl -L https://github.com/grafana/k6/releases/download/v0.45.0/k6-v0.45.0-linux-amd64.tar.gz | tar xz --strip-components=1 -C /usr/local/bin/
+          chmod +x /usr/local/bin/k6
+      
+      - name: Build application for testing
+        run: |
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm run build && cd ..
+            else
+              npm run build
+            fi
+            echo "✅ Application built successfully"
+          fi
+      
+      - name: Start application for testing
+        run: |
+          if [ -f "package.json" ] || [ -f "frontend/package.json" ]; then
+            if [ -f "frontend/package.json" ]; then
+              cd frontend && npm run preview &
+            else
+              npm run preview &
+            fi
+            echo $! > app.pid
+            sleep 10  # Wait for server to start
+            echo "✅ Application started on localhost:4173"
+          fi
+      
+      - name: API Performance Test (P95 < 200ms)
+        run: |
+          echo "Running real k6 performance test..."
+          k6 run --summary-export=reports/k6-summary.json scripts/performance-test.js
+          
+          # Validate P95 metric
+          P95_LATENCY=$(jq -r '.metrics.http_req_duration.values."p(95)"' reports/k6-summary.json)
+          echo "P95 Latency: ${P95_LATENCY}ms"
+          
+          if (( $(echo "$P95_LATENCY > 200" | bc -l) )); then
+            echo "❌ P95 latency exceeded threshold: $P95_LATENCY ms"
+            exit 1
+          fi
+          echo "✅ API P95 latency acceptable: ${P95_LATENCY}ms"
+      
+      - name: Bundle Size Analysis
+        run: |
+          echo "Analyzing real bundle size..."
+          if [ -d "dist" ]; then
+            BUNDLE_SIZE=$(du -sh dist/ | cut -f1)
+            BUNDLE_SIZE_BYTES=$(du -sb dist/ | cut -f1)
+            echo "Bundle size: $BUNDLE_SIZE ($BUNDLE_SIZE_BYTES bytes)"
+            
+            # Check if bundle is under 2MB
+            if [ $BUNDLE_SIZE_BYTES -gt 2097152 ]; then
+              echo "❌ Bundle size too large: $BUNDLE_SIZE"
+              exit 1
+            fi
+            echo "✅ Bundle size within limits: $BUNDLE_SIZE"
+          else
+            echo "⚠️ No dist directory found, skipping bundle analysis"
+          fi
+      
+      - name: Memory Usage Test
+        run: |
+          echo "Running real memory usage test..."
+          node scripts/test-memory-usage.js
+          echo "✅ Memory usage test completed"
+      
+      - name: Cache Performance Test
+        run: |
+          echo "Running real cache performance test..."
+          node scripts/test-cache-performance.js
+          echo "✅ Cache performance test completed"
+      
+      - name: Stop application
+        if: always()
+        run: |
+          if [ -f app.pid ]; then
+            kill $(cat app.pid) || true
+            rm app.pid
+          fi
