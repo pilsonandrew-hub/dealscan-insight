@@ -72,12 +72,15 @@ get_critical_failures() {
 }
 
 main() {
-    header "DealerScope Comprehensive Validation Suite"
+    header "DealerScope Master Validation Runner"
     log "🎯 Production Readiness Validation Starting..."
     log "📊 Reports directory: $REPORTS_DIR"
     
-    # Create reports directory structure
-    mkdir -p "$REPORTS_DIR"/{security,auth,resilience,performance,observability,cicd,dbops,frontend,runbooks,final}
+    # Create reports directory structure - GUARANTEED to exist
+    mkdir -p "$REPORTS_DIR"/{security,auth,resilience,performance,observability,cicd,dbops,frontend,runbooks,final,raw}
+    
+    # ALWAYS create minimal required outputs first (failsafe)
+    create_minimal_outputs
     
     # 1. Security Validation
     run_security_validation
@@ -112,6 +115,62 @@ main() {
     # Apply gate policy and exit appropriately
     apply_gate_policy
 }
+
+create_minimal_outputs() {
+    log "📋 Creating guaranteed minimal outputs..."
+    
+    # Create minimal summary.json (will be enhanced later)
+    cat > "$REPORTS_DIR/final/summary.json" << EOF
+{
+  "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source_commit": "${GITHUB_SHA:-unknown}",
+  "critical_failures": 0,
+  "total_tests": 0,
+  "passed_tests": 0,
+  "failed_tests": 0,
+  "warned_tests": 0,
+  "status": "processing",
+  "notes": "Initial placeholder; will be updated with real metrics."
+}
+EOF
+
+    # Create minimal index.html (will be enhanced later)
+    cat > "$REPORTS_DIR/final/index.html" << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DealerScope Validation Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2563eb; border-bottom: 3px solid #2563eb; padding-bottom: 10px; }
+        .status { padding: 15px; border-radius: 6px; margin: 20px 0; }
+        .processing { background: #fef3c7; border-left: 4px solid #f59e0b; }
+        .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 30px; }
+        .link-card { padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; text-decoration: none; color: #334155; transition: all 0.2s; }
+        .link-card:hover { background: #e2e8f0; transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 DealerScope Validation Dashboard</h1>
+        <div class="status processing">
+            <strong>⏳ Processing:</strong> Validation suite is running. This page will be updated with comprehensive results.
+        </div>
+        <div class="links">
+            <a href="./summary.json" class="link-card">
+                <strong>📄 Summary JSON</strong><br>
+                Machine-readable results
+            </a>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+
+    success "Minimal required outputs created successfully"
 
 run_security_validation() {
     header "🛡️  Security Validation Suite"
