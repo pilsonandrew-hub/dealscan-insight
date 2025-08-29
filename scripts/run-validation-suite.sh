@@ -1,9 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-# CI/CD friendly mode - don't exit on individual test failures
+# CI/CD friendly mode - continue on individual test failures but track them
 if [ "${CI:-false}" = "true" ]; then
-    set +e  # Don't exit on errors in CI
+    set +e  # Don't exit on errors in CI, but track failures
+    echo "🔧 Running in CI mode - will continue on individual test failures"
 fi
 
 # DealerScope Master Validation Runner
@@ -255,7 +256,7 @@ run_performance_validation() {
     # Check bundle size if dist exists
     if [ -d "dist" ]; then
         local bundle_size=$(du -sh dist | cut -f1 | sed 's/[^0-9.]//g')
-        if (( $(echo "$bundle_size < 10" | bc -l 2>/dev/null || echo "1") )); then
+        if command -v bc >/dev/null && (( $(echo "$bundle_size < 10" | bc -l 2>/dev/null || echo "1") )); then
             success "Bundle size within limits"
             ((perf_score++))
         else
