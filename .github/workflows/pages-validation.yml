@@ -44,6 +44,21 @@ jobs:
           pip install requests beautifulsoup4 lxml pytest
         continue-on-error: true
 
+      - name: Show files
+        run: ls -la && echo "----" && ls -la scripts || true
+
+      - name: Verify validation script exists
+        run: |
+          if [ -f scripts/run-validation-suite.sh ]; then
+            echo "✅ Found scripts/run-validation-suite.sh"
+            ls -la scripts/run-validation-suite.sh
+          else
+            echo "❌ Missing scripts/run-validation-suite.sh"
+            echo "Available files in scripts/:"
+            ls -la scripts/ || echo "No scripts directory found"
+            exit 1
+          fi
+
       - name: Make validation script executable
         run: chmod +x scripts/run-validation-suite.sh || true
 
@@ -129,6 +144,9 @@ jobs:
           echo "📁 Public site contents:"
           ls -la public-site/ || echo "No public-site directory created"
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -139,7 +157,14 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Output deployment URL
+        run: |
+          echo "🚀 Deployed to: ${{ steps.deployment.outputs.page_url }}"
+          echo "## 📊 Validation Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 **Dashboard URL**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
