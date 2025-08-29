@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/UnifiedAuthContext';
+import { useAuth } from '@/contexts/ModernAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -60,7 +60,7 @@ export default function Auth() {
     setIsLoading(true);
     setError(null);
     
-    const { error } = await signUp(formData.email, formData.password, formData.displayName);
+    const { error } = await signUp(formData.email, formData.password);
     
     if (error) {
       setError(error.message);

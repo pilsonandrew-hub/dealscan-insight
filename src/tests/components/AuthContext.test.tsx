@@ -5,11 +5,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
-import { AuthProvider, useAuth } from '@/contexts/UnifiedAuthContext';
+import { AuthProvider, useAuth } from '@/contexts/ModernAuthContext';
 
 // Simple test component
 const TestComponent = () => {
-  const { loading, isAuthenticated } = useAuth();
+  const { loading, user } = useAuth();
+  const isAuthenticated = !!user;
   
   if (loading) return <div>Loading...</div>;
   

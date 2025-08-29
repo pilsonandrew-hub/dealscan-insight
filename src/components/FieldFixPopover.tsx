@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Edit3, Check, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { logger } from '@/core/UnifiedLogger';
 
 interface FieldFixPopoverProps {
   url: string;
@@ -64,7 +65,7 @@ export function FieldFixPopover({
       onSave?.(newValue);
       setIsOpen(false);
     } catch (error) {
-      console.error('Failed to save field correction:', error);
+      logger.error('Failed to save field correction', { error });
       toast.error('Failed to save correction', {
         description: 'Please try again'
       });

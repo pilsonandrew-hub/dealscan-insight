@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { createLogger } from "@/utils/productionLogger";
+import { logger } from "@/core/UnifiedLogger";
 
 interface Deal {
   id: string;
@@ -41,7 +41,6 @@ interface DealInboxProps {
 }
 
 export const DealInbox = ({ className = "" }: DealInboxProps) => {
-  const logger = createLogger('DealInbox');
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDeals, setSelectedDeals] = useState<Set<string>>(new Set());
@@ -132,7 +131,7 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
       const { data, error } = await query.limit(100);
 
       if (error) {
-        console.error('Error fetching deals:', error);
+        logger.error('Error fetching deals', { error });
         toast.error('Failed to load deals');
         return;
       }
@@ -146,7 +145,7 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
 
       setDeals(transformedDeals);
     } catch (error) {
-      console.error('Error:', error);
+      logger.error('Deal action error', { error });
       toast.error('Failed to load deals');
     } finally {
       setLoading(false);
@@ -174,7 +173,7 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
       
       toast.success(`Marked ${dealIds.length} deal(s) as read`);
     } catch (error) {
-      console.error('Error marking deals as read:', error);
+      logger.error('Error marking deals as read', { error });
       toast.error('Failed to update deals');
     }
   };
@@ -196,7 +195,7 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
       
       toast.success(`Flagged ${dealIds.length} deal(s) for follow-up`);
     } catch (error) {
-      console.error('Error flagging deals:', error);
+      logger.error('Error flagging deals', { error });
       toast.error('Failed to flag deals');
     }
   };
