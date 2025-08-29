@@ -1,48 +1,86 @@
 name: Publish validation dashboard
 
 on:
-  workflow_dispatch:   # 👈 this enables the "Run workflow" button
+  workflow_dispatch:
   push:
     branches: [ main ]
+  schedule:
+    - cron: '15 6 * * *'   # daily at 06:15 UTC
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+concurrency:
+  group: pages-validation
+  cancel-in-progress: true
+
 jobs:
-  build-and-deploy:
+  validate-and-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---------- Node (frontend) ----------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
 
+      - name: Install frontend deps
+        run: |
+          if [ -d frontend ]; then
+            cd frontend && npm ci
+          else
+            npm ci
+          fi
+
+      - name: Frontend tests (optional if present)
+        run: |
+          if [ -d frontend ]; then
+            cd frontend && npm run test --if-present && npm run build --if-present
+          else
+            npm run test --if-present && npm run build --if-present
+          fi
+
+      # ---------- Python (backend) ----------
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
+          sudo apt-get install -y curl=7.68.0-1ubuntu2* jq=1.6-1ubuntu0* || \
           sudo apt-get install -y curl jq
 
-      - name: Install Node.js dependencies
+      - name: Install backend deps
         run: |
-          npm ci || npm install
-        continue-on-error: true
+          python -m pip install --upgrade pip
+          if [ -f webapp/requirements.txt ]; then
+            pip install -r webapp/requirements.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests beautifulsoup4 lxml pytest
+          fi
 
-      - name: Install Python dependencies
+      - name: Backend tests (pytest) -> junit + coverage
+        env:
+          PYTHONWARNINGS: ignore::DeprecationWarning
         run: |
-          pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml pytest
-        continue-on-error: true
+          mkdir -p validation-reports/raw
+          pytest -q --maxfail=1 --disable-warnings \
+            --junitxml=validation-reports/raw/pytest-junit.xml || echo "No pytest tests found"
 
       - name: Show files
         run: ls -la && echo "----" && ls -la scripts || true
@@ -62,98 +100,46 @@ jobs:
       - name: Make validation script executable
         run: chmod +x scripts/run-validation-suite.sh || true
 
-      - name: Run validation suite (creates validation-reports/)
+      # ---------- Validation Suite ----------
+      - name: Run validation suite (must create validation-reports/final/index.html)
         env:
           APP_ENV: ci
           CI: true
         run: |
-          # Ensure reports directory exists
+          set -e
           mkdir -p validation-reports
-          
-          # Run validation with error handling
-          if ./scripts/run-validation-suite.sh; then
-            echo "✅ Validation suite completed successfully"
-          else
-            echo "⚠️ Validation suite completed with warnings/errors (exit code: $?)"
-          fi
-        continue-on-error: true
+          ./scripts/run-validation-suite.sh
+          test -f validation-reports/final/index.html || (echo "❌ No final index.html produced - suite failed" && exit 1)
 
-      - name: Collect reports for Pages
+      # ---------- Collect + Pages site ----------
+      - name: Build public site from reports
         run: |
+          set -e
+          rm -rf public-site
           mkdir -p public-site
-          
-          # Copy validation reports with fallback handling
-          if [ -d validation-reports/final ] && [ "$(ls -A validation-reports/final)" ]; then
-            echo "📋 Copying final reports..."
-            cp -R validation-reports/final/* public-site/
-          elif [ -d validation-reports ] && [ "$(ls -A validation-reports)" ]; then
-            echo "📋 Copying all validation reports..."
-            cp -R validation-reports/* public-site/
-          else
-            echo "⚠️ No validation reports found, creating fallback page"
-          fi
-          
-          # Ensure index.html exists with proper fallback
-          if [ ! -f public-site/index.html ]; then
-            cat > public-site/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>DealerScope Validation Dashboard</title>
-            <style>
-              body { font-family: system-ui, -apple-system, sans-serif; margin: 40px; line-height: 1.6; }
-              .container { max-width: 800px; margin: 0 auto; }
-              .warning { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 20px; border-radius: 8px; }
-              .info { background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 20px; border-radius: 8px; margin-top: 20px; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <h1>🔍 DealerScope Validation Dashboard</h1>
-              <div class="warning">
-                <h2>⚠️ No Validation Results Available</h2>
-                <p>The validation suite has not generated reports yet. This could be due to:</p>
-                <ul>
-                  <li>First-time setup still in progress</li>
-                  <li>Validation scripts need dependencies installed</li>
-                  <li>Environment configuration required</li>
-                </ul>
-              </div>
-              <div class="info">
-                <h3>📝 Expected Reports</h3>
-                <p>Once validation completes, you'll see reports for:</p>
-                <ul>
-                  <li><strong>Security:</strong> Vulnerability scans, dependency audits</li>
-                  <li><strong>Performance:</strong> Load testing, database optimization</li>
-                  <li><strong>Resilience:</strong> Circuit breakers, chaos testing</li>
-                  <li><strong>Observability:</strong> Logging, metrics, tracing</li>
-                  <li><strong>CI/CD:</strong> Pipeline validation, security scans</li>
-                  <li><strong>Database:</strong> Migration testing, backup validation</li>
-                  <li><strong>Frontend:</strong> Lighthouse audits, E2E testing</li>
-                </ul>
-              </div>
-            </div>
-          </body>
-          </html>
-          EOF
-          fi
+          cp -R validation-reports/final/* public-site/
           
           # Debug output
           echo "📁 Public site contents:"
-          ls -la public-site/ || echo "No public-site directory created"
+          ls -la public-site/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public-site
 
+      - name: Upload raw reports artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-reports
+          path: validation-reports
+          if-no-files-found: error
+
   deploy:
-    needs: build-and-deploy
+    needs: validate-and-build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -165,6 +151,5 @@ jobs:
 
       - name: Output deployment URL
         run: |
-          echo "🚀 Deployed to: ${{ steps.deployment.outputs.page_url }}"
-          echo "## 📊 Validation Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "🔗 **Dashboard URL**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Validation Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
