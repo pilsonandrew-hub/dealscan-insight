@@ -1,0 +1,26 @@
+{
+  "status": "fallback",
+  "generated_at": "TIMESTAMP_PLACEHOLDER",
+  "source_commit": "COMMIT_PLACEHOLDER", 
+  "workflow_run": "RUN_PLACEHOLDER",
+  "critical_failures": 0,
+  "total_tests": 0,
+  "passed_tests": 0,
+  "failed_tests": 0,
+  "warned_tests": 0,
+  "message": "Fallback dashboard generated - validation reports not available",
+  "deployment_status": "FALLBACK_MODE",
+  "next_steps": [
+    "Check validation script execution logs",
+    "Verify all dependencies are properly installed",
+    "Ensure validation-reports/final/ directory is created", 
+    "Review script permissions and integrity",
+    "Check GitHub Actions workflow logs for errors"
+  ],
+  "recommendations": [
+    "Implement proper validation script",
+    "Ensure all required dependencies are pinned",
+    "Add proper error handling in validation suite",
+    "Verify security scanning tools are available"
+  ]
+}
