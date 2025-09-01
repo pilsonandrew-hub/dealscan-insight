@@ -106,7 +106,7 @@ jobs:
           echo "✅ Input validation passed"
 
       # ---------- Dependency Management with Caching ----------
-      - name: Setup Node.js with built-in caching
+      - name: Setup Node.js with deterministic caching
         uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
         with:
           node-version: '18.19.0'  # Pinned version
@@ -115,7 +115,7 @@ jobs:
             package-lock.json
             frontend/package-lock.json
 
-      - name: Install frontend dependencies with retry
+      - name: Install frontend dependencies (fail-fast)
         run: |
           set -euo pipefail
           
@@ -125,30 +125,35 @@ jobs:
             if [ -d frontend ] && [ -f frontend/package.json ]; then
               echo "📦 Installing frontend dependencies from frontend/ directory"
               cd frontend
-              npm ci --no-audit --no-fund
+              # Enforce lockfile-based install - fail if no lockfile
+              if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund --frozen-lockfile
+              else
+                echo "❌ No package-lock.json found - cannot ensure deterministic install"
+                exit 1
+              fi
               cd "$original_dir"
             elif [ -f package.json ]; then
               echo "📦 Installing dependencies from root package.json"
-              npm ci --no-audit --no-fund
+              if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund --frozen-lockfile
+              else
+                echo "❌ No package-lock.json found - cannot ensure deterministic install"
+                exit 1
+              fi
             else
               echo "📋 No package.json found - skipping npm installation"
               return 0
             fi
           }
           
-          # Retry mechanism for network resilience
-          for attempt in 1 2 3; do
-            if install_frontend; then
-              echo "✅ Dependencies installed successfully"
-              break
-            elif [ $attempt -eq 3 ]; then
-              echo "⚠️ Failed to install dependencies after 3 attempts - continuing anyway"
-              break
-            else
-              echo "⚠️ Attempt $attempt failed, retrying in 10 seconds..."
-              sleep 10
-            fi
-          done
+          # Fail-fast approach - no retry on dependency failures
+          if ! install_frontend; then
+            echo "❌ Frontend dependency installation failed"
+            exit 1
+          fi
+          
+          echo "✅ Frontend dependencies installed successfully"
 
       - name: Frontend tests and build with validation
         run: |
@@ -207,10 +212,13 @@ jobs:
       - name: Cache Python dependencies
         uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2 # v4.0.0
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'webapp/requirements.txt') }}
+          path: |
+            ~/.cache/pip
+            ~/.local/lib/python3.11/site-packages
+          key: ${{ runner.os }}-python-3.11.7-${{ hashFiles('requirements.txt', 'webapp/requirements.txt', '**/requirements*.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-python-3.11.7-
+            ${{ runner.os }}-python-
 
       - name: Setup Python with pinned version
         uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
@@ -218,88 +226,111 @@ jobs:
           python-version: '3.11.7'  # Pinned version
           cache: 'pip'  # Enable pip caching
 
-      - name: Install system dependencies with version detection
+      - name: Install minimal system dependencies
         run: |
           set -euo pipefail
           
-          # Update package lists
-          sudo apt-get update
+          # Only install packages not already present on GitHub runners
+          # curl, git, wget, unzip are pre-installed on github runners
+          echo "📋 Checking for missing system packages..."
           
-          # Detect Ubuntu version for appropriate packages
-          ubuntu_version=$(lsb_release -rs)
-          echo "📋 Detected Ubuntu version: $ubuntu_version"
+          missing_packages=()
           
-          # Install system packages (version-agnostic)
-          sudo apt-get install -y --no-install-recommends \
-            curl \
-            jq \
-            bc \
-            git \
-            wget \
-            unzip || echo "⚠️ Some system packages may be missing"
+          # Check for bc (basic calculator) - not pre-installed
+          if ! command -v bc >/dev/null 2>&1; then
+            missing_packages+=("bc")
+          fi
           
-          echo "✅ System dependencies installed for Ubuntu $ubuntu_version"
+          # Check for jq - pre-installed on GitHub runners
+          if ! command -v jq >/dev/null 2>&1; then
+            missing_packages+=("jq")
+          fi
+          
+          if [ ${#missing_packages[@]} -gt 0 ]; then
+            echo "📦 Installing missing packages: ${missing_packages[*]}"
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends "${missing_packages[@]}"
+          else
+            echo "✅ All required system packages are already available"
+          fi
 
-      - name: Install Python dependencies with validation
+      - name: Install Python dependencies (pinned versions)
         run: |
           set -euo pipefail
           
-          # Upgrade pip securely
-          python -m pip install --upgrade pip
+          # Upgrade pip to latest version for security
+          python -m pip install --upgrade pip==23.3.1
           
-          # Install security and validation tools
-          pip install safety bandit semgrep requests beautifulsoup4 lxml pytest pytest-cov pytest-html
+          # Install from requirements files with pinned versions
+          requirements_found=false
           
-          # Install additional requirements if they exist
-          requirements_installed=false
-          if [ -f webapp/requirements.txt ]; then
+          if [ -f requirements.txt ]; then
+            echo "📦 Installing from requirements.txt (pinned versions)"
+            python -m pip install -r requirements.txt --no-deps
+            requirements_found=true
+          elif [ -f webapp/requirements.txt ]; then
             echo "📦 Installing from webapp/requirements.txt"
-            if pip install -r webapp/requirements.txt; then
-              requirements_installed=true
-            else
-              echo "⚠️ Some webapp dependencies failed to install"
-            fi
-          elif [ -f requirements.txt ]; then
-            echo "📦 Installing from requirements.txt"
-            if pip install -r requirements.txt; then
-              requirements_installed=true
-            else
-              echo "⚠️ Some requirements failed to install"
-            fi
+            python -m pip install -r webapp/requirements.txt --no-deps
+            requirements_found=true
           fi
           
-          if [ "$requirements_installed" = false ]; then
-            echo "📋 No requirements.txt found or installation failed - using base dependencies only"
+          if [ "$requirements_found" = false ]; then
+            echo "❌ No requirements.txt found - cannot install Python dependencies"
+            echo "📋 Create requirements.txt with pinned versions for reproducible builds"
+            exit 1
           fi
           
-          echo "✅ Python dependencies and security tools installed successfully"
+          # Verify critical packages are installed
+          python -c "import requests, bs4, lxml, pytest, bandit" || {
+            echo "❌ Critical Python packages not available"
+            exit 1
+          }
+          
+          echo "✅ Python dependencies installed successfully with pinned versions"
 
-      - name: Install validation tools
+      - name: Install validation tools (pinned versions)
         run: |
-          echo "Installing comprehensive validation tools..."
+          set -euo pipefail
+          echo "📦 Installing comprehensive validation tools with pinned versions..."
           
-          # Security scanning tools
-          npm install -g snyk@latest --no-audit --no-fund
-          pip install safety bandit semgrep
+          # Security scanning tools (pinned versions)
+          npm install -g snyk@1.1244.0 --no-audit --no-fund
           
-          # Performance tools - k6 for real load testing
-          curl -L https://github.com/grafana/k6/releases/download/v0.45.0/k6-v0.45.0-linux-amd64.tar.gz | tar xz --strip-components=1 -C /usr/local/bin/
-          chmod +x /usr/local/bin/k6
+          # Performance tools - k6 for real load testing (pinned version)
+          K6_VERSION="v0.45.0"
+          curl -L "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz" | \
+            sudo tar xz --strip-components=1 -C /usr/local/bin/
           
-          # Web testing tools
-          pip install pytest pytest-cov requests playwright
-          npm install -g lighthouse@latest --no-audit --no-fund
+          # Web testing tools (pinned versions)
+          npm install -g lighthouse@11.3.0 --no-audit --no-fund
           
-          # OWASP ZAP for security testing
-          wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.sh
-          chmod +x ZAP_2_14_0_unix.sh
-          sudo ./ZAP_2_14_0_unix.sh -q -dir /opt/zap/
+          # Install Playwright browsers
+          python -m playwright install chromium --with-deps
           
-          # Verify installations
-          k6 version || exit 1
-          safety --version || exit 1
-          bandit --version || exit 1
-          lighthouse --version || exit 1
+          # Verify critical tools are available
+          echo "🔍 Verifying tool installations..."
+          
+          tools_verified=true
+          
+          if ! k6 version >/dev/null 2>&1; then
+            echo "❌ k6 not available"
+            tools_verified=false
+          fi
+          
+          if ! python -m bandit --version >/dev/null 2>&1; then
+            echo "❌ bandit not available"
+            tools_verified=false
+          fi
+          
+          if ! lighthouse --version >/dev/null 2>&1; then
+            echo "❌ lighthouse not available"
+            tools_verified=false
+          fi
+          
+          if [ "$tools_verified" = false ]; then
+            echo "❌ Some validation tools failed to install"
+            exit 1
+          fi
           
           echo "✅ All validation tools successfully installed and verified"
 
@@ -392,7 +423,7 @@ jobs:
           
           echo "✅ Pre-flight security checks completed"
 
-      - name: Run REAL production validation suite
+      - name: Run REAL production validation suite (fail-fast)
         env:
           APP_ENV: ci
           CI: true
@@ -401,62 +432,37 @@ jobs:
           set -euo pipefail
           
           echo "🚀 Starting REAL DealerScope validation..."
-          chmod +x scripts/run-real-validation.sh
           
-          # Run the REAL validation script that can actually FAIL
-          if ./scripts/run-real-validation.sh; then
-            echo "✅ REAL validation suite completed successfully"
-          else
+          # Ensure script exists and is executable
+          if [ ! -f scripts/run-real-validation.sh ]; then
+            echo "❌ Validation script not found: scripts/run-real-validation.sh"
+            exit 1
+          fi
+          
+          if [ ! -x scripts/run-real-validation.sh ]; then
+            echo "📋 Making validation script executable..."
+            chmod +x scripts/run-real-validation.sh
+          fi
+          
+          # Run validation suite and capture exit code
+          echo "🔥 Running validation suite (fail-fast mode)..."
+          if ! ./scripts/run-real-validation.sh; then
             exit_code=$?
-            echo "⚠️ REAL validation suite failed with exit code: ${exit_code}"
+            echo "❌ VALIDATION SUITE FAILED with exit code: ${exit_code}"
+            echo "🚨 This indicates critical issues that MUST be resolved before deployment"
             
-            # Still generate fallback reports if validation fails catastrophically
-            if [[ ! -f "validation-reports/final/index.html" ]] || [[ ! -f "validation-reports/final/summary.json" ]]; then
-              echo "📋 Generating emergency fallback reports..."
-              mkdir -p validation-reports/final
-              
-              # Emergency error report
-              cat > validation-reports/final/summary.json << EOF
-{
-  "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "source_commit": "${GITHUB_SHA:-unknown}",
-  "workflow_run": "${GITHUB_RUN_NUMBER:-unknown}",
-  "overall_status": "CATASTROPHIC_FAILURE",
-  "exit_code": $exit_code,
-  "critical_failures": 999,
-  "p95_api_ms": 999999,
-  "memory_mb": 999,
-  "security_issues": 999,
-  "success_rate": 0.0,
-  "error": "Validation script failed to complete"
-}
-EOF
-
-              # Emergency error HTML
-              cat > validation-reports/final/index.html << 'HTML'
-<!DOCTYPE html>
-<html>
-<head><title>VALIDATION FAILURE</title>
-<style>body{font-family:Arial;margin:20px;color:#d32f2f;}</style></head>
-<body>
-<h1>🚨 CRITICAL VALIDATION FAILURE</h1>
-<p><strong>The validation script failed to complete.</strong></p>
-<p>This indicates serious infrastructure issues that must be resolved before deployment.</p>
-<ul>
-<li>Backend may have failed to start</li>
-<li>Dependencies may be missing</li>
-<li>System resources may be insufficient</li>
-<li>Security tools may have failed</li>
-</ul>
-<p><strong>DO NOT DEPLOY TO PRODUCTION</strong></p>
-</body></html>
-HTML
-            fi
+            # Log failure details for debugging
+            echo "📋 Validation failure details:" >> $GITHUB_STEP_SUMMARY
+            echo "- Exit code: ${exit_code}" >> $GITHUB_STEP_SUMMARY
+            echo "- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+            echo "- Commit: ${GITHUB_SHA}" >> $GITHUB_STEP_SUMMARY
+            echo "- Recommendation: Fix validation issues before deploying to production" >> $GITHUB_STEP_SUMMARY
             
-            # In CI mode, deploy the failure report but exit with error
-            echo "🔧 CI mode: deploying failure report for analysis"
+            # FAIL FAST - do not continue with deployment
             exit $exit_code
           fi
+          
+          echo "✅ Validation suite completed successfully - proceeding with deployment"
           
           # Verify required outputs were created by REAL tests
           required_files=(
@@ -491,7 +497,7 @@ HTML
           echo "✅ All SLO gates passed - Ready for production deployment"
 
       # ---------- Secure Artifact Collection ----------
-      - name: Collect and prepare site (with resilient fallback)
+      - name: Collect and prepare site (fail if no reports)
         run: |
           set -euo pipefail
           
@@ -499,102 +505,57 @@ HTML
           rm -rf public-site
           mkdir -p public-site
           
-          # Try to use real validation reports first
+          # Check for validation reports - FAIL if none exist
           if [ -d validation-reports/final ] && [ -s validation-reports/final/index.html ] && [ -s validation-reports/final/summary.json ]; then
             echo "✅ Using real validation reports from validation-reports/final/"
-            cp -R validation-reports/final/* public-site/
+            
+            # Copy all files including hidden ones
+            cp -R validation-reports/final/. public-site/
+            
+            # Verify critical files were copied
+            if [ ! -f public-site/index.html ] || [ ! -f public-site/summary.json ]; then
+              echo "❌ Critical report files missing after copy"
+              exit 1
+            fi
+            
+            echo "✅ Validation reports successfully prepared for deployment"
+            
           else
-            echo "⚠️ Final reports missing or empty; generating comprehensive fallback dashboard"
+            echo "❌ DEPLOYMENT BLOCKED: No validation reports were generated"
+            echo "📋 This indicates the validation suite failed or was not executed properly"
+            echo "🚨 Cannot deploy without successful validation"
             
-            # Create comprehensive fallback dashboard
-            cat > public-site/index.html << 'HTML'
+            # Use fallback template from repository
+            if [ -f validation-templates/fallback-dashboard.html ]; then
+              echo "📄 Using fallback dashboard template from repository"
+              cp validation-templates/fallback-dashboard.html public-site/index.html
+            else
+              echo "📄 Creating minimal fallback dashboard"
+              cat > public-site/index.html << 'HTML'
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DealerScope Validation Dashboard</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        .card { background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); padding: 40px; margin-bottom: 30px; }
-        h1 { color: #2563eb; margin: 0 0 20px 0; font-size: 2.5rem; }
-        .status-badge { display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: 600; margin: 10px 0; }
-        .warning { background: #fef3c7; color: #92400e; border: 2px solid #fbbf24; }
-        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 30px; }
-        .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; }
-        .info-card h3 { margin: 0 0 10px 0; color: #1e40af; }
-        .links { margin-top: 30px; }
-        .link { display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin: 10px 10px 10px 0; transition: all 0.2s; }
-        .link:hover { background: #1d4ed8; transform: translateY(-2px); }
-    </style>
-</head>
+<html><head><title>Validation Failed</title></head>
 <body>
-    <div class="container">
-        <div class="card">
-            <h1>🚀 DealerScope Validation Dashboard</h1>
-            <div class="status-badge warning">
-                ⚠️ Fallback Mode: No validation reports were produced in this run
-            </div>
-            <p>This can happen during first-time setup, transient failures, or when the validation suite is being updated. The system is designed to always provide a useful dashboard.</p>
-            
-            <div class="info-grid">
-                <div class="info-card">
-                    <h3>🛡️ Security Validation</h3>
-                    <p>Dependency audit, SAST scanning, credential checks, RLS policy validation</p>
-                </div>
-                <div class="info-card">
-                    <h3>⚡ Performance Testing</h3>
-                    <p>Load tests, bundle analysis, Lighthouse scoring, core web vitals</p>
-                </div>
-                <div class="info-card">
-                    <h3>🔄 Resilience Checks</h3>
-                    <p>Circuit breakers, chaos engineering, retry mechanisms, failover testing</p>
-                </div>
-                <div class="info-card">
-                    <h3>👁️ Observability</h3>
-                    <p>Logging, metrics collection, tracing, alerting, monitoring dashboards</p>
-                </div>
-                <div class="info-card">
-                    <h3>🗄️ Database Operations</h3>
-                    <p>Migration validation, RLS testing, query performance, backup verification</p>
-                </div>
-                <div class="info-card">
-                    <h3>🎨 Frontend Quality</h3>
-                    <p>TypeScript compilation, linting, testing, accessibility, SEO validation</p>
-                </div>
-            </div>
-            
-            <div class="links">
-                <a href="./summary.json" class="link">📄 View Summary JSON</a>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
+<h1>❌ Validation Failed</h1>
+<p>The validation suite did not complete successfully.</p>
+<p>Deployment blocked until validation passes.</p>
+</body></html>
 HTML
-
-            # Provide comprehensive fallback JSON
+            fi
+            
+            # Create failure summary
             cat > public-site/summary.json << EOF
 {
-  "status": "fallback",
+  "status": "DEPLOYMENT_BLOCKED",
   "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "source_commit": "${GITHUB_SHA:-unknown}",
   "workflow_run": "${GITHUB_RUN_NUMBER:-unknown}",
-  "critical_failures": 0,
-  "total_tests": 0,
-  "passed_tests": 0,
-  "failed_tests": 0,
-  "warned_tests": 0,
-  "message": "Fallback dashboard generated due to missing validation reports",
-  "next_steps": [
-    "Check validation script execution logs",
-    "Verify all dependencies are installed",
-    "Ensure validation-reports/final/ directory is created",
-    "Review script permissions and integrity"
-  ]
+  "critical_failures": 999,
+  "error": "Validation suite did not generate reports"
 }
 EOF
+            
+            # FAIL the workflow - do not deploy failed validation
+            exit 1
           fi
           
           # Security: Remove any sensitive files
@@ -625,7 +586,7 @@ EOF
         with:
           name: validation-reports-${{ github.run_number }}
           path: validation-reports
-          if-no-files-found: error
+          if-no-files-found: error  # Fail if no validation reports generated
           retention-days: 90
           compression-level: 6
 
@@ -637,15 +598,20 @@ EOF
           echo "::group::Workflow Performance Metrics"
           echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
           echo "runner_os=${{ runner.os }}" >> $GITHUB_OUTPUT
-          echo "workflow_duration=${{ github.event.repository.updated_at }}" >> $GITHUB_OUTPUT
-          echo "artifact_count=$(find public-site -type f | wc -l)" >> $GITHUB_OUTPUT
+          echo "workflow_start_time=${{ github.event.head_commit.timestamp }}" >> $GITHUB_OUTPUT
+          artifact_count=$(find public-site -type f | wc -l 2>/dev/null || echo "0")
+          echo "artifact_count=$artifact_count" >> $GITHUB_OUTPUT
           echo "::endgroup::"
           
           # Log to job summary
           echo "## 📊 Validation Metrics" >> $GITHUB_STEP_SUMMARY
-          echo "- **Execution Time**: Started ${{ github.event.head_commit.timestamp }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Artifacts Generated**: $(find public-site -type f | wc -l) files" >> $GITHUB_STEP_SUMMARY
-          echo "- **Total Size**: $(du -sh public-site | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Time**: Started ${{ github.event.head_commit.timestamp || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+          artifact_count=$(find public-site -type f | wc -l 2>/dev/null || echo "0")
+          echo "- **Artifacts Generated**: $artifact_count files" >> $GITHUB_STEP_SUMMARY
+          if [ -d public-site ]; then
+            total_size=$(du -sh public-site 2>/dev/null | cut -f1 || echo "unknown")
+            echo "- **Total Size**: $total_size" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ---------- Secure Deployment Pipeline ----------
   deploy:
