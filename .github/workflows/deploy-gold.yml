@@ -1,0 +1,138 @@
+name: Deploy GOLD Validation Reports
+
+on:
+  # manual trigger
+  workflow_dispatch:
+  # auto on main changes (but ignore docs and generated reports)
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'validation-reports/**'
+  # daily at 6 AM UTC
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install deps (don’t fail build)
+        run: |
+          pip install -r requirements.txt || true
+          npm ci || true
+
+      - name: Run validation suite (continue on failure)
+        run: |
+          if [ -x scripts/run-validation-suite.sh ]; then
+            chmod +x scripts/run-validation-suite.sh
+            ./scripts/run-validation-suite.sh || echo "Validation failed, continuing to package reports"
+          else
+            echo "No validation script found; creating placeholder reports"
+          fi
+
+      # always upload whatever exists so deploy has something to show
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-validation-reports
+          path: validation-reports/
+          if-no-files-found: warn
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 10
+    steps:
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          name: gold-validation-reports
+          path: validation-reports
+
+      # deterministic Pages scaffold so there is always a usable site
+      - name: Prepare Pages directory
+        run: |
+          mkdir -p pages/api pages/assets pages/reports
+          # copy reports if present
+          if [ -d validation-reports ]; then
+            cp -r validation-reports/* pages/reports/ 2>/dev/null || true
+          fi
+
+          # main index (simple, but guaranteed)
+          cat > pages/index.html <<'HTML'
+          <!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8"/>
+              <title>DealerScope GOLD Validation</title>
+              <link rel="stylesheet" href="assets/style.css">
+            </head>
+            <body>
+              <h1>DealerScope GOLD Validation</h1>
+              <p>This page is deployed by GitHub Actions.</p>
+              <ul>
+                <li><a href="reports/">Browse raw reports</a></li>
+                <li><a href="summary.json">JSON summary</a> (alias of api/summary.json)</li>
+              </ul>
+            </body>
+          </html>
+          HTML
+
+          # css
+          cat > pages/assets/style.css <<'CSS'
+          body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+          a { color: #0969da; text-decoration: none; }
+          a:hover { text-decoration: underline; }
+          CSS
+
+          # summary json (fallback if none produced)
+          SUMMARY_SRC=""
+          if ls pages/reports/**/validation-summary*.json >/dev/null 2>&1; then
+            SUMMARY_SRC=$(ls -t pages/reports/**/validation-summary*.json | head -1)
+            cp "$SUMMARY_SRC" pages/api/summary.json
+          else
+            cat > pages/api/summary.json <<'JSON'
+            { "status":"no-reports", "message":"No validation summaries found", "generatedAt": "" }
+            JSON
+          fi
+          cp pages/api/summary.json pages/summary.json
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Post deployment summary
+        run: |
+          echo "## 🚀 GOLD Validation Reports Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "URL: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
