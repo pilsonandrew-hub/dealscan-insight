@@ -1,0 +1,360 @@
+name: Deploy Validation Reports to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if SLO gate fails (requires justification)'
+        type: boolean
+        default: false
+        required: false
+      justification:
+        description: 'Why are we forcing deployment?'
+        type: string
+        required: false
+      validation_level:
+        description: 'Validation strictness level'
+        required: false
+        default: standard
+        type: choice
+        options: [minimal, standard, comprehensive]
+
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'validation-reports/**'
+
+  schedule:
+    - cron: '0 6 * * *'   # daily at 06:00 UTC
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  # Wire these to org/network values via repo/org secrets if you’re behind a proxy.
+  HTTP_PROXY:  ${{ secrets.HTTP_PROXY }}
+  HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
+  NO_PROXY:    ${{ secrets.NO_PROXY || 'localhost,127.0.0.1,.svc,.internal' }}
+
+jobs:
+  validate-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VALIDATION_LEVEL: ${{ github.event.inputs.validation_level || 'standard' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Setup Node.js (for shared tooling, if any)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          npm ci || true  # tolerate no frontend in backend-only repos
+
+      - name: Inject Backend Secrets
+        run: |
+          :> .env
+          echo "DATABASE_URL=${{ secrets.TEST_DATABASE_URL }}" >> .env
+          echo "REDIS_URL=${{ secrets.TEST_REDIS_URL }}" >> .env
+          echo "VALIDATION_MODE=ci" >> .env
+          echo "VALIDATION_LEVEL=${VALIDATION_LEVEL}" >> .env
+
+      - name: Run Backend Validation Suite (resilient)
+        id: run
+        run: |
+          set +e
+          chmod +x scripts/run-validation-suite.sh
+          ./scripts/run-validation-suite.sh backend
+          code=$?
+          # always ensure a place to collect
+          mkdir -p validation-reports/final || true
+          echo "exit_code=$code" >> $GITHUB_OUTPUT
+          # segregate artifacts for clarity
+          mkdir -p backend
+          if [ -d validation-reports ]; then mv validation-reports backend/; fi
+          exit 0
+
+      - name: Upload Backend Reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-reports
+          path: backend
+          if-no-files-found: warn
+
+      # Failsafe: ensure minimal bundle exists even if suite produced nothing
+      - name: Backend Failsafe Bundle
+        if: always()
+        run: |
+          mkdir -p backend/validation-reports/final
+          test -f backend/validation-reports/final/index.html || cat > backend/validation-reports/final/index.html <<'HTML'
+          <!DOCTYPE html><html><head><meta charset="utf-8"><title>DealerScope Backend - No Reports</title></head>
+          <body><h1>Backend Validation</h1><p>No reports were generated in this run.</p></body></html>
+          HTML
+          test -f backend/validation-reports/final/summary.json || cat > backend/validation-reports/final/summary.json <<'JSON'
+          {"status":"no-reports","component":"backend"}
+          JSON
+
+  validate-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VALIDATION_LEVEL: ${{ github.event.inputs.validation_level || 'standard' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Setup Python (for any shared scripts)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          # Install Playwright browsers if used in e2e tests; tolerate air-gapped failures
+          npx playwright install --with-deps || true
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Inject Frontend Secrets
+        run: |
+          :> .env
+          echo "VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}" >> .env
+          echo "VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}" >> .env
+          echo "VALIDATION_MODE=ci" >> .env
+          echo "VALIDATION_LEVEL=${VALIDATION_LEVEL}" >> .env
+
+      - name: Run Frontend Validation Suite (resilient)
+        id: run
+        run: |
+          set +e
+          chmod +x scripts/run-validation-suite.sh
+          ./scripts/run-validation-suite.sh frontend
+          code=$?
+          mkdir -p validation-reports/final || true
+          echo "exit_code=$code" >> $GITHUB_OUTPUT
+          mkdir -p frontend
+          if [ -d validation-reports ]; then mv validation-reports frontend/; fi
+          exit 0
+
+      - name: Upload Frontend Reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-reports
+          path: frontend
+          if-no-files-found: warn
+
+      # Failsafe: ensure minimal bundle exists even if suite produced nothing
+      - name: Frontend Failsafe Bundle
+        if: always()
+        run: |
+          mkdir -p frontend/validation-reports/final
+          test -f frontend/validation-reports/final/index.html || cat > frontend/validation-reports/final/index.html <<'HTML'
+          <!DOCTYPE html><html><head><meta charset="utf-8"><title>DealerScope Frontend - No Reports</title></head>
+          <body><h1>Frontend Validation</h1><p>No reports were generated in this run.</p></body></html>
+          HTML
+          test -f frontend/validation-reports/final/summary.json || cat > frontend/validation-reports/final/summary.json <<'JSON'
+          {"status":"no-reports","component":"frontend"}
+          JSON
+
+  gatekeeper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [validate-backend, validate-frontend]
+    outputs:
+      status: ${{ steps.slo.outputs.status }}
+    steps:
+      - name: Download Backend Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-reports
+          path: validation-reports/backend
+
+      - name: Download Frontend Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-reports
+          path: validation-reports/frontend
+
+      - name: Consolidate Reports (resilient)
+        run: |
+          chmod +x scripts/consolidate-reports.sh || true
+          if [ -x scripts/consolidate-reports.sh ]; then
+            scripts/consolidate-reports.sh || true
+          fi
+          # Always yield a final bundle
+          mkdir -p validation-reports/final
+          # Prefer consolidated if present; otherwise pick a decent fallback
+          if [ -f validation-reports/final/index.html ]; then
+            :
+          elif [ -f validation-reports/backend/final/index.html ]; then
+            cp validation-reports/backend/final/* validation-reports/final/ || true
+          elif [ -f validation-reports/frontend/final/index.html ]; then
+            cp validation-reports/frontend/final/* validation-reports/final/ || true
+          else
+            cat > validation-reports/final/index.html <<'HTML'
+            <!DOCTYPE html><html><head><meta charset="utf-8"><title>DealerScope Validation - Minimal Bundle</title></head>
+            <body><h1>Validation Bundle</h1><p>No consolidated report found; using minimal bundle.</p></body></html>
+            HTML
+            cat > validation-reports/final/summary.json <<'JSON'
+            {"status":"no-reports","note":"minimal bundle"}
+            JSON
+          fi
+          # Guarantee a machine-readable summary
+          test -f validation-reports/final/summary.json || echo '{"status":"unknown"}' > validation-reports/final/summary.json
+
+      - name: Enforce SLOs (single source of truth)
+        id: slo
+        run: |
+          chmod +x scripts/enforce_slos.sh || true
+          if [ -x scripts/enforce_slos.sh ] && scripts/enforce_slos.sh; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Final Bundle (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-reports
+          path: validation-reports
+          retention-days: 7
+          if-no-files-found: warn
+
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: gatekeeper
+    if: needs.gatekeeper.outputs.status == 'success' || github.event.inputs.force_deploy == 'true'
+    environment:
+      name: github-pages
+    steps:
+      - name: Download final reports artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: final-reports
+          path: validation-reports
+
+      - name: Prepare deterministic Pages scaffold (always)
+        run: |
+          set -e
+          mkdir -p pages/assets pages/api
+          # Copy final bundle if present
+          if [ -d validation-reports/final ]; then
+            cp -r validation-reports/final/* pages/ || true
+          fi
+          # Ensure main-report.html and index.html exist deterministically
+          if [ -f pages/index.html ]; then
+            mv pages/index.html pages/main-report.html
+          fi
+          # Minimal index if none exists
+          test -f pages/main-report.html || cat > pages/main-report.html <<'HTML'
+          <!DOCTYPE html><html><head><meta charset="utf-8"><title>DealerScope Report</title></head>
+          <body><h1>DealerScope Report</h1><p>No detailed report found.</p></body></html>
+          HTML
+
+          # Root landing index linking to main report + API
+          cat > pages/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="utf-8"><title>DealerScope Validation Dashboard</title></head>
+            <body>
+              <h1>DealerScope Validation Dashboard</h1>
+              <p><strong><a href="main-report.html">View Latest Full Report</a></strong></p>
+              <p><a href="summary.json">Download JSON Summary</a></p>
+            </body>
+          </html>
+          HTML
+
+          # Ensure summary in both api/ and root
+          if [ -f pages/summary.json ]; then
+            cp pages/summary.json pages/api/summary.json
+          elif [ -f validation-reports/final/summary.json ]; then
+            cp validation-reports/final/summary.json pages/summary.json
+            cp validation-reports/final/summary.json pages/api/summary.json
+          else
+            echo '{"status":"no-reports"}' > pages/summary.json
+            cp pages/summary.json pages/api/summary.json
+          fi
+
+          # Basic style (optional)
+          cat > pages/assets/style.css <<'CSS'
+          body{font-family:system-ui,Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 16px}
+          h1{color:#0b69d0}
+          a{color:#0b69d0;text-decoration:none}
+          a:hover{text-decoration:underline}
+          CSS
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Post deployment summary
+        run: |
+          echo "## 🚀 Validation Reports Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployment URL: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.force_deploy }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Forced by @${{ github.actor }}** — Reason: ${{ github.event.inputs.justification || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  handle-failure:
+    runs-on: ubuntu-latest
+    needs: [validate-backend, validate-frontend, gatekeeper, deploy]
+    if: failure() && github.event.inputs.force_deploy != 'true'
+    steps:
+      - name: Notify Failure (Slack)
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          channel-id: ${{ secrets.SLACK_CHANNEL_ID || 'C12345678' }}
+          slack-message: |
+            ❌ **DealerScope Validation Failed**
+            Repo: `${{ github.repository }}`
+            Branch: `${{ github.ref_name }}`
+            Run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Open Run>
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Mark failure
+        run: |
+          echo "❌ Validation or SLO Gate Failed. Deployment was skipped."
+          exit 1
