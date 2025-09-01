@@ -496,7 +496,7 @@ generate_dashboard() {
 </html>
 EOF
 
-    # Replace placeholders with actual values
+    # Replace placeholders with actual values using comprehensive substitution
     sed -i "s/STATUS_VALUE/$overall_status/g" "$FINAL_DIR/index.html"
     sed -i "s/STATUS_CLASS/$([ "$overall_status" = "PASS" ] && echo "pass" || echo "fail")/g" "$FINAL_DIR/index.html"
     sed -i "s/API_LATENCY/$p95_latency/g" "$FINAL_DIR/index.html"
