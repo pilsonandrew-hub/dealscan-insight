@@ -845,7 +845,7 @@ export type Database = {
           error_message: string | null
           id: string
           idempotency_key: string | null
-          owner_id: string | null
+          owner_id: string
           results: Json | null
           sites_targeted: string[] | null
           started_at: string | null
@@ -857,7 +857,7 @@ export type Database = {
           error_message?: string | null
           id: string
           idempotency_key?: string | null
-          owner_id?: string | null
+          owner_id: string
           results?: Json | null
           sites_targeted?: string[] | null
           started_at?: string | null
@@ -869,7 +869,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           idempotency_key?: string | null
-          owner_id?: string | null
+          owner_id?: string
           results?: Json | null
           sites_targeted?: string[] | null
           started_at?: string | null
