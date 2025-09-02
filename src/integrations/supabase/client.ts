@@ -4,13 +4,10 @@ import type { Database } from './types';
 import { configService } from '../../core/UnifiedConfigService';
 import { logger } from '../../core/UnifiedLogger';
 
-// Get configuration from unified config service
-const dbConfig = configService.database;
-
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(dbConfig.url, dbConfig.anonKey, {
+export const supabase = createClient<Database>(configService.database.url, configService.database.anonKey, {
   auth: {
     storage: localStorage,
     persistSession: true,
@@ -26,6 +23,6 @@ export const supabase = createClient<Database>(dbConfig.url, dbConfig.anonKey, {
 
 // Log database connection initialization
 logger.setContext('database').info('Supabase client initialized', {
-  url: dbConfig.url,
+  url: configService.database.url,
   environment: configService.environment,
 });

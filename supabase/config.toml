@@ -1,4 +1,13 @@
 project_id = "lgpugcflvrqhslfnsjfh"
 
 [functions.vehicle-scraper]
-verify_jwt = false
+verify_jwt = true
+jwt_aud = "authenticated"
+
+[functions.scrape-coordinator]
+verify_jwt = true
+jwt_aud = "authenticated"
+
+[functions.alerts-guard]
+verify_jwt = true
+jwt_aud = "authenticated"

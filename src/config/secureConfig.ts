@@ -1,6 +1,6 @@
 /**
  * Secure Environment Configuration Service
- * Handles all environment variables and prevents hardcoded credentials
+ * FAIL-FAST: No hardcoded fallbacks, no credentials in production builds
  */
 
 interface AppConfig {
@@ -18,6 +18,26 @@ interface AppConfig {
   version: string;
 }
 
+// Fail-fast validation helper
+const requireEnv = (key: string, value?: string): string => {
+  if (!value || value.trim() === '') {
+    throw new Error(`SECURITY ERROR: Missing critical environment variable: ${key}. Application cannot start without proper configuration.`);
+  }
+  return value.trim();
+};
+
+// Validate environment in production
+const validateProductionConfig = (url: string, key: string) => {
+  if (import.meta.env.PROD) {
+    if (url.includes('localhost') || url.includes('127.0.0.1')) {
+      throw new Error('SECURITY ERROR: Production build cannot use localhost URLs');
+    }
+    if (key.includes('your-anon-key') || key.length < 50) {
+      throw new Error('SECURITY ERROR: Invalid or placeholder Supabase key detected in production');
+    }
+  }
+};
+
 class ConfigService {
   private static instance: ConfigService;
   private config: AppConfig;
@@ -34,9 +54,12 @@ class ConfigService {
   }
 
   private loadConfiguration(): AppConfig {
-    // Get from environment or use secure defaults
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lgpugcflvrqhslfnsjfh.supabase.co';
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncHVnY2ZsdnJxaHNsZm5zamZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NjkzODksImV4cCI6MjA3MTI0NTM4OX0.Tadce_MW20ZfG75-EtiAHQPy2VfS0ciH1bekFNlVX0U';
+    // FAIL-FAST: No fallbacks allowed
+    const supabaseUrl = requireEnv('VITE_SUPABASE_URL', import.meta.env.VITE_SUPABASE_URL);
+    const supabaseKey = requireEnv('VITE_SUPABASE_ANON_KEY', import.meta.env.VITE_SUPABASE_ANON_KEY);
+    
+    // Validate configuration for production
+    validateProductionConfig(supabaseUrl, supabaseKey);
     
     return {
       supabase: {
