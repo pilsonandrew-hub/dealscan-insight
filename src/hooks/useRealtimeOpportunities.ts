@@ -5,20 +5,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { logger } from '@/core/UnifiedLogger';
-
-interface Opportunity {
-  id: string;
-  make: string;
-  model: string;
-  year: number;
-  current_bid: number;
-  potential_profit: number;
-  roi_percentage: number;
-  confidence_score: number;
-  risk_score: number;
-  status: string;
-  created_at: string;
-}
+import { Opportunity } from '@/types/dealerscope';
+import { WebSocketStatus } from './useWebSocket';
 
 interface PipelineStatus {
   status: 'running' | 'paused' | 'stopped';
@@ -34,7 +22,7 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
     processedCount: 0
   });
   const [newOpportunitiesCount, setNewOpportunitiesCount] = useState(0);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connected');
+  const [connectionStatus, setConnectionStatus] = useState<WebSocketStatus>(WebSocketStatus.CONNECTED);
   const [isConnected, setIsConnected] = useState(true);
 
   // Initialize with provided data
@@ -60,13 +48,13 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
   }, []);
 
   const connect = useCallback(() => {
-    setConnectionStatus('connected');
+    setConnectionStatus(WebSocketStatus.CONNECTED);
     setIsConnected(true);
     logger.setContext('system').info('Connection established');
   }, []);
 
   const disconnect = useCallback(() => {
-    setConnectionStatus('disconnected');
+    setConnectionStatus(WebSocketStatus.DISCONNECTED);
     setIsConnected(false);
     logger.setContext('system').info('Connection disconnected');
   }, []);

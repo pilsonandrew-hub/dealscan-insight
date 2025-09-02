@@ -18,20 +18,7 @@ import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 import { useToast } from "@/hooks/use-toast";
-
-interface Opportunity {
-  id: string;
-  make: string;
-  model: string;
-  year: number;
-  current_bid: number;
-  potential_profit: number;
-  roi_percentage: number;
-  confidence_score: number;
-  risk_score: number;
-  status: string;
-  created_at: string;
-}
+import { Opportunity } from "@/types/dealerscope";
 
 const Index = () => {
   const [activeView, setActiveView] = useState("dashboard");
@@ -86,7 +73,12 @@ const Index = () => {
           <div className="space-y-8">
             <DashboardMetrics 
               metrics={metrics}
-              pipelineStatus={pipelineStatus}
+              pipelineStatus={{
+                status: pipelineStatus?.status || 'stopped',
+                stage: 'processing',
+                progress: 0,
+                opportunities_found: 0
+              }}
               isRealtime={isConnected}
             />
             <DealInbox />
