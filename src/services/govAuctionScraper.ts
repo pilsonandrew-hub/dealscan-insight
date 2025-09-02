@@ -358,6 +358,14 @@ export class GovernmentAuctionScraper {
   }
 
   private async createScrapingJob(jobId: string, sites: string[]): Promise<void> {
+    // Get current user for ownership
+    const { data: { user } } = await supabase.auth.getUser();
+    const userId = user?.id;
+    
+    if (!userId) {
+      throw new Error('User not authenticated for job creation');
+    }
+
     await supabase
       .from('scoring_jobs')
       .insert({
@@ -367,7 +375,8 @@ export class GovernmentAuctionScraper {
         processed_listings: 0,
         opportunities_created: 0,
         progress: 0,
-        error_message: null
+        error_message: null,
+        user_id: userId
       });
   }
 

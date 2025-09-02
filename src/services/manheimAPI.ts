@@ -254,6 +254,15 @@ export class ManheimAPIConnector {
 
   private async cacheMarketData(data: ManheimMarketData): Promise<void> {
     try {
+      // Get current user for market price ownership
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+      
+      if (!userId) {
+        console.warn('No user context for Manheim market data caching, skipping');
+        return;
+      }
+
       await supabase
         .from('market_prices')
         .upsert({
@@ -265,6 +274,7 @@ export class ManheimAPIConnector {
           high_price: data.marketRange.high,
           sample_size: 50, // Manheim has good sample sizes
           source_api: 'manheim',
+          user_id: userId,
           metadata: {
             mmr: data.mmr,
             daysToSell: data.daysToSell,

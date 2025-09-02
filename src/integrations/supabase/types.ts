@@ -913,6 +913,51 @@ export type Database = {
         }
         Relationships: []
       }
+      security_events: {
+        Row: {
+          action: string
+          context: Json | null
+          created_at: string
+          error_message: string | null
+          id: number
+          ip_address: unknown | null
+          row_id: string | null
+          severity: string | null
+          success: boolean
+          table_name: string | null
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          context?: Json | null
+          created_at?: string
+          error_message?: string | null
+          id?: number
+          ip_address?: unknown | null
+          row_id?: string | null
+          severity?: string | null
+          success?: boolean
+          table_name?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          context?: Json | null
+          created_at?: string
+          error_message?: string | null
+          id?: number
+          ip_address?: unknown | null
+          row_id?: string | null
+          severity?: string | null
+          success?: boolean
+          table_name?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       system_logs: {
         Row: {
           context: Json | null
