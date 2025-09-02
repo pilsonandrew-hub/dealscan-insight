@@ -65,7 +65,7 @@ export type Database = {
           title_status: string | null
           trim: string | null
           updated_at: string
-          user_id: string | null
+          user_id: string
           vin: string | null
           year: number
         }
@@ -86,7 +86,7 @@ export type Database = {
           title_status?: string | null
           trim?: string | null
           updated_at?: string
-          user_id?: string | null
+          user_id: string
           vin?: string | null
           year: number
         }
@@ -107,7 +107,7 @@ export type Database = {
           title_status?: string | null
           trim?: string | null
           updated_at?: string
-          user_id?: string | null
+          user_id?: string
           vin?: string | null
           year?: number
         }
@@ -333,7 +333,7 @@ export type Database = {
           source_api: string
           state: string | null
           trim: string | null
-          user_id: string | null
+          user_id: string
           year: number
         }
         Insert: {
@@ -351,7 +351,7 @@ export type Database = {
           source_api: string
           state?: string | null
           trim?: string | null
-          user_id?: string | null
+          user_id: string
           year: number
         }
         Update: {
@@ -369,7 +369,7 @@ export type Database = {
           source_api?: string
           state?: string | null
           trim?: string | null
-          user_id?: string | null
+          user_id?: string
           year?: number
         }
         Relationships: []
@@ -725,7 +725,7 @@ export type Database = {
           status: string
           total_listings: number
           updated_at: string
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           completed_at?: string | null
@@ -739,7 +739,7 @@ export type Database = {
           status: string
           total_listings?: number
           updated_at?: string
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           completed_at?: string | null
@@ -753,7 +753,7 @@ export type Database = {
           status?: string
           total_listings?: number
           updated_at?: string
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: []
       }
