@@ -4,12 +4,7 @@
 
 import { Opportunity, PipelineStatus, UploadResult } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
-import { productionCache, generateContentHashETag } from '@/utils/productionCache';
-import { performanceMonitor } from '@/utils/performance-monitor';
-import { auditLogger } from '@/utils/audit-logger';
-import { supabaseCircuitBreaker } from '@/utils/circuitBreakerEnhanced';
-import { buildCursorQuery, processCursorResults, CursorPaginationParams, CursorPaginationResult } from '@/utils/cursorPagination';
-import productionLogger from '@/utils/productionLogger';
+import { logger } from '@/core/UnifiedLogger';
 
 // Transform database row to Opportunity type
 function transformOpportunity(row: any): Opportunity & { created_at: string; id: string } {
@@ -53,122 +48,52 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
 export const api = {
   // Get opportunities - supports both cursor pagination and legacy page/limit
   async getOpportunities(
-    paramsOrPage?: CursorPaginationParams | number, 
+    paramsOrPage?: number, 
     limit?: number
-  ): Promise<CursorPaginationResult<Opportunity> | { data: Opportunity[]; total: number; hasMore: boolean }> {
+  ): Promise<{ data: Opportunity[]; total: number; hasMore: boolean }> {
     // Handle legacy page/limit signature
-    if (typeof paramsOrPage === 'number') {
-      const page = paramsOrPage;
-      const pageLimit = limit || 100;
-      const offset = (page - 1) * pageLimit;
-      
-      const cacheKey = `opportunities-page-${page}-${pageLimit}`;
-      const timer = performanceMonitor.monitorAPI('getOpportunities', 'GET');
-      
-      return supabaseCircuitBreaker.execute(async () => {
-        try {
-          return await productionCache.singleFlight(
-            cacheKey,
-            async () => {
-              // Get total count
-              const { count } = await supabase
-                .from('opportunities')
-                .select('*', { count: 'exact', head: true })
-                .eq('is_active', true);
-              
-              // Get paginated data
-              const { data, error } = await supabase
-                .from('opportunities')
-                .select('*')
-                .eq('is_active', true)
-                .order('created_at', { ascending: false })
-                .range(offset, offset + pageLimit - 1);
-              
-              if (error) throw error;
-              
-              const opportunities = (data || []).map(transformOpportunity);
-              
-              return {
-                data: opportunities,
-                total: count || 0,
-                hasMore: (count || 0) > offset + pageLimit
-              };
-            },
-            300000
-          );
-        } catch (error) {
-          timer.end(false);
-          throw error;
-        } finally {
-          timer.end(true);
-        }
-      });
-    }
-
-    // Handle cursor pagination
-    const params = (paramsOrPage || {}) as CursorPaginationParams;
-    const { cursor, limit: cursorLimit = 100 } = params;
-    const cacheKey = `opportunities-cursor-${cursor || 'first'}-${cursorLimit}`;
-    const timer = performanceMonitor.monitorAPI('getOpportunities', 'GET');
+    const page = typeof paramsOrPage === 'number' ? paramsOrPage : 1;
+    const pageLimit = limit || 100;
+    const offset = (page - 1) * pageLimit;
     
-    auditLogger.log('api_call_start', 'system', 'info', { endpoint: 'opportunities', cursor, limit: cursorLimit });
+    logger.setContext('api').info('Fetching opportunities', { page, limit: pageLimit });
     
-    return supabaseCircuitBreaker.execute(async () => {
-      try {
-        // Use single-flight pattern to prevent cache stampedes
-        return await productionCache.singleFlight(
-          cacheKey,
-          async () => {
-            // Build cursor query
-            let query = supabase
-              .from('opportunities')
-              .select('*')
-              .eq('is_active', true);
-            
-            query = buildCursorQuery(query, params, cursorLimit);
-            
-            const { data, error } = await query;
-            
-            if (error) {
-              productionLogger.error('Supabase query failed', { 
-                endpoint: 'opportunities', 
-                cursor, 
-                limit: cursorLimit,
-                error: (error as Error).message 
-              });
-              throw error;
-            }
-            
-            const transformedData = (data || []).map(transformOpportunity);
-            const result = processCursorResults(transformedData, cursorLimit);
-            
-            auditLogger.log('api_call_success', 'system', 'info', { 
-              endpoint: 'opportunities', 
-              itemCount: result.items.length,
-              hasMore: result.hasMore 
-            });
-            
-            return result;
-          },
-          300000, // 5 minute TTL
-          (data) => generateContentHashETag(JSON.stringify(data))
-        );
-      } catch (error) {
-        timer.end(false);
-        auditLogger.log('api_call_error', 'system', 'error', { 
-          endpoint: 'opportunities', 
-          error: (error as Error).message 
-        });
+    try {
+      // Get total count
+      const { count } = await supabase
+        .from('opportunities')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_active', true);
+      
+      // Get paginated data
+      const { data, error } = await supabase
+        .from('opportunities')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageLimit - 1);
+      
+      if (error) {
+        logger.setContext('api').error('Failed to fetch opportunities', error);
         throw error;
-      } finally {
-        timer.end(true);
       }
-    });
+      
+      const opportunities = (data || []).map(transformOpportunity);
+      
+      return {
+        data: opportunities,
+        total: count || 0,
+        hasMore: (count || 0) > offset + pageLimit
+      };
+    } catch (error) {
+      logger.setContext('api').error('API call failed', error);
+      throw error;
+    }
   },
 
   // Upload CSV file
   async uploadCSV(file: File): Promise<UploadResult> {
-    const timer = performanceMonitor.monitorAPI('uploadCSV', 'POST');
+    logger.setContext('api').info('Uploading CSV file', { fileName: file.name, fileSize: file.size });
     
     try {
       // Mock implementation for now - would integrate with actual file processing
@@ -179,10 +104,8 @@ export const api = {
         rows_processed: Math.floor(Math.random() * 100) + 1
       };
     } catch (error) {
-      timer.end(false);
+      logger.setContext('api').error('CSV upload failed', error);
       throw error;
-    } finally {
-      timer.end(true);
     }
   },
 
@@ -193,38 +116,35 @@ export const api = {
     potential_revenue: number;
     success_rate: number;
   }> {
-    const timer = performanceMonitor.monitorAPI('getDashboardMetrics', 'GET');
+    logger.setContext('api').info('Fetching dashboard metrics');
     
     try {
-      return await productionCache.singleFlight(
-        'dashboard-metrics',
-        async () => {
-          const { data, error } = await supabase
-            .from('opportunities')
-            .select('potential_profit, roi_percentage, status')
-            .eq('is_active', true);
-          
-          if (error) throw error;
-          
-          const opportunities = data || [];
-          const activeCount = opportunities.length;
-          const totalProfit = opportunities.reduce((sum: number, opp: any) => sum + (opp.potential_profit || 0), 0);
-          const avgMargin = opportunities.length > 0 
-            ? opportunities.reduce((sum: number, opp: any) => sum + (opp.roi_percentage || 0), 0) / opportunities.length
-            : 0;
-          const successfulOpps = opportunities.filter((opp: any) => opp.status === 'high').length;
-          
-          return {
-            active_opportunities: activeCount,
-            avg_margin: avgMargin,
-            potential_revenue: totalProfit,
-            success_rate: activeCount > 0 ? (successfulOpps / activeCount) * 100 : 0
-          };
-        },
-        120000 // 2 minute TTL
-      );
+      const { data, error } = await supabase
+        .from('opportunities')
+        .select('potential_profit, roi_percentage, status')
+        .eq('is_active', true);
+      
+      if (error) {
+        logger.setContext('api').error('Failed to fetch dashboard metrics', error);
+        throw error;
+      }
+      
+      const opportunities = data || [];
+      const activeCount = opportunities.length;
+      const totalProfit = opportunities.reduce((sum: number, opp: any) => sum + (opp.potential_profit || 0), 0);
+      const avgMargin = opportunities.length > 0 
+        ? opportunities.reduce((sum: number, opp: any) => sum + (opp.roi_percentage || 0), 0) / opportunities.length
+        : 0;
+      const successfulOpps = opportunities.filter((opp: any) => opp.status === 'high').length;
+      
+      return {
+        active_opportunities: activeCount,
+        avg_margin: avgMargin,
+        potential_revenue: totalProfit,
+        success_rate: activeCount > 0 ? (successfulOpps / activeCount) * 100 : 0
+      };
     } catch (error) {
-      timer.end(false);
+      logger.setContext('api').error('Dashboard metrics fetch failed', error);
       // Return default values on error
       return {
         active_opportunities: 0,
@@ -232,8 +152,6 @@ export const api = {
         potential_revenue: 0,
         success_rate: 0
       };
-    } finally {
-      timer.end(true);
     }
   },
 

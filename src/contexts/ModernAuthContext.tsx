@@ -6,10 +6,8 @@
 import React, { createContext, useContext, useEffect, ReactNode } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { configService } from '../core/UnifiedConfigService';
 import { logger } from '../core/UnifiedLogger';
 import { stateManager, StateSlice, Action } from '../core/UnifiedStateManager';
-import { performanceKit } from '../core/PerformanceEmergencyKit';
 
 interface AuthState {
   user: User | null;
@@ -230,10 +228,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       stateManager.dispatch({ type: 'AUTH_LOADING', payload: true });
       
-      const { data, error } = await performanceKit.deduplicateRequest(
-        `auth_signin_${email}`,
-        () => supabase.auth.signInWithPassword({ email, password })
-      );
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
       if (error) {
         const currentAuthState = stateManager.select<AuthState, AuthState>('auth');

@@ -129,9 +129,9 @@ export const DealInbox = ({ className = "" }: DealInboxProps) => {
       }
 
       const { data, error } = await query.limit(100);
-
+      
       if (error) {
-        logger.error('Error fetching deals', { error });
+        logger.setContext('api').error('Error fetching deals', error);
         toast.error('Failed to load deals');
         return;
       }

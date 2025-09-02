@@ -19,6 +19,20 @@ import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 import { useToast } from "@/hooks/use-toast";
 
+interface Opportunity {
+  id: string;
+  make: string;
+  model: string;
+  year: number;
+  current_bid: number;
+  potential_profit: number;
+  roi_percentage: number;
+  confidence_score: number;
+  risk_score: number;
+  status: string;
+  created_at: string;
+}
+
 const Index = () => {
   const [activeView, setActiveView] = useState("dashboard");
   const { toast } = useToast();
@@ -31,7 +45,9 @@ const Index = () => {
   });
 
   // Extract data safely from either response format
-  const initialData = 'data' in initialOpportunities ? initialOpportunities.data : initialOpportunities.items || [];
+  const initialData: any[] = Array.isArray(initialOpportunities) ? initialOpportunities : 
+    (initialOpportunities && typeof initialOpportunities === 'object' && 'data' in initialOpportunities ? 
+      (initialOpportunities.data || []) : []);
 
   const { data: metrics = {
     active_opportunities: 0,
