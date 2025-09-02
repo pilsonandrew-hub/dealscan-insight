@@ -567,6 +567,4 @@ class SystemIntegrationProtocols {
 // Create singleton instance
 export const integrationProtocols = SystemIntegrationProtocols.getInstance();
 
-// Export types and protocols
-export type { IntegrationEventType, ProtocolConfig, SystemTransaction };
 export default SystemIntegrationProtocols;
