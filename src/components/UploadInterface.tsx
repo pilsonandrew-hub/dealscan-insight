@@ -13,6 +13,8 @@ import { auditLogger } from "@/utils/audit-logger";
 import { dataValidator } from "@/utils/data-validator";
 import { batchUtils } from "@/utils/batch-processor";
 import { settings } from "@/config/settings";
+import { uploadHardening } from "@/security/uploadHardening";
+import { inputSanitizer } from "@/utils/inputSanitizer";
 import apiService from "@/services/api";
 
 interface UploadFile {
@@ -48,7 +50,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     setIsDragOver(false);
   }, []);
 
-  // Enhanced security check with performance monitoring and audit logging
+  // Enhanced security check with upload hardening and performance monitoring
   const performSecurityCheck = async (file: File): Promise<{ 
     isSecure: boolean; 
     issues: string[]; 
@@ -64,7 +66,29 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         throw new Error('Security check rate limit exceeded. Please wait before uploading more files.');
       }
 
-      // Use enhanced security validation
+      // Use upload hardening for comprehensive security validation
+      const validationResult = await uploadHardening.validateFile(file);
+      
+      if (!validationResult.safe) {
+        auditLogger.log(
+          'file_security_validation_failed',
+          'upload',
+          'error',
+          {
+            filename: file.name,
+            fileSize: file.size,
+            reason: validationResult.reason
+          }
+        );
+        
+        return {
+          isSecure: false,
+          issues: [validationResult.reason],
+          riskLevel: 'high'
+        };
+      }
+
+      // Use enhanced security validation for additional checks
       const securityResult = validateCSVSecurity(file);
       
       // Log security check
@@ -80,10 +104,33 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         }
       );
       
-      // Additional content checks for CSV files
+      // Additional content checks for CSV files with input sanitization
       if (file.name.toLowerCase().endsWith('.csv')) {
         try {
           const content = await file.text();
+          
+          // Sanitize CSV content
+          const lines = content.split('\n').map(line => line.trim()).filter(Boolean);
+          const csvData = lines.map(line => line.split(','));
+          const sanitizationResult = inputSanitizer.sanitizeCSVData(csvData);
+          
+          if (sanitizationResult.threats.length > 0) {
+            securityResult.issues.push(...sanitizationResult.threats.slice(0, 3));
+            securityResult.riskLevel = 'high';
+            
+            auditLogger.log(
+              'csv_content_sanitization_issues',
+              'upload',
+              'warning',
+              {
+                filename: file.name,
+                threatsFound: sanitizationResult.threats.length,
+                samples: sanitizationResult.threats.slice(0, 2)
+              }
+            );
+          }
+          
+          // Check for dangerous formulas
           const dangerous = detectDangerousFormulas(content);
           if (dangerous.length > 0) {
             securityResult.issues.push(...dangerous.slice(0, 3));
