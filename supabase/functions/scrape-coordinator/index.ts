@@ -4,6 +4,7 @@
  */
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const ALLOWED_HOSTS = new Set([
   'gsaauctions.gov', 'govdeals.com', 'publicsurplus.com', 'municibid.com', 'allsurplus.com',
@@ -28,11 +29,25 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // ---- Auth (JWT or internal key) ----------------------------------
-    const auth = req.headers.get('authorization')?.replace(/^Bearer\s+/i,'') ?? '';
-    const internal = req.headers.get('x-internal-key') ?? '';
-    const ok = auth || internal === Deno.env.get('INTERNAL_API_KEY');
-    if (!ok) return new Response('Unauthorized', { status: 401, headers: corsHeaders });
+    // ---- Auth (JWT required - NO BYPASS) ----------------------------------
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header');
+      return new Response('Unauthorized: Valid JWT required', { status: 401, headers: corsHeaders });
+    }
+    
+    // Verify JWT token with Supabase
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      console.error('Invalid JWT token:', authError?.message);
+      return new Response('Unauthorized: Invalid JWT token', { status: 401, headers: corsHeaders });
+    }
 
     // ---- parse body ---------------------------------------------------
     const { jobId, sites = [], mode = 'live' } = await req.json().catch(() => ({}));
