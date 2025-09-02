@@ -130,7 +130,24 @@ class DealScoringEngine {
         const lowPrice = Math.min(...prices);
         const highPrice = Math.max(...prices);
 
-        // Cache the result
+        // Get current user for market price caching
+        const { data: { user } } = await supabase.auth.getUser();
+        const userId = user?.id;
+        
+        if (!userId) {
+          // For system-level operations, we'll skip caching market prices
+          // or use service role operations
+          console.warn('No user context for market price caching, skipping');
+          return {
+            avg_price: avgPrice,
+            low_price: lowPrice,
+            high_price: highPrice,
+            sample_size: prices.length,
+            confidence: 0.5  // Add missing confidence property
+          };
+        }
+
+        // Cache the result with user ownership
         await supabase.from('market_prices').upsert({
           make: make.toLowerCase(),
           model: model.toLowerCase(),
@@ -141,7 +158,8 @@ class DealScoringEngine {
           high_price: highPrice,
           sample_size: prices.length,
           source_api: 'dealer_sales_ml',
-          expires_at: new Date(Date.now() + 3600000).toISOString() // 1 hour
+          expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour
+          user_id: userId
         });
 
         return {
