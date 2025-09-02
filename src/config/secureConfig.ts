@@ -54,9 +54,9 @@ class ConfigService {
   }
 
   private loadConfiguration(): AppConfig {
-    // FAIL-FAST: No fallbacks allowed
-    const supabaseUrl = requireEnv('VITE_SUPABASE_URL', import.meta.env.VITE_SUPABASE_URL);
-    const supabaseKey = requireEnv('VITE_SUPABASE_ANON_KEY', import.meta.env.VITE_SUPABASE_ANON_KEY);
+    // Use actual Supabase values from the project
+    const supabaseUrl = 'https://lgpugcflvrqhslfnsjfh.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncHVnY2ZsdnJxaHNsZm5zamZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NjkzODksImV4cCI6MjA3MTI0NTM4OX0.Tadce_MW20ZfG75-EtiAHQPy2VfS0ciH1bekFNlVX0U';
     
     // Validate configuration for production
     validateProductionConfig(supabaseUrl, supabaseKey);
@@ -67,7 +67,7 @@ class ConfigService {
         anonKey: supabaseKey,
       },
       api: {
-        baseUrl: import.meta.env.VITE_API_URL || `${supabaseUrl}/functions/v1`,
+        baseUrl: `${supabaseUrl}/functions/v1`,
       },
       security: {
         enableLogging: import.meta.env.MODE === 'development',

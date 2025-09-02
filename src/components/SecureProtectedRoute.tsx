@@ -6,7 +6,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/ModernAuthContext';
-import { logger } from '@/utils/secureLogger';
+import { logger } from '@/core/UnifiedLogger';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -32,7 +32,7 @@ export function SecureProtectedRoute({ children, requiredRole }: ProtectedRouteP
 
   // Redirect to auth if not authenticated
   if (!isAuthenticated) {
-    logger.warn('Unauthorized access attempt', 'AUTH', {
+    logger.setContext('security').warn('Unauthorized access attempt', {
       path: location.pathname,
       requiredRole
     });
@@ -50,7 +50,7 @@ export function SecureProtectedRoute({ children, requiredRole }: ProtectedRouteP
   if (requiredRole && user) {
     // This would check user roles from the database
     // For now, we'll allow all authenticated users
-    logger.info('Authorized access', 'AUTH', {
+    logger.setContext('auth').info('Authorized access', {
       userId: user.id,
       path: location.pathname,
       requiredRole

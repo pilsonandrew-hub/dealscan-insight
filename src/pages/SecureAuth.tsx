@@ -6,8 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/ModernAuthContext';
-import { inputValidator } from '@/utils/inputValidator';
-import { logger } from '@/utils/secureLogger';
+import { logger } from '@/core/UnifiedLogger';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -46,9 +45,11 @@ export function AuthPage() {
     const newErrors: { [key: string]: string[] } = {};
 
     // Email validation
-    const emailResult = inputValidator.validateEmail(formData.email);
-    if (!emailResult.isValid) {
-      newErrors.email = emailResult.errors;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!formData.email) {
+      newErrors.email = ['Email is required'];
+    } else if (!emailRegex.test(formData.email)) {
+      newErrors.email = ['Invalid email format'];
     }
 
     // Password validation
@@ -68,14 +69,12 @@ export function AuthPage() {
         }
 
         // Display name validation
-        const nameResult = inputValidator.validateString(formData.displayName, {
-          required: true,
-          minLength: 2,
-          maxLength: 50,
-          sanitize: true
-        });
-        if (!nameResult.isValid) {
-          newErrors.displayName = nameResult.errors;
+        if (!formData.displayName) {
+          newErrors.displayName = ['Display name is required'];
+        } else if (formData.displayName.length < 2) {
+          newErrors.displayName = ['Display name must be at least 2 characters'];
+        } else if (formData.displayName.length > 50) {
+          newErrors.displayName = ['Display name must be less than 50 characters'];
         }
       }
     }
@@ -107,7 +106,7 @@ export function AuthPage() {
               setMessage({ type: 'error', text: result.error.message });
             }
           } else {
-            logger.info('User signed in successfully', 'AUTH');
+            logger.setContext('auth').info('User signed in successfully');
             // Navigation handled by useEffect
           }
           break;
@@ -141,7 +140,7 @@ export function AuthPage() {
           break;
       }
     } catch (error) {
-      logger.error('Auth form error', 'AUTH', error);
+      logger.setContext('auth').error('Auth form error', error);
       setMessage({ type: 'error', text: 'An unexpected error occurred' });
     } finally {
       setIsSubmitting(false);

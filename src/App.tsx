@@ -9,8 +9,6 @@ import { AuthProvider } from './contexts/ModernAuthContext';
 import { SecureProtectedRoute } from '@/components/SecureProtectedRoute';
 import { AuthPage } from '@/pages/SecureAuth';
 import { logger } from './core/UnifiedLogger';
-import { configService } from './core/UnifiedConfigService';
-import { performanceKit } from './core/PerformanceEmergencyKit';
 
 // Lazy load pages for better performance
 const Index = React.lazy(() => import("./pages/Index"));
@@ -46,15 +44,15 @@ const PerformanceMonitor: React.FC = () => {
   React.useEffect(() => {
     logger.info('App performance monitor initialized');
     
-    // Initialize performance monitoring
-    const metrics = performanceKit.getMetrics();
-    logger.performance('Initial performance metrics', metrics);
-    
     // Monitor memory usage periodically
     const interval = setInterval(() => {
-      const currentMetrics = performanceKit.getMetrics();
-      if (currentMetrics.pendingRequests > 10) {
-        logger.warn('High number of pending requests', currentMetrics);
+      if ('memory' in performance) {
+        const memory = (performance as any).memory;
+        const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
+        
+        if (usedMB > 100) { // Log if over 100MB
+          logger.warn('High memory usage detected', { usedMB });
+        }
       }
     }, 60000); // Check every minute
     
@@ -67,8 +65,8 @@ const PerformanceMonitor: React.FC = () => {
 const App = () => {
   React.useEffect(() => {
     logger.info('DealerScope App component mounted', {
-      environment: configService.environment,
-      version: configService.deployment.version,
+      environment: import.meta.env.MODE,
+      version: '4.9.0',
     });
   }, []);
 
