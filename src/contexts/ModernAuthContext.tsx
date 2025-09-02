@@ -202,8 +202,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
-      // Check for inactivity (30 minutes)
-      const inactivityLimit = 30 * 60 * 1000;
+      // Check for inactivity (10 minutes - reduced from 30)
+      const inactivityLimit = 10 * 60 * 1000;
       if (now - currentAuthState.lastActivity > inactivityLimit) {
         logger.warn('Session inactive, signing out');
         signOut();
@@ -350,12 +350,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const currentAuthState = stateManager.select<AuthState, AuthState>('auth');
       if (!currentAuthState.user) return false;
 
-      // For now, return false since user_roles table doesn't exist
-      // This would need to be implemented when the database schema is updated
-      const isAdmin = false;
-      stateManager.dispatch({ type: 'AUTH_SET_ADMIN', payload: isAdmin });
-      
-      return isAdmin;
+      // Check is_admin claim from JWT token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return false;
+
+      // Parse JWT to get is_admin claim
+      try {
+        const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+        const isAdmin = Boolean(payload.is_admin);
+        stateManager.dispatch({ type: 'AUTH_SET_ADMIN', payload: isAdmin });
+        
+        logger.debug('Admin status checked', { isAdmin, userId: currentAuthState.user.id });
+        return isAdmin;
+      } catch (jwtError) {
+        logger.warn('Failed to parse JWT for admin check', { error: jwtError });
+        return false;
+      }
       
     } catch (error) {
       logger.error('Admin status check error', { error });
