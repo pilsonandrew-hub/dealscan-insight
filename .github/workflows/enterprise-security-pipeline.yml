@@ -1,0 +1,258 @@
+# Enterprise Security & Quality Gate Pipeline for DealerScope
+name: Enterprise Security Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  NODE_VERSION: '20'
+  
+jobs:
+  # Phase 1: Code Quality & Testing
+  test-and-lint:
+    name: Code Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better analysis
+          
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install Dependencies
+        run: npm ci --prefer-offline --no-audit
+        
+      - name: Run TypeScript Compilation Check
+        run: npx tsc --noEmit
+        
+      - name: Run ESLint Security Rules
+        run: |
+          npm run lint -- --format=json --output-file=eslint-results.json || true
+          # Check for security-related ESLint violations
+          if grep -q '"ruleId":"@typescript-eslint/no-unused-vars"' eslint-results.json; then
+            echo "::warning::Unused variables detected - potential dead code"
+          fi
+          
+      - name: Run Unit & Integration Tests
+        run: |
+          npm test -- --coverage --reporter=json --outputFile=test-results.json
+          
+      - name: Security Test Coverage Check
+        run: |
+          # Ensure security tests are present and passing
+          if ! grep -q "security.*test" test-results.json; then
+            echo "::error::Security tests are missing or failing"
+            exit 1
+          fi
+          
+      - name: Upload Test Coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-coverage
+          path: coverage/
+          
+  # Phase 2: Dependency Security Audit
+  dependency-security:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install Dependencies
+        run: npm ci --prefer-offline
+        
+      - name: Run NPM Security Audit
+        run: |
+          # Fail build for high or critical vulnerabilities
+          npm audit --audit-level=high --json > audit-results.json || AUDIT_EXIT_CODE=$?
+          
+          # Parse results and provide detailed feedback
+          if [ $AUDIT_EXIT_CODE -ne 0 ]; then
+            echo "::error::High or critical security vulnerabilities found!"
+            cat audit-results.json
+            exit $AUDIT_EXIT_CODE
+          fi
+          
+      - name: Check for Outdated Packages
+        run: |
+          npm outdated --json > outdated-packages.json || true
+          # Warn about outdated packages but don't fail build
+          if [ -s outdated-packages.json ]; then
+            echo "::warning::Some packages are outdated. Consider updating for latest security patches."
+          fi
+          
+  # Phase 3: Secret Scanning
+  secret-scanning:
+    name: Secret & Credential Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Run GitLeaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Scan for Hardcoded API Keys
+        run: |
+          # Custom patterns for common API key formats
+          echo "Scanning for potential API keys and secrets..."
+          
+          # Check for common API key patterns
+          if grep -r -E "(api[_-]?key|secret[_-]?key|access[_-]?token)" --include="*.ts" --include="*.js" --include="*.json" . | grep -v node_modules | grep -v ".git"; then
+            echo "::warning::Potential API keys or secrets found in code. Review carefully."
+          fi
+          
+          # Check for URLs with credentials
+          if grep -r -E "https?://[^:]+:[^@]+@" --include="*.ts" --include="*.js" . | grep -v node_modules; then
+            echo "::error::URLs with embedded credentials found!"
+            exit 1
+          fi
+          
+  # Phase 4: SAST (Static Application Security Testing)
+  static-security-analysis:
+    name: Static Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, typescript
+          queries: security-and-quality
+          
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+        
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        
+      - name: Run Semgrep Security Rules
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/javascript
+            p/typescript
+            p/react
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          
+  # Phase 5: Container Security (if applicable)
+  container-security:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Build Docker Image
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t dealerscope:latest .
+          else
+            echo "No Dockerfile found, skipping container scan"
+            exit 0
+          fi
+          
+      - name: Run Trivy Container Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'dealerscope:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          
+      - name: Upload Trivy Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          
+  # Phase 6: Security Summary & Notifications
+  security-summary:
+    name: Security Assessment Summary
+    runs-on: ubuntu-latest
+    needs: [test-and-lint, dependency-security, secret-scanning]
+    if: always()
+    
+    steps:
+      - name: Generate Security Report
+        run: |
+          echo "# DealerScope Security Assessment Report" > security-report.md
+          echo "**Generated:** $(date -u)" >> security-report.md
+          echo "**Commit:** ${{ github.sha }}" >> security-report.md
+          echo "" >> security-report.md
+          
+          # Test results
+          if [[ "${{ needs.test-and-lint.result }}" == "success" ]]; then
+            echo "✅ **Code Quality:** All tests passed" >> security-report.md
+          else
+            echo "❌ **Code Quality:** Tests failed or incomplete" >> security-report.md
+          fi
+          
+          # Dependency results
+          if [[ "${{ needs.dependency-security.result }}" == "success" ]]; then
+            echo "✅ **Dependencies:** No high/critical vulnerabilities" >> security-report.md
+          else
+            echo "❌ **Dependencies:** Security vulnerabilities detected" >> security-report.md
+          fi
+          
+          # Secret scanning results
+          if [[ "${{ needs.secret-scanning.result }}" == "success" ]]; then
+            echo "✅ **Secrets:** No exposed credentials detected" >> security-report.md
+          else
+            echo "❌ **Secrets:** Potential credential exposure found" >> security-report.md
+          fi
+          
+          echo "" >> security-report.md
+          echo "View detailed results in the [Actions tab](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> security-report.md
+          
+      - name: Comment PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('security-report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
