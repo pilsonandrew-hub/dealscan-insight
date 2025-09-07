@@ -1,0 +1,205 @@
+# Dependabot configuration for DealerScope
+# Automatically updates dependencies to keep the project secure and up-to-date
+
+version: 2
+updates:
+  # Node.js/npm dependencies (Frontend)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "pilsonandrew-hub"
+    assignees:
+      - "pilsonandrew-hub"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "security"
+    # Group updates to reduce PR noise
+    groups:
+      # Security updates - highest priority
+      security-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "security"
+      # Major version updates - separate to allow careful review
+      major-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "version-update:semver-major"
+      # Minor and patch updates - can be grouped together
+      minor-and-patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      # Development dependencies
+      dev-dependencies:
+        patterns:
+          - "@types/*"
+          - "@testing-library/*"
+          - "eslint*"
+          - "prettier*"
+          - "vitest*"
+          - "@vitejs/*"
+        dependency-type: "development"
+    # Version management
+    versioning-strategy: "increase"
+    # Ignore specific dependencies that need manual updates
+    ignore:
+      # React ecosystem - major updates need careful testing
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      # Node.js version - controlled by deployment environment
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  # Python/pip dependencies (Backend)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "pilsonandrew-hub"
+    assignees:
+      - "pilsonandrew-hub"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "security"
+      - "python"
+    # Group Python updates
+    groups:
+      # Security updates - highest priority
+      security-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "security"
+      # FastAPI ecosystem
+      fastapi-ecosystem:
+        patterns:
+          - "fastapi*"
+          - "uvicorn*"
+          - "pydantic*"
+          - "starlette*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      # Database and ORM
+      database-stack:
+        patterns:
+          - "sqlalchemy*"
+          - "psycopg2*"
+          - "alembic*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      # Testing frameworks
+      testing-tools:
+        patterns:
+          - "pytest*"
+          - "coverage*"
+          - "bandit*"
+          - "safety*"
+        dependency-type: "development"
+      # ML/AI libraries
+      ml-libraries:
+        patterns:
+          - "scikit-learn*"
+          - "pandas*"
+          - "numpy*"
+          - "joblib*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+    versioning-strategy: "increase"
+    # Ignore specific Python dependencies
+    ignore:
+      # Major Python version updates need careful testing
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major"]
+      # FastAPI major updates need API compatibility review
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+      # SQLAlchemy major updates need migration review
+      - dependency-name: "sqlalchemy"
+        update-types: ["version-update:semver-major"]
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "pilsonandrew-hub"
+    assignees:
+      - "pilsonandrew-hub"
+    commit-message:
+      prefix: "docker"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "infrastructure"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/.github/workflows"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "pilsonandrew-hub"
+    assignees:
+      - "pilsonandrew-hub"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "ci-cd"
+      - "github-actions"
+    groups:
+      # Group action updates by category
+      security-actions:
+        patterns:
+          - "github/codeql-action*"
+          - "aquasecurity/trivy-action*"
+          - "securecodewarrior/github-action*"
+      # Core actions
+      core-actions:
+        patterns:
+          - "actions/checkout*"
+          - "actions/setup-node*"
+          - "actions/setup-python*"
+          - "actions/cache*"
+          - "actions/upload-artifact*"
+          - "actions/download-artifact*"
