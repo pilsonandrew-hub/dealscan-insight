@@ -1,6 +1,6 @@
 import React from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAuth } from '@/contexts/UnifiedAuthContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { Loader2 } from 'lucide-react'
 
 interface ProtectedRouteProps {
@@ -8,13 +8,13 @@ interface ProtectedRouteProps {
   requireAdmin?: boolean
 }
 
-export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
+function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
   const { user, isLoading } = useAuth()
   const location = useLocation()
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" data-testid="protected-route-loader">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     )
@@ -32,3 +32,5 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 
   return <>{children}</>
 }
+
+export default ProtectedRoute
