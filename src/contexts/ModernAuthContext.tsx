@@ -260,25 +260,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signUp = async (email: string, password: string) => {
     try {
+      console.log('📝 ModernAuthContext: Starting sign up for:', email);
       stateManager.dispatch({ type: 'AUTH_LOADING', payload: true });
       
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${window.location.origin}/`,
         },
       });
 
       if (error) {
+        console.error('❌ ModernAuthContext: Sign up error:', error);
         logger.setContext('auth').warn('Sign up failed', { email, error: error.message });
         return { error };
       }
 
+      console.log('✅ ModernAuthContext: Sign up successful, user:', data.user?.id);
       logger.setContext('auth').info('User signed up successfully', { userId: data.user?.id });
       return { error: undefined };
       
     } catch (error) {
+      console.error('❌ ModernAuthContext: Sign up exception:', error);
       logger.error('Sign up error', { error });
       return { error: error as AuthError };
     } finally {
