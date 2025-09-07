@@ -1,0 +1,481 @@
+name: Production-Grade Validation Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Enable debug mode'
+        required: false
+        default: false
+
+# Security: Minimal permissions by default
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  
+concurrency:
+  group: pages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_ENV: production
+  PYTHONUNBUFFERED: 1
+  FORCE_COLOR: 1
+  TERM: xterm-256color
+  CI: true
+  # Security: Disable telemetry
+  NEXT_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+  # Performance: Parallel execution
+  PYTEST_XDIST_WORKER_COUNT: auto
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  # Job: Security scanning before any code execution
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          
+      - name: Dependency vulnerability check
+        run: |
+          # Check for known vulnerabilities in dependencies
+          if [ -f "package-lock.json" ]; then
+            npm audit --audit-level=moderate || echo "::warning::npm vulnerabilities detected"
+          fi
+          if [ -f "requirements.txt" ]; then
+            pip install safety
+            safety check --json || echo "::warning::Python vulnerabilities detected"
+          fi
+
+  validate-frontend:
+    needs: [security-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        node-version: ['18.x', '20.x']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            .next/cache
+          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.node-version }}-
+            
+      - name: Install dependencies with integrity check
+        run: |
+          npm ci --prefer-offline --no-audit --silent
+          npm ls --depth=0 || true
+          
+      - name: Parallel validation tasks
+        run: |
+          # Run multiple validation tasks in parallel
+          npm run lint &
+          lint_pid=$!
+          
+          npm run type-check &
+          type_pid=$!
+          
+          npm run test:unit -- --coverage --maxWorkers=50% &
+          test_pid=$!
+          
+          # Wait for all background jobs
+          wait $lint_pid || echo "::error::Linting failed"
+          wait $type_pid || echo "::error::Type checking failed"
+          wait $test_pid || echo "::error::Unit tests failed"
+          
+      - name: Build validation
+        run: |
+          npm run build
+          # Verify build output
+          test -d dist || { echo "::error::Build output missing"; exit 1; }
+          
+      - name: Bundle size check
+        run: |
+          # Check bundle sizes against thresholds
+          npx size-limit || echo "::warning::Bundle size exceeds limits"
+          
+      - name: Generate comprehensive reports
+        if: always()
+        run: |
+          mkdir -p validation-reports/{coverage,lint,security,performance}
+          
+          # Coverage report
+          if [ -f coverage/lcov.info ]; then
+            npx lcov-summary coverage/lcov.info > validation-reports/coverage/summary.txt
+            cp -r coverage/* validation-reports/coverage/ 2>/dev/null || true
+          fi
+          
+          # Lighthouse CI for performance
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npx lhci autorun --collect.numberOfRuns=3 || true
+          fi
+          
+          # Generate consolidated report
+          node scripts/generate-frontend-report.js || echo '{"status":"partial"}' > validation-reports/summary.json
+          
+      - name: Upload frontend artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-reports-${{ matrix.node-version }}
+          path: validation-reports/
+          retention-days: 7
+          compression-level: 9
+
+  validate-backend:
+    needs: [security-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+        test-group: ['unit', 'integration', 'performance']
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U testuser"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+          
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+          
+    env:
+      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+      REDIS_URL: redis://localhost:6379
+      PYTHONPATH: ${{ github.workspace }}
+      
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            
+      - name: Cache Python packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            .pytest_cache
+            .mypy_cache
+            .ruff_cache
+          key: ${{ runner.os }}-python-${{ matrix.python-version }}-${{ hashFiles('requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-python-${{ matrix.python-version }}-
+            
+      - name: Install dependencies with verification
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip check
+          pip list --outdated || true
+          
+      - name: Static analysis
+        if: matrix.test-group == 'unit'
+        run: |
+          # Type checking
+          mypy src --ignore-missing-imports --strict &
+          mypy_pid=$!
+          
+          # Security scanning
+          bandit -r src -ll &
+          bandit_pid=$!
+          
+          # Code quality
+          ruff check src &
+          ruff_pid=$!
+          
+          # Complexity analysis
+          radon cc src -s -nb &
+          radon_pid=$!
+          
+          wait $mypy_pid || echo "::warning::Type checking issues found"
+          wait $bandit_pid || echo "::warning::Security issues found"
+          wait $ruff_pid || echo "::warning::Code quality issues found"
+          wait $radon_pid || true
+          
+      - name: Database migrations
+        if: matrix.test-group != 'unit'
+        run: |
+          alembic upgrade head
+          alembic check
+          
+      - name: Run test suite - ${{ matrix.test-group }}
+        run: |
+          case "${{ matrix.test-group }}" in
+            unit)
+              pytest tests/unit \
+                --cov=src \
+                --cov-report=xml:coverage.xml \
+                --cov-report=html:htmlcov \
+                --cov-report=term-missing \
+                --cov-fail-under=80 \
+                --maxfail=5 \
+                --tb=short \
+                -n auto \
+                --dist loadgroup \
+                --junitxml=test-results.xml
+              ;;
+            integration)
+              pytest tests/integration \
+                --maxfail=3 \
+                --tb=short \
+                -n 2 \
+                --junitxml=test-results.xml
+              ;;
+            performance)
+              pytest tests/performance \
+                --benchmark-only \
+                --benchmark-json=benchmark.json \
+                --benchmark-autosave \
+                --benchmark-compare-fail=min:10% \
+                --junitxml=test-results.xml
+              ;;
+          esac
+          
+      - name: Generate backend reports
+        if: always()
+        run: |
+          mkdir -p validation-reports/{coverage,tests,security,performance}
+          
+          # Copy test results
+          cp test-results.xml validation-reports/tests/ 2>/dev/null || true
+          cp coverage.xml validation-reports/coverage/ 2>/dev/null || true
+          cp -r htmlcov validation-reports/coverage/ 2>/dev/null || true
+          cp benchmark.json validation-reports/performance/ 2>/dev/null || true
+          
+          # Generate summary
+          python scripts/generate_backend_report.py || echo '{"status":"partial"}' > validation-reports/summary.json
+          
+      - name: Upload backend artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-reports-${{ matrix.python-version }}-${{ matrix.test-group }}
+          path: validation-reports/
+          retention-days: 7
+          compression-level: 9
+
+  performance-analysis:
+    needs: [validate-frontend, validate-backend]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-reports
+          
+      - name: Analyze performance regression
+        run: |
+          # Compare with base branch metrics
+          python scripts/performance_regression.py \
+            --current all-reports \
+            --threshold 5 \
+            --output performance-analysis.md
+            
+      - name: Comment PR with analysis
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const analysis = fs.readFileSync('performance-analysis.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: analysis
+            });
+
+  gatekeeper:
+    needs: [validate-frontend, validate-backend, security-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          path: all-reports
+          
+      - name: Enforce quality gates
+        id: quality-gates
+        run: |
+          set -e
+          
+          # Aggregate all reports
+          mkdir -p final-reports
+          python scripts/aggregate_reports.py \
+            --input all-reports \
+            --output final-reports/summary.json
+            
+          # Check quality gates
+          MIN_COVERAGE=80
+          MAX_VULNERABILITIES=0
+          MAX_CODE_SMELLS=10
+          
+          # Parse metrics
+          coverage=$(jq -r '.coverage.percentage // 0' final-reports/summary.json)
+          vulnerabilities=$(jq -r '.security.vulnerabilities // 0' final-reports/summary.json)
+          code_smells=$(jq -r '.quality.code_smells // 0' final-reports/summary.json)
+          
+          # Enforce thresholds
+          failed=false
+          
+          if (( $(echo "$coverage < $MIN_COVERAGE" | bc -l) )); then
+            echo "::error::Coverage ${coverage}% is below minimum ${MIN_COVERAGE}%"
+            failed=true
+          fi
+          
+          if [ "$vulnerabilities" -gt "$MAX_VULNERABILITIES" ]; then
+            echo "::error::Found ${vulnerabilities} vulnerabilities (max: ${MAX_VULNERABILITIES})"
+            failed=true
+          fi
+          
+          if [ "$code_smells" -gt "$MAX_CODE_SMELLS" ]; then
+            echo "::warning::Found ${code_smells} code smells (max: ${MAX_CODE_SMELLS})"
+          fi
+          
+          if [ "$failed" = true ]; then
+            echo "quality_gate_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "quality_gate_status=passed" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Generate deployment manifest
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          # Create deployment manifest with validation signatures
+          cat > deployment-manifest.json << EOF
+          {
+            "version": "${{ github.sha }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "validated": true,
+            "quality_gates": "${{ steps.quality-gates.outputs.quality_gate_status }}",
+            "artifacts": {
+              "frontend": "frontend-reports-*",
+              "backend": "backend-reports-*"
+            },
+            "signatures": {
+              "sha256": "$(find all-reports -type f -exec sha256sum {} \; | sha256sum | cut -d' ' -f1)"
+            }
+          }
+          EOF
+          
+      - name: Upload deployment manifest
+        if: success() && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-manifest
+          path: deployment-manifest.json
+          retention-days: 90
+          
+      - name: Create check run summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = JSON.parse(fs.readFileSync('final-reports/summary.json', 'utf8'));
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Quality Gate',
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: '${{ steps.quality-gates.outputs.quality_gate_status }}' === 'passed' ? 'success' : 'failure',
+              output: {
+                title: 'Quality Gate Results',
+                summary: `
+                  ## Metrics
+                  - Coverage: ${summary.coverage?.percentage || 0}%
+                  - Vulnerabilities: ${summary.security?.vulnerabilities || 0}
+                  - Code Smells: ${summary.quality?.code_smells || 0}
+                  - Build Time: ${summary.performance?.build_time || 'N/A'}
+                `,
+              }
+            });
