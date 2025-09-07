@@ -80,13 +80,23 @@ export default function Auth() {
   const testSupabaseConnection = async () => {
     try {
       console.log('🧪 Testing Supabase connection...');
-      const { data, error } = await supabase.auth.getUser();
-      console.log('🧪 Supabase connection test result:', { data, error });
-      if (error) {
-        setError(`Supabase connection error: ${error.message}`);
+      console.log('🔗 Supabase URL:', 'https://lgpugcflvrqhslfnsjfh.supabase.co');
+      console.log('🔗 Current window location:', window.location.origin);
+      
+      // Test basic connection first
+      const { data: testData, error: testError } = await supabase
+        .from('profiles')
+        .select('count')
+        .limit(1);
+      
+      if (testError && testError.message.includes('permission denied')) {
+        setError('✅ Connection OK, but you need to sign in to access data.');
+      } else if (testError) {
+        setError(`Connection error: ${testError.message}`);
       } else {
-        setError('Supabase connection is working. Try signing in again.');
+        setError('✅ Supabase connection is working perfectly!');
       }
+      
     } catch (error) {
       console.error('🧪 Supabase connection test failed:', error);
       setError(`Connection test failed: ${error}`);
