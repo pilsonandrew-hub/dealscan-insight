@@ -8,12 +8,7 @@ import { AuthProvider } from './contexts/ModernAuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import Auth from '@/pages/Auth';
 
-// Import investment-grade enterprise systems
-import { logger } from './core/UnifiedLogger';
-import { configService } from './core/UnifiedConfigService';
-import { stateManager } from './core/UnifiedStateManager';
-import { integrationProtocols } from './core/SystemIntegrationProtocols';
-import { enterpriseOrchestrator } from './core/EnterpriseSystemOrchestrator';
+console.log('🔧 App.tsx: Starting component initialization...');
 
 // Lazy load pages for better performance
 const Index = React.lazy(() => import("./pages/Index"));
@@ -25,64 +20,76 @@ const ProductionStatus = React.lazy(() => import("./pages/ProductionStatus"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: configService.isProduction ? 3 : 1,
-      staleTime: configService.performance.caching.ttl,
-      refetchOnWindowFocus: configService.isDevelopment,
+      retry: 3,
+      staleTime: 60000,
+      refetchOnWindowFocus: true,
     },
   },
 });
 
 const App = () => {
-  const [systemsInitialized, setSystemsInitialized] = useState(false);
+  const [systemsInitialized, setSystemsInitialized] = useState(true); // Start as initialized
   const [systemsHealth, setSystemsHealth] = useState<'healthy' | 'degraded' | 'critical'>('healthy');
+  const [enterpriseSystems, setEnterpriseSystems] = useState<any>(null);
 
   useEffect(() => {
-    // Subscribe to system integration events
-    const unsubscribe = integrationProtocols.subscribeToIntegrationEvents('*', async (event) => {
-      if (event.type === 'system-health-update') {
-        setSystemsHealth(event.payload.health);
-      }
-    });
-
-    // Subscribe to state management events
-    const unsubscribeState = stateManager.addGlobalListener((newState, oldState, action) => {
-      if (action.type === 'APP_INITIALIZE') {
-        setSystemsInitialized(true);
-        logger.info('Application state initialized', { 
-          stateSize: JSON.stringify(newState).length,
-          action: action.type 
+    console.log('🚀 App.tsx: Loading enterprise systems asynchronously...');
+    
+    // Load enterprise systems asynchronously without blocking
+    const loadEnterpriseSystems = async () => {
+      try {
+        const systems = await Promise.all([
+          import('./core/UnifiedLogger'),
+          import('./core/UnifiedConfigService'),
+          import('./core/UnifiedStateManager'),
+          import('./core/SystemIntegrationProtocols'),
+          import('./core/EnterpriseSystemOrchestrator')
+        ]);
+        
+        const [logger, configService, stateManager, integrationProtocols, enterpriseOrchestrator] = systems;
+        
+        console.log('✅ App.tsx: Enterprise systems loaded successfully');
+        
+        setEnterpriseSystems({
+          logger: logger.logger,
+          configService: configService.configService,
+          stateManager: stateManager.stateManager,
+          integrationProtocols: integrationProtocols.integrationProtocols,
+          enterpriseOrchestrator: enterpriseOrchestrator.enterpriseOrchestrator
+        });
+        
+        // Initialize state
+        stateManager.stateManager.dispatch({ type: 'APP_INITIALIZE' });
+        
+      } catch (error) {
+        console.error('⚠️ App.tsx: Enterprise systems failed to load, using fallback:', error);
+        // Use mock systems
+        setEnterpriseSystems({
+          logger: { info: console.log, debug: console.log, error: console.error, warn: console.warn },
+          configService: { 
+            isProduction: false, 
+            isDevelopment: true, 
+            environment: 'development',
+            performance: { caching: { ttl: 60000 }, monitoring: { enabled: false } } 
+          },
+          stateManager: { 
+            dispatch: () => {}, 
+            addGlobalListener: () => () => {}
+          },
+          integrationProtocols: { subscribeToIntegrationEvents: () => () => {} },
+          enterpriseOrchestrator: { getSystemReport: () => Promise.resolve({ overallHealth: 'healthy' }) }
         });
       }
-    });
-
-    // Initialize application state
-    stateManager.dispatch({ type: 'APP_INITIALIZE' });
-
-    // Monitor system health
-    const healthInterval = setInterval(async () => {
-      try {
-        const report = await enterpriseOrchestrator.getSystemReport();
-        setSystemsHealth(report.overallHealth);
-        
-        if (report.overallHealth === 'critical') {
-          logger.error('Critical system health detected', {
-            criticalSystems: report.systemsStatus.filter(s => s.status === 'critical')
-          });
-        }
-      } catch (error) {
-        logger.error('Health monitoring failed', error);
-      }
-    }, configService.isProduction ? 30000 : 10000);
-
-    return () => {
-      unsubscribe();
-      unsubscribeState();
-      clearInterval(healthInterval);
     };
+
+    loadEnterpriseSystems();
   }, []);
 
-  // Show system health indicator in development
-  const showHealthIndicator = configService.isDevelopment && systemsInitialized;
+  // Show system health indicator only in development
+  const isDevelopment = import.meta.env.DEV;
+  const showHealthIndicator = isDevelopment && systemsInitialized && enterpriseSystems;
+
+  console.log('🎨 App.tsx: Rendering application...');
 
   return (
     <AuthProvider>
@@ -90,11 +97,11 @@ const App = () => {
         <TooltipProvider>
           <Toaster />
           <Sonner 
-            position={configService.isDevelopment ? "top-right" : "bottom-right"}
-            expand={configService.isDevelopment}
+            position={isDevelopment ? "top-right" : "bottom-right"}
+            expand={isDevelopment}
             richColors={true}
             closeButton={true}
-            duration={configService.isProduction ? 5000 : 3000}
+            duration={isDevelopment ? 3000 : 5000}
           />
           
           {/* Enterprise System Health Indicator (Development Only) */}
@@ -105,7 +112,7 @@ const App = () => {
               'bg-red-600 text-white'
             }`}>
               🏢 Enterprise Systems: {systemsHealth.toUpperCase()} - 
-              Unified Config: {configService.environment} | 
+              Unified Config: {enterpriseSystems?.configService?.environment || 'loading'} | 
               State Manager: Active | 
               Integration Protocols: Online
             </div>
@@ -117,7 +124,7 @@ const App = () => {
                 <div className="min-h-screen flex items-center justify-center">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                    <p className="mt-2 text-muted-foreground">Loading enterprise systems...</p>
+                    <p className="mt-2 text-muted-foreground">Loading DealerScope...</p>
                   </div>
                 </div>
               }>

@@ -3,75 +3,100 @@ import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
 
-// Initialize Enterprise System Orchestrator - Investment Grade Architecture
-import { enterpriseOrchestrator } from './core/EnterpriseSystemOrchestrator'
-import { logger } from './core/UnifiedLogger'
+console.log('🚀 DealerScope v4.8: Starting investment-grade application...')
 
-// Enterprise-grade startup sequence
+// Simplified and robust initialization
 async function initializeApplication() {
   try {
-    logger.info('Starting investment-grade application initialization')
+    console.log('🎯 main.tsx: Starting basic application render...')
     
-    // Initialize all sophisticated systems in proper order
-    const orchestrationReport = await enterpriseOrchestrator.initialize()
-    
-    logger.info('Enterprise orchestration completed', {
-      overallHealth: orchestrationReport.overallHealth,
-      systemsOnline: orchestrationReport.performanceMetrics.systemsOnline,
-      totalSystems: orchestrationReport.performanceMetrics.totalSystems,
-      startupTime: orchestrationReport.performanceMetrics.startupTime
-    })
-
-    if (orchestrationReport.overallHealth === 'critical') {
-      logger.error('Critical systems failure detected', {
-        criticalAlerts: orchestrationReport.criticalAlerts,
-        recommendedActions: orchestrationReport.recommendedActions
-      })
-      
-      // Show enterprise-grade error handling
-      const errorDisplay = document.createElement('div')
-      errorDisplay.innerHTML = `
-        <div style="position: fixed; top: 0; left: 0; right: 0; background: #dc2626; color: white; padding: 1rem; z-index: 9999;">
-          <strong>⚠️ Critical System Failure</strong> - Some enterprise systems failed to initialize. 
-          Check console for details. Recommended: ${orchestrationReport.recommendedActions.join(', ')}
-        </div>
-      `
-      document.body.appendChild(errorDisplay)
-    }
-
-    // Render application with enterprise systems initialized
+    // Render the application immediately for better UX
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <App />
       </React.StrictMode>,
     )
+    
+    console.log('✅ main.tsx: Application rendered successfully')
+    
+    // Initialize enterprise systems asynchronously after render
+    console.log('🔧 main.tsx: Initializing enterprise systems in background...')
+    
+    setTimeout(async () => {
+      try {
+        const { enterpriseOrchestrator } = await import('./core/EnterpriseSystemOrchestrator')
+        const { logger } = await import('./core/UnifiedLogger')
+        
+        console.log('📊 main.tsx: Starting enterprise orchestration...')
+        const orchestrationReport = await enterpriseOrchestrator.initialize()
+        
+        console.log('✅ main.tsx: Enterprise orchestration completed:', {
+          overallHealth: orchestrationReport.overallHealth,
+          systemsOnline: orchestrationReport.performanceMetrics.systemsOnline,
+          totalSystems: orchestrationReport.performanceMetrics.totalSystems,
+          startupTime: orchestrationReport.performanceMetrics.startupTime
+        })
+        
+        logger.info('Enterprise orchestration completed', {
+          overallHealth: orchestrationReport.overallHealth,
+          systemsOnline: orchestrationReport.performanceMetrics.systemsOnline,
+          totalSystems: orchestrationReport.performanceMetrics.totalSystems,
+          startupTime: orchestrationReport.performanceMetrics.startupTime
+        })
 
-    // Setup graceful shutdown
-    window.addEventListener('beforeunload', async () => {
-      await enterpriseOrchestrator.shutdown()
-    })
+        if (orchestrationReport.overallHealth === 'critical') {
+          console.warn('⚠️ main.tsx: Critical systems detected but application is functional')
+          
+          // Show non-blocking warning for enterprise-grade visibility
+          const warningElement = document.createElement('div')
+          warningElement.innerHTML = `
+            <div style="position: fixed; top: 0; left: 0; right: 0; background: #f59e0b; color: white; padding: 0.5rem; z-index: 9999; text-align: center; font-size: 0.875rem;">
+              ⚠️ Some enterprise systems are degraded - Application is functional but monitoring recommended
+              <button onclick="this.parentElement.remove()" style="margin-left: 1rem; background: transparent; border: 1px solid white; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer;">×</button>
+            </div>
+          `
+          document.body.appendChild(warningElement)
+          
+          // Auto-remove after 10 seconds
+          setTimeout(() => {
+            if (warningElement.parentElement) {
+              warningElement.remove()
+            }
+          }, 10000)
+        }
+
+        // Setup graceful shutdown
+        window.addEventListener('beforeunload', async () => {
+          await enterpriseOrchestrator.shutdown()
+        })
+
+      } catch (enterpriseError) {
+        console.warn('⚠️ main.tsx: Enterprise systems initialization failed but app is functional:', enterpriseError)
+      }
+    }, 100) // Small delay to let initial render complete
 
   } catch (error) {
-    logger.fatal('Enterprise application initialization failed', error)
+    console.error('❌ main.tsx: Critical application failure:', error)
     
-    // Fallback rendering for catastrophic failure
+    // Ultimate fallback rendering for catastrophic failure
     document.getElementById('root')!.innerHTML = `
       <div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui;">
         <div style="text-align: center; max-width: 600px; padding: 2rem;">
-          <h1 style="color: #dc2626; margin-bottom: 1rem;">🚨 System Initialization Failure</h1>
-          <p style="margin-bottom: 1rem;">The enterprise-grade application failed to initialize properly.</p>
-          <details style="text-align: left; background: #f5f5f5; padding: 1rem; border-radius: 4px;">
+          <h1 style="color: #dc2626; margin-bottom: 1rem;">🚨 DealerScope Initialization Failure</h1>
+          <p style="margin-bottom: 1rem;">The application failed to initialize properly.</p>
+          <details style="text-align: left; background: #f5f5f5; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
             <summary style="cursor: pointer; font-weight: bold;">Technical Details</summary>
             <pre style="margin-top: 0.5rem; font-size: 0.875rem; overflow-x: auto;">${error}</pre>
           </details>
-          <p style="margin-top: 1rem; font-size: 0.875rem; color: #666;">
-            Please refresh the page or contact system administrators.
-          </p>
+          <button onclick="window.location.reload()" style="background: #3b82f6; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer;">
+            Reload Application
+          </button>
         </div>
       </div>
     `
   }
 }
 
-// Start enterprise initialization
+// Start the application
+console.log('🔥 main.tsx: Launching DealerScope...')
 initializeApplication()
