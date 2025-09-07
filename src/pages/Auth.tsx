@@ -83,23 +83,37 @@ export default function Auth() {
       console.log('🔗 Supabase URL:', 'https://lgpugcflvrqhslfnsjfh.supabase.co');
       console.log('🔗 Current window location:', window.location.origin);
       
-      // Test basic connection first
-      const { data: testData, error: testError } = await supabase
-        .from('profiles')
-        .select('count')
-        .limit(1);
+      // Test the new auth debugging function
+      const { data: authTest, error: authError } = await supabase.rpc('test_auth');
       
-      if (testError && testError.message.includes('permission denied')) {
-        setError('✅ Connection OK, but you need to sign in to access data.');
-      } else if (testError) {
-        setError(`Connection error: ${testError.message}`);
+      if (authError) {
+        console.error('🧪 Auth test error:', authError);
+        setError(`Auth test failed: ${authError.message}`);
       } else {
-        setError('✅ Supabase connection is working perfectly!');
+        console.log('🧪 Auth test result:', authTest);
+        setError(`✅ Connection working! Current auth state: ${JSON.stringify(authTest, null, 2)}`);
       }
       
     } catch (error) {
       console.error('🧪 Supabase connection test failed:', error);
       setError(`Connection test failed: ${error}`);
+    }
+  };
+
+  const createTestAccount = async () => {
+    const testEmail = 'test@dealerscope.com';
+    const testPassword = 'testpass123';
+    
+    console.log('🔨 Creating test account...');
+    setError('Creating test account...');
+    
+    const { error } = await signUp(testEmail, testPassword);
+    
+    if (error) {
+      setError(`Test account creation failed: ${error.message}`);
+    } else {
+      setError('✅ Test account created! You can now sign in with test@dealerscope.com / testpass123');
+      setFormData({ ...formData, email: testEmail, password: testPassword });
     }
   };
 
@@ -259,8 +273,8 @@ export default function Auth() {
               </Alert>
             )}
             
-            {/* Debug/Test Connection Button */}
-            <div className="mt-4 pt-4 border-t border-border">
+            {/* Debug/Test Connection Buttons */}
+            <div className="mt-4 pt-4 border-t border-border space-y-2">
               <Button 
                 onClick={testSupabaseConnection} 
                 variant="outline" 
@@ -269,6 +283,15 @@ export default function Auth() {
                 disabled={isLoading}
               >
                 Test Connection
+              </Button>
+              <Button 
+                onClick={createTestAccount} 
+                variant="outline" 
+                size="sm" 
+                className="w-full text-xs"
+                disabled={isLoading}
+              >
+                Create Test Account
               </Button>
             </div>
           </CardContent>
