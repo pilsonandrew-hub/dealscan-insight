@@ -80,23 +80,21 @@ export default function Auth() {
   const testSupabaseConnection = async () => {
     try {
       console.log('🧪 Testing Supabase connection...');
-      console.log('🔗 Supabase URL:', 'https://lgpugcflvrqhslfnsjfh.supabase.co');
-      console.log('🔗 Current window location:', window.location.origin);
       
-      // Test the new auth debugging function
+      // Test the auth debugging function
       const { data: authTest, error: authError } = await supabase.rpc('test_auth');
       
       if (authError) {
         console.error('🧪 Auth test error:', authError);
-        setError(`Auth test failed: ${authError.message}`);
+        setError(`❌ Auth test failed: ${authError.message}`);
       } else {
         console.log('🧪 Auth test result:', authTest);
-        setError(`✅ Connection working! Current auth state: ${JSON.stringify(authTest, null, 2)}`);
+        setError(`✅ Connection working! Auth test successful.`);
       }
       
     } catch (error) {
       console.error('🧪 Supabase connection test failed:', error);
-      setError(`Connection test failed: ${error}`);
+      setError(`❌ Connection test failed: ${error}`);
     }
   };
 

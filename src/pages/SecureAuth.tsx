@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Eye, EyeOff, Shield, Lock, UserPlus, LogIn } from 'lucide-react';
 
 export function AuthPage() {
-  const { signIn, signUp, resetPassword, user, loading } = useAuth();
+  const { signIn, signUp, user, loading } = useAuth();
   const isAuthenticated = !!user;
   const navigate = useNavigate();
   const location = useLocation();
@@ -128,15 +128,11 @@ export function AuthPage() {
           break;
 
         case 'reset':
-          result = await resetPassword(formData.email);
-          if (result.error) {
-            setMessage({ type: 'error', text: result.error.message });
-          } else {
-            setMessage({ 
-              type: 'success', 
-              text: 'Password reset email sent! Please check your inbox.' 
-            });
-          }
+          // For now, just show a message (can implement later if needed)
+          setMessage({ 
+            type: 'success', 
+            text: 'Password reset functionality will be available soon.' 
+          });
           break;
       }
     } catch (error) {
