@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/ModernAuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -46,10 +47,15 @@ export default function Auth() {
     setIsLoading(true);
     setError(null);
     
+    console.log('🔐 Attempting sign in for:', formData.email);
+    
     const { error } = await signIn(formData.email, formData.password);
     
     if (error) {
-      setError(error.message);
+      console.error('❌ Sign in failed:', error);
+      setError(error.message || 'Failed to sign in. Please check your credentials.');
+    } else {
+      console.log('✅ Sign in successful');
     }
     
     setIsLoading(false);
@@ -69,6 +75,22 @@ export default function Auth() {
     }
     
     setIsLoading(false);
+  };
+
+  const testSupabaseConnection = async () => {
+    try {
+      console.log('🧪 Testing Supabase connection...');
+      const { data, error } = await supabase.auth.getUser();
+      console.log('🧪 Supabase connection test result:', { data, error });
+      if (error) {
+        setError(`Supabase connection error: ${error.message}`);
+      } else {
+        setError('Supabase connection is working. Try signing in again.');
+      }
+    } catch (error) {
+      console.error('🧪 Supabase connection test failed:', error);
+      setError(`Connection test failed: ${error}`);
+    }
   };
 
   return (
@@ -226,6 +248,19 @@ export default function Auth() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
+            
+            {/* Debug/Test Connection Button */}
+            <div className="mt-4 pt-4 border-t border-border">
+              <Button 
+                onClick={testSupabaseConnection} 
+                variant="outline" 
+                size="sm" 
+                className="w-full text-xs"
+                disabled={isLoading}
+              >
+                Test Connection
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

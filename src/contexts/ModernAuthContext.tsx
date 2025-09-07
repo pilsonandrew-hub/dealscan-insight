@@ -217,6 +217,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signIn = async (email: string, password: string) => {
     try {
+      console.log('🔐 ModernAuthContext: Starting sign in for:', email);
+      
       const currentAuthState = stateManager.select<AuthState, AuthState>('auth');
       
       // Check if account is locked
@@ -228,9 +230,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       stateManager.dispatch({ type: 'AUTH_LOADING', payload: true });
       
+      console.log('🌐 ModernAuthContext: Calling Supabase signInWithPassword...');
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
       if (error) {
+        console.error('❌ ModernAuthContext: Supabase auth error:', error);
         const currentAuthState = stateManager.select<AuthState, AuthState>('auth');
         stateManager.dispatch({ type: 'AUTH_LOGIN_ATTEMPT' });
         logger.setContext('auth').warn('Sign in failed', { 
@@ -241,10 +245,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { error };
       }
 
+      console.log('✅ ModernAuthContext: Supabase auth successful, user:', data.user?.id);
       logger.setContext('auth').info('User signed in successfully', { userId: data.user?.id });
       return { error: undefined };
       
     } catch (error) {
+      console.error('❌ ModernAuthContext: Sign in exception:', error);
       logger.error('Sign in error', { error });
       return { error: error as AuthError };
     } finally {
