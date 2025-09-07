@@ -24,6 +24,28 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
       "@typescript-eslint/no-unused-vars": "off",
+      // Prevent incorrect default import usage for ProtectedRoute
+      "no-restricted-imports": [
+        "error",
+        {
+          "paths": [
+            {
+              "name": "@/components/ProtectedRoute",
+              "importNames": ["ProtectedRoute"],
+              "message": "Use default import for ProtectedRoute: import ProtectedRoute from '@/components/ProtectedRoute'"
+            }
+          ]
+        }
+      ],
+      // Enforce consistent import/export patterns
+      "import/no-default-export": "off",
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        {
+          "prefer": "type-imports",
+          "disallowTypeAnnotations": true
+        }
+      ]
     },
   }
 );
