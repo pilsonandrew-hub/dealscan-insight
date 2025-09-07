@@ -1,16 +1,29 @@
 name: Deploy GOLD Validation Reports
 
 on:
-  # manual trigger
   workflow_dispatch:
-  # auto on main changes (but ignore docs and generated reports)
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if validation fails'
+        required: false
+        default: 'false'
+        type: boolean
+      validation_level:
+        description: 'Validation level'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - minimal
+          - security-only
   push:
     branches: [ main ]
     paths-ignore:
       - '**.md'
       - '.gitignore'
       - 'validation-reports/**'
-  # daily at 6 AM UTC
+      - 'docs/**'
   schedule:
     - cron: '0 6 * * *'
 
@@ -19,111 +32,506 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: validation-gold-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+  VALIDATION_MODE: 'production'
+
 jobs:
-  validate:
+  security-precheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      security_status: ${{ steps.security.outputs.status }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          
+      - name: Security scan
+        id: security
+        run: |
+          echo "Performing security pre-check..."
+          
+          # Check for exposed secrets
+          if grep -rE "(password|secret|key|token).*=.*['\"][^'\"]{10,}" \
+               --exclude-dir=node_modules \
+               --exclude-dir=.git \
+               --exclude="*.lock" \
+               --exclude="*.json" . || false; then
+            echo "::error::Potential exposed secrets detected"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Check for executable files with wrong permissions
+          if find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | head -5; then
+            echo "::warning::Found non-executable shell scripts"
+          fi
+          
+          echo "status=passed" >> $GITHUB_OUTPUT
+
+  validate:
+    needs: [security-precheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    outputs:
+      validation_status: ${{ steps.validate.outputs.status }}
+      reports_generated: ${{ steps.validate.outputs.reports_generated }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Install deps (don’t fail build)
+      - name: Install dependencies
         run: |
-          pip install -r requirements.txt || true
-          npm ci || true
-
-      - name: Run validation suite (continue on failure)
-        run: |
-          if [ -x scripts/run-validation-suite.sh ]; then
-            chmod +x scripts/run-validation-suite.sh
-            ./scripts/run-validation-suite.sh || echo "Validation failed, continuing to package reports"
+          echo "Installing Python dependencies..."
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
           else
-            echo "No validation script found; creating placeholder reports"
+            echo "::warning::No requirements.txt found"
           fi
+          
+          echo "Installing Node.js dependencies..."
+          if [ -f package.json ]; then
+            npm ci
+          else
+            echo "::warning::No package.json found"
+          fi
+          
+          # Verify critical tools
+          python --version
+          node --version
+          
+          # Install validation tools if missing
+          pip install bandit safety || echo "Optional security tools not installed"
 
-      # always upload whatever exists so deploy has something to show
-      - name: Upload validation reports
-        if: always()
+      - name: Run comprehensive validation
+        id: validate
+        run: |
+          set -euo pipefail
+          
+          echo "Starting investment-grade validation..."
+          validation_failed=false
+          
+          # Ensure validation script exists and is executable
+          if [ ! -f scripts/run-validation-suite.sh ]; then
+            echo "::error::Critical validation script missing"
+            validation_failed=true
+          else
+            chmod +x scripts/run-validation-suite.sh
+            
+            # Set validation mode
+            export VALIDATION_MODE="${{ env.VALIDATION_MODE }}"
+            export VALIDATION_LEVEL="${{ inputs.validation_level || 'full' }}"
+            
+            # Run validation with proper error handling
+            if ! ./scripts/run-validation-suite.sh; then
+              echo "::error::Validation suite failed"
+              validation_failed=true
+            fi
+          fi
+          
+          # Verify required reports were generated
+          if [ ! -f validation-reports/final/summary.json ]; then
+            echo "::error::Summary report not generated"
+            validation_failed=true
+          fi
+          
+          if [ ! -f validation-reports/final/index.html ]; then
+            echo "::error::Dashboard not generated"
+            validation_failed=true
+          fi
+          
+          # Check validation results
+          if [ -f validation-reports/final/summary.json ]; then
+            overall_status=$(cat validation-reports/final/summary.json | grep -o '"overall_status":"[^"]*"' | cut -d'"' -f4)
+            if [ "$overall_status" = "FAIL" ]; then
+              echo "::error::Validation failed - system not ready for production"
+              validation_failed=true
+            fi
+          fi
+          
+          # Set outputs
+          if [ "$validation_failed" = true ]; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            if [ "${{ inputs.force_deploy }}" != "true" ]; then
+              exit 1
+            else
+              echo "::warning::Forcing deployment despite validation failures"
+              echo "status=forced" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "status=passed" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "reports_generated=true" >> $GITHUB_OUTPUT
+
+      - name: Upload validation artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: gold-validation-reports
           path: validation-reports/
-          if-no-files-found: warn
+          retention-days: 30
+          if-no-files-found: error
+
+  enforce-slos:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    outputs:
+      slo_status: ${{ steps.slo-check.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          
+      - name: Download validation reports
+        uses: actions/download-artifact@v4
+        if: needs.validate.outputs.reports_generated == 'true'
+        with:
+          name: gold-validation-reports
+          path: validation-reports
+
+      - name: Enforce SLOs
+        id: slo-check
+        run: |
+          set -euo pipefail
+          
+          echo "Enforcing Service Level Objectives..."
+          
+          # Make SLO script executable
+          chmod +x scripts/enforce_slos.sh
+          
+          # Run SLO enforcement
+          if ./scripts/enforce_slos.sh; then
+            echo "status=passed" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            if [ "${{ inputs.force_deploy }}" != "true" ]; then
+              exit 1
+            else
+              echo "::warning::Forcing deployment despite SLO failures"
+            fi
+          fi
 
   deploy:
+    needs: [validate, enforce-slos]
     runs-on: ubuntu-latest
-    needs: validate
     timeout-minutes: 10
+    if: |
+      always() && 
+      (needs.enforce-slos.outputs.slo_status == 'passed' || 
+       github.event.inputs.force_deploy == 'true')
+    environment: 
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download reports
+      - name: Download validation reports
         uses: actions/download-artifact@v4
         with:
           name: gold-validation-reports
           path: validation-reports
 
-      # deterministic Pages scaffold so there is always a usable site
-      - name: Prepare Pages directory
+      - name: Prepare production-grade pages
         run: |
-          mkdir -p pages/api pages/assets pages/reports
-          # copy reports if present
+          set -euo pipefail
+          
+          echo "Preparing investment-grade deployment..."
+          
+          # Create structured directory
+          mkdir -p pages/{api,assets,reports,health}
+          
+          # Copy reports with verification
           if [ -d validation-reports ]; then
-            cp -r validation-reports/* pages/reports/ 2>/dev/null || true
-          fi
-
-          # main index (simple, but guaranteed)
-          cat > pages/index.html <<'HTML'
-          <!doctype html>
-          <html>
-            <head>
-              <meta charset="utf-8"/>
-              <title>DealerScope GOLD Validation</title>
-              <link rel="stylesheet" href="assets/style.css">
-            </head>
-            <body>
-              <h1>DealerScope GOLD Validation</h1>
-              <p>This page is deployed by GitHub Actions.</p>
-              <ul>
-                <li><a href="reports/">Browse raw reports</a></li>
-                <li><a href="summary.json">JSON summary</a> (alias of api/summary.json)</li>
-              </ul>
-            </body>
-          </html>
-          HTML
-
-          # css
-          cat > pages/assets/style.css <<'CSS'
-          body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-          a { color: #0969da; text-decoration: none; }
-          a:hover { text-decoration: underline; }
-          CSS
-
-          # summary json (fallback if none produced)
-          SUMMARY_SRC=""
-          if ls pages/reports/**/validation-summary*.json >/dev/null 2>&1; then
-            SUMMARY_SRC=$(ls -t pages/reports/**/validation-summary*.json | head -1)
-            cp "$SUMMARY_SRC" pages/api/summary.json
+            cp -r validation-reports/* pages/reports/
+            
+            # Verify critical files exist
+            if [ ! -f pages/reports/final/summary.json ]; then
+              echo "::error::Critical summary.json missing"
+              exit 1
+            fi
+            
+            if [ ! -f pages/reports/final/index.html ]; then
+              echo "::error::Critical dashboard missing"
+              exit 1
+            fi
           else
-            cat > pages/api/summary.json <<'JSON'
-            { "status":"no-reports", "message":"No validation summaries found", "generatedAt": "" }
-            JSON
+            echo "::error::No validation reports found"
+            exit 1
           fi
-          cp pages/api/summary.json pages/summary.json
+          
+          # Create professional main index
+          cat > pages/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>DealerScope GOLD Production Validation</title>
+            <meta name="description" content="Investment-grade validation dashboard for DealerScope arbitrage platform">
+            <link rel="stylesheet" href="assets/style.css">
+          </head>
+          <body>
+            <div class="container">
+              <header>
+                <h1>🏆 DealerScope GOLD Validation</h1>
+                <p class="subtitle">Investment-Grade Production Readiness Assessment</p>
+              </header>
+              
+              <main>
+                <div class="dashboard-link">
+                  <a href="reports/final/" class="primary-button">
+                    📊 View Live Dashboard
+                  </a>
+                </div>
+                
+                <div class="quick-stats" id="quick-stats">
+                  <div class="stat-card" id="status-card">
+                    <h3>System Status</h3>
+                    <div class="stat-value" id="overall-status">Loading...</div>
+                  </div>
+                  <div class="stat-card">
+                    <h3>API Performance</h3>
+                    <div class="stat-value" id="api-latency">Loading...</div>
+                  </div>
+                  <div class="stat-card">
+                    <h3>Security Score</h3>
+                    <div class="stat-value" id="security-score">Loading...</div>
+                  </div>
+                </div>
+                
+                <div class="links-section">
+                  <h2>Resources</h2>
+                  <ul class="resource-links">
+                    <li><a href="api/summary.json">JSON API</a> - Machine-readable summary</li>
+                    <li><a href="reports/">Raw Reports</a> - Detailed validation data</li>
+                    <li><a href="health/">Health Checks</a> - System monitoring</li>
+                  </ul>
+                </div>
+              </main>
+              
+              <footer>
+                <p>Deployed via GitHub Actions • <span id="last-updated">Loading...</span></p>
+              </footer>
+            </div>
+            
+            <script src="assets/script.js"></script>
+          </body>
+          </html>
+          EOF
+          
+          # Professional CSS
+          cat > pages/assets/style.css << 'EOF'
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #2c3e50;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+          }
+          
+          .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+          }
+          
+          header {
+            text-align: center;
+            margin-bottom: 3rem;
+            color: white;
+          }
+          
+          h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+          }
+          
+          .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+          }
+          
+          main {
+            background: white;
+            border-radius: 16px;
+            padding: 3rem;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+          }
+          
+          .dashboard-link {
+            text-align: center;
+            margin-bottom: 3rem;
+          }
+          
+          .primary-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 1rem 2rem;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: transform 0.3s ease;
+          }
+          
+          .primary-button:hover {
+            transform: translateY(-2px);
+          }
+          
+          .quick-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+          }
+          
+          .stat-card {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 12px;
+            text-align: center;
+          }
+          
+          .stat-card h3 {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+          }
+          
+          .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2c3e50;
+          }
+          
+          .status-pass { color: #27ae60; }
+          .status-fail { color: #e74c3c; }
+          
+          .links-section h2 {
+            margin-bottom: 1rem;
+            color: #2c3e50;
+          }
+          
+          .resource-links {
+            list-style: none;
+          }
+          
+          .resource-links li {
+            margin-bottom: 0.5rem;
+          }
+          
+          .resource-links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+          }
+          
+          .resource-links a:hover {
+            text-decoration: underline;
+          }
+          
+          footer {
+            text-align: center;
+            margin-top: 2rem;
+            color: white;
+            opacity: 0.8;
+          }
+          
+          @media (max-width: 768px) {
+            .container { padding: 1rem; }
+            h1 { font-size: 2rem; }
+            main { padding: 2rem; }
+          }
+          EOF
+          
+          # Interactive JavaScript
+          cat > pages/assets/script.js << 'EOF'
+          document.addEventListener('DOMContentLoaded', async function() {
+            try {
+              const response = await fetch('api/summary.json');
+              const data = await response.json();
+              
+              // Update status
+              const statusEl = document.getElementById('overall-status');
+              const statusCard = document.getElementById('status-card');
+              if (data.overall_status === 'PASS') {
+                statusEl.textContent = '✅ OPERATIONAL';
+                statusEl.className = 'stat-value status-pass';
+                statusCard.style.borderLeft = '4px solid #27ae60';
+              } else {
+                statusEl.textContent = '❌ ISSUES DETECTED';
+                statusEl.className = 'stat-value status-fail';
+                statusCard.style.borderLeft = '4px solid #e74c3c';
+              }
+              
+              // Update metrics
+              document.getElementById('api-latency').textContent = data.p95_api_ms + 'ms';
+              document.getElementById('security-score').textContent = data.security_issues + ' issues';
+              document.getElementById('last-updated').textContent = 
+                new Date(data.generated_at).toLocaleString();
+              
+            } catch (error) {
+              console.error('Failed to load summary:', error);
+              document.getElementById('overall-status').textContent = 'Error loading';
+            }
+          });
+          EOF
+          
+          # Copy summary for API access
+          if [ -f pages/reports/final/summary.json ]; then
+            cp pages/reports/final/summary.json pages/api/summary.json
+            # Create root alias
+            cp pages/api/summary.json pages/summary.json
+          else
+            echo "::error::Summary JSON not found"
+            exit 1
+          fi
+          
+          # Create health endpoint
+          cat > pages/health/index.json << EOF
+          {
+            "status": "operational",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "version": "1.0.0",
+            "environment": "production"
+          }
+          EOF
 
       - name: Configure Pages
         uses: actions/configure-pages@v4
 
-      - name: Upload artifact for Pages
+      - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages/
@@ -134,5 +542,30 @@ jobs:
 
       - name: Post deployment summary
         run: |
-          echo "## 🚀 GOLD Validation Reports Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "URL: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          validation_status="${{ needs.validate.outputs.validation_status }}"
+          slo_status="${{ needs.enforce-slos.outputs.slo_status }}"
+          
+          echo "## 🚀 GOLD Validation Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dashboard URL:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Validation Status:** $validation_status" >> $GITHUB_STEP_SUMMARY
+          echo "**SLO Status:** $slo_status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quick Access" >> $GITHUB_STEP_SUMMARY
+          echo "- [Live Dashboard](${{ steps.deployment.outputs.page_url }}reports/final/)" >> $GITHUB_STEP_SUMMARY
+          echo "- [API Summary](${{ steps.deployment.outputs.page_url }}api/summary.json)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Health Check](${{ steps.deployment.outputs.page_url }}health/)" >> $GITHUB_STEP_SUMMARY
+
+  notification:
+    needs: [validate, enforce-slos, deploy]
+    runs-on: ubuntu-latest
+    if: failure() && github.event.inputs.force_deploy != 'true'
+    steps:
+      - name: Failure notification
+        run: |
+          echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Validation Status:** ${{ needs.validate.outputs.validation_status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SLO Status:** ${{ needs.enforce-slos.outputs.slo_status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Investment-grade standards not met. Review validation reports before retry." >> $GITHUB_STEP_SUMMARY
