@@ -1093,6 +1093,16 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: undefined
       }
+      get_user_profile: {
+        Args: { target_user_id?: string }
+        Returns: {
+          created_at: string
+          display_name: string
+          email: string
+          is_authenticated: boolean
+          user_id: string
+        }[]
+      }
       log_security_event: {
         Args: {
           p_action: string
@@ -1101,6 +1111,10 @@ export type Database = {
           p_status?: string
         }
         Returns: undefined
+      }
+      test_auth: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
       }
     }
     Enums: {

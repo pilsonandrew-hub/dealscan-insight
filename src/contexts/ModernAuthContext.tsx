@@ -116,16 +116,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const initializeAuth = async () => {
       try {
+        console.log('🔐 ModernAuthContext: Initializing authentication...');
         logger.setContext('auth').info('Initializing authentication');
         
         // Get initial session
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
+          console.error('❌ ModernAuthContext: Failed to get initial session:', error);
           logger.error('Failed to get initial session', { error: error.message });
+          
+          // If we get "Auth session missing" error, it's not fatal - just means no one is logged in
+          if (error.message.includes('Auth session missing')) {
+            console.log('ℹ️ ModernAuthContext: No active session (this is normal for logged out users)');
+          }
         }
         
         if (mounted) {
+          console.log('✅ ModernAuthContext: Setting initial session state:', { hasSession: !!session, userId: session?.user?.id });
           stateManager.dispatch({
             type: 'AUTH_SET_SESSION',
             payload: { session, user: session?.user || null },
@@ -133,10 +141,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           
           // Check admin status if user is logged in
           if (session?.user) {
+            console.log('👤 ModernAuthContext: User found, checking admin status...');
             checkAdminStatus();
           }
         }
       } catch (error) {
+        console.error('❌ ModernAuthContext: Auth initialization exception:', error);
         logger.error('Auth initialization error', { error });
         if (mounted) {
           stateManager.dispatch({ type: 'AUTH_LOADING', payload: false });
