@@ -67,10 +67,10 @@ export const AuthorizationBoundary: React.FC<AuthorizationBoundaryProps> = ({
     return <div data-testid={testIds?.container ?? 'auth-boundary'}>{children ?? fallback}</div>;
   }
 
-  const roles = normalizeStringArray(user?.roles);
-  const permissions = normalizeStringArray(user?.permissions);
-  const attributes: Record<string, any> = user?.attributes || {};
-  const isAdmin = !!user?.is_admin;
+  const roles = normalizeStringArray(user?.user_metadata?.roles);
+  const permissions = normalizeStringArray(user?.user_metadata?.permissions);
+  const attributes: Record<string, any> = user?.user_metadata || {};
+  const isAdmin = !!user?.user_metadata?.is_admin;
   const adminBypass = isAdmin && allowAdminImplicit && !disableAdminBypass;
   const adminRequirementOk = requireAdmin ? isAdmin : true;
   const roleAllowed = allowedRoles?.length ? allowedRoles.map(r => r.toLowerCase()).some(r => roles.includes(r)) : true;

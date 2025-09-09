@@ -32,6 +32,7 @@ const ALLOWED_DOMAINS = new Set([
   'govplanet.com',
   'govliquidation.com',
   'usgovbid.com',
+  'bidspotter.com',
   
   // Vehicle auction sites
   'iaai.com',

@@ -14,6 +14,6 @@ export const PermissionMap = {
 
 export type PermissionKey = typeof PermissionMap[keyof typeof PermissionMap];
 
-export const ALL_PERMISSIONS: PermissionKey[] = Object.freeze(
+export const ALL_PERMISSIONS = Object.freeze(
   Object.values(PermissionMap)
-);
+) as readonly PermissionKey[];
