@@ -10,7 +10,8 @@ const ALLOWED_HOSTS = new Set([
   'gsaauctions.gov', 'govdeals.com', 'publicsurplus.com', 'municibid.com', 'allsurplus.com',
   'hibid.com', 'proxibid.com', 'equipmentfacts.com', 'govplanet.com', 'govliquidation.com',
   'usgovbid.com', 'iaai.com', 'copart.com', 'treasuryauctions.gov', 'usmarshals.gov',
-  'caleprocure.ca.gov', 'lacounty.gov', 'des.wa.gov', 'ogs.ny.gov', 'dms.myflorida.com'
+  'caleprocure.ca.gov', 'lacounty.gov', 'des.wa.gov', 'ogs.ny.gov', 'dms.myflorida.com',
+  'bidspotter.com'
 ]);
 
 const PRIVATE_NET = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)|^\[?::1\]?$/;

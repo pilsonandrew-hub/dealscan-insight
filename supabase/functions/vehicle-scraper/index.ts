@@ -9,7 +9,7 @@ const corsHeaders = {
 // Valid sites whitelist for SSRF protection
 const ALLOWED_SITES = [
   'GovDeals', 'PublicSurplus', 'GSAauctions', 'TreasuryAuctions', 
-  'MuniciBid', 'AllSurplus', 'HiBid', 'Proxibid'
+  'MuniciBid', 'AllSurplus', 'HiBid', 'Proxibid', 'BidSpotter'
 ];
 
 Deno.serve(async (req) => {
