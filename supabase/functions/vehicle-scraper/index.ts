@@ -10,7 +10,9 @@ const corsHeaders = {
 const ALLOWED_SITES = [
   'GovDeals', 'PublicSurplus', 'GSAauctions', 'TreasuryAuctions', 
   'MuniciBid', 'AllSurplus', 'HiBid', 'Proxibid', 'BidSpotter',
-  'PurpleWave', 'JJKane'
+  'PurpleWave', 'JJKane', 'TexasStateSurplus', 'ArizonaStateSurplus',
+  'ColoradoStateSurplus', 'NevadaStateSurplus', 'NewMexicoStateSurplus',
+  'Bid4Assets'
 ];
 
 Deno.serve(async (req) => {

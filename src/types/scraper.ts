@@ -74,7 +74,16 @@ export const STATE_SITES = [
   'New York State',
   'Florida DMS',
   'Oregon DAS',
-  'North Carolina DOA'
+  'North Carolina DOA',
+  'Texas State Surplus',
+  'Arizona State Surplus',
+  'Colorado State Surplus',
+  'Nevada State Surplus',
+  'New Mexico State Surplus'
 ] as const
 
-export type SiteName = typeof FEDERAL_SITES[number] | typeof STATE_SITES[number]
+export const MUNICIPAL_SITES = [
+  'Bid4Assets'
+] as const
+
+export type SiteName = typeof FEDERAL_SITES[number] | typeof STATE_SITES[number] | typeof MUNICIPAL_SITES[number]
