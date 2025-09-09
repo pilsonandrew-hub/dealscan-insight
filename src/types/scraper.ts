@@ -62,7 +62,9 @@ export const FEDERAL_SITES = [
   'GovLiquidation',
   'USGovBid',
   'IRSAuctions',
-  'BidSpotter'
+  'BidSpotter',
+  'PurpleWave',
+  'JJKane'
 ] as const
 
 export const STATE_SITES = [

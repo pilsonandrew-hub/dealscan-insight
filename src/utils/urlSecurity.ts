@@ -33,6 +33,8 @@ const ALLOWED_DOMAINS = new Set([
   'govliquidation.com',
   'usgovbid.com',
   'bidspotter.com',
+  'purplewave.com',
+  'jjkane.com',
   
   // Vehicle auction sites
   'iaai.com',
