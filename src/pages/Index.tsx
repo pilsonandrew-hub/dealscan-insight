@@ -11,6 +11,7 @@ import { MarketAnalytics } from "@/components/MarketAnalytics";
 import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList";
 import { SystemEvaluationPanel } from "@/components/SystemEvaluationPanel";
 import { VehicleScraperPanel } from "@/components/VehicleScraperPanel";
+import { ScraperTestDashboard } from "@/components/ScraperTestDashboard";
 import { DealScoringPanel } from "@/components/DealScoringPanel";
 import { V5FeaturesShowcase } from "@/components/V5FeaturesShowcase";
 import { ProductionReadinessSummary } from "@/components/ProductionReadinessSummary";
@@ -100,6 +101,8 @@ const Index = () => {
         return <SystemMetrics />;
       case "scraper":
         return <VehicleScraperPanel />;
+      case "scraper-test":
+        return <ScraperTestDashboard />;
       case "scoring":
         return <DealScoringPanel />;
       case "evaluation":
