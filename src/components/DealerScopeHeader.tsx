@@ -65,6 +65,15 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           </Button>
           
           <Button
+            variant={activeView === "scraper-test" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("scraper-test")}
+          >
+            <Settings className="mr-2 h-4 w-4" />
+            Test Sites
+          </Button>
+          
+          <Button
             variant={activeView === "upload" ? "default" : "ghost"}
             size="sm"
             onClick={() => onViewChange("upload")}
