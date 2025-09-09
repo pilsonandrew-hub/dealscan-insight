@@ -47,6 +47,18 @@ const ALLOWED_DOMAINS = new Set([
   'texas.gov',
   'florida.gov',
   'newyork.gov',
+  'txdmv.gov',
+  'floridabid.com',
+  'ogs.ny.gov',
+  'azsurplus.gov',
+  'colorado.gov',
+  'ncadmin.nc.gov',
+  'des.wa.gov',
+  'oregon.gov',
+  'purchasing.nv.gov',
+  'dgs.ca.gov',
+  'generalservices.state.nm.us',
+  'bid4assets.com',
 ]);
 
 /**
