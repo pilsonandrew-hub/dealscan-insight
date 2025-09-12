@@ -47,6 +47,113 @@ export type Database = {
         }
         Relationships: []
       }
+      crosshair_intents: {
+        Row: {
+          canonical_query: Json
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          last_results_count: number | null
+          last_scan_at: string | null
+          notify_on_first_match: boolean | null
+          rescan_interval: string | null
+          search_options: Json | null
+          title: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          canonical_query: Json
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_results_count?: number | null
+          last_scan_at?: string | null
+          notify_on_first_match?: boolean | null
+          rescan_interval?: string | null
+          search_options?: Json | null
+          title: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          canonical_query?: Json
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_results_count?: number | null
+          last_scan_at?: string | null
+          notify_on_first_match?: boolean | null
+          rescan_interval?: string | null
+          search_options?: Json | null
+          title?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      crosshair_jobs: {
+        Row: {
+          canonical_query: Json
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          intent_id: string | null
+          metadata: Json | null
+          progress: number | null
+          results_count: number | null
+          search_options: Json | null
+          sites_targeted: string[] | null
+          started_at: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          canonical_query: Json
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          intent_id?: string | null
+          metadata?: Json | null
+          progress?: number | null
+          results_count?: number | null
+          search_options?: Json | null
+          sites_targeted?: string[] | null
+          started_at?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          canonical_query?: Json
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          intent_id?: string | null
+          metadata?: Json | null
+          progress?: number | null
+          results_count?: number | null
+          search_options?: Json | null
+          sites_targeted?: string[] | null
+          started_at?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crosshair_jobs_intent_id_fkey"
+            columns: ["intent_id"]
+            isOneToOne: false
+            referencedRelation: "crosshair_intents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dealer_sales: {
         Row: {
           auction_house: string | null
@@ -314,6 +421,102 @@ export type Database = {
           updated_at?: string | null
           url?: string
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      listings_normalized: {
+        Row: {
+          arbitrage_score: number | null
+          auction_ends_at: string | null
+          bid_current: number | null
+          body_type: string | null
+          buy_now: number | null
+          collected_at: string | null
+          comp_band: Json | null
+          condition: string | null
+          created_at: string | null
+          external_id: string
+          flags: string[] | null
+          fuel: string | null
+          id: string
+          is_active: boolean | null
+          location: Json | null
+          make: string
+          model: string
+          odo_miles: number | null
+          photos: string[] | null
+          provenance: Json | null
+          seller: string | null
+          snapshot_sha: string | null
+          source: string
+          title_status: string | null
+          trim: string | null
+          updated_at: string | null
+          url: string
+          vin: string | null
+          year: number
+        }
+        Insert: {
+          arbitrage_score?: number | null
+          auction_ends_at?: string | null
+          bid_current?: number | null
+          body_type?: string | null
+          buy_now?: number | null
+          collected_at?: string | null
+          comp_band?: Json | null
+          condition?: string | null
+          created_at?: string | null
+          external_id: string
+          flags?: string[] | null
+          fuel?: string | null
+          id?: string
+          is_active?: boolean | null
+          location?: Json | null
+          make: string
+          model: string
+          odo_miles?: number | null
+          photos?: string[] | null
+          provenance?: Json | null
+          seller?: string | null
+          snapshot_sha?: string | null
+          source: string
+          title_status?: string | null
+          trim?: string | null
+          updated_at?: string | null
+          url: string
+          vin?: string | null
+          year: number
+        }
+        Update: {
+          arbitrage_score?: number | null
+          auction_ends_at?: string | null
+          bid_current?: number | null
+          body_type?: string | null
+          buy_now?: number | null
+          collected_at?: string | null
+          comp_band?: Json | null
+          condition?: string | null
+          created_at?: string | null
+          external_id?: string
+          flags?: string[] | null
+          fuel?: string | null
+          id?: string
+          is_active?: boolean | null
+          location?: Json | null
+          make?: string
+          model?: string
+          odo_miles?: number | null
+          photos?: string[] | null
+          provenance?: Json | null
+          seller?: string | null
+          snapshot_sha?: string | null
+          source?: string
+          title_status?: string | null
+          trim?: string | null
+          updated_at?: string | null
+          url?: string
+          vin?: string | null
+          year?: number
         }
         Relationships: []
       }
@@ -709,6 +912,48 @@ export type Database = {
           updated_at?: string | null
           vin?: string | null
           year?: number | null
+        }
+        Relationships: []
+      }
+      raw_pages: {
+        Row: {
+          api_response: Json | null
+          collected_at: string | null
+          compliance_result: Json | null
+          content_hash: string
+          created_at: string | null
+          html_content: string | null
+          id: string
+          provenance: string
+          snapshot_sha: string | null
+          source_site: string
+          url: string
+        }
+        Insert: {
+          api_response?: Json | null
+          collected_at?: string | null
+          compliance_result?: Json | null
+          content_hash: string
+          created_at?: string | null
+          html_content?: string | null
+          id?: string
+          provenance?: string
+          snapshot_sha?: string | null
+          source_site: string
+          url: string
+        }
+        Update: {
+          api_response?: Json | null
+          collected_at?: string | null
+          compliance_result?: Json | null
+          content_hash?: string
+          created_at?: string | null
+          html_content?: string | null
+          id?: string
+          provenance?: string
+          snapshot_sha?: string | null
+          source_site?: string
+          url?: string
         }
         Relationships: []
       }

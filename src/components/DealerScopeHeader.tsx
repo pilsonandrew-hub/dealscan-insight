@@ -1,4 +1,4 @@
-import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles, Crosshair } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -35,6 +35,16 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
                 {newDealsCount}
               </Badge>
             )}
+          </Button>
+          
+          <Button
+            variant={activeView === "crosshair" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("crosshair")}
+          >
+            <Crosshair className="mr-2 h-4 w-4" />
+            Crosshair
+            <Badge variant="secondary" className="ml-2 text-xs">PREMIUM</Badge>
           </Button>
           
           <Button
