@@ -15,6 +15,7 @@ import { ScraperTestDashboard } from "@/components/ScraperTestDashboard";
 import { DealScoringPanel } from "@/components/DealScoringPanel";
 import { V5FeaturesShowcase } from "@/components/V5FeaturesShowcase";
 import { ProductionReadinessSummary } from "@/components/ProductionReadinessSummary";
+import { CrosshairDashboard } from "@/components/CrosshairDashboard";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
@@ -85,7 +86,9 @@ const Index = () => {
             <DealInbox />
           </div>
         );
-      case "opportunities": 
+      case "crosshair":
+        return <CrosshairDashboard />;
+      case "opportunities":
         return (
           <DealOpportunities 
             opportunities={opportunities}
