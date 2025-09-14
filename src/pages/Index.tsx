@@ -15,6 +15,7 @@ import { ScraperTestDashboard } from "@/components/ScraperTestDashboard";
 import { DealScoringPanel } from "@/components/DealScoringPanel";
 import { V5FeaturesShowcase } from "@/components/V5FeaturesShowcase";
 import { ProductionReadinessSummary } from "@/components/ProductionReadinessSummary";
+import { RealtimeOpportunityDashboard } from "@/components/RealtimeOpportunityDashboard";
 import { CrosshairDashboard } from "@/components/CrosshairDashboard";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
@@ -89,13 +90,7 @@ const Index = () => {
       case "crosshair":
         return <CrosshairDashboard />;
       case "opportunities":
-        return (
-          <DealOpportunities 
-            opportunities={opportunities}
-            isRealtime={isConnected}
-            onNewCountCleared={clearNewCount}
-          />
-        );
+        return <RealtimeOpportunityDashboard />;
       case "analytics":
         return <MarketAnalytics opportunities={opportunities} />;
       case "upload":
