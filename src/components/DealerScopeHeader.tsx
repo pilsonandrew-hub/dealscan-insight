@@ -1,6 +1,7 @@
-import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles, Crosshair } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles, Crosshair, Brain, Shield, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import dealerscopeLogo from "@/assets/dealerscope-logo.png";
 
 interface DealerScopeHeaderProps {
   activeView: string;
@@ -13,9 +14,11 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center">
         <div className="mr-8 flex items-center space-x-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary-glow">
-            <TrendingUp className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img 
+            src={dealerscopeLogo} 
+            alt="DealerScope" 
+            className="h-8 w-8 rounded-lg object-contain"
+          />
           <div>
             <h1 className="text-xl font-bold text-foreground">DealerScope</h1>
             <p className="text-xs text-muted-foreground">v5.0 Professional</p>
@@ -108,6 +111,36 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
           >
             <Activity className="mr-2 h-4 w-4" />
             Evaluation
+          </Button>
+
+          <Button
+            variant={activeView === "ai-engine" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("ai-engine")}
+          >
+            <Brain className="mr-2 h-4 w-4" />
+            AI Engine
+            <Badge variant="secondary" className="ml-2 text-xs">PHASE 3</Badge>
+          </Button>
+
+          <Button
+            variant={activeView === "anomaly-detection" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("anomaly-detection")}
+          >
+            <Shield className="mr-2 h-4 w-4" />
+            Anomaly Detection
+            <Badge variant="secondary" className="ml-2 text-xs">PHASE 3</Badge>
+          </Button>
+
+          <Button
+            variant={activeView === "automation" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("automation")}
+          >
+            <Zap className="mr-2 h-4 w-4" />
+            Automation
+            <Badge variant="secondary" className="ml-2 text-xs">PHASE 3</Badge>
           </Button>
 
           <Button
