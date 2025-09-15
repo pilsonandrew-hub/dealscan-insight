@@ -17,6 +17,9 @@ import { V5FeaturesShowcase } from "@/components/V5FeaturesShowcase";
 import { ProductionReadinessSummary } from "@/components/ProductionReadinessSummary";
 import { RealtimeOpportunityDashboard } from "@/components/RealtimeOpportunityDashboard";
 import { CrosshairDashboard } from "@/components/CrosshairDashboard";
+import { AIDecisionEngine } from "@/components/AIDecisionEngine";
+import { AnomalyDetectionPanel } from "@/components/AnomalyDetectionPanel";
+import { AdvancedAutomationHub } from "@/components/AdvancedAutomationHub";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
@@ -91,6 +94,12 @@ const Index = () => {
         return <CrosshairDashboard />;
       case "opportunities":
         return <RealtimeOpportunityDashboard />;
+      case "ai-engine":
+        return <AIDecisionEngine />;
+      case "anomaly-detection":
+        return <AnomalyDetectionPanel />;
+      case "automation":
+        return <AdvancedAutomationHub />;
       case "analytics":
         return <MarketAnalytics opportunities={opportunities} />;
       case "upload":
