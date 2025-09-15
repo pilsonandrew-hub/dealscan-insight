@@ -14,21 +14,26 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center">
         <div className="mr-8 flex items-center space-x-3">
-          <div className="h-10 w-10 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-1 border border-primary/20">
+          <div className="relative h-12 w-12 bg-gradient-to-br from-primary to-primary/70 rounded-xl p-2 shadow-lg shadow-primary/20">
             <img 
               src={dealerscopeLogo} 
               alt="DealerScope" 
-              className="h-full w-full object-contain filter brightness-110 contrast-110"
+              className="h-full w-full object-contain filter drop-shadow-sm"
               onError={(e) => {
                 console.log('Logo failed to load:', e);
                 e.currentTarget.style.display = 'none';
               }}
               onLoad={() => console.log('Logo loaded successfully')}
             />
+            <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent rounded-xl"></div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">DealerScope</h1>
-            <p className="text-xs text-muted-foreground">v5.0 Professional</p>
+          <div className="flex flex-col">
+            <h1 className="text-xl font-brand font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent tracking-tight">
+              DealerScope
+            </h1>
+            <p className="text-xs font-medium text-muted-foreground/80 tracking-wide uppercase">
+              Professional Intelligence
+            </p>
           </div>
         </div>
 
