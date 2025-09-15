@@ -13,12 +13,19 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center">
-        <div className="mr-8 flex items-center space-x-2">
-          <img 
-            src={dealerscopeLogo} 
-            alt="DealerScope" 
-            className="h-8 w-8 rounded-lg object-contain"
-          />
+        <div className="mr-8 flex items-center space-x-3">
+          <div className="h-10 w-10 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-1 border border-primary/20">
+            <img 
+              src={dealerscopeLogo} 
+              alt="DealerScope" 
+              className="h-full w-full object-contain filter brightness-110 contrast-110"
+              onError={(e) => {
+                console.log('Logo failed to load:', e);
+                e.currentTarget.style.display = 'none';
+              }}
+              onLoad={() => console.log('Logo loaded successfully')}
+            />
+          </div>
           <div>
             <h1 className="text-xl font-bold text-foreground">DealerScope</h1>
             <p className="text-xs text-muted-foreground">v5.0 Professional</p>
