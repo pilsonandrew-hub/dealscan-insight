@@ -20,6 +20,8 @@ import { CrosshairDashboard } from "@/components/CrosshairDashboard";
 import { AIDecisionEngine } from "@/components/AIDecisionEngine";
 import { AnomalyDetectionPanel } from "@/components/AnomalyDetectionPanel";
 import { AdvancedAutomationHub } from "@/components/AdvancedAutomationHub";
+import { MLModelDashboard } from "@/components/MLModelDashboard";
+import { ComprehensiveTestSuite } from "@/components/ComprehensiveTestSuite";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
@@ -100,6 +102,10 @@ const Index = () => {
         return <AnomalyDetectionPanel />;
       case "automation":
         return <AdvancedAutomationHub />;
+      case "ml-models":
+        return <MLModelDashboard />;
+      case "testing":
+        return <ComprehensiveTestSuite />;
       case "analytics":
         return <MarketAnalytics opportunities={opportunities} />;
       case "upload":
