@@ -5,8 +5,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from './contexts/ModernAuthContext';
+import { SecurityMiddlewareProvider } from '@/middleware/SecurityMiddlewareIntegration';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import Auth from '@/pages/Auth';
+import { SecurityStatusDashboard } from '@/components/SecurityStatusDashboard';
 
 console.log('🔧 App.tsx: Starting component initialization...');
 
@@ -92,9 +94,10 @@ const App = () => {
   console.log('🎨 App.tsx: Rendering application...');
 
   return (
-    <AuthProvider>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
+    <SecurityMiddlewareProvider>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
           <Toaster />
           <Sonner 
             position={isDevelopment ? "top-right" : "bottom-right"}
@@ -130,6 +133,13 @@ const App = () => {
               }>
                 <Routes>
                   <Route path="/auth" element={<Auth />} />
+                  <Route path="/security-dashboard" element={
+                    <ProtectedRoute>
+                      <div className="container mx-auto p-6">
+                        <SecurityStatusDashboard />
+                      </div>
+                    </ProtectedRoute>
+                  } />
                   <Route path="/" element={
                     <ProtectedRoute>
                       <Index />
@@ -155,9 +165,10 @@ const App = () => {
               </Suspense>
             </div>
           </BrowserRouter>
-        </TooltipProvider>
-      </QueryClientProvider>
-    </AuthProvider>
+          </TooltipProvider>
+        </QueryClientProvider>
+      </AuthProvider>
+    </SecurityMiddlewareProvider>
   );
 };
 
