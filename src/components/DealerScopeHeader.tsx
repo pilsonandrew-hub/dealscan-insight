@@ -1,4 +1,4 @@
-import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles, Crosshair, Brain, Shield, Zap } from "lucide-react";
+import { TrendingUp, Upload, Settings, Bell, BarChart3, Target, PieChart, Activity, Search, Sparkles, Crosshair, Brain, Shield, Zap, Bot, TestTube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import dealerscopeLogo from "@/assets/dealerscope-logo.png";
@@ -153,6 +153,26 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
             <Zap className="mr-2 h-4 w-4" />
             Automation
             <Badge variant="secondary" className="ml-2 text-xs">PHASE 3</Badge>
+          </Button>
+
+          <Button
+            variant={activeView === "ml-models" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("ml-models")}
+          >
+            <Bot className="mr-2 h-4 w-4" />
+            ML Models
+            <Badge variant="secondary" className="ml-2 text-xs bg-purple-100 text-purple-700">PHASE 4</Badge>
+          </Button>
+
+          <Button
+            variant={activeView === "testing" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("testing")}
+          >
+            <TestTube className="mr-2 h-4 w-4" />
+            Testing Suite
+            <Badge variant="secondary" className="ml-2 text-xs bg-purple-100 text-purple-700">PHASE 4</Badge>
           </Button>
 
           <Button
