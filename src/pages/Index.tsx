@@ -18,6 +18,7 @@ import { ProductionReadinessSummary } from "@/components/ProductionReadinessSumm
 import { RealtimeOpportunityDashboard } from "@/components/RealtimeOpportunityDashboard";
 import { CrosshairDashboard } from "@/components/CrosshairDashboard";
 import { AIDecisionEngine } from "@/components/AIDecisionEngine";
+import { RoverDashboard } from "@/components/RoverDashboard";
 import { AnomalyDetectionPanel } from "@/components/AnomalyDetectionPanel";
 import { AdvancedAutomationHub } from "@/components/AdvancedAutomationHub";
 import { MLModelDashboard } from "@/components/MLModelDashboard";
@@ -98,6 +99,8 @@ const Index = () => {
         return <RealtimeOpportunityDashboard />;
       case "ai-engine":
         return <AIDecisionEngine />;
+      case "rover":
+        return <RoverDashboard isPremium={true} />;
       case "anomaly-detection":
         return <AnomalyDetectionPanel />;
       case "automation":
@@ -141,6 +144,7 @@ const Index = () => {
           activeView={activeView} 
           onViewChange={setActiveView}
           newDealsCount={newOpportunitiesCount}
+          isPremium={true}
         />
         <RealtimeStatusBadge
           status={connectionStatus}

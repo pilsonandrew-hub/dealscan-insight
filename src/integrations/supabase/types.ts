@@ -957,6 +957,66 @@ export type Database = {
         }
         Relationships: []
       }
+      rover_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          item_data: Json
+          timestamp: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          item_data: Json
+          timestamp?: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          item_data?: Json
+          timestamp?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: []
+      }
+      rover_recommendations: {
+        Row: {
+          confidence: number
+          created_at: string
+          expires_at: string
+          id: string
+          recommendations: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string
+          expires_at: string
+          id?: string
+          recommendations: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          expires_at?: string
+          id?: string
+          recommendations?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       scoring_jobs: {
         Row: {
           completed_at: string | null
