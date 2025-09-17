@@ -7,6 +7,7 @@ interface DealerScopeHeaderProps {
   activeView: string;
   onViewChange: (view: string) => void;
   newDealsCount: number;
+  isPremium?: boolean;
 }
 
 export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: DealerScopeHeaderProps) => {
