@@ -102,7 +102,7 @@ class SecurityMiddlewareOrchestrator {
       return this.status;
 
     } catch (error) {
-      logger.error('❌ Security Middleware Integration Failed', {}, error as Error);
+      logger.error('❌ Security Middleware Integration Failed', error as Error);
       recordSecurityEvent({
         type: 'security_initialization_failure',
         severity: 'critical',
@@ -120,7 +120,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.headersActive = true;
       logger.info('✅ Security Headers Active');
     } catch (error) {
-      logger.error('❌ Security Headers Failed', {}, error as Error);
+      logger.error('❌ Security Headers Failed', error as Error);
     }
   }
 
@@ -136,7 +136,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.intrusionDetectionActive = true;
       logger.info('✅ Intrusion Detection System Active');
     } catch (error) {
-      logger.error('❌ Intrusion Detection Failed', {}, error as Error);
+      logger.error('❌ Intrusion Detection Failed', error as Error);
     }
   }
 
@@ -150,7 +150,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.uploadHardeningActive = true;
       logger.info('✅ Upload Hardening Active');
     } catch (error) {
-      logger.error('❌ Upload Hardening Failed', {}, error as Error);
+      logger.error('❌ Upload Hardening Failed', error as Error);
     }
   }
 
@@ -161,7 +161,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.rateLimitingActive = true;
       logger.info('✅ Rate Limiting Active');
     } catch (error) {
-      logger.error('❌ Rate Limiting Failed', {}, error as Error);
+      logger.error('❌ Rate Limiting Failed', error as Error);
     }
   }
 
@@ -173,7 +173,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.ssrfProtectionActive = true;
       logger.info('✅ SSRF Protection Active');
     } catch (error) {
-      logger.error('❌ SSRF Protection Failed', {}, error as Error);
+      logger.error('❌ SSRF Protection Failed', error as Error);
     }
   }
 
@@ -184,7 +184,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.inputValidationActive = true;
       logger.info('✅ Input Validation Active');
     } catch (error) {
-      logger.error('❌ Input Validation Failed', {}, error as Error);
+      logger.error('❌ Input Validation Failed', error as Error);
     }
   }
 
@@ -195,7 +195,7 @@ class SecurityMiddlewareOrchestrator {
       this.status.auditLoggingActive = true;
       logger.info('✅ Audit Logging Active');
     } catch (error) {
-      logger.error('❌ Audit Logging Failed', {}, error as Error);
+      logger.error('❌ Audit Logging Failed', error as Error);
     }
   }
 
@@ -321,7 +321,7 @@ export const SecurityMiddlewareProvider: React.FC<{ children: React.ReactNode }>
         const status = await orchestrator.initialize();
         setSecurityStatus(status);
       } catch (error) {
-        logger.error('Security middleware initialization failed', {}, error as Error);
+        logger.error('Security middleware initialization failed', error as Error);
       } finally {
         setLoading(false);
       }
