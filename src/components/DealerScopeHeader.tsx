@@ -10,7 +10,7 @@ interface DealerScopeHeaderProps {
   isPremium?: boolean;
 }
 
-export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: DealerScopeHeaderProps) => {
+export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount, isPremium = false }: DealerScopeHeaderProps) => {
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center">
@@ -134,6 +134,28 @@ export const DealerScopeHeader = ({ activeView, onViewChange, newDealsCount }: D
             <Brain className="mr-2 h-4 w-4" />
             AI Engine
             <Badge variant="secondary" className="ml-2 text-xs">PHASE 3</Badge>
+          </Button>
+
+          <Button
+            variant={activeView === "rover" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => onViewChange("rover")}
+            disabled={!isPremium}
+            className="relative"
+          >
+            <Bot className="mr-2 h-4 w-4" />
+            Rover
+            <Badge 
+              variant="default" 
+              className="ml-2 text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white"
+            >
+              PREMIUM
+            </Badge>
+            {!isPremium && (
+              <div className="absolute -top-1 -right-1">
+                <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse" />
+              </div>
+            )}
           </Button>
 
           <Button
