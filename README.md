@@ -31,6 +31,21 @@ The API will be available at: http://localhost:8080
 - **Supabase Account** (free tier works)
 - Modern browser with ES2020+ support
 
+## 📚 Documentation
+
+### Core Documentation
+- [API Documentation](README_API.md) - Complete API reference and integration guide
+- [Security Guide](README_SECURITY_OPTIMIZATIONS.md) - Security features and best practices
+- [Production Readiness](docs/PRODUCTION_READINESS.md) - Production deployment checklist
+
+### Rover Premium Module
+- 📋 **[Code Verification Checklist](.github/rover_code_verification.md)** - Pre-deployment verification
+- 🧪 **[Testing Guidance](docs/rover_smoke_e2e.md)** - Smoke, E2E, and load testing strategies
+- 📊 **[Monitoring & Logging](docs/rover_monitoring_audit.md)** - Observability and metrics setup
+- 📖 **[Documentation Review](docs/rover_docs_review.md)** - Documentation standards and checklists
+- 🎯 **[Retrospective Templates](docs/rover_retro_agenda.md)** - Post-launch review processes
+- ⚡ **[Code Snippets](docs/rover_snippets.md)** - Production-ready utilities and patterns
+
 ## 🔧 Setup
 
 ### 1. Environment Configuration
@@ -247,10 +262,36 @@ npm run config:validate
 - **Testing**: Maintain >90% test coverage
 - **Documentation**: Update docs with any API changes
 
+## 🤖 Rover Premium Intelligence Engine
+
+DealerScope includes **Rover**, an advanced ML-powered premium module that provides intelligent vehicle arbitrage recommendations and analytics.
+
+### Rover Features
+- ✅ **ML-Powered Recommendations**: Advanced machine learning for high-value opportunity identification
+- ✅ **Real-time Scoring**: Dynamic arbitrage and ROI scoring with confidence metrics
+- ✅ **User Preference Learning**: Personalized recommendations based on interaction history
+- ✅ **Premium Analytics**: Advanced performance tracking and conversion analytics
+- ✅ **Risk Assessment**: Intelligent risk profiling and tolerance matching
+
+### Rover Documentation & Templates
+- 📋 **[Code Verification Checklist](.github/rover_code_verification.md)** - Comprehensive pre-deployment verification
+- 🧪 **[Smoke & E2E Test Guidance](docs/rover_smoke_e2e.md)** - Testing strategies with Vitest, Playwright, and k6
+- 📊 **[Monitoring & Logging Audit](docs/rover_monitoring_audit.md)** - Prometheus/Grafana setup and observability
+- 📖 **[Documentation Review Checklist](docs/rover_docs_review.md)** - Complete documentation standards and review process
+- 🎯 **[Post-Launch Retrospective](docs/rover_retro_agenda.md)** - Retro agenda and survey templates
+- ⚡ **[Code Snippets & Utilities](docs/rover_snippets.md)** - Ready-to-use Redis, ML, monitoring, and testing utilities
+
+### Getting Started with Rover
+1. **Premium Subscription**: Rover features require premium subscription
+2. **Navigate to Rover**: Access via premium dashboard or `/rover` route
+3. **Set Preferences**: Configure search criteria and risk tolerance
+4. **Generate Recommendations**: Get ML-powered vehicle recommendations
+5. **Track Performance**: Monitor ROI and conversion analytics
+
 ## 📈 Roadmap
 
 ### v5.0 Features
-- [ ] Machine learning for better opportunity scoring
+- [ ] Enhanced ML models with deeper market analysis
 - [ ] Advanced market analytics and trends
 - [ ] Automated bidding capabilities
 - [ ] Enhanced mobile app with offline support
