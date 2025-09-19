@@ -7,11 +7,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { roverAPI, DealItem, RoverRecommendations } from "@/services/roverAPI";
-import { Rocket, Target, TrendingUp, AlertTriangle, Star, Clock, DollarSign, MapPin } from "lucide-react";
+import { CrosshairSearch } from "./CrosshairSearch";
+import { RoverAnalytics } from "./RoverAnalytics";
+import { formatCurrency, formatMileage, formatScore, getScoreColor, timeAgo, formatDate, isHighValue } from "@/utils/roverUtils";
+import { Rocket, Target, TrendingUp, AlertTriangle, Star, Clock, DollarSign, MapPin, Search, BarChart3, Crosshair } from "lucide-react";
 
 interface RoverDashboardProps {
   isPremium: boolean;
-  // Optional: allow passing a known userId from app auth. Fallback to window/global if omitted.
   userId?: string;
 }
 
@@ -30,13 +32,12 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
   const [savedIntents, setSavedIntents] = useState<SavedIntent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"feed" | "intents" | "analytics">("feed");
+  const [activeTab, setActiveTab] = useState<"feed" | "crosshair" | "intents" | "analytics">("feed");
   const { toast } = useToast();
 
   const currentUserId = useMemo(() => {
     if (userId) return userId;
     if (typeof window !== "undefined") {
-      // Wire to your auth layer if available
       return (window as any).__USER_ID__ || "current_user";
     }
     return "current_user";
@@ -67,7 +68,6 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
       const intents = await roverAPI.getUserIntents();
       setSavedIntents((intents || []) as SavedIntent[]);
     } catch (e) {
-      // Non-fatal; show subtle feedback but don't block the feed
       console.error("Failed to load saved intents:", e);
     }
   }, [isPremium]);
@@ -88,18 +88,21 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
   }, [isPremium, loadRecommendations, loadSavedIntents]);
 
   const handleItemInteraction = useCallback(
-    async (item: DealItem, eventType: "view" | "click" | "save") => {
+    async (item: DealItem, eventType: "view" | "click" | "save" | "bid") => {
       try {
-        // fire-and-forget; errors logged but do not interrupt UX
         await roverAPI.trackEvent({ userId: currentUserId, event: eventType, item });
         if (eventType === "save") {
           toast({
             title: "Deal saved",
             description: `${[item.year, item.make, item.model].filter(Boolean).join(" ")} added to your watchlist.`,
           });
+        } else if (eventType === "bid") {
+          toast({
+            title: "Bid tracked",
+            description: "Your bidding activity has been recorded for better recommendations.",
+          });
         }
       } catch (e) {
-        // Silent fail for tracking to avoid noisy UX; still log
         console.warn("trackEvent failed", e);
       }
     },
@@ -118,6 +121,10 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
     return Math.round(sum / items.length);
   }, [recommendations]);
 
+  const highValueDeals = useMemo(() => {
+    return recommendations?.items.filter(isHighValue).length || 0;
+  }, [recommendations]);
+
   if (!isPremium) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-background to-muted/20">
@@ -134,15 +141,17 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
               <CardHeader>
                 <CardTitle className="text-2xl text-center">🎯 Premium Features</CardTitle>
                 <CardDescription className="text-center">
-                  Instant, precomputed picks with ML ranking and alerting.
+                  Enterprise-grade ML recommendations with real-time market intelligence.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FeatureLine icon={<TrendingUp className="h-5 w-5 text-primary" />} label="AI-Powered Recommendations" />
-                  <FeatureLine icon={<Target className="h-5 w-5 text-primary" />} label="Precision Crosshair Search" />
-                  <FeatureLine icon={<AlertTriangle className="h-5 w-5 text-primary" />} label="Real-time Alerts" />
-                  <FeatureLine icon={<Star className="h-5 w-5 text-primary" />} label="Advanced ML Scoring" />
+                  <FeatureLine icon={<Crosshair className="h-5 w-5 text-primary" />} label="Precision Crosshair Search" />
+                  <FeatureLine icon={<AlertTriangle className="h-5 w-5 text-primary" />} label="Real-time Market Alerts" />
+                  <FeatureLine icon={<Star className="h-5 w-5 text-primary" />} label="ML Arbitrage Scoring" />
+                  <FeatureLine icon={<BarChart3 className="h-5 w-5 text-primary" />} label="Advanced Analytics" />
+                  <FeatureLine icon={<Target className="h-5 w-5 text-primary" />} label="Intent Monitoring" />
                 </div>
                 <Button size="lg" className="w-full mt-6" onClick={() => window.dispatchEvent(new CustomEvent("open-upgrade-modal"))}>
                   Upgrade to Premium
@@ -177,7 +186,7 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <StatCard title="Active Picks" value={recommendations?.items.length || 0} icon={<TrendingUp className="h-8 w-8 text-primary" />} />
           <StatCard title="Confidence" value={`${confidencePercent}%`} icon={<Target className="h-8 w-8 text-primary" />} />
-          <StatCard title="Saved Intents" value={savedIntents.length} icon={<Star className="h-8 w-8 text-primary" />} />
+          <StatCard title="High Value" value={highValueDeals} icon={<Star className="h-8 w-8 text-green-500" />} />
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -195,8 +204,9 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="feed">Rover Feed</TabsTrigger>
+            <TabsTrigger value="crosshair">Crosshair Search</TabsTrigger>
             <TabsTrigger value="intents">Saved Intents</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
@@ -209,7 +219,6 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
               </Button>
             </div>
 
-            {/* Content states */}
             {error && (
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" aria-hidden />
@@ -241,13 +250,18 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center space-x-3 mb-2">
-                            <h3 className="text-lg font-semibold">{titleOf(item)}</h3>
-                            <Badge variant="outline" className="bg-primary/10 text-primary">
-                              Score: {displayScore(item._score)}
+                            <h3 className="text-lg font-semibold">{[item.year, item.make, item.model].filter(Boolean).join(" ")}</h3>
+                            <Badge variant="outline" className={getScoreColor(item._score)}>
+                              Score: {formatScore(item._score)}
                             </Badge>
-                            {isNumber(item as any, "roi_percentage") && (
+                            {item.roi_percentage && (
                               <Badge variant="outline" className="bg-green-100 text-green-800">
-                                ROI: {Math.round((item as any).roi_percentage)}%
+                                ROI: {Math.round(item.roi_percentage)}%
+                              </Badge>
+                            )}
+                            {isHighValue(item) && (
+                              <Badge variant="default" className="bg-primary">
+                                High Value
                               </Badge>
                             )}
                           </div>
@@ -257,7 +271,7 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
                               <DollarSign className="h-4 w-4" aria-hidden />
                               <span>{formatCurrency(item.price)}</span>
                             </div>
-                            {isNumber(item, "mileage") && <span>{formatMiles(item.mileage!)} miles</span>}
+                            {item.mileage && <span>{formatMileage(item.mileage)} miles</span>}
                             {item.state && (
                               <div className="flex items-center space-x-1">
                                 <MapPin className="h-4 w-4" aria-hidden />
@@ -267,10 +281,10 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
                             {item.source && <Badge variant="secondary">{item.source}</Badge>}
                           </div>
 
-                          {(item as any).potential_profit && (
+                          {item.potential_profit && (
                             <div className="mt-2">
                               <span className="text-sm font-medium text-green-600">
-                                Potential Profit: {formatCurrency((item as any).potential_profit)}
+                                Potential Profit: {formatCurrency(item.potential_profit)}
                               </span>
                             </div>
                           )}
@@ -288,8 +302,14 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
                           >
                             Save
                           </Button>
-                          <Button size="sm" onClick={(e) => e.stopPropagation()}>
-                            View Details
+                          <Button 
+                            size="sm" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleItemInteraction(item, "bid");
+                            }}
+                          >
+                            Track Bid
                           </Button>
                         </div>
                       </div>
@@ -298,6 +318,15 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="crosshair" className="space-y-4">
+            <CrosshairSearch onResultsFound={(results) => {
+              toast({
+                title: "Search Results",
+                description: `Found ${results.length} matching opportunities.`
+              });
+            }} />
           </TabsContent>
 
           <TabsContent value="intents" className="space-y-4">
@@ -333,32 +362,7 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Performance Metrics</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <MetricLine label="Recommendation Accuracy" value={`${confidencePercent}%`} />
-                    <MetricLine label="Average ROI" value={`${averageROI}%`} />
-                    <MetricLine label="Active Opportunities" value={recommendations?.items.length || 0} />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Learning Status</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <MetricLine label="Data Collection" value={<Badge variant="default">Active</Badge>} />
-                    <MetricLine label="Model Training" value={<Badge variant="default">Continuous</Badge>} />
-                    <MetricLine label="Preference Learning" value={<Badge variant="default">Improving</Badge>} />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <RoverAnalytics />
           </TabsContent>
         </Tabs>
       </div>
@@ -393,15 +397,6 @@ function StatCard({ title, value, icon }: { title: string; value: React.ReactNod
   );
 }
 
-function MetricLine({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between">
-      <span>{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
-  );
-}
-
 function FeedSkeleton() {
   return (
     <div className="grid gap-4">
@@ -421,48 +416,6 @@ function FeedSkeleton() {
       ))}
     </div>
   );
-}
-
-function titleOf(it: Partial<DealItem>) {
-  return [it.year, it.make, it.model].filter(Boolean).join(" ");
-}
-
-function displayScore(raw?: number) {
-  if (raw == null || Number.isNaN(raw)) return "—";
-  // If the backend already returns 0..1, show as percent; if bigger, cap at 100.
-  const pct = raw <= 1 ? raw * 100 : raw;
-  return `${Math.min(100, Math.max(0, Math.round(pct)))}`;
-}
-
-function isNumber<T extends object>(obj: T, key: keyof T): boolean {
-  const v = obj[key];
-  return typeof v === "number" && Number.isFinite(v as number);
-}
-
-function formatCurrency(n?: number) {
-  if (!Number.isFinite(n as number)) return "—";
-  return `$${Number(n).toLocaleString()}`;
-}
-
-function formatMiles(n: number) {
-  return Number(n).toLocaleString();
-}
-
-function formatDate(s?: string) {
-  if (!s) return "—";
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
-}
-
-function timeAgo(t: number) {
-  const s = Math.max(1, Math.floor((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
 }
 
 export default RoverDashboard;
