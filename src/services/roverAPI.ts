@@ -65,7 +65,7 @@ class RoverAPIService {
         (Date.now() - (event.timestamp || Date.now())) / this.decayHalfLife);
 
       // Store event for ML training
-      await supabase.from('rover_events').insert({
+      await (supabase as any).from('rover_events').insert({
         user_id: user.user.id,
         event_type: event.event,
         item_data: event.item as any,
@@ -75,7 +75,10 @@ class RoverAPIService {
 
       logger.info('Rover event tracked', { event: event.event, itemId: event.item.id });
     } catch (error) {
-      logger.error('Failed to track Rover event', { error: error.message, stack: error.stack });
+      logger.error('Failed to track Rover event', { 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
@@ -87,7 +90,7 @@ class RoverAPIService {
       }
 
       // Check for cached recommendations first
-      const { data: cached } = await supabase
+      const { data: cached } = await (supabase as any)
         .from('rover_recommendations')
         .select('*')
         .eq('user_id', user.user.id)
@@ -97,12 +100,12 @@ class RoverAPIService {
         .maybeSingle();
 
       if (cached) {
-        const recommendations = cached.recommendations as any;
+        const recommendations = (cached as any).recommendations;
         return {
-          precomputedAt: new Date(cached.created_at).getTime(),
+          precomputedAt: new Date((cached as any).created_at).getTime(),
           items: Array.isArray(recommendations) ? recommendations.slice(0, limit) : [],
           totalCount: Array.isArray(recommendations) ? recommendations.length : 0,
-          confidence: cached.confidence || 0.8
+          confidence: (cached as any).confidence || 0.8
         };
       }
 
@@ -110,7 +113,7 @@ class RoverAPIService {
       const recommendations = await this.generateRecommendations(user.user.id, limit);
       
       // Cache the results
-      await supabase.from('rover_recommendations').insert({
+      await (supabase as any).from('rover_recommendations').insert({
         user_id: user.user.id,
         recommendations: recommendations.items as any,
         confidence: recommendations.confidence,
@@ -119,7 +122,10 @@ class RoverAPIService {
 
       return recommendations;
     } catch (error) {
-      logger.error('Failed to get Rover recommendations', { error: error.message, stack: error.stack });
+      logger.error('Failed to get Rover recommendations', { 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       throw error;
     }
   }
@@ -158,14 +164,17 @@ class RoverAPIService {
         confidence
       };
     } catch (error) {
-      logger.error('Failed to generate recommendations', { error: error.message, stack: error.stack });
+      logger.error('Failed to generate recommendations', { 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
     }
   }
 
   private async getUserPreferences(userId: string): Promise<UserPreferences> {
     try {
-      const { data: events } = await supabase
+      const { data: events } = await (supabase as any)
         .from('rover_events')
         .select('*')
         .eq('user_id', userId)
@@ -187,8 +196,8 @@ class RoverAPIService {
 
       // Aggregate preferences with decay
       events.forEach((event: any) => {
-        const item = (event.item_data as any) as DealItem;
-        const weight = (event.weight as number) || 1;
+        const item = event.item_data as DealItem;
+        const weight = event.weight || 1;
 
         if (item.make) preferences.makes[item.make] = (preferences.makes[item.make] || 0) + weight;
         if (item.model) preferences.models[item.model] = (preferences.models[item.model] || 0) + weight;
@@ -198,7 +207,10 @@ class RoverAPIService {
 
       return preferences;
     } catch (error) {
-      logger.error('Failed to get user preferences', { error: error.message, stack: error.stack });
+      logger.error('Failed to get user preferences', { 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       return {
         makes: {},
         models: {},
@@ -271,7 +283,10 @@ class RoverAPIService {
 
       logger.info('Rover intent saved', { title });
     } catch (error) {
-      logger.error('Failed to save Rover intent', { error: error.message, stack: error.stack });
+      logger.error('Failed to save Rover intent', { 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
@@ -289,7 +304,10 @@ class RoverAPIService {
 
       return intents || [];
     } catch (error) {
-      logger.error('Failed to get user intents', { error: error.message, stack: error.stack });
+      logger.error('Failed to get user intents', { 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       return [];
     }
   }
