@@ -135,7 +135,7 @@ class RoverAPIService {
       // Get user preferences from past events
       const preferences = await this.getUserPreferences(userId);
       
-      // Get available opportunities
+      // Get available opportunities - use ML service for scoring
       const { data: opportunities } = await supabase
         .from('opportunities')
         .select('*')
@@ -147,20 +147,27 @@ class RoverAPIService {
         return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
       }
 
-      // Score and rank opportunities
-      const scoredItems = opportunities
-        .map(opp => this.scoreOpportunity(opp, preferences))
+      // Use ML service for enhanced scoring
+      const { roverMLService } = await import('./roverMLService');
+      const scoredItems = await roverMLService.scoreOpportunities(opportunities, preferences);
+
+      // Filter and sort
+      const finalItems = scoredItems
         .filter(item => item._score && item._score > 0.1)
         .sort((a, b) => (b._score || 0) - (a._score || 0))
         .slice(0, limit);
 
-      const confidence = scoredItems.length > 0 ? 
-        Math.min(0.95, 0.5 + (scoredItems[0]._score || 0) * 0.5) : 0;
+      const confidence = finalItems.length > 0 ? 
+        Math.min(0.95, 0.5 + (finalItems[0]._score || 0) * 0.5) : 0;
+
+      // Record metrics
+      const { roverMetrics } = await import('./roverMetrics');
+      roverMetrics.recordMLScoringLatency(Date.now() - performance.now());
 
       return {
         precomputedAt: Date.now(),
-        items: scoredItems,
-        totalCount: scoredItems.length,
+        items: finalItems,
+        totalCount: finalItems.length,
         confidence
       };
     } catch (error) {
