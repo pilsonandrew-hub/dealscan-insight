@@ -8,13 +8,19 @@ from datetime import datetime
 from supabase import create_client
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
+logger = logging.getLogger(__name__)
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "sbEC0dNgb7Ohg3rDV")
 
-supabase_client = create_client(
-    os.getenv("VITE_SUPABASE_URL", ""),
-    os.getenv("SUPABASE_SERVICE_ROLE_KEY", os.getenv("VITE_SUPABASE_ANON_KEY", "")),
-)
+_supabase_url = os.getenv("VITE_SUPABASE_URL", "")
+_supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+
+if _supabase_url and _supabase_key:
+    supabase_client = create_client(_supabase_url, _supabase_key)
+    logger.info("Supabase client initialized for ingest")
+else:
+    supabase_client = None
+    logger.warning("Supabase client NOT initialized — missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Deals will be logged but not saved.")
 
 # Rust state classification
 LOW_RUST_STATES = {"AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI","OK","AR","LA","MS","AL"}
@@ -178,15 +184,19 @@ def calculate_dos_score(vehicle: dict) -> float:
     return min(100, round(score, 1))
 
 
-async def save_opportunity_to_supabase(vehicle: dict) -> None:
+async def save_opportunity_to_supabase(vehicle: dict) -> bool:
     """Save a scored vehicle to the Supabase opportunities table.
 
     Only saves if dos_score >= 50. Upserts on listing_url.
     """
+    if supabase_client is None:
+        logger.warning(f"[INGEST] Supabase not configured — skipping save for {vehicle.get('title')}")
+        return False
+
     score = vehicle.get("dos_score", 0)
     if score < 50:
         logging.info(f"[INGEST] Skipping weak deal (score={score}): {vehicle.get('listing_url')}")
-        return
+        return False
 
     if score >= 80:
         status = "hot"
@@ -218,5 +228,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> None:
             f"[INGEST] Saved to Supabase: {vehicle.get('year')} {vehicle.get('make')} "
             f"{vehicle.get('model')} | score={score} | status={status}"
         )
+        return True
     except Exception as e:
         logging.error(f"[INGEST] Supabase save failed for {vehicle.get('listing_url')}: {e}")
+        return False

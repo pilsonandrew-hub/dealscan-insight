@@ -51,7 +51,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             content={
                 "error": error_message,
                 "request_id": request_id,
-                **self._get_debug_info(exc) if settings.debug else {}
+                **(self._get_debug_info(exc) if settings.debug else {})
             },
             status_code=status_code
         )
