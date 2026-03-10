@@ -1,0 +1,17 @@
+{
+  "actors": {
+    "ds-govdeals": {
+      "id": "CuKaIAcWyFS0EPrAz",
+      "scheduleId": "qjgekMFdXQDRrULto",
+      "webhookId": "ZtD68eBxLI416ql80"
+    },
+    "ds-publicsurplus": {
+      "id": "9xxQLlRsROnSgA42i",
+      "scheduleId": "IZsc1DPIraSBlT4eu",
+      "webhookId": "8yqQfG35cyEAjQ0z1"
+    }
+  },
+  "webhookSecret": "sbEC0dNgb7Ohg3rDV",
+  "webhookUrl": "https://dealerscope-api.com/api/ingest/apify",
+  "deployedAt": "2026-03-10T21:05:40.000Z"
+}
