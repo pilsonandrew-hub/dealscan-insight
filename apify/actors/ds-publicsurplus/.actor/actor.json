@@ -1,0 +1,8 @@
+{
+  "actorSpecification": 1,
+  "name": "ds-publicsurplus-scraper",
+  "title": "DealerScope PublicSurplus Vehicle Scraper",
+  "description": "Scrapes vehicle listings from PublicSurplus.com for arbitrage analysis",
+  "version": "1.0",
+  "input": "./input_schema.json"
+}

@@ -17,7 +17,7 @@ from webapp.middleware.request_id import RequestIDMiddleware
 from webapp.middleware.rate_limit import RateLimitMiddleware
 from webapp.middleware.security import SecurityMiddleware
 from webapp.middleware.error_handler import ErrorHandlerMiddleware
-from webapp.routers import auth, vehicles, opportunities, upload, ml, admin
+from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest
 from webapp.database import init_db
 from webapp.monitoring import setup_monitoring
 
@@ -89,6 +89,7 @@ app.include_router(opportunities.router, prefix="/opportunities", tags=["Opportu
 app.include_router(upload.router, prefix="/upload", tags=["Data Upload"])
 app.include_router(ml.router, prefix="/ml", tags=["Machine Learning"])
 app.include_router(admin.router, prefix="/admin", tags=["Administration"])
+app.include_router(ingest.router)
 
 # Global exception handler
 @app.exception_handler(Exception)
