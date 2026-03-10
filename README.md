@@ -1,315 +1,199 @@
-# DealerScope - Vehicle Arbitrage Platform
+# DealerScope
 
-A production-ready FastAPI application for intelligent vehicle arbitrage analysis.
-
-**Status**: Refactored for production deployment with Docker support.
-
-## Quick Start
-
-### Docker (Recommended)
-
-```bash
-# Clone and start with Docker Compose
-git clone <repository>
-cd dealerscope
-docker-compose up --build
-```
-
-The API will be available at: http://localhost:8080
-
-## 🛠 Tech Stack
-
-- **Frontend**: React 18 + TypeScript, Tailwind CSS, shadcn/ui
-- **Backend**: Supabase (Auth, Database, Edge Functions)
-- **Real-time**: WebSocket updates for live deal notifications  
-- **Security**: Row Level Security, audit logging, input sanitization
-- **Performance**: Query optimization, intelligent caching, circuit breakers
-
-## 📋 Prerequisites
-
-- **Node.js 18+** and npm
-- **Supabase Account** (free tier works)
-- Modern browser with ES2020+ support
-
-## 🔧 Setup
-
-### 1. Environment Configuration
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit with your Supabase credentials
-nano .env
-```
-
-Required environment variables:
-```bash
-VITE_SUPABASE_URL=your-supabase-url
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
-
-### 2. Database Setup
-
-The database schema is automatically created when you first run the app. Tables include:
-- `public_listings` - Scraped vehicle data
-- `opportunities` - Analyzed arbitrage opportunities  
-- `user_settings` - User preferences
-- `security_audit_log` - Security events
-
-### 3. Development Commands
-
-```bash
-# Start development server
-npm run dev
-# or
-bash scripts/dev.sh
-
-# Run tests
-npm test
-
-# Type checking
-npm run type-check
-
-# Build for production
-npm run build
-```
-
-## 🏗 Architecture
-
-### Core Components
-
-```
-src/
-├── components/         # UI components
-│   ├── DealInbox.tsx  # Main deal management interface
-│   ├── DealCard.tsx   # Individual deal display
-│   └── ui/            # shadcn/ui components
-├── pages/
-│   ├── Index.tsx      # Main dashboard
-│   └── Settings.tsx   # User preferences
-├── hooks/
-│   ├── useRealtimeOpportunities.ts  # WebSocket integration
-│   └── useSecureStorage.ts          # Encrypted local storage
-├── services/
-│   └── api.ts         # Supabase integration layer
-└── utils/
-    ├── performanceOptimizer.ts  # Performance monitoring
-    └── securityHeaders.ts       # Security hardening
-```
-
-### Data Flow
-
-```mermaid
-graph TD
-    A[Scrapers] --> B[Edge Functions]
-    B --> C[Database]
-    C --> D[Real-time Updates]
-    D --> E[Deal Inbox]
-    E --> F[User Actions]
-    F --> C
-```
-
-## 🎮 Usage Guide
-
-### Deal Inbox Workflow
-
-1. **Open** DealerScope - see your deal inbox with New/Watching/Dismissed
-2. **Configure** sources & filters in Settings (GovDeals, PublicSurplus, etc.)
-3. **Scan** manually or let background scans run every 10 minutes
-4. **Review** deals with profit/risk badges and market analysis
-5. **Act** on opportunities - Watch, Hide, or Open auction
-
-### Key Features
-
-- **🔴 Red Bubble Alerts**: New high-profit deals appear instantly
-- **📱 Mobile PWA**: Full functionality on mobile devices
-- **🔒 Secure**: Enterprise-grade security with audit logging
-- **⚡ Fast**: Optimized queries and intelligent caching
-- **🎯 Smart Filtering**: ROI, risk score, location, make/model
-
-## 🔐 Security Features
-
-DealerScope v4.9 includes enterprise-grade security:
-
-- ✅ **Authentication**: JWT + TOTP two-factor authentication
-- ✅ **Authorization**: Row Level Security for all data access
-- ✅ **Input Validation**: Comprehensive sanitization and validation
-- ✅ **SSRF Protection**: Domain allowlisting for scraper requests
-- ✅ **Audit Logging**: Complete security event tracking
-- ✅ **Rate Limiting**: Protection against abuse
-- ✅ **CSP Headers**: XSS and injection protection
-- ✅ **Encrypted Storage**: Sensitive data encryption at rest
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-npm test
-
-# Run specific test suites
-npm run test:unit        # Unit tests
-npm run test:integration # Integration tests
-npm run test:security    # Security tests
-
-# Coverage report
-npm run test:coverage
-```
-
-### Test Categories
-
-- **Unit Tests**: Component logic, utilities, calculations
-- **Integration Tests**: API interactions, database operations
-- **Security Tests**: Input validation, authentication flows
-- **Contract Tests**: API response shapes and schemas
-
-## 📊 Performance Monitoring
-
-Built-in performance monitoring includes:
-
-- **Memory Usage**: Automatic cleanup and garbage collection
-- **API Response Times**: Circuit breakers for resilience  
-- **Cache Hit Rates**: Intelligent caching strategies
-- **Error Tracking**: Comprehensive error reporting
-
-## 🚀 Validation Dashboard (GitHub Pages)
-
-DealerScope includes a comprehensive validation dashboard deployed via GitHub Pages:
-
-- **📋 Live Dashboard**: Real-time production readiness reports
-- **🔄 Auto-Updates**: Daily validation runs at 6 AM UTC
-- **📊 Multi-Category**: Security, performance, resilience, observability
-- **📱 Mobile-Friendly**: Responsive design for all devices
-
-### Access the Dashboard
-
-```bash
-# View live reports (after GitHub Pages setup)
-https://[username].github.io/[repository]/
-
-# Run validation locally
-./scripts/run-validation-suite.sh
-
-# Manual deployment trigger
-gh workflow run deploy-validation-reports.yml
-```
-
-### Available Reports
-- **Security**: Vulnerability scans, auth testing, RLS validation
-- **Performance**: Load testing, bundle analysis, DB optimization  
-- **Resilience**: Chaos engineering, circuit breaker testing
-- **Observability**: Logging, metrics, distributed tracing
-- **CI/CD**: Pipeline health, test coverage, deployments
-- **Frontend**: Lighthouse scores, accessibility, SEO
-
-See [Validation Dashboard Guide](docs/VALIDATION_DASHBOARD.md) for complete documentation.
-
-## 🚦 Security Hardening
-
-### Production Checklist
-
-- [ ] Set up proper environment variables
-- [ ] Configure Row Level Security policies
-- [ ] Enable audit logging
-- [ ] Set up backup procedures
-- [ ] Configure rate limiting
-- [ ] Review user permissions
-- [ ] Test authentication flows
-- [ ] Validate input sanitization
-
-### Security Scan
-
-```bash
-# Run security audit
-npm run security:audit
-
-# Check dependencies
-npm audit
-
-# Validate configuration
-npm run config:validate
-```
-
-## 🤝 Contributing
-
-### Adding New Auction Sites
-
-1. **Add site configuration** in `src/types/scraper.ts`
-2. **Implement scraper** in `supabase/functions/vehicle-scraper/`
-3. **Add CSS selectors** for data extraction
-4. **Test with sample data**
-5. **Update documentation**
-
-### Development Guidelines
-
-- **Security First**: All features must pass security review
-- **Performance**: Optimize for mobile and low-bandwidth
-- **Testing**: Maintain >90% test coverage
-- **Documentation**: Update docs with any API changes
-
-## 📈 Roadmap
-
-### v5.0 Features
-- [ ] Machine learning for better opportunity scoring
-- [ ] Advanced market analytics and trends
-- [ ] Automated bidding capabilities
-- [ ] Enhanced mobile app with offline support
-- [ ] Integration with dealer management systems
-
-### Performance Targets
-- [ ] <500ms average page load time
-- [ ] <100ms API response times  
-- [ ] 99.9% uptime SLA
-- [ ] Support for 10,000+ concurrent users
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**Build Errors**
-```bash
-# Clear node_modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
-```
-
-**Database Connection Issues**
-```bash
-# Check Supabase credentials in .env
-# Verify network connectivity
-# Check Supabase dashboard for service status
-```
-
-**Authentication Problems**
-```bash
-# Clear browser storage
-# Check JWT token expiration
-# Verify user permissions in Supabase
-```
-
-### Debug Mode
-
-```bash
-# Enable debug logging
-DEBUG=dealerscope:* npm run dev
-
-# Verbose error reporting
-NODE_ENV=development npm run dev
-```
-
-## 📞 Support
-
-- **Documentation**: Full API docs at `/docs`
-- **Issues**: GitHub Issues for bug reports
-- **Security**: Report security issues privately
-- **Community**: Discord server for discussions
-
-## 📄 License
-
-**MIT License** - see [LICENSE](LICENSE) for details
+**Unified vehicle arbitrage platform** — scrapes government/surplus auctions, scores deals against dealer MMR comps, and surfaces high-margin opportunities through a real-time React dashboard.
 
 ---
 
-**Built with ❤️ for the vehicle arbitrage community**
+## Architecture
 
-*DealerScope v4.9 - Production-ready, secure, and blazingly fast.*
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        docker-compose                        │
+│                                                             │
+│  ┌──────────────┐   REST/WS    ┌──────────────────────────┐ │
+│  │   frontend   │◄────────────►│        backend           │ │
+│  │  React+Vite  │              │  FastAPI  (port 8000)    │ │
+│  │  port 5173   │              │                          │ │
+│  └──────────────┘              │  /api/auth               │ │
+│                                │  /api/vehicles           │ │
+│  ┌──────────────┐              │  /api/opportunities      │ │
+│  │    worker    │              │  /api/ml                 │ │
+│  │  Celery      │◄────────────►│  /api/pipeline/run  ◄──┐ │ │
+│  │  (scraping)  │   task queue │  /api/pipeline/status   │ │ │
+│  └──────┬───────┘              └──────────────────────────┘ │ │
+│         │                                     │             │ │
+│         ▼                                     ▼             │ │
+│  ┌──────────────────────────────────────────────────────┐   │ │
+│  │                   backend/ingest/                    │   │ │
+│  │                                                      │   │ │
+│  │  scrapers/govdeals.py  ──► scrape_all.py             │   │ │
+│  │  scrapers/publicsurplus.py   │                       │   │ │
+│  │  scrapers/govdeals_live.py   ▼                       │   │ │
+│  │                         normalize.py                 │   │ │
+│  │                         transport.py                 │   │ │
+│  │                         score.py                     │   │ │
+│  └──────────────────────────────────────────────────────┘   │ │
+│         │                                                    │ │
+│  ┌──────▼───────┐    ┌──────────────┐                       │ │
+│  │  PostgreSQL  │    │    Redis     │                       │ │
+│  │  (listings,  │    │  (Celery     │                       │ │
+│  │   sales,     │    │   broker +   │                       │ │
+│  │   audit log) │    │   cache)     │                       │ │
+│  └──────────────┘    └──────────────┘                       │ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone
+git clone https://github.com/pilsonandrew-hub/dealerscope.git
+cd dealerscope
+
+# 2. Copy env file and set secrets
+cp .env.example .env
+# edit SECRET_KEY in .env
+
+# 3. Start everything
+docker-compose up
+
+# Frontend → http://localhost:5173
+# API docs → http://localhost:8000/docs  (DEBUG=true only)
+# API      → http://localhost:8000
+```
+
+### Run the pipeline manually
+
+```bash
+# Trigger a scrape+score run via the API
+curl -X POST http://localhost:8000/api/pipeline/run
+
+# Check status
+curl http://localhost:8000/api/pipeline/status
+```
+
+---
+
+## Services
+
+| Service    | Port  | Description                                      |
+|------------|-------|--------------------------------------------------|
+| `frontend` | 5173  | React + Vite dev server                          |
+| `backend`  | 8000  | FastAPI unified entrypoint (webapp + pipeline)   |
+| `worker`   | —     | Celery worker for background scraping/scoring    |
+| `db`       | 5432  | PostgreSQL 15 — listings, sales, audit logs      |
+| `redis`    | 6379  | Celery broker, result backend, rate-limit cache  |
+
+---
+
+## Environment Variables
+
+| Variable                | Default                                    | Description                          |
+|-------------------------|--------------------------------------------|--------------------------------------|
+| `SECRET_KEY`            | *(required in prod)*                       | JWT signing key                      |
+| `DATABASE_URL`          | `postgresql://dealerscope:...@db:5432/...` | Postgres connection string           |
+| `REDIS_URL`             | `redis://redis:6379/0`                     | Redis connection (webapp)            |
+| `CELERY_BROKER_URL`     | `redis://redis:6379/1`                     | Celery broker                        |
+| `CELERY_RESULT_BACKEND` | `redis://redis:6379/2`                     | Celery result backend                |
+| `OFFLINE_MODE`          | `1`                                        | `1` = use demo fixtures; `0` = live  |
+| `USE_LIVE_GOVDEALS`     | `0`                                        | `1` = scrape GovDeals live           |
+| `DATA_DIR`              | `/app/data`                                | Where pipeline writes CSV/DB files   |
+| `CORS_ORIGINS`          | `http://localhost:5173`                    | Allowed frontend origins             |
+| `DEBUG`                 | `false`                                    | Enables `/docs` and verbose logs     |
+
+---
+
+## Pipeline — End to End
+
+```
+POST /api/pipeline/run
+        │
+        ▼
+  scrape_all.py          ← async-gathers all scrapers concurrently
+        │
+        ├─ GovDealsScraper / GovDealsLive
+        └─ PublicSurplusScraper
+        │
+        ▼
+  Rust/state filter      ← backend/config/states.yml whitelist
+        │
+        ▼
+  normalize.py           ← canonical make/model aliases
+        │
+        ▼
+  transport.py           ← mileage-band cost from state → CA
+        │
+        ▼
+  score.py               ← margin = MMR_CA - bid - premium - doc_fee - transport
+                            score  = margin / max(1000, bid)
+        │
+        ▼
+  opportunities.csv      ← ranked deals written to DATA_DIR
+        │
+        ▼
+  /api/opportunities     ← served to React dashboard
+```
+
+### Auction sources & fees
+
+| Source        | Buyer's Premium | Doc Fee |
+|---------------|-----------------|---------|
+| GovDeals      | 12.5%           | $75     |
+| PublicSurplus | 10.0%           | $50     |
+
+Configured in `backend/config/fees.yml` and `backend/config/sources.yml`.
+
+---
+
+## Project Layout
+
+```
+dealerscope/
+├── backend/                  # Scraper/pipeline engine (NEW)
+│   ├── __init__.py
+│   ├── main.py               # Unified FastAPI entrypoint
+│   ├── config/
+│   │   ├── sources.yml       # Auction source URLs + cadence
+│   │   ├── states.yml        # Rust-safe state whitelist
+│   │   ├── fees.yml          # Buyer premiums + doc fees per site
+│   │   ├── transit_rates.yml # Mileage-band transport rates
+│   │   └── state_miles_to_ca.yml
+│   └── ingest/
+│       ├── normalize.py      # Make/model alias resolution
+│       ├── transport.py      # Transport cost calculation
+│       ├── score.py          # Deal margin + score
+│       ├── scrape_all.py     # Scraper orchestrator
+│       └── scrapers/
+│           ├── structures.py     # PublicListing dataclass
+│           ├── govdeals.py       # GovDeals scraper (offline + live)
+│           ├── govdeals_live.py  # Live HTML scraper (lxml)
+│           ├── publicsurplus.py  # PublicSurplus scraper
+│           └── registry.py       # Scraper factory
+├── webapp/                   # Original FastAPI app (routers, ML, auth)
+│   ├── main.py
+│   ├── routers/
+│   ├── ml/
+│   ├── middleware/
+│   └── ...
+├── src/                      # React + TypeScript frontend
+├── docker-compose.yml
+├── Dockerfile
+└── requirements.txt
+```
+
+---
+
+## Tech Stack
+
+| Layer      | Technology                                      |
+|------------|-------------------------------------------------|
+| Frontend   | React 18, TypeScript, Vite, Tailwind, shadcn/ui |
+| Backend    | FastAPI, Uvicorn, SQLAlchemy 2                  |
+| Pipeline   | asyncio, aiohttp/requests, lxml, PyYAML         |
+| Queue      | Celery 5 + Redis 7                              |
+| Database   | PostgreSQL 15                                   |
+| ML         | scikit-learn, SHAP, joblib                      |
+| Auth       | JWT, bcrypt, TOTP (2FA)                         |
+| Containers | Docker + docker-compose                         |

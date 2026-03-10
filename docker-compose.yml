@@ -1,38 +1,83 @@
 version: '3.8'
 
 services:
-  api:
-    build: .
-    environment:
-      - PORT=8080
-      - DATABASE_URL=postgresql://dealerscope:dealerscope@db:5432/dealerscope
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-development-secret-key-change-in-production-32chars}
-      - ENVIRONMENT=development
-      - DEBUG=true
+
+  # ── Frontend ─────────────────────────────────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     ports:
-      - "8080:8080"
-    depends_on:
-      - db
-      - redis
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:5173"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
+  # ── Backend (FastAPI unified entrypoint) ─────────────────────────────────
+  backend:
+    build: .
+    command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://dealerscope:dealerscope@db:5432/dealerscope
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - SECRET_KEY=${SECRET_KEY:-development-secret-key-change-in-production-32chars}
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - CORS_ORIGINS=http://localhost:5173
+      - DATA_DIR=/app/data
+      - OFFLINE_MODE=${OFFLINE_MODE:-1}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - pipeline_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Celery worker (background scraping + scoring) ─────────────────────────
   worker:
     build: .
-    command: ["celery", "-A", "webapp.celery_app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "scripts.run_pipeline", "worker", "--loglevel=info", "-Q", "dealerscope"]
     environment:
       - DATABASE_URL=postgresql://dealerscope:dealerscope@db:5432/dealerscope
       - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - DATA_DIR=/app/data
+      - OFFLINE_MODE=${OFFLINE_MODE:-1}
+    volumes:
+      - .:/app
+      - pipeline_data:/app/data
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
   db:
     image: postgres:15-alpine
     environment:
@@ -44,7 +89,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealerscope"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ── Redis (Celery broker + result backend + rate-limit cache) ─────────────
   redis:
     image: redis:7-alpine
     ports:
@@ -52,7 +103,13 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
   redis_data:
+  pipeline_data:
