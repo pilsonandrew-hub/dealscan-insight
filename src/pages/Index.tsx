@@ -1,48 +1,34 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "@/services/api";
 import { DealerScopeHeader } from "@/components/DealerScopeHeader";
 import { DashboardMetrics } from "@/components/DashboardMetrics";
-import { DealOpportunities } from "@/components/DealOpportunities";
-import { DealInbox } from "@/components/DealInbox";
+import { EnhancedDealInbox } from "@/components/EnhancedDealInbox";
 import { UploadInterface } from "@/components/UploadInterface";
-import { SystemMetrics } from "@/components/SystemMetrics";
 import { MarketAnalytics } from "@/components/MarketAnalytics";
-import { OptimizedOpportunityList } from "@/components/OptimizedOpportunityList";
-import { SystemEvaluationPanel } from "@/components/SystemEvaluationPanel";
-import { VehicleScraperPanel } from "@/components/VehicleScraperPanel";
-import { ScraperTestDashboard } from "@/components/ScraperTestDashboard";
-import { DealScoringPanel } from "@/components/DealScoringPanel";
-import { V5FeaturesShowcase } from "@/components/V5FeaturesShowcase";
-import { ProductionReadinessSummary } from "@/components/ProductionReadinessSummary";
-import { RealtimeOpportunityDashboard } from "@/components/RealtimeOpportunityDashboard";
 import { CrosshairDashboard } from "@/components/CrosshairDashboard";
-import { AIDecisionEngine } from "@/components/AIDecisionEngine";
 import { RoverDashboard } from "@/components/RoverDashboard";
-import { AnomalyDetectionPanel } from "@/components/AnomalyDetectionPanel";
-import { AdvancedAutomationHub } from "@/components/AdvancedAutomationHub";
 import { MLModelDashboard } from "@/components/MLModelDashboard";
-import { ComprehensiveTestSuite } from "@/components/ComprehensiveTestSuite";
+import { UpdatedDealScoringPanel } from "@/components/UpdatedDealScoringPanel";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
 import { useToast } from "@/hooks/use-toast";
-import { Opportunity } from "@/types/dealerscope";
+
+type View = "dashboard" | "crosshair" | "rover" | "analytics" | "settings";
 
 const Index = () => {
-  const [activeView, setActiveView] = useState("dashboard");
+  const [activeView, setActiveView] = useState<View>("dashboard");
   const { toast } = useToast();
 
-  // Fetch initial opportunities and metrics
   const { data: initialOpportunities = { data: [], total: 0, hasMore: false } } = useQuery({
     queryKey: ["opportunities"],
     queryFn: () => api.getOpportunities(1, 100),
-    refetchInterval: 30000, // Fallback polling
+    refetchInterval: 30000,
   });
 
-  // Extract data safely from either response format
-  const initialData: any[] = Array.isArray(initialOpportunities) ? initialOpportunities : 
-    (initialOpportunities && typeof initialOpportunities === 'object' && 'data' in initialOpportunities ? 
+  const initialData: any[] = Array.isArray(initialOpportunities) ? initialOpportunities :
+    (initialOpportunities && typeof initialOpportunities === 'object' && 'data' in initialOpportunities ?
       (initialOpportunities.data || []) : []);
 
   const { data: metrics = {
@@ -56,7 +42,6 @@ const Index = () => {
     refetchInterval: 60000,
   });
 
-  // Real-time opportunities with WebSocket
   const {
     opportunities,
     pipelineStatus,
@@ -71,7 +56,6 @@ const Index = () => {
   } = useRealtimeOpportunities(initialData);
 
   const handleUploadSuccess = () => {
-    // Real-time updates will handle new opportunities automatically
     setActiveView("dashboard");
   };
 
@@ -80,7 +64,7 @@ const Index = () => {
       case "dashboard":
         return (
           <div className="space-y-8">
-            <DashboardMetrics 
+            <DashboardMetrics
               metrics={metrics}
               pipelineStatus={{
                 status: pipelineStatus?.status || 'stopped',
@@ -90,48 +74,38 @@ const Index = () => {
               }}
               isRealtime={isConnected}
             />
-            <DealInbox />
+            <EnhancedDealInbox />
+            <RealtimeStatusBadge
+              status={connectionStatus}
+              newCount={newOpportunitiesCount}
+              onConnect={connect}
+              onDisconnect={disconnect}
+              onClearNew={clearNewCount}
+              pipelineRunning={pipelineStatus?.status === 'running'}
+              onPausePipeline={pausePipeline}
+              onResumePipeline={resumePipeline}
+            />
           </div>
         );
       case "crosshair":
         return <CrosshairDashboard />;
-      case "opportunities":
-        return <RealtimeOpportunityDashboard />;
-      case "ai-engine":
-        return <AIDecisionEngine />;
       case "rover":
         return <RoverDashboard isPremium={true} />;
-      case "anomaly-detection":
-        return <AnomalyDetectionPanel />;
-      case "automation":
-        return <AdvancedAutomationHub />;
-      case "ml-models":
-        return <MLModelDashboard />;
-      case "testing":
-        return <ComprehensiveTestSuite />;
       case "analytics":
-        return <MarketAnalytics opportunities={opportunities} />;
-      case "upload":
-        return <UploadInterface onUploadSuccess={handleUploadSuccess} />;
-      case "metrics":
-        return <SystemMetrics />;
-      case "scraper":
-        return <VehicleScraperPanel />;
-      case "scraper-test":
-        return <ScraperTestDashboard />;
-      case "scoring":
-        return <DealScoringPanel />;
-      case "evaluation":
-        return <SystemEvaluationPanel />;
-      case "v5features":
         return (
           <div className="space-y-8">
-            <V5FeaturesShowcase />
-            <ProductionReadinessSummary />
+            <MarketAnalytics opportunities={opportunities} />
+            <MLModelDashboard />
+            <UpdatedDealScoringPanel />
           </div>
         );
       case "settings":
-        return <Settings />;
+        return (
+          <div className="space-y-8">
+            <UploadInterface onUploadSuccess={handleUploadSuccess} />
+            <Settings />
+          </div>
+        );
       default:
         return null;
     }
@@ -139,25 +113,13 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex items-center justify-between p-4 border-b">
-        <DealerScopeHeader 
-          activeView={activeView} 
-          onViewChange={setActiveView}
-          newDealsCount={newOpportunitiesCount}
-          isPremium={true}
-        />
-        <RealtimeStatusBadge
-          status={connectionStatus}
-          newCount={newOpportunitiesCount}
-          onConnect={connect}
-          onDisconnect={disconnect}
-          onClearNew={clearNewCount}
-          pipelineRunning={pipelineStatus?.status === 'running'}
-          onPausePipeline={pausePipeline}
-          onResumePipeline={resumePipeline}
-        />
-      </div>
-      
+      <DealerScopeHeader
+        activeView={activeView}
+        onViewChange={(v) => setActiveView(v as View)}
+        newDealsCount={newOpportunitiesCount}
+        isPremium={true}
+      />
+
       <main className="container py-8">
         {renderActiveView()}
       </main>

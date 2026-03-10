@@ -10,7 +10,7 @@ import { roverAPI, DealItem, RoverRecommendations } from "@/services/roverAPI";
 import { CrosshairSearch } from "./CrosshairSearch";
 import { formatCurrency, formatMileage, formatScore, getScoreColor, timeAgo, formatDate, isHighValue } from "@/utils/roverUtils";
 import { Rocket, Target, TrendingUp, AlertTriangle, Star, Clock, DollarSign, MapPin, Search, BarChart3, Crosshair } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/ModernAuthContext";
 
 interface RoverDashboardProps {
   isPremium: boolean;
