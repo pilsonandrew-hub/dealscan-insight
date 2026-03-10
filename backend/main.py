@@ -1,3 +1,4 @@
+# PRIMARY ENTRYPOINT - use this. webapp/main.py is deprecated.
 """
 DealerScope — Unified Backend Entrypoint
 Combines the FastAPI webapp routers with the scrape/score pipeline.
@@ -17,7 +18,7 @@ from webapp.middleware.request_id import RequestIDMiddleware
 from webapp.middleware.rate_limit import RateLimitMiddleware
 from webapp.middleware.security import SecurityMiddleware
 from webapp.middleware.error_handler import ErrorHandlerMiddleware
-from webapp.routers import auth, vehicles, opportunities, upload, ml, admin
+from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest
 from webapp.database import init_db
 from webapp.monitoring import setup_monitoring
 
@@ -86,6 +87,7 @@ app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opp
 app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(ml.router, prefix="/api/ml", tags=["ml"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(ingest.router)  # Apify webhook endpoint
 
 
 # ---------------------------------------------------------------------------
