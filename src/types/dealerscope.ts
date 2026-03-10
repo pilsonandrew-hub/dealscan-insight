@@ -3,6 +3,68 @@
  * Matches the Python FastAPI models for consistency
  */
 
+// ─── Gate 1: Age & Mileage ───────────────────────────────────────────────────
+export interface AgeMileageGate {
+  age_years: number;
+  mileage: number;
+  passes: boolean;
+  price_tier: "premium" | "mid" | "sub_floor";
+}
+
+// ─── Gate 2: Market Days Supply (MDS) ────────────────────────────────────────
+export interface MDSGate {
+  market_days_supply: number;
+  threshold: 35;
+  passes: boolean;
+  days_below_threshold: number;
+}
+
+// ─── Gate 3: Scarcity Index ───────────────────────────────────────────────────
+export interface ScarcityGate {
+  demand_score: number;
+  local_supply_count: number;
+  scarcity_ratio: number;
+  passes: boolean;
+  discovery_type: "targeted" | "off_list";
+}
+
+// ─── Gate 4: Cost-to-Market Ratio ─────────────────────────────────────────────
+export interface CostToMarketGate {
+  total_all_in_cost: number;
+  wholesale_benchmark: number;
+  cost_to_market_ratio: number;
+  passes: boolean;
+}
+
+// ─── Gate 5: Holding Cost Clock ───────────────────────────────────────────────
+export interface HoldingCostGate {
+  projected_days_to_sale: number;
+  daily_holding_cost: number;
+  total_holding_cost: number;
+  passes: boolean;
+}
+
+// ─── Five-Layer Filter Result ──────────────────────────────────────────────────
+export interface FiveLayerFilterResult {
+  gate1_age_mileage: AgeMileageGate;
+  gate2_mds: MDSGate;
+  gate3_scarcity: ScarcityGate;
+  gate4_cost_to_market: CostToMarketGate;
+  gate5_holding_clock: HoldingCostGate;
+  all_gates_passed: boolean;
+  first_failed_gate: "gate1" | "gate2" | "gate3" | "gate4" | "gate5" | null;
+}
+
+// ─── CPO Eligibility ──────────────────────────────────────────────────────────
+export interface CPOEligibility {
+  age_qualifies: boolean;
+  oem_warranty_remaining: boolean;
+  franchise_certifiable: boolean;
+  cpo_eligible: boolean;
+  estimated_premium: number;
+  cpo_adjusted_retail: number;
+}
+
 export interface Vehicle {
   id?: string;
   vin: string;
@@ -75,6 +137,11 @@ export interface Opportunity {
   bid_cap?: number;
   market_position?: "below" | "market" | "above";
   last_updated?: string;
+  // Five-Layer Filter
+  five_layer_filter?: FiveLayerFilterResult;
+  cpo_eligibility?: CPOEligibility;
+  scarcity?: ScarcityGate;
+  market_days_supply?: number;
 }
 
 export interface PipelineStatus {

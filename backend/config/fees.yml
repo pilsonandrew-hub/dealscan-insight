@@ -1,0 +1,7 @@
+sites:
+  GovDeals:
+    buyers_premium_pct: 12.5
+    doc_fee: 75
+  PublicSurplus:
+    buyers_premium_pct: 10.0
+    doc_fee: 50

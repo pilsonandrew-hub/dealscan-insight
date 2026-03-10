@@ -1,0 +1,21 @@
+sources:
+  gov_platforms:
+    - name: GovDeals
+      tz: "America/New_York"
+      cadence_min: 60
+      urls:
+        - "https://www.govdeals.com/index.cfm?fa=Main.CategorySearch"
+    - name: PublicSurplus
+      tz: "America/Los_Angeles"
+      cadence_min: 60
+      urls:
+        - "https://www.publicsurplus.com/sms/all,ca/browse/cataucs?catid=16"
+
+fees:
+  sites:
+    GovDeals:
+      buyers_premium_pct: 12.5
+      doc_fee: 75
+    PublicSurplus:
+      buyers_premium_pct: 10.0
+      doc_fee: 50

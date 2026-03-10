@@ -1,0 +1,59 @@
+# Rust/corrosion-safe state whitelist
+# Only vehicles from these states pass the rust filter by default.
+# Vehicles from other states require an explicit "no rust" disclaimer in the listing.
+whitelist_states:
+  # Western / Dry states
+  - AZ
+  - CA
+  - CO
+  - ID
+  - MT
+  - NV
+  - NM
+  - OR
+  - UT
+  - WA
+  - WY
+  # Southern states (generally low road-salt exposure)
+  - AL
+  - AR
+  - FL
+  - GA
+  - KY
+  - LA
+  - MS
+  - NC
+  - OK
+  - SC
+  - TN
+  - TX
+  - VA
+
+county_overrides: {}
+
+# High rust/road-salt exposure states — require explicit inspection or discount
+high_rust_states:
+  - OH
+  - MI
+  - PA
+  - NY
+  - WI
+  - MN
+  - IL
+  - IN
+  - MO
+  - IA
+  - ND
+  - SD
+  - NE
+  - KS
+  - WV
+  - ME
+  - NH
+  - VT
+  - MA
+  - RI
+  - CT
+  - NJ
+  - MD
+  - DE
