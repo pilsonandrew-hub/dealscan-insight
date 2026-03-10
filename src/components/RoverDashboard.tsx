@@ -8,13 +8,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { roverAPI, DealItem, RoverRecommendations } from "@/services/roverAPI";
 import { CrosshairSearch } from "./CrosshairSearch";
-import { RoverAnalytics } from "./RoverAnalytics";
 import { formatCurrency, formatMileage, formatScore, getScoreColor, timeAgo, formatDate, isHighValue } from "@/utils/roverUtils";
 import { Rocket, Target, TrendingUp, AlertTriangle, Star, Clock, DollarSign, MapPin, Search, BarChart3, Crosshair } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface RoverDashboardProps {
   isPremium: boolean;
   userId?: string;
+  minDosScore?: number;
 }
 
 interface SavedIntent {
@@ -27,21 +28,15 @@ interface SavedIntent {
 
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 
-export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userId }) => {
+export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, minDosScore = 65 }) => {
   const [recommendations, setRecommendations] = useState<RoverRecommendations | null>(null);
   const [savedIntents, setSavedIntents] = useState<SavedIntent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"feed" | "crosshair" | "intents" | "analytics">("feed");
   const { toast } = useToast();
-
-  const currentUserId = useMemo(() => {
-    if (userId) return userId;
-    if (typeof window !== "undefined") {
-      return (window as any).__USER_ID__ || "current_user";
-    }
-    return "current_user";
-  }, [userId]);
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? "anonymous";
 
   const loadRecommendations = useCallback(async () => {
     if (!isPremium) return;
@@ -49,7 +44,16 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
     setError(null);
     try {
       const recs = await roverAPI.getRecommendations(25);
-      setRecommendations(recs);
+      const filtered = {
+        ...recs,
+        items: recs.items.filter(item => {
+          const score = item._score != null
+            ? (item._score <= 1 ? item._score * 100 : item._score)
+            : (item.arbitrage_score ?? 0);
+          return score >= minDosScore;
+        })
+      };
+      setRecommendations(filtered);
     } catch {
       setError("Failed to load recommendations");
       toast({
@@ -60,7 +64,7 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
     } finally {
       setLoading(false);
     }
-  }, [isPremium, toast]);
+  }, [isPremium, minDosScore, toast]);
 
   const loadSavedIntents = useCallback(async () => {
     if (!isPremium) return;
@@ -109,6 +113,22 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
     [currentUserId, toast]
   );
 
+  const handleCreateIntent = useCallback(async (item: DealItem) => {
+    try {
+      const title = `${[item.year, item.make, item.model].filter(Boolean).join(" ")} — Auto`;
+      await roverAPI.createIntent({ title, make: item.make, model: item.model, year: item.year });
+      setSavedIntents(prev => [...prev, {
+        id: Date.now().toString(),
+        title,
+        is_active: true,
+        created_at: new Date().toISOString()
+      }]);
+      toast({ title: "Intent saved", description: `Rover will now track ${title}` });
+    } catch {
+      toast({ title: "Could not save intent", variant: "destructive" });
+    }
+  }, [toast]);
+
   const confidencePercent = useMemo(
     () => (recommendations ? Math.round((Number(recommendations.confidence) || 0) * 100) : 0),
     [recommendations]
@@ -123,6 +143,16 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
 
   const highValueDeals = useMemo(() => {
     return recommendations?.items.filter(isHighValue).length || 0;
+  }, [recommendations]);
+
+  const averageDosScore = useMemo(() => {
+    const items = recommendations?.items || [];
+    if (!items.length) return 0;
+    const sum = items.reduce((acc, it) => {
+      const s = it._score != null ? (it._score <= 1 ? it._score * 100 : it._score) : 0;
+      return acc + s;
+    }, 0);
+    return Math.round(sum / items.length);
   }, [recommendations]);
 
   if (!isPremium) {
@@ -232,7 +262,9 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
               <Alert>
                 <AlertTriangle className="h-4 w-4" aria-hidden />
                 <AlertDescription>
-                  No recommendations yet. Rover is learning your preferences—interact with deals to improve suggestions.
+                  No deals currently meet your minimum score threshold (≥{minDosScore ?? 65}).
+                  Rover checks every 5 minutes — interact with deals to improve suggestions,
+                  or lower your score threshold to see more opportunities.
                 </AlertDescription>
               </Alert>
             )}
@@ -291,6 +323,17 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
                         </div>
 
                         <div className="flex space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCreateIntent(item);
+                            }}
+                            aria-label="Track this vehicle type"
+                          >
+                            🎯 Track
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -362,7 +405,33 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, userI
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-4">
-            <RoverAnalytics />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Session Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <MetricLine label="Deals Shown" value={recommendations?.items.length || 0} />
+                    <MetricLine label="Saved Intents" value={savedIntents.length} />
+                    <MetricLine label="Avg DOS Score" value={averageDosScore > 0 ? `${averageDosScore}` : "—"} />
+                    <MetricLine label="Min Score Filter" value={`≥ ${minDosScore ?? 65}`} />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Pipeline Status</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <MetricLine label="Data Source" value={<Badge variant="default">Apify + Manheim</Badge>} />
+                    <MetricLine label="Scoring Engine" value={<Badge variant="default">Five-Layer Filter</Badge>} />
+                    <MetricLine label="Last Refresh" value={recommendations?.precomputedAt ? timeAgo(recommendations.precomputedAt) : "—"} />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
@@ -414,6 +483,15 @@ function FeedSkeleton() {
           </CardContent>
         </Card>
       ))}
+    </div>
+  );
+}
+
+function MetricLine({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium">{value}</span>
     </div>
   );
 }

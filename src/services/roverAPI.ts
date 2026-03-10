@@ -297,6 +297,20 @@ class RoverAPIService {
     }
   }
 
+  async createIntent(params: { title: string; make?: string; model?: string; year?: number }): Promise<void> {
+    const { error } = await supabase
+      .from("saved_intents")
+      .insert({
+        title: params.title,
+        make: params.make,
+        model: params.model,
+        year: params.year,
+        is_active: true,
+        created_at: new Date().toISOString()
+      });
+    if (error) throw error;
+  }
+
   async getUserIntents(): Promise<any[]> {
     try {
       const { data: user } = await supabase.auth.getUser();
