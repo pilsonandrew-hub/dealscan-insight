@@ -27,5 +27,7 @@ def calc_transport_cost(state: str, rates_cfg: dict = None, miles_cfg: dict = No
     bands = rates_cfg.get("mileage_bands", [])
     band = next((b for b in bands if dist <= b["max_miles"]), bands[-1] if bands else None)
     if band is None:
-        return dist * 1.8  # fallback rate
-    return dist * band["rate_per_mile"]
+        cost = dist * 1.8  # fallback rate
+    else:
+        cost = dist * band["rate_per_mile"]
+    return max(350.0, cost)  # minimum charge $350
