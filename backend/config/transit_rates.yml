@@ -1,0 +1,13 @@
+mileage_bands:
+  - max_miles: 500
+    rate_per_mile: 2.2
+  - max_miles: 1000
+    rate_per_mile: 1.9
+  - max_miles: 2000
+    rate_per_mile: 1.6
+  - max_miles: 99999
+    rate_per_mile: 1.4
+
+flydrive:
+  base_cost: 450
+  per_mile: 0.45
