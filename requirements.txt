@@ -54,6 +54,9 @@ selenium==4.15.0
 pandas==2.1.2
 numpy==1.25.2
 
+# Supabase client
+supabase>=2.0.0
+
 # API testing
 httpx==0.25.1
 

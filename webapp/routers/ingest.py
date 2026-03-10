@@ -2,11 +2,19 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
 import re
 import os
+import logging
 from datetime import datetime
+
+from supabase import create_client
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "sbEC0dNgb7Ohg3rDV")
+
+supabase_client = create_client(
+    os.getenv("VITE_SUPABASE_URL", ""),
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY", os.getenv("VITE_SUPABASE_ANON_KEY", "")),
+)
 
 # Rust state classification
 LOW_RUST_STATES = {"AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI","OK","AR","LA","MS","AL"}
@@ -54,7 +62,7 @@ async def apify_webhook(request: Request, x_apify_webhook_secret: Optional[str] 
         vehicle["dos_score"] = score
         vehicle["ingested_at"] = datetime.utcnow().isoformat()
 
-        # TODO: Save to Supabase opportunities table
+        await save_opportunity_to_supabase(vehicle)
         print(f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} | Score: {score} | Bid: ${vehicle.get('current_bid')}")
 
         processed += 1
@@ -168,3 +176,47 @@ def calculate_dos_score(vehicle: dict) -> float:
         score += 6
 
     return min(100, round(score, 1))
+
+
+async def save_opportunity_to_supabase(vehicle: dict) -> None:
+    """Save a scored vehicle to the Supabase opportunities table.
+
+    Only saves if dos_score >= 50. Upserts on listing_url.
+    """
+    score = vehicle.get("dos_score", 0)
+    if score < 50:
+        logging.info(f"[INGEST] Skipping weak deal (score={score}): {vehicle.get('listing_url')}")
+        return
+
+    if score >= 80:
+        status = "hot"
+    elif score >= 65:
+        status = "good"
+    else:
+        status = "moderate"
+
+    row = {
+        "listing_url": vehicle.get("listing_url", ""),
+        "acquisition_cost": vehicle.get("current_bid"),
+        "score": score,
+        "source_site": vehicle.get("source_site"),
+        "state": vehicle.get("state"),
+        "location": vehicle.get("location"),
+        "photo_url": vehicle.get("photo_url"),
+        "make": vehicle.get("make"),
+        "model": vehicle.get("model"),
+        "year": vehicle.get("year"),
+        "auction_end": vehicle.get("auction_end_time"),
+        "status": status,
+    }
+
+    try:
+        supabase_client.table("opportunities").upsert(
+            row, on_conflict="listing_url"
+        ).execute()
+        logging.info(
+            f"[INGEST] Saved to Supabase: {vehicle.get('year')} {vehicle.get('make')} "
+            f"{vehicle.get('model')} | score={score} | status={status}"
+        )
+    except Exception as e:
+        logging.error(f"[INGEST] Supabase save failed for {vehicle.get('listing_url')}: {e}")
