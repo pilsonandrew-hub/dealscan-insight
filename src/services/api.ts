@@ -240,10 +240,10 @@ export const api = {
   async checkRailwayHealth(): Promise<{ status: string; latency?: number }> {
     const start = Date.now();
     try {
-      // Use manual AbortController for iOS Safari compatibility (AbortSignal.timeout not supported on older iOS)
+      // Use same-origin Vercel proxy to avoid any cross-origin/CORS issues on mobile
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch('/proxy/health', { signal: controller.signal });
       clearTimeout(timer);
       const latency = Date.now() - start;
       if (!res.ok) return { status: 'error', latency };

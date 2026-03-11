@@ -4,6 +4,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
+    { "source": "/proxy/health", "destination": "https://dealscan-insight-production.up.railway.app/health" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
