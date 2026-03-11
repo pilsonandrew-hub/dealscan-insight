@@ -170,8 +170,8 @@ export const api = {
       const { data, error } = await supabase
         .from('opportunities')
         .select('source_site, created_at')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (error) throw error;
 

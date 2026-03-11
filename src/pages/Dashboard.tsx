@@ -663,20 +663,18 @@ const SettingsTab = () => {
 
   const checkConnections = useCallback(async () => {
     setChecking(true);
-    try {
-      const [r, s, src] = await Promise.all([
-        api.checkRailwayHealth(),
-        api.checkSupabaseHealth(),
-        api.getScraperSources()
-      ]);
-      setRailwayStatus(r);
-      setSupabaseStatus(s);
-      setSources(src);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setChecking(false);
-    }
+    // Use allSettled so each check is independent — one failure won't block others
+    const [r, s, src] = await Promise.allSettled([
+      api.checkRailwayHealth(),
+      api.checkSupabaseHealth(),
+      api.getScraperSources()
+    ]);
+    if (r.status === 'fulfilled') setRailwayStatus(r.value);
+    else setRailwayStatus({ status: 'error' });
+    if (s.status === 'fulfilled') setSupabaseStatus(s.value);
+    else setSupabaseStatus({ status: 'error' });
+    if (src.status === 'fulfilled') setSources(src.value);
+    setChecking(false);
   }, []);
 
   useEffect(() => { checkConnections(); }, [checkConnections]);
