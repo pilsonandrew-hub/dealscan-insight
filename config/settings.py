@@ -2,23 +2,9 @@
 Application settings — Railway-safe, robust defaults
 """
 import os
-import json
-from typing import List, Optional, Any
+from typing import Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-def _parse_list(v: Any) -> Any:
-    """Parse list fields — handles JSON array, comma-separated, or empty string."""
-    if isinstance(v, list):
-        return v
-    if not isinstance(v, str) or not v.strip():
-        return []
-    try:
-        parsed = json.loads(v.strip())
-        return parsed if isinstance(parsed, list) else [str(parsed)]
-    except (json.JSONDecodeError, ValueError):
-        return [x.strip() for x in v.split(",") if x.strip()]
 
 
 class Settings(BaseSettings):
@@ -56,7 +42,6 @@ class Settings(BaseSettings):
 
     # File upload
     max_upload_size: int = 50 * 1024 * 1024
-    allowed_file_types: List[str] = ["text/csv", "application/vnd.ms-excel"]
 
     # ML/AI
     ml_enabled: bool = False
@@ -83,11 +68,6 @@ class Settings(BaseSettings):
 
     # Prometheus
     prometheus_enabled: bool = False
-
-    @field_validator("allowed_file_types", mode="before")
-    @classmethod
-    def parse_allowed_file_types(cls, v: Any) -> Any:
-        return _parse_list(v)
 
     @field_validator("database_url", mode="before")
     @classmethod
