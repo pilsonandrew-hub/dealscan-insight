@@ -2,7 +2,8 @@
 Application settings with Pydantic v2
 """
 import os
-from typing import List, Optional
+import json
+from typing import List, Optional, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,6 +45,19 @@ class Settings(BaseSettings):
     # File upload
     max_upload_size: int = 50 * 1024 * 1024  # 50MB
     allowed_file_types: List[str] = ["text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
+
+    @field_validator("allowed_file_types", mode="before")
+    @classmethod
+    def parse_list_field(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return [x.strip() for x in v.split(",") if x.strip()]
+        return v
     
     # ML/AI
     ml_enabled: bool = True
