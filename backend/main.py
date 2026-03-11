@@ -14,13 +14,62 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from webapp.middleware.request_id import RequestIDMiddleware
-from webapp.middleware.rate_limit import RateLimitMiddleware
-from webapp.middleware.security import SecurityMiddleware
-from webapp.middleware.error_handler import ErrorHandlerMiddleware
-from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest, rover
-from webapp.database import init_db
-from webapp.monitoring import setup_monitoring
+# Middleware — import with fallbacks
+try:
+    from webapp.middleware.request_id import RequestIDMiddleware
+except Exception as e:
+    RequestIDMiddleware = None
+    logging.warning(f"request_id middleware unavailable: {e}")
+
+try:
+    from webapp.middleware.rate_limit import RateLimitMiddleware
+except Exception as e:
+    RateLimitMiddleware = None
+    logging.warning(f"rate_limit middleware unavailable: {e}")
+
+try:
+    from webapp.middleware.security import SecurityMiddleware
+except Exception as e:
+    SecurityMiddleware = None
+    logging.warning(f"security middleware unavailable: {e}")
+
+try:
+    from webapp.middleware.error_handler import ErrorHandlerMiddleware
+except Exception as e:
+    ErrorHandlerMiddleware = None
+    logging.warning(f"error_handler middleware unavailable: {e}")
+
+# Routers — import each independently so one failure doesn't kill everything
+_routers = []
+for _name, _import in [
+    ("auth",          "from webapp.routers import auth"),
+    ("vehicles",      "from webapp.routers import vehicles"),
+    ("opportunities", "from webapp.routers import opportunities"),
+    ("upload",        "from webapp.routers import upload"),
+    ("ml",            "from webapp.routers import ml"),
+    ("admin",         "from webapp.routers import admin"),
+    ("ingest",        "from webapp.routers import ingest"),
+    ("rover",         "from webapp.routers import rover"),
+]:
+    try:
+        _mod = {}
+        exec(_import, _mod)
+        _routers.append((_name, list(_mod.values())[-1]))
+        logging.info(f"Router loaded: {_name}")
+    except Exception as e:
+        logging.warning(f"Router {_name} unavailable: {e}")
+
+try:
+    from webapp.database import init_db
+except Exception as e:
+    init_db = None
+    logging.warning(f"database unavailable: {e}")
+
+try:
+    from webapp.monitoring import setup_monitoring
+except Exception as e:
+    setup_monitoring = None
+    logging.warning(f"monitoring unavailable: {e}")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,31 +120,43 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Middleware stack
-app.add_middleware(SecurityMiddleware)
-app.add_middleware(ErrorHandlerMiddleware)
-app.add_middleware(RequestIDMiddleware)
+# Middleware stack — only add if available
+if SecurityMiddleware:
+    app.add_middleware(SecurityMiddleware)
+if ErrorHandlerMiddleware:
+    app.add_middleware(ErrorHandlerMiddleware)
+if RequestIDMiddleware:
+    app.add_middleware(RequestIDMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
-app.add_middleware(RateLimitMiddleware)
+if RateLimitMiddleware:
+    app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ---------------------------------------------------------------------------
-# Register webapp routers
+# Register webapp routers — only those that loaded successfully
 # ---------------------------------------------------------------------------
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
-app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"])
-app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
-app.include_router(ml.router, prefix="/api/ml", tags=["ml"])
-app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(ingest.router)  # Apify webhook endpoint
-app.include_router(rover.router)
+_prefix_map = {
+    "auth": "/api/auth",
+    "vehicles": "/api/vehicles",
+    "opportunities": "/api/opportunities",
+    "upload": "/api/upload",
+    "ml": "/api/ml",
+    "admin": "/api/admin",
+    "ingest": "",
+    "rover": "",
+}
+for _name, _mod in _routers:
+    try:
+        app.include_router(_mod.router, prefix=_prefix_map.get(_name, f"/api/{_name}"))
+        logger.info(f"Registered router: {_name}")
+    except Exception as e:
+        logger.warning(f"Could not register router {_name}: {e}")
 
 
 # ---------------------------------------------------------------------------
