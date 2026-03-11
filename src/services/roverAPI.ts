@@ -57,76 +57,34 @@ class RoverAPIService {
 
   async trackEvent(event: RoverEvent): Promise<void> {
     try {
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) return;
-
-      const weight = this.eventWeights[event.event];
-      const decayedWeight = weight * Math.exp(-Math.log(2) * 
-        (Date.now() - (event.timestamp || Date.now())) / this.decayHalfLife);
-
-      // Store event for ML training
-      await (supabase as any).from('rover_events').insert({
-        user_id: user.user.id,
-        event_type: event.event,
-        item_data: event.item as any,
-        weight: decayedWeight,
-        timestamp: new Date(event.timestamp || Date.now()).toISOString()
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      await fetch(`${apiUrl}/api/rover/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
       });
-
-      logger.info('Rover event tracked', { event: event.event, itemId: event.item.id });
     } catch (error) {
-      logger.error('Failed to track Rover event', { 
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      // Fire and forget - don't block UX on tracking failures
+      logger.warn("Rover event tracking failed", { message: String(error) });
     }
   }
 
-  async getRecommendations(limit = 25): Promise<RoverRecommendations> {
+  async getRecommendations(limit: number = 25): Promise<RoverRecommendations> {
     try {
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) {
-        throw new Error('User not authenticated');
-      }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
 
-      // Check for cached recommendations first
-      const { data: cached } = await (supabase as any)
-        .from('rover_recommendations')
-        .select('*')
-        .eq('user_id', user.user.id)
-        .gt('expires_at', new Date().toISOString())
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${user.id}&limit=${limit}`);
 
-      if (cached) {
-        const recommendations = (cached as any).recommendations;
-        return {
-          precomputedAt: new Date((cached as any).created_at).getTime(),
-          items: Array.isArray(recommendations) ? recommendations.slice(0, limit) : [],
-          totalCount: Array.isArray(recommendations) ? recommendations.length : 0,
-          confidence: (cached as any).confidence || 0.8
-        };
-      }
+      if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
 
-      // Generate fresh recommendations
-      const recommendations = await this.generateRecommendations(user.user.id, limit);
-      
-      // Cache the results
-      await (supabase as any).from('rover_recommendations').insert({
-        user_id: user.user.id,
-        recommendations: recommendations.items as any,
-        confidence: recommendations.confidence,
-        expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() // 4 hours
-      });
-
-      return recommendations;
+      const data = await resp.json();
+      return data as RoverRecommendations;
     } catch (error) {
-      logger.error('Failed to get Rover recommendations', { 
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      throw error;
+      logger.error("Rover recommendations failed", { message: String(error) });
+      // Fallback: return empty with cold start indicator
+      return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
     }
   }
 
