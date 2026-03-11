@@ -40,24 +40,14 @@ except Exception as e:
     logging.warning(f"error_handler middleware unavailable: {e}")
 
 # Routers — import each independently so one failure doesn't kill everything
-_routers = []
-for _name, _import in [
-    ("auth",          "from webapp.routers import auth"),
-    ("vehicles",      "from webapp.routers import vehicles"),
-    ("opportunities", "from webapp.routers import opportunities"),
-    ("upload",        "from webapp.routers import upload"),
-    ("ml",            "from webapp.routers import ml"),
-    ("admin",         "from webapp.routers import admin"),
-    ("ingest",        "from webapp.routers import ingest"),
-    ("rover",         "from webapp.routers import rover"),
-]:
+import importlib
+_routers = {}
+for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover"]:
     try:
-        _mod = {}
-        exec(_import, _mod)
-        _routers.append((_name, list(_mod.values())[-1]))
-        logging.info(f"Router loaded: {_name}")
+        _routers[_rname] = importlib.import_module(f"webapp.routers.{_rname}")
+        logging.info(f"Router loaded: {_rname}")
     except Exception as e:
-        logging.warning(f"Router {_name} unavailable: {e}")
+        logging.warning(f"Router {_rname} unavailable: {e}")
 
 try:
     from webapp.database import init_db
@@ -151,7 +141,7 @@ _prefix_map = {
     "ingest": "",
     "rover": "",
 }
-for _name, _mod in _routers:
+for _name, _mod in _routers.items():
     try:
         app.include_router(_mod.router, prefix=_prefix_map.get(_name, f"/api/{_name}"))
         logger.info(f"Registered router: {_name}")
