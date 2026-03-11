@@ -38,6 +38,10 @@ joblib==1.4.0
 # Task queue
 celery==5.3.4
 
+# Data processing
+pandas==2.1.2
+numpy==1.26.4
+
 # Utilities
 python-dotenv==1.0.0
 structlog==23.1.0
