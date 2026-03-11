@@ -22,14 +22,14 @@ redis==5.0.1
 
 # HTTP
 requests==2.31.0
-httpx==0.25.1
+httpx==0.27.2
 
 # HTML parsing (scraper support)
 beautifulsoup4==4.12.2
 lxml==4.9.3
 
 # Supabase
-supabase>=2.3.0,<3.0.0
+supabase==2.10.1
 
 # ML
 scikit-learn==1.4.0
