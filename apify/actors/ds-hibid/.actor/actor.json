@@ -2,7 +2,5 @@
   "actorSpecification": 1,
   "name": "ds-hibid-scraper",
   "title": "DealerScope HiBid Vehicle Scraper",
-  "description": "Scrapes vehicle listings from HiBid.com (Angular SPA) for arbitrage analysis. Filters for low-rust states and recent model years.",
-  "version": "1.0",
-  "input": "./input_schema.json"
+  "version": "1.0"
 }

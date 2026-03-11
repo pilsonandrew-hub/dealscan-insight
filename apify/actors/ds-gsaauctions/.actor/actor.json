@@ -2,7 +2,5 @@
   "actorSpecification": 1,
   "name": "ds-gsaauctions-scraper",
   "title": "DealerScope GSA Auctions Vehicle Scraper",
-  "description": "Scrapes vehicle listings from GSAauctions.gov for arbitrage analysis. Tries API endpoints first, falls back to HTML crawl across all vehicle category codes.",
-  "version": "1.0",
-  "input": "./input_schema.json"
+  "version": "1.0"
 }
