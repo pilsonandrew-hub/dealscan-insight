@@ -5,13 +5,21 @@ Implements preference-based deal ranking with event weighting + decay.
 from fastapi import APIRouter, HTTPException
 import time
 import os
-from supabase import create_client
+import logging
 
 router = APIRouter(prefix="/api/rover", tags=["rover"])
+logger = logging.getLogger(__name__)
 
 _supabase_url = os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
-supa = create_client(_supabase_url, _supabase_key) if _supabase_url and _supabase_key else None
+
+supa = None
+try:
+    if _supabase_url and _supabase_key:
+        from supabase import create_client
+        supa = create_client(_supabase_url, _supabase_key)
+except Exception as _e:
+    logger.warning(f"Rover Supabase client init failed (non-fatal): {_e}")
 
 
 @router.get("/recommendations")

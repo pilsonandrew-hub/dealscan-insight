@@ -5,8 +5,6 @@ import os
 import logging
 from datetime import datetime
 
-from supabase import create_client
-
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
@@ -15,12 +13,16 @@ WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "sbEC0dNgb7Ohg3rDV")
 _supabase_url = os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 
-if _supabase_url and _supabase_key:
-    supabase_client = create_client(_supabase_url, _supabase_key)
-    logger.info("Supabase client initialized for ingest")
-else:
-    supabase_client = None
-    logger.warning("Supabase client NOT initialized — missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Deals will be logged but not saved.")
+supabase_client = None
+try:
+    if _supabase_url and _supabase_key:
+        from supabase import create_client
+        supabase_client = create_client(_supabase_url, _supabase_key)
+        logger.info("Supabase client initialized for ingest")
+    else:
+        logger.warning("Supabase client NOT initialized — missing env vars.")
+except Exception as _supa_err:
+    logger.warning(f"Supabase client init failed (non-fatal): {_supa_err}")
 
 # Rust state classification
 LOW_RUST_STATES = {"AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI","OK","AR","LA","MS","AL"}
