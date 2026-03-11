@@ -203,6 +203,11 @@ async def apify_webhook(
         vehicle["ingested_at"] = datetime.utcnow().isoformat()
 
         await save_opportunity_to_supabase(vehicle)
+
+        # Sync to Notion for DOS >= 65 (good + hot deals)
+        if vehicle["dos_score"] >= 65:
+            await sync_to_notion(vehicle)
+
         logger.info(
             f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
             f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
@@ -411,6 +416,87 @@ def _fallback_score(vehicle: dict) -> dict:
     if 1 <= age <= 4:
         score += 10
     return {"dos_score": min(100, round(score, 1)), "score": min(100, round(score, 1)), "mmr_estimated": 0}
+
+
+async def sync_to_notion(vehicle: dict) -> bool:
+    """Push a scored deal to the Notion Dealerscope Deals database."""
+    notion_token = os.getenv("NOTION_TOKEN", "")
+    notion_db_id = os.getenv("NOTION_DEALS_DB_ID", "")
+    if not notion_token or not notion_db_id:
+        return False
+
+    score = vehicle.get("dos_score", 0)
+    breakdown = vehicle.get("score_breakdown", {})
+
+    if score >= 80:
+        status = "🔥 Hot"
+    elif score >= 65:
+        status = "✅ Good"
+    else:
+        status = "👀 Watching"
+
+    title = f"{vehicle.get('year','')} {vehicle.get('make','')} {vehicle.get('model','')}".strip() or vehicle.get("title", "Unknown")
+
+    # Parse auction end date
+    end_date = None
+    raw_end = vehicle.get("auction_end_time")
+    if raw_end:
+        try:
+            from dateutil import parser as dateparser
+            end_date = dateparser.parse(str(raw_end)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    props = {
+        "Name": {"title": [{"text": {"content": title[:100]}}]},
+        "DOS Score": {"number": score},
+        "Status": {"select": {"name": status}},
+        "Bid Price": {"number": vehicle.get("current_bid")},
+        "MMR": {"number": breakdown.get("mmr_estimated")},
+        "Gross Margin": {"number": breakdown.get("margin")},
+        "Source": {"select": {"name": vehicle.get("source_site", "GovDeals")}},
+        "Year": {"number": vehicle.get("year")},
+        "Listing URL": {"url": vehicle.get("listing_url") or None},
+    }
+
+    if vehicle.get("state"):
+        props["State"] = {"select": {"name": vehicle["state"][:2]}}
+    if vehicle.get("make"):
+        props["Make"] = {"rich_text": [{"text": {"content": vehicle["make"][:100]}}]}
+    if vehicle.get("model"):
+        props["Model"] = {"rich_text": [{"text": {"content": vehicle["model"][:100]}}]}
+    if vehicle.get("mileage"):
+        try:
+            props["Mileage"] = {"number": int(float(vehicle["mileage"]))}
+        except (ValueError, TypeError):
+            pass
+    if end_date:
+        props["Auction Ends"] = {"date": {"start": end_date}}
+
+    # Remove None values (Notion rejects null numbers)
+    props = {k: v for k, v in props.items() if not (
+        isinstance(v, dict) and v.get("number") is None
+    )}
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://api.notion.com/v1/pages",
+                headers={
+                    "Authorization": f"Bearer {notion_token}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
+                },
+                json={"parent": {"database_id": notion_db_id}, "properties": props},
+            )
+            if resp.status_code == 200:
+                return True
+            logger.warning(f"[NOTION] Failed to sync: {resp.status_code} {resp.text[:200]}")
+            return False
+    except Exception as e:
+        logger.error(f"[NOTION] Sync error (non-fatal): {e}")
+        return False
 
 
 async def send_telegram_alerts(hot_deals: list) -> None:
