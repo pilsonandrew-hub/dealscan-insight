@@ -29,7 +29,7 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 
 # Supabase
-supabase>=2.0.0
+supabase>=2.3.0,<3.0.0
 
 # ML
 scikit-learn==1.4.0
