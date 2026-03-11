@@ -46,8 +46,15 @@ _pipeline_state: dict = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting DealerScope unified backend")
-    await init_db()
-    setup_monitoring(app)
+    try:
+        await init_db()
+        logger.info("Database initialized")
+    except Exception as e:
+        logger.warning(f"Database init failed (non-fatal): {e}")
+    try:
+        setup_monitoring(app)
+    except Exception as e:
+        logger.warning(f"Monitoring setup failed (non-fatal): {e}")
     yield
     logger.info("Shutting down DealerScope unified backend")
 
