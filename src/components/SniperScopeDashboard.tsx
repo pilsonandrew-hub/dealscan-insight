@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Target, Lock, Trash2, Calculator } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Target, Lock, Trash2, Calculator, Upload } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SniperInputs {
@@ -7,12 +7,16 @@ interface SniperInputs {
   make: string;
   model: string;
   mmr: string;
+  source: string;
   buyerPremiumPct: string;
+  salesTaxPct: string;
   auctionFees: string;
+  titleFees: string;
   transport: string;
   recon: string;
   targetMargin: string;
   state: string;
+  currentBid: string;
 }
 
 interface SavedTarget {
@@ -23,9 +27,20 @@ interface SavedTarget {
   margin: number;
   roi: number;
   date: string;
+  source: string;
+  snapshot: {
+    buyerPremiumPct: string;
+    auctionFees: string;
+    titleFees: string;
+    transport: string;
+    recon: string;
+    targetMargin: string;
+    state: string;
+    salesTaxPct: string;
+  };
 }
 
-// ─── Low-rust states with default transport estimates ────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const LOW_RUST_STATES: { value: string; label: string; transport: number }[] = [
   { value: 'AZ', label: 'Arizona', transport: 350 },
   { value: 'CA', label: 'California', transport: 500 },
@@ -35,11 +50,28 @@ const LOW_RUST_STATES: { value: string; label: string; transport: number }[] = [
   { value: 'KS', label: 'Kansas', transport: 350 },
   { value: 'NM', label: 'New Mexico', transport: 375 },
   { value: 'NV', label: 'Nevada', transport: 450 },
+  { value: 'NC', label: 'North Carolina', transport: 575 },
   { value: 'OK', label: 'Oklahoma', transport: 325 },
   { value: 'OR', label: 'Oregon', transport: 550 },
+  { value: 'TN', label: 'Tennessee', transport: 525 },
   { value: 'TX', label: 'Texas', transport: 400 },
   { value: 'UT', label: 'Utah', transport: 425 },
+  { value: 'VA', label: 'Virginia', transport: 600 },
   { value: 'WA', label: 'Washington', transport: 575 },
+];
+
+const STATE_SALES_TAX: Record<string, number> = {
+  AZ: 5.6, CA: 7.25, CO: 2.9, FL: 6.0, GA: 4.0, NC: 4.75,
+  NV: 6.85, OR: 0.0, TN: 7.0, TX: 6.25, VA: 4.3, WA: 6.5,
+};
+
+const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: boolean }[] = [
+  { value: 'govdeals',     label: 'GovDeals',      premium: 10 },
+  { value: 'gsaauctions',  label: 'GSAauctions',   premium: 0,    noTax: true },
+  { value: 'publicsurplus',label: 'PublicSurplus',  premium: 10 },
+  { value: 'hibid',        label: 'HiBid',          premium: 15 },
+  { value: 'municibid',    label: 'Municibid',      premium: 10 },
+  { value: 'other',        label: 'Other',          premium: 12.5 },
 ];
 
 const STORAGE_KEY = 'dealerscope_sniper_targets';
@@ -52,20 +84,23 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+const DEFAULT_INPUTS: SniperInputs = {
+  year: '', make: '', model: '', mmr: '',
+  source: 'other',
+  buyerPremiumPct: '12.5',
+  salesTaxPct: '5.0',
+  auctionFees: '150',
+  titleFees: '150',
+  transport: '450',
+  recon: '500',
+  targetMargin: '2500',
+  state: '',
+  currentBid: '',
+};
+
 // ─── SniperScope Calculator ───────────────────────────────────────────────────
 export default function SniperScopeDashboard() {
-  const [inputs, setInputs] = useState<SniperInputs>({
-    year: '',
-    make: '',
-    model: '',
-    mmr: '',
-    buyerPremiumPct: '12.5',
-    auctionFees: '150',
-    transport: '450',
-    recon: '500',
-    targetMargin: '2500',
-    state: '',
-  });
+  const [inputs, setInputs] = useState<SniperInputs>(DEFAULT_INPUTS);
 
   const [saved, setSaved] = useState<SavedTarget[]>(() => {
     try {
@@ -75,45 +110,74 @@ export default function SniperScopeDashboard() {
     }
   });
 
-  // Recalculate live
+  // ─── Live calculation ──────────────────────────────────────────────────────
   const calc = useMemo(() => {
-    const mmr = parseFloat(inputs.mmr) || 0;
-    const buyerPremiumPct = parseFloat(inputs.buyerPremiumPct) || 0;
-    const auctionFees = parseFloat(inputs.auctionFees) || 0;
-    const transport = parseFloat(inputs.transport) || 0;
-    const recon = parseFloat(inputs.recon) || 0;
-    const targetMargin = parseFloat(inputs.targetMargin) || 0;
+    const mmr            = parseFloat(inputs.mmr)            || 0;
+    const buyerPremiumPct= parseFloat(inputs.buyerPremiumPct)|| 0;
+    const salesTaxPct    = parseFloat(inputs.salesTaxPct)    || 0;
+    const auctionFees    = parseFloat(inputs.auctionFees)    || 0;
+    const titleFees      = parseFloat(inputs.titleFees)      || 0;
+    const transport      = parseFloat(inputs.transport)      || 0;
+    const recon          = parseFloat(inputs.recon)          || 0;
+    const targetMargin   = parseFloat(inputs.targetMargin)   || 0;
+    const currentBid     = parseFloat(inputs.currentBid)     || 0;
 
-    const buyerPremium = mmr * (buyerPremiumPct / 100);
-    const maxBid = mmr - buyerPremium - auctionFees - transport - recon - targetMargin;
-    const allInCost = maxBid + buyerPremium + auctionFees + transport + recon;
+    // Correct algebraic formula: premium + tax are percentages of maxBid
+    const divisor = 1 + buyerPremiumPct / 100 + salesTaxPct / 100;
+    const maxBid = divisor > 0
+      ? (mmr - auctionFees - titleFees - transport - recon - targetMargin) / divisor
+      : 0;
+
+    const buyerPremiumAmount = maxBid * (buyerPremiumPct / 100);
+    const salesTaxAmount     = maxBid * (salesTaxPct / 100);
+    const allInCost          = maxBid + buyerPremiumAmount + salesTaxAmount + auctionFees + titleFees + transport + recon;
     const estimatedGrossMargin = mmr - allInCost;
     const roi = allInCost > 0 ? (estimatedGrossMargin / allInCost) * 100 : 0;
+    const headroom = maxBid - currentBid;
 
-    return { mmr, buyerPremium, auctionFees, transport, recon, targetMargin, maxBid, allInCost, estimatedGrossMargin, roi };
+    return {
+      mmr, buyerPremiumPct, salesTaxPct, buyerPremiumAmount, salesTaxAmount,
+      auctionFees, titleFees, transport, recon, targetMargin,
+      maxBid, allInCost, estimatedGrossMargin, roi,
+      currentBid, headroom,
+    };
   }, [inputs]);
 
-  const marginStatus = useMemo(() => {
-    if (calc.estimatedGrossMargin <= 0) return 'red';
-    if (calc.estimatedGrossMargin < calc.targetMargin * 0.8) return 'yellow';
-    return 'green';
-  }, [calc]);
-
+  // ─── Helpers ───────────────────────────────────────────────────────────────
   const set = (key: keyof SniperInputs, value: string) =>
     setInputs(prev => ({ ...prev, [key]: value }));
 
   const handleStateChange = (state: string) => {
-    const stateData = LOW_RUST_STATES.find(s => s.value === state);
+    const stateData  = LOW_RUST_STATES.find(s => s.value === state);
+    const stateTax   = STATE_SALES_TAX[state] ?? 5.0;
+    // Don't override salesTax if source is GSA (no tax)
+    const sourceData = AUCTION_SOURCES.find(s => s.value === inputs.source);
     setInputs(prev => ({
       ...prev,
       state,
       transport: stateData ? stateData.transport.toString() : prev.transport,
+      salesTaxPct: sourceData?.noTax ? '0' : stateTax.toFixed(2),
     }));
+  };
+
+  const handleSourceChange = (source: string) => {
+    const sourceData = AUCTION_SOURCES.find(s => s.value === source);
+    if (!sourceData) return;
+    setInputs(prev => {
+      const stateTax = STATE_SALES_TAX[prev.state] ?? 5.0;
+      return {
+        ...prev,
+        source,
+        buyerPremiumPct: sourceData.premium.toString(),
+        salesTaxPct: sourceData.noTax ? '0' : stateTax.toFixed(2),
+      };
+    });
   };
 
   const lockTarget = () => {
     if (!inputs.mmr) return;
     const vehicle = [inputs.year, inputs.make, inputs.model].filter(Boolean).join(' ') || 'Unknown Vehicle';
+    const sourceLabel = AUCTION_SOURCES.find(s => s.value === inputs.source)?.label ?? inputs.source;
     const entry: SavedTarget = {
       id: Date.now().toString(),
       vehicle,
@@ -122,6 +186,17 @@ export default function SniperScopeDashboard() {
       margin: calc.estimatedGrossMargin,
       roi: calc.roi,
       date: new Date().toISOString(),
+      source: sourceLabel,
+      snapshot: {
+        buyerPremiumPct: inputs.buyerPremiumPct,
+        auctionFees: inputs.auctionFees,
+        titleFees: inputs.titleFees,
+        transport: inputs.transport,
+        recon: inputs.recon,
+        targetMargin: inputs.targetMargin,
+        state: inputs.state,
+        salesTaxPct: inputs.salesTaxPct,
+      },
     };
     const next = [entry, ...saved];
     setSaved(next);
@@ -134,14 +209,48 @@ export default function SniperScopeDashboard() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   };
 
+  const loadTarget = (t: SavedTarget) => {
+    const sourceEntry = AUCTION_SOURCES.find(s => s.label === t.source);
+    setInputs(prev => ({
+      ...prev,
+      mmr: t.mmr.toString(),
+      source: sourceEntry?.value ?? 'other',
+      ...t.snapshot,
+      currentBid: '',
+    }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // ─── Derived UI state ──────────────────────────────────────────────────────
+  const hasMMR = Boolean(inputs.mmr);
+  const isViable = calc.maxBid > 0;
+  const marginShort = isViable && calc.estimatedGrossMargin < calc.targetMargin;
+
+  const maxBidColor  = isViable ? 'text-emerald-400' : 'text-red-400';
+  const marginColor  = !hasMMR ? 'text-white'
+    : calc.estimatedGrossMargin <= 0 ? 'text-red-400'
+    : marginShort ? 'text-yellow-400'
+    : 'text-emerald-400';
+
+  const headroomColor = calc.headroom > 1000
+    ? 'text-emerald-400 border-emerald-800/60'
+    : calc.headroom >= 200
+    ? 'text-yellow-400 border-yellow-800/60'
+    : 'text-red-400 border-red-800/60 animate-pulse';
+
   const inputCls = "w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 transition-colors";
   const labelCls = "block text-xs text-gray-400 mb-1";
 
-  const maxBidColor = calc.maxBid > 0 ? 'text-emerald-400' : 'text-red-400';
-  const marginColor = marginStatus === 'green' ? 'text-emerald-400' : marginStatus === 'yellow' ? 'text-yellow-400' : 'text-red-400';
-
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
+      {/* Mobile sticky max bid */}
+      <div className="sticky top-0 z-10 bg-gray-950 py-2 px-4 xl:hidden border-b border-gray-800 flex justify-between items-center -mx-4 md:-mx-6">
+        <span className="text-sm text-gray-400">Max Bid Ceiling</span>
+        <span className={`text-2xl font-black ${isViable ? 'text-emerald-400' : 'text-red-400'}`}>
+          {hasMMR ? fmt$(calc.maxBid) : '—'}
+        </span>
+      </div>
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <Target className="h-6 w-6 text-emerald-400" />
@@ -150,6 +259,18 @@ export default function SniperScopeDashboard() {
           <p className="text-sm text-gray-400">Bid execution calculator — find your max bid before you raise your hand</p>
         </div>
       </div>
+
+      {/* Viability banners */}
+      {hasMMR && !isViable && (
+        <div className="bg-red-950/60 border border-red-700 rounded-lg px-4 py-3 text-red-300 font-semibold text-sm">
+          ⚠️ DEAL NOT VIABLE — costs exceed MMR at this margin target
+        </div>
+      )}
+      {hasMMR && marginShort && (
+        <div className="bg-yellow-950/60 border border-yellow-700 rounded-lg px-4 py-3 text-yellow-300 font-semibold text-sm">
+          ⚠️ Margin below target — deal is thin
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* ── INPUT FORM ─────────────────────────────────────────────────────── */}
@@ -186,7 +307,17 @@ export default function SniperScopeDashboard() {
             <p className="text-xs text-gray-600 mt-1">Manheim Market Report value or your best market estimate</p>
           </div>
 
-          {/* Cost inputs grid */}
+          {/* Auction Source */}
+          <div>
+            <label className={labelCls}>Auction Source</label>
+            <select className={inputCls} value={inputs.source} onChange={e => handleSourceChange(e.target.value)}>
+              {AUCTION_SOURCES.map(s => (
+                <option key={s.value} value={s.value}>{s.label} (premium: {s.premium}%{s.noTax ? ', no tax' : ''})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Premium + sales tax row */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Buyer Premium (%)</label>
@@ -194,9 +325,23 @@ export default function SniperScopeDashboard() {
                 onChange={e => set('buyerPremiumPct', e.target.value)} />
             </div>
             <div>
+              <label className={labelCls}>Sales Tax (%)</label>
+              <input type="number" step="0.01" className={inputCls} value={inputs.salesTaxPct}
+                onChange={e => set('salesTaxPct', e.target.value)} />
+            </div>
+          </div>
+
+          {/* Fees grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <label className={labelCls}>Auction Fees ($)</label>
               <input type="number" className={inputCls} value={inputs.auctionFees}
                 onChange={e => set('auctionFees', e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>Title & Doc Fees ($)</label>
+              <input type="number" className={inputCls} value={inputs.titleFees}
+                onChange={e => set('titleFees', e.target.value)} />
             </div>
             <div>
               <label className={labelCls}>Recon Estimate ($)</label>
@@ -227,39 +372,56 @@ export default function SniperScopeDashboard() {
                 onChange={e => set('transport', e.target.value)} />
             </div>
           </div>
+
+          {/* Current Bid tracker */}
+          <div>
+            <label className={labelCls}>Current Bid (live) ($)</label>
+            <input type="number" className={inputCls} placeholder="Enter live auction price…" value={inputs.currentBid}
+              onChange={e => set('currentBid', e.target.value)} />
+          </div>
         </div>
 
         {/* ── CALCULATED OUTPUT ───────────────────────────────────────────────── */}
         <div className="space-y-4">
           {/* Big Max Bid display */}
           <div className={`bg-gray-900 rounded-xl border p-5 text-center ${
-            calc.maxBid > 0 ? 'border-emerald-800/60' : 'border-red-800/60'
+            isViable ? 'border-emerald-800/60' : 'border-red-800/60'
           }`}>
             <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Max Bid Ceiling</p>
             <p className={`text-5xl font-black tracking-tight ${maxBidColor}`}>
-              {inputs.mmr ? fmt$(calc.maxBid) : '—'}
+              {hasMMR ? fmt$(calc.maxBid) : '—'}
             </p>
-            {inputs.mmr && calc.maxBid <= 0 && (
-              <p className="text-red-400 text-xs mt-2">⚠ Costs exceed MMR — deal underwater at this margin target</p>
-            )}
           </div>
+
+          {/* Headroom display */}
+          {hasMMR && inputs.currentBid && (
+            <div className={`bg-gray-900 rounded-xl border p-4 flex items-center justify-between ${headroomColor}`}>
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Headroom Remaining</p>
+                <p className="text-xs text-gray-500">You have {calc.headroom > 0 ? fmt$(calc.headroom) : '—'} left before hitting your ceiling</p>
+              </div>
+              <span className={`text-2xl font-black ${headroomColor.split(' ')[0]}`}>
+                {calc.headroom >= 0 ? fmt$(calc.headroom) : `-${fmt$(Math.abs(calc.headroom))}`}
+              </span>
+            </div>
+          )}
 
           {/* Summary metrics */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-3 text-center">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">All-In Cost</p>
-              <p className="text-lg font-bold text-white">{inputs.mmr ? fmt$(calc.allInCost) : '—'}</p>
+              <p className="text-lg font-bold text-white">{hasMMR ? fmt$(calc.allInCost) : '—'}</p>
             </div>
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-3 text-center">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Est. Gross Margin</p>
-              <p className={`text-lg font-bold ${inputs.mmr ? marginColor : 'text-white'}`}>
-                {inputs.mmr ? fmt$(calc.estimatedGrossMargin) : '—'}
+              <p className={`text-lg font-bold ${hasMMR ? marginColor : 'text-white'}`}>
+                {hasMMR ? fmt$(calc.estimatedGrossMargin) : '—'}
               </p>
             </div>
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-3 text-center">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">ROI</p>
-              <p className={`text-lg font-bold ${inputs.mmr ? marginColor : 'text-white'}`}>
-                {inputs.mmr ? `${calc.roi.toFixed(1)}%` : '—'}
+              <p className={`text-lg font-bold ${hasMMR ? marginColor : 'text-white'}`}>
+                {hasMMR ? `${calc.roi.toFixed(1)}%` : '—'}
               </p>
             </div>
           </div>
@@ -276,32 +438,42 @@ export default function SniperScopeDashboard() {
               <tbody className="divide-y divide-gray-800">
                 <tr>
                   <td className="px-4 py-2.5 text-gray-300">MMR (Market Value)</td>
-                  <td className="px-4 py-2.5 text-right text-emerald-400 font-medium">{inputs.mmr ? fmt$(calc.mmr) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-emerald-400 font-medium">{hasMMR ? fmt$(calc.mmr) : '—'}</td>
                 </tr>
                 <tr>
-                  <td className="px-4 py-2.5 text-gray-300">Buyer Premium ({inputs.buyerPremiumPct}%)</td>
-                  <td className="px-4 py-2.5 text-right text-red-400">-{inputs.mmr ? fmt$(calc.buyerPremium) : '—'}</td>
+                  <td className="px-4 py-2.5 text-gray-300">Buyer Premium ({inputs.buyerPremiumPct}% of bid)</td>
+                  <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.buyerPremiumAmount) : '—'}</td>
                 </tr>
+                {parseFloat(inputs.salesTaxPct) > 0 && (
+                  <tr>
+                    <td className="px-4 py-2.5 text-gray-300">Sales Tax ({inputs.salesTaxPct}% of bid)</td>
+                    <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.salesTaxAmount) : '—'}</td>
+                  </tr>
+                )}
                 <tr>
                   <td className="px-4 py-2.5 text-gray-300">Auction Fees</td>
-                  <td className="px-4 py-2.5 text-right text-red-400">-{inputs.mmr ? fmt$(calc.auctionFees) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.auctionFees) : '—'}</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2.5 text-gray-300">Title & Doc Fees</td>
+                  <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.titleFees) : '—'}</td>
                 </tr>
                 <tr>
                   <td className="px-4 py-2.5 text-gray-300">Transport</td>
-                  <td className="px-4 py-2.5 text-right text-red-400">-{inputs.mmr ? fmt$(calc.transport) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.transport) : '—'}</td>
                 </tr>
                 <tr>
                   <td className="px-4 py-2.5 text-gray-300">Recon Estimate</td>
-                  <td className="px-4 py-2.5 text-right text-red-400">-{inputs.mmr ? fmt$(calc.recon) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.recon) : '—'}</td>
                 </tr>
                 <tr>
                   <td className="px-4 py-2.5 text-gray-300">Target Margin</td>
-                  <td className="px-4 py-2.5 text-right text-red-400">-{inputs.mmr ? fmt$(calc.targetMargin) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-red-400">-{hasMMR ? fmt$(calc.targetMargin) : '—'}</td>
                 </tr>
                 <tr className="border-t-2 border-emerald-800/60">
                   <td className="px-4 py-3 font-bold text-white">MAX BID CEILING</td>
                   <td className={`px-4 py-3 text-right font-black text-lg ${maxBidColor}`}>
-                    {inputs.mmr ? fmt$(calc.maxBid) : '—'}
+                    {hasMMR ? fmt$(calc.maxBid) : '—'}
                   </td>
                 </tr>
               </tbody>
@@ -311,7 +483,7 @@ export default function SniperScopeDashboard() {
           {/* Lock button */}
           <button
             onClick={lockTarget}
-            disabled={!inputs.mmr}
+            disabled={!hasMMR}
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2.5 px-4 rounded-lg transition-colors"
           >
             <Lock className="h-4 w-4" />
@@ -327,10 +499,10 @@ export default function SniperScopeDashboard() {
             Saved Targets ({saved.length})
           </h3>
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
-            <table className="w-full text-sm min-w-[600px]">
+            <table className="w-full text-sm min-w-[700px]">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {['Vehicle', 'MMR', 'Max Bid', 'Est. Margin', 'ROI', 'Saved', ''].map(h => (
+                  {['Vehicle', 'Source', 'MMR', 'Max Bid', 'Est. Margin', 'ROI', 'Saved', ''].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide last:text-right">
                       {h}
                     </th>
@@ -343,6 +515,7 @@ export default function SniperScopeDashboard() {
                   return (
                     <tr key={t.id} className="hover:bg-gray-800/50 transition-colors">
                       <td className="px-4 py-3 text-white font-medium">{t.vehicle}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{t.source}</td>
                       <td className="px-4 py-3 text-gray-300">{fmt$(t.mmr)}</td>
                       <td className="px-4 py-3 text-emerald-400 font-semibold">{fmt$(t.maxBid)}</td>
                       <td className={`px-4 py-3 font-medium ${marginOk ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -353,12 +526,22 @@ export default function SniperScopeDashboard() {
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(t.date)}</td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => deleteTarget(t.id)}
-                          className="text-gray-600 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => loadTarget(t)}
+                            title="Load into calculator"
+                            className="text-gray-500 hover:text-emerald-400 transition-colors"
+                          >
+                            <Upload className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => deleteTarget(t.id)}
+                            title="Delete"
+                            className="text-gray-600 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
