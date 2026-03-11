@@ -136,6 +136,7 @@ async def pipeline_status():
 # Health
 # ---------------------------------------------------------------------------
 @app.get("/healthz", include_in_schema=False)
+@app.get("/health", include_in_schema=False)
 async def health():
     return {"status": "ok"}
 
