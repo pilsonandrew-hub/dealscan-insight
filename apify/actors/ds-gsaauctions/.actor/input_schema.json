@@ -1,42 +1,47 @@
 {
-  "title": "GSA Auctions Scraper Input",
+  "title": "DealerScope Scraper Input",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "maxPages": {
       "title": "Max Pages",
       "type": "integer",
-      "description": "Maximum search result pages to crawl per category",
-      "default": 20,
+      "description": "Maximum pages to crawl",
+      "default": 15,
       "minimum": 1,
-      "maximum": 100
+      "maximum": 100,
+      "editor": "number"
     },
     "minBid": {
       "title": "Minimum Bid ($)",
       "type": "integer",
-      "description": "Minimum current bid to include a listing",
+      "description": "Minimum current bid",
       "default": 1000,
-      "minimum": 0
+      "minimum": 0,
+      "editor": "number"
     },
     "maxMileage": {
       "title": "Maximum Mileage",
       "type": "integer",
-      "description": "Maximum odometer reading in miles",
+      "description": "Max odometer (miles)",
       "default": 50000,
-      "minimum": 0
+      "minimum": 0,
+      "editor": "number"
     },
     "minYear": {
       "title": "Minimum Model Year",
       "type": "integer",
-      "description": "Oldest model year to include (e.g. 2022)",
+      "description": "Oldest model year to include",
       "default": 2022,
-      "minimum": 1990
+      "minimum": 1990,
+      "editor": "number"
     },
     "targetStates": {
       "title": "Target States",
       "type": "array",
       "description": "Low-rust states to include",
       "default": ["AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"],
+      "editor": "stringList",
       "items": { "type": "string" }
     }
   }

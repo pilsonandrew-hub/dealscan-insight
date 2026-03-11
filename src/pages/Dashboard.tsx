@@ -839,19 +839,21 @@ export default function Dashboard() {
       </main>
 
       {/* Bottom tab bar — mobile */}
-      <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-gray-900 border-t border-gray-800 flex z-50">
+      <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-gray-900 border-t border-gray-800 z-50 overflow-x-auto">
+        <div className="flex min-w-max">
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
-            className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs transition-colors ${
+            className={`flex flex-col items-center gap-1 py-2 px-3 text-xs transition-colors min-w-[72px] ${
               activeTab === id ? 'text-emerald-400' : 'text-gray-500'
             }`}
           >
             <Icon className="h-5 w-5" />
-            <span>{label}</span>
+            <span className="whitespace-nowrap">{label}</span>
           </button>
         ))}
+        </div>
       </nav>
     </div>
   );
