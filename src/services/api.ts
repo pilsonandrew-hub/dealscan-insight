@@ -240,7 +240,11 @@ export const api = {
   async checkRailwayHealth(): Promise<{ status: string; latency?: number }> {
     const start = Date.now();
     try {
-      const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5000) });
+      // Use manual AbortController for iOS Safari compatibility (AbortSignal.timeout not supported on older iOS)
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+      clearTimeout(timer);
       const latency = Date.now() - start;
       if (!res.ok) return { status: 'error', latency };
       return { status: 'healthy', latency };
