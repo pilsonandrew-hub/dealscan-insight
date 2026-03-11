@@ -120,12 +120,17 @@ if RequestIDMiddleware:
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 if RateLimitMiddleware:
     app.add_middleware(RateLimitMiddleware)
+_ALLOWED_ORIGINS = [
+    o.strip() for o in
+    os.getenv("ALLOWED_ORIGINS", "https://dealscan-insight-production.up.railway.app").split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Apify-Webhook-Secret"],
 )
 
 # ---------------------------------------------------------------------------
@@ -196,7 +201,11 @@ async def pipeline_status():
 @app.get("/healthz", include_in_schema=False)
 @app.get("/health", include_in_schema=False)
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "routers_loaded": list(_routers.keys()),
+        "routes_count": len(app.routes),
+    }
 
 
 if __name__ == "__main__":

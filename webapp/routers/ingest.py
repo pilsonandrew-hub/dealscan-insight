@@ -28,7 +28,8 @@ WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8770839167:AAEPvbNtS5Fr3LPmoEUM-9CJ14r7OXhIgzI")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7529788084")
 
-_supabase_url = os.getenv("VITE_SUPABASE_URL", "")
+# Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
+_supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 
 supabase_client = None

@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "production"
 
-    # Security
-    secret_key: str = "dealerscope-prod-2026-xK9mP2qR8nL4wZ7v"
+    # Security — SECRET_KEY must be set in environment; no default allowed
+    secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
@@ -86,3 +86,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Hard-fail if secret_key is missing in production — no silent weak default
+import os as _os
+if not settings.secret_key and _os.getenv("ENVIRONMENT", "production").lower() != "development":
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required and must not be empty. "
+        "Set it in Railway Variables or your .env file."
+    )
