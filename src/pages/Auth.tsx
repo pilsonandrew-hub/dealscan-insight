@@ -271,27 +271,7 @@ export default function Auth() {
               </Alert>
             )}
             
-            {/* Debug/Test Connection Buttons */}
-            <div className="mt-4 pt-4 border-t border-border space-y-2">
-              <Button 
-                onClick={testSupabaseConnection} 
-                variant="outline" 
-                size="sm" 
-                className="w-full text-xs"
-                disabled={isLoading}
-              >
-                Test Connection
-              </Button>
-              <Button 
-                onClick={createTestAccount} 
-                variant="outline" 
-                size="sm" 
-                className="w-full text-xs"
-                disabled={isLoading}
-              >
-                Create Test Account
-              </Button>
-            </div>
+
           </CardContent>
         </Card>
       </div>
