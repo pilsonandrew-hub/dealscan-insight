@@ -1,0 +1,8 @@
+{
+  "actorSpecification": 1,
+  "name": "ds-municibid-scraper",
+  "title": "DealerScope MuniciPal Bid Vehicle Scraper",
+  "description": "Scrapes vehicle listings from MuniciPalBid.com for arbitrage analysis. Tries REST API first, falls back to web crawl.",
+  "version": "1.0",
+  "input": "./input_schema.json"
+}

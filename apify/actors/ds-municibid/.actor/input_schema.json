@@ -1,0 +1,43 @@
+{
+  "title": "MuniciPal Bid Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxPages": {
+      "title": "Max Pages",
+      "type": "integer",
+      "description": "Maximum search result pages to crawl (web fallback mode)",
+      "default": 20,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "minBid": {
+      "title": "Minimum Bid ($)",
+      "type": "integer",
+      "description": "Minimum current bid to include a listing",
+      "default": 1000,
+      "minimum": 0
+    },
+    "maxMileage": {
+      "title": "Maximum Mileage",
+      "type": "integer",
+      "description": "Maximum odometer reading in miles",
+      "default": 50000,
+      "minimum": 0
+    },
+    "minYear": {
+      "title": "Minimum Model Year",
+      "type": "integer",
+      "description": "Oldest model year to include (e.g. 2022)",
+      "default": 2022,
+      "minimum": 1990
+    },
+    "targetStates": {
+      "title": "Target States",
+      "type": "array",
+      "description": "Low-rust states to include",
+      "default": ["AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"],
+      "items": { "type": "string" }
+    }
+  }
+}

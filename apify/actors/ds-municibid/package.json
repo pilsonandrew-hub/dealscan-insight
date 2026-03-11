@@ -1,0 +1,14 @@
+{
+  "name": "ds-municibid-scraper",
+  "version": "1.0.0",
+  "description": "DealerScope scraper for MuniciPal Bid vehicle auctions (API-first with web fallback)",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.0.0",
+    "crawlee": "^3.0.0"
+  }
+}
