@@ -1,0 +1,14 @@
+{
+  "name": "ds-gsaauctions-scraper",
+  "version": "1.0.0",
+  "description": "DealerScope scraper for GSA Auctions vehicle listings (API-first with HTML fallback)",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.0.0",
+    "crawlee": "^3.0.0"
+  }
+}
