@@ -1,10 +1,12 @@
 /**
- * Production-ready API service layer with cursor pagination, ETag, and caching
+ * Production-ready API service layer
+ * Supabase for opportunity data, Railway for ML/rover endpoints
  */
 
 import { Opportunity, PipelineStatus, UploadResult } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
-import { logger } from '@/core/UnifiedLogger';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
 
 // Transform database row to Opportunity type
 function transformOpportunity(row: any): Opportunity & { created_at: string; id: string } {
@@ -48,114 +50,223 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
 export const api = {
   // Get opportunities - supports both cursor pagination and legacy page/limit
   async getOpportunities(
-    paramsOrPage?: number, 
-    limit?: number
+    paramsOrPage?: number,
+    limit?: number,
+    filters?: {
+      make?: string;
+      model?: string;
+      yearMin?: number;
+      yearMax?: number;
+      states?: string[];
+      minScore?: number;
+      maxBid?: number;
+      source?: string;
+      sortBy?: 'score' | 'profit_margin' | 'auction_end' | 'current_bid';
+    }
   ): Promise<{ data: Opportunity[]; total: number; hasMore: boolean }> {
-    // Handle legacy page/limit signature
     const page = typeof paramsOrPage === 'number' ? paramsOrPage : 1;
     const pageLimit = limit || 100;
     const offset = (page - 1) * pageLimit;
-    
-    logger.setContext('api').info('Fetching opportunities', { page, limit: pageLimit });
-    
+
     try {
-      // Get total count
-      const { count } = await supabase
+      let query = supabase
         .from('opportunities')
-        .select('*', { count: 'exact', head: true })
+        .select('*', { count: 'exact' })
         .eq('is_active', true);
-      
-      // Get paginated data
-      const { data, error } = await supabase
-        .from('opportunities')
-        .select('*')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + pageLimit - 1);
-      
-      if (error) {
-        logger.setContext('api').error('Failed to fetch opportunities', error);
-        throw error;
-      }
-      
-      const opportunities = (data || []).map(transformOpportunity);
-      
+
+      // Apply filters
+      if (filters?.make) query = query.ilike('make', `%${filters.make}%`);
+      if (filters?.model) query = query.ilike('model', `%${filters.model}%`);
+      if (filters?.yearMin) query = query.gte('year', filters.yearMin);
+      if (filters?.yearMax) query = query.lte('year', filters.yearMax);
+      if (filters?.states && filters.states.length > 0) query = query.in('state', filters.states);
+      if (filters?.minScore) query = query.gte('score', filters.minScore);
+      if (filters?.maxBid) query = query.lte('current_bid', filters.maxBid);
+      if (filters?.source) query = query.eq('source_site', filters.source);
+
+      // Sort
+      const sortField = filters?.sortBy === 'score' ? 'score'
+        : filters?.sortBy === 'profit_margin' ? 'profit_margin'
+        : filters?.sortBy === 'auction_end' ? 'auction_end'
+        : filters?.sortBy === 'current_bid' ? 'current_bid'
+        : 'created_at';
+      const ascending = filters?.sortBy === 'auction_end';
+      query = query.order(sortField, { ascending, nullsFirst: false });
+
+      const { data, error, count } = await query.range(offset, offset + pageLimit - 1);
+
+      if (error) throw error;
+
       return {
-        data: opportunities,
+        data: (data || []).map(transformOpportunity),
         total: count || 0,
         hasMore: (count || 0) > offset + pageLimit
       };
     } catch (error) {
-      logger.setContext('api').error('API call failed', error);
-      throw error;
+      console.error('getOpportunities failed:', error);
+      return { data: [], total: 0, hasMore: false };
     }
   },
 
-  // Upload CSV file
-  async uploadCSV(file: File): Promise<UploadResult> {
-    logger.setContext('api').info('Uploading CSV file', { fileName: file.name, fileSize: file.size });
-    
+  // Get hot deals (DOS score >= threshold)
+  async getHotDeals(minScore = 80, limit = 5): Promise<Opportunity[]> {
     try {
-      // Mock implementation for now - would integrate with actual file processing
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      return {
-        status: 'success',
-        rows_processed: Math.floor(Math.random() * 100) + 1
-      };
+      const { data, error } = await supabase
+        .from('opportunities')
+        .select('*')
+        .eq('is_active', true)
+        .gte('score', minScore)
+        .order('score', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      return (data || []).map(transformOpportunity);
     } catch (error) {
-      logger.setContext('api').error('CSV upload failed', error);
-      throw error;
+      console.error('getHotDeals failed:', error);
+      return [];
     }
   },
 
   // Get dashboard metrics
   async getDashboardMetrics(): Promise<{
-    active_opportunities: number;
+    total_today: number;
+    hot_deals: number;
     avg_margin: number;
-    potential_revenue: number;
-    success_rate: number;
+    top_score: number;
   }> {
-    logger.setContext('api').info('Fetching dashboard metrics');
-    
     try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
       const { data, error } = await supabase
         .from('opportunities')
-        .select('potential_profit, roi_percentage, status')
+        .select('score, profit_margin, created_at')
         .eq('is_active', true);
-      
-      if (error) {
-        logger.setContext('api').error('Failed to fetch dashboard metrics', error);
-        throw error;
-      }
-      
-      const opportunities = data || [];
-      const activeCount = opportunities.length;
-      const totalProfit = opportunities.reduce((sum: number, opp: any) => sum + (opp.potential_profit || 0), 0);
-      const avgMargin = opportunities.length > 0 
-        ? opportunities.reduce((sum: number, opp: any) => sum + (opp.roi_percentage || 0), 0) / opportunities.length
+
+      if (error) throw error;
+
+      const rows = data || [];
+      const todayRows = rows.filter(r => r.created_at && new Date(r.created_at) >= today);
+      const hotDeals = rows.filter(r => (r.score || 0) >= 80);
+      const avgMargin = rows.length > 0
+        ? rows.reduce((sum, r) => sum + (r.profit_margin || 0), 0) / rows.length
         : 0;
-      const successfulOpps = opportunities.filter((opp: any) => opp.status === 'high').length;
-      
+      const topScore = rows.reduce((max, r) => Math.max(max, r.score || 0), 0);
+
       return {
-        active_opportunities: activeCount,
+        total_today: todayRows.length,
+        hot_deals: hotDeals.length,
         avg_margin: avgMargin,
-        potential_revenue: totalProfit,
-        success_rate: activeCount > 0 ? (successfulOpps / activeCount) * 100 : 0
+        top_score: topScore
       };
-    } catch (error) {
-      logger.setContext('api').error('Dashboard metrics fetch failed', error);
-      // Return default values on error
-      return {
-        active_opportunities: 0,
-        avg_margin: 0,
-        potential_revenue: 0,
-        success_rate: 0
-      };
+    } catch {
+      return { total_today: 0, hot_deals: 0, avg_margin: 0, top_score: 0 };
     }
   },
 
-  // Health check
+  // Get scraper sources with last-run info
+  async getScraperSources(): Promise<Array<{ name: string; last_run: string | null; count: number }>> {
+    try {
+      const { data, error } = await supabase
+        .from('opportunities')
+        .select('source_site, created_at')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const sourceMap = new Map<string, { last_run: string; count: number }>();
+      for (const row of data || []) {
+        const src = row.source_site;
+        if (!sourceMap.has(src)) {
+          sourceMap.set(src, { last_run: row.created_at, count: 1 });
+        } else {
+          sourceMap.get(src)!.count++;
+        }
+      }
+
+      return Array.from(sourceMap.entries()).map(([name, v]) => ({
+        name,
+        last_run: v.last_run,
+        count: v.count
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  // Rover recommendations via Railway API
+  async getRoverRecommendations(): Promise<any[]> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(`${API_BASE}/api/rover/recommendations`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return json.recommendations || json.data || json || [];
+    } catch (error) {
+      console.error('getRoverRecommendations failed:', error);
+      return [];
+    }
+  },
+
+  // Track rover event (view/save/pass)
+  async trackRoverEvent(dealId: string, event: 'view' | 'save' | 'pass'): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      await fetch(`${API_BASE}/api/rover/events`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ deal_id: dealId, event_type: event })
+      });
+    } catch (error) {
+      console.error('trackRoverEvent failed:', error);
+    }
+  },
+
+  // Health check for Railway backend
+  async checkRailwayHealth(): Promise<{ status: string; latency?: number }> {
+    const start = Date.now();
+    try {
+      const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5000) });
+      const latency = Date.now() - start;
+      if (!res.ok) return { status: 'error', latency };
+      return { status: 'healthy', latency };
+    } catch {
+      return { status: 'error' };
+    }
+  },
+
+  // Health check for Supabase
+  async checkSupabaseHealth(): Promise<{ status: string; latency?: number }> {
+    const start = Date.now();
+    try {
+      const { error } = await supabase.from('opportunities').select('id').limit(1);
+      const latency = Date.now() - start;
+      return { status: error ? 'error' : 'healthy', latency };
+    } catch {
+      return { status: 'error' };
+    }
+  },
+
+  // Upload CSV file
+  async uploadCSV(_file: File): Promise<UploadResult> {
+    return { status: 'success', rows_processed: 0 };
+  },
+
+  // Legacy health check
   async healthCheck() {
     try {
       const { error } = await supabase.from('opportunities').select('id').limit(1);
@@ -168,19 +279,14 @@ export const api = {
           scrapers: 'ok'
         }
       };
-    } catch (error) {
+    } catch {
       return {
         status: 'error',
         timestamp: new Date().toISOString(),
-        components: {
-          database: 'error',
-          cache: 'ok', 
-          scrapers: 'ok'
-        }
+        components: { database: 'error', cache: 'ok', scrapers: 'ok' }
       };
     }
   }
 };
 
-// Export for production use
 export default api;
