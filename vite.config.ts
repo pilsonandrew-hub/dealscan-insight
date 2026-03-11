@@ -9,9 +9,9 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
     cors: {
-      origin: mode === 'development' 
-        ? ['http://localhost:3000', 'http://localhost:8080', 'https://lgpugcflvrqhslfnsjfh.supabase.co']
-        : ['https://lgpugcflvrqhslfnsjfh.supabase.co'],
+      origin: mode === 'development'
+        ? ['http://localhost:3000', 'http://localhost:8080', 'https://lbnxzvqppccajllsqaaw.supabase.co']
+        : ['https://lbnxzvqppccajllsqaaw.supabase.co'],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey'],

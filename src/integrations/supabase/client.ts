@@ -5,8 +5,8 @@ import type { Database } from './types';
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-const supabaseUrl = 'https://lgpugcflvrqhslfnsjfh.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncHVnY2ZsdnJxaHNsZm5zamZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NjkzODksImV4cCI6MjA3MTI0NTM4OX0.Tadce_MW20ZfG75-EtiAHQPy2VfS0ciH1bekFNlVX0U';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lbnxzvqppccajllsqaaw.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI';
 
 export const supabase = createClient<Database>(
   supabaseUrl,
