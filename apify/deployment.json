@@ -9,9 +9,24 @@
       "id": "9xxQLlRsROnSgA42i",
       "scheduleId": "IZsc1DPIraSBlT4eu",
       "webhookId": "8yqQfG35cyEAjQ0z1"
+    },
+    "ds-hibid": {
+      "id": "e8UeyRvQ6QSnX5fhP",
+      "scheduleId": "LNhrCXrqdHMuzInc3",
+      "webhookId": "caMGRnk95hTAWmjcr"
+    },
+    "ds-municibid": {
+      "id": "svmsItf3CRBZuIntp",
+      "scheduleId": "YRrPwLatWXzJnOzeS",
+      "webhookId": "QYOKGB6ejtlcfSaXm"
+    },
+    "ds-gsaauctions": {
+      "id": "fvDnYmGuFBCrwpEi9",
+      "scheduleId": "rJ2FyiGHrxIOOHhor",
+      "webhookId": "QgKHl5U66MXMpoBHs"
     }
   },
   "webhookSecret": "sbEC0dNgb7Ohg3rDV",
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
-  "deployedAt": "2026-03-10T21:05:40.000Z"
+  "deployedAt": "2026-03-11T14:20:00.000Z"
 }
