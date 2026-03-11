@@ -2,7 +2,7 @@
 Application settings — Railway-safe, robust defaults
 """
 import os
-from typing import Optional
+from typing import Optional, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
