@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "description": "DealerScope scraper for GovDeals vehicle auctions",
   "main": "src/main.js",
-  "scripts": { "start": "node src/main.js" },
+  "scripts": {
+    "start": "node src/main.js"
+  },
   "dependencies": {
     "apify": "^3.0.0",
-    "crawlee": "^3.0.0"
+    "crawlee": "^3.0.0",
+    "@crawlee/playwright": "^3.0.0",
+    "playwright": "^1.40.0"
   }
 }

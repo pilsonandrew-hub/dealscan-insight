@@ -473,6 +473,20 @@ async def sync_to_notion(vehicle: dict) -> bool:
     if end_date:
         props["Auction Ends"] = {"date": {"start": end_date}}
 
+    # Structured deal summary for the Notes field
+    bid        = vehicle.get("current_bid", 0)
+    mmr        = breakdown.get("mmr_estimated", 0)
+    margin     = breakdown.get("margin", 0)
+    state_str  = vehicle.get("state", "?")
+    end_str    = end_date or "?"
+    rec        = "🔥 BUY HOT" if score >= 80 else "✅ BUY" if score >= 65 else "⚠️ WATCH"
+    notes_text = (
+        f"{title} | Bid: ${bid:,.0f} | MMR: ${mmr:,.0f} | "
+        f"Margin: ${margin:,.0f} | DOS: {score} | "
+        f"Ends: {end_str} | State: {state_str} | {rec}"
+    )
+    props["Notes"] = {"rich_text": [{"text": {"content": notes_text[:2000]}}]}
+
     # Remove None values (Notion rejects null numbers)
     props = {k: v for k, v in props.items() if not (
         isinstance(v, dict) and v.get("number") is None
