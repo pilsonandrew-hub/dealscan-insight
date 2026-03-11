@@ -24,6 +24,21 @@
       "id": "fvDnYmGuFBCrwpEi9",
       "scheduleId": "rJ2FyiGHrxIOOHhor",
       "webhookId": "QgKHl5U66MXMpoBHs"
+    },
+    "ds-allsurplus": {
+      "id": "gYGIfHeYeN3EzmLnB",
+      "scheduleId": "MBuO3CqsBprCha5fH",
+      "webhookId": "fjxMgUc6GH6rJRISU"
+    },
+    "ds-bidcal": {
+      "id": "DF1THdFOBSYlxyNjD",
+      "scheduleId": "ZmaJLeGu3klW8Yd2Z",
+      "webhookId": "pDMsSYxpqaFwC8s2Y"
+    },
+    "ds-auctiontime": {
+      "id": "eb4oYXDf8qs1Ckbth",
+      "scheduleId": "ayw0gnoHxgezNswF6",
+      "webhookId": "IqLsgHfhiAT04sPtB"
     }
   },
   "webhookSecret": "sbEC0dNgb7Ohg3rDV",
