@@ -16,8 +16,9 @@ import logging
 router = APIRouter(prefix="/api/rover", tags=["rover"])
 logger = logging.getLogger(__name__)
 
-_supabase_url = os.getenv("VITE_SUPABASE_URL", "")
-_supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+# Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
+_supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
+_supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 
 supa = None
 try:
