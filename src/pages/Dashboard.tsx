@@ -9,14 +9,15 @@ import { Opportunity } from '@/types/dealerscope';
 
 // ─── Icons (lucide-react is in package.json) ──────────────────────────────────
 import {
-  LayoutDashboard, Crosshair, Navigation, BarChart2, Settings,
+  LayoutDashboard, Crosshair, Navigation, BarChart2, Settings, Target,
   ExternalLink, RefreshCw, CheckCircle, XCircle, AlertCircle,
   TrendingUp, Car, MapPin, Clock, Star, Filter, ChevronDown,
   ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff
 } from 'lucide-react';
+import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = 'dashboard' | 'crosshair' | 'rover' | 'analytics' | 'settings';
+type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'analytics' | 'settings';
 
 interface ScraperSource {
   name: string;
@@ -783,6 +784,7 @@ const SettingsTab = () => {
 const TABS: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
   { id: 'crosshair', label: 'Crosshair', Icon: Crosshair },
+  { id: 'sniper', label: 'SniperScope', Icon: Target },
   { id: 'rover', label: 'Rover', Icon: Navigation },
   { id: 'analytics', label: 'Analytics', Icon: BarChart2 },
   { id: 'settings', label: 'Settings', Icon: Settings },
@@ -795,6 +797,7 @@ export default function Dashboard() {
     switch (activeTab) {
       case 'dashboard': return <DashboardTab />;
       case 'crosshair': return <CrosshairTab />;
+      case 'sniper': return <SniperScopeDashboard />;
       case 'rover': return <RoverTab />;
       case 'analytics': return <AnalyticsTab />;
       case 'settings': return <SettingsTab />;
