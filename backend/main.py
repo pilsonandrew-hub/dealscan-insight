@@ -85,6 +85,10 @@ _pipeline_state: dict = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting DealerScope unified backend")
+    # Critical env var validation
+    for var in ("SUPABASE_SERVICE_ROLE_KEY", "APIFY_TOKEN", "APIFY_WEBHOOK_SECRET"):
+        if not os.getenv(var):
+            logger.critical(f"MISSING REQUIRED ENV VAR: {var} — system will not function correctly")
     try:
         await init_db()
         logger.info("Database initialized")

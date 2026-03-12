@@ -1,4 +1,5 @@
 """Transport cost calculation based on distance bands."""
+import functools
 import os
 import yaml
 
@@ -6,11 +7,13 @@ import yaml
 _CONFIGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
 
+@functools.lru_cache(maxsize=1)
 def _load_rates():
     with open(os.path.join(_CONFIGS_DIR, "transit_rates.yml")) as f:
         return yaml.safe_load(f)
 
 
+@functools.lru_cache(maxsize=1)
 def _load_state_miles():
     with open(os.path.join(_CONFIGS_DIR, "state_miles_to_ca.yml")) as f:
         return yaml.safe_load(f).get("miles", {})
