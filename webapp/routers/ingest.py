@@ -236,32 +236,76 @@ async def apify_webhook(
 
 
 def normalize_apify_vehicle(item: dict) -> Optional[dict]:
-    """Normalize raw Apify scraper output to DealerScope vehicle format."""
+    """Normalize raw Apify scraper output to DealerScope vehicle format.
+
+    Handles two formats:
+    - Our custom scrapers: snake_case (current_bid, listing_url, etc.)
+    - parseforge/govdeals-scraper: camelCase (currentBid, url, locationState, etc.)
+    """
     try:
         title = item.get("title", "")
-        state = (item.get("state", "") or "").strip().upper()
+
+        # State: parseforge uses locationState, ours uses state
+        state = (
+            item.get("locationState") or
+            item.get("state") or ""
+        ).strip().upper()
 
         # Skip high rust states at normalize time
         if state in HIGH_RUST_STATES:
             return None
 
-        make = extract_make(title)
-        model = extract_model(title, make)
-        year = extract_year(title)
+        # Make/model/year: parseforge provides these directly
+        make = item.get("make") or extract_make(title) or ""
+        model = item.get("model") or extract_model(title, make) or ""
+        year_raw = item.get("modelYear") or item.get("year")
+        year = int(year_raw) if year_raw and str(year_raw).isdigit() else extract_year(title)
+
+        # Bid: parseforge uses currentBid, ours uses current_bid
+        current_bid = float(item.get("currentBid") or item.get("current_bid") or 0)
+
+        # Mileage: parseforge puts in meterCount when type is odometer
+        mileage = item.get("mileage") or item.get("meterCount")
+
+        # End time: parseforge uses auctionEndUtc
+        auction_end = (
+            item.get("auctionEndUtc") or
+            item.get("auction_end_time") or
+            item.get("auction_end_date")
+        )
+
+        # URL: parseforge uses url, ours uses listing_url
+        listing_url = item.get("url") or item.get("listing_url") or ""
+
+        # Photo: parseforge uses imageUrl or photos[]
+        photos = item.get("photos", [])
+        photo_url = (
+            item.get("imageUrl") or item.get("photo_url") or
+            item.get("image_url") or (photos[0] if photos else "")
+        )
+
+        # Agency: parseforge uses seller
+        agency = item.get("seller") or item.get("agency_name") or ""
+
+        # Source
+        source = item.get("source_site") or item.get("source") or "govdeals"
 
         return {
             "title": title,
-            "current_bid": float(item.get("current_bid") or 0),
-            "buyer_premium_pct": float(item.get("buyer_premium_pct") or 12.5),
+            "current_bid": current_bid,
+            "buyer_premium_pct": float(item.get("buyer_premium_pct") or 10.0),
             "doc_fee": float(item.get("doc_fee") or 75),
-            "mileage": item.get("mileage"),
+            "mileage": mileage,
             "state": state,
-            "location": item.get("location", ""),
-            "auction_end_time": item.get("auction_end_time") or item.get("auction_end_date"),
-            "listing_url": item.get("listing_url", ""),
-            "source_site": item.get("source") or item.get("source_site") or "GovDeals",
-            "photo_url": item.get("image_url") or item.get("photo_url"),
-            "agency_name": item.get("agency_name", ""),
+            "location": (
+                item.get("location") or
+                f"{item.get('locationCity','')}, {state}".strip(", ")
+            ),
+            "auction_end_time": auction_end,
+            "listing_url": listing_url,
+            "source_site": source,
+            "photo_url": photo_url,
+            "agency_name": agency,
             "vin": item.get("vin"),
             "year": year,
             "make": make,
