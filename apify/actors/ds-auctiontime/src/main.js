@@ -118,6 +118,15 @@ function parseMileage(text) {
     return null;
 }
 
+function normalizeText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
+function readLabelFromBody(bodyText, labelRegex) {
+    const match = bodyText.match(new RegExp(`${labelRegex.source}\\s*([^\\n]+)`, labelRegex.flags));
+    return match ? normalizeText(match[1]) : '';
+}
+
 function applyFilters(listing, log) {
     if (!isCommercialVehicle(listing.title)) {
         log.debug(`[SKIP] Not a commercial vehicle: ${listing.title}`);
@@ -166,78 +175,27 @@ const crawler = new CheerioCrawler({
             return;
         }
 
-        // LIST page — AuctionTime listing grid
+        // LIST page — AuctionTime lot links follow Sandhills listing patterns.
         const listingLinks = [];
 
-        // AuctionTime listing links
-        $('a[href*="/listings/"]').each((_, el) => {
+        $('a[href*="/listing/upcoming-auctions/"][href*="/for-sale/"], a[href*="/listing/auction-results/"][href*="/for-sale/"], a[href*="/listing/for-sale/"]').each((_, el) => {
             const href = $(el).attr('href');
             if (!href) return;
             const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            // Avoid re-queuing list pages — match individual listing IDs (numeric or slug after category)
-            if (abs.match(/\/listings\/[a-z\-]+\/[a-z0-9\-]+$/i) ||
-                abs.match(/\/listings\/\d+/) ||
-                abs.match(/\/(listing|item|lot)\/[a-z0-9\-]+/i)) {
+            if (abs.match(/\/listing\/(?:upcoming-auctions|auction-results|for-sale)\/.+\/for-sale\/\d+/i)) {
                 listingLinks.push(abs);
             }
         });
 
-        // Fallback: card links
+        // Fallback: keep only detail-shaped URLs rather than generic cards.
         if (listingLinks.length === 0) {
-            $('.listing-card a, .item-card a, [class*="listing-item"] a, [class*="result-card"] a, .equipment-card a').each((_, el) => {
+            $('a[href*="/listing/upcoming-auctions/"], a[href*="/listing/auction-results/"], a[href*="/listing/for-sale/"]').each((_, el) => {
                 const href = $(el).attr('href');
                 if (!href) return;
                 const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                if (!abs.includes('#') && abs !== url) listingLinks.push(abs);
+                if (!abs.includes('#') && abs !== url && abs.match(/\/listing\/.+\/for-sale\/\d+/i)) listingLinks.push(abs);
             });
         }
-
-        // Try to extract inline listing data from cards (AuctionTime renders some data in list)
-        $('[class*="listing-card"], [class*="item-card"], [class*="equipment-item"], [class*="result-item"]').each((_, card) => {
-            const el = $(card);
-            const title = el.find('h2, h3, h4, [class*="title"], [class*="name"]').first().text().trim();
-            if (!title || !isCommercialVehicle(title)) return;
-
-            const bidText = el.find('[class*="bid"], [class*="price"], [class*="amount"]').first().text().trim();
-            const bid = parseBid(bidText);
-            const locationText = el.find('[class*="location"], [class*="city"], [class*="state"]').first().text().trim();
-            const state = parseState(locationText);
-            const endText = el.find('[class*="end"], [class*="close"], [class*="date"], time').first().text().trim();
-            const mileageText = el.find('[class*="mileage"], [class*="miles"], [class*="odometer"], [class*="hours"]').first().text().trim();
-            const mileage = parseMileage(mileageText);
-            const linkEl = el.find('a').first();
-            const href = linkEl.attr('href') || '';
-            const listingUrl = href ? (href.startsWith('http') ? href : `${BASE}${href}`) : url;
-            const imgEl = el.find('img').first();
-            const imageUrl = imgEl.attr('data-src') || imgEl.attr('src') || null;
-
-            const { year, make, model } = parseVehicleTitle(title);
-            const listing = {
-                listing_id: `auctiontime-inline-${Buffer.from(listingUrl).toString('base64').slice(0, 16)}`,
-                title,
-                current_bid: bid,
-                buy_now_price: null,
-                auction_end_date: parseDate(endText),
-                state,
-                listing_url: listingUrl,
-                image_url: imageUrl,
-                mileage,
-                vin: null,
-                year,
-                make,
-                model,
-                source: SOURCE,
-                scraped_at: new Date().toISOString(),
-            };
-
-            if (applyFilters(listing, log)) {
-                totalAfterFilters++;
-                log.info(`[PASS-INLINE] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
-                allListings.push(listing);
-                await Actor.pushData(listing);
-            }
-            totalFound++;
-        });
 
         const uniqueLinks = [...new Set(listingLinks)];
         log.info(`Found ${uniqueLinks.length} detail links on page`);
@@ -275,8 +233,9 @@ const crawler = new CheerioCrawler({
 });
 
 async function handleDetailPage($, request, log) {
-    const title = $('h1, .listing-title, [class*="listing-title"], [class*="item-title"], .equipment-title')
-        .first().text().trim() ||
+    const bodyText = normalizeText($('body').text());
+    const title = $('h1').first().text().trim() ||
+        $('meta[property="og:title"]').attr('content') ||
         $('title').text().split('|')[0].trim();
 
     if (!title) {
@@ -293,12 +252,7 @@ async function handleDetailPage($, request, log) {
         if (t) { bidText = t; break; }
     }
     if (!bidText) {
-        $('td, th, dt, label, span, div').each((_, el) => {
-            if ($(el).text().match(/current\s*bid|high\s*bid|asking\s*price|reserve\s*price/i)) {
-                bidText = $(el).next().text().trim() ||
-                          $(el).parent().next().text().trim();
-            }
-        });
+        bidText = readLabelFromBody(bodyText, /current\s*bid:|high\s*bid:|asking\s*price:|reserve\s*price:/i);
     }
     const bid = parseBid(bidText);
 
@@ -309,6 +263,9 @@ async function handleDetailPage($, request, log) {
         const t = $(sel).first().text().trim();
         if (t) { location = t; break; }
     }
+    if (!location) {
+        location = readLabelFromBody(bodyText, /machine\s*location:|location:/i);
+    }
 
     // End date
     let endText = '';
@@ -318,16 +275,19 @@ async function handleDetailPage($, request, log) {
         endText = el.attr('data-end') || el.attr('datetime') || el.text().trim();
         if (endText) break;
     }
+    if (!endText) {
+        endText = readLabelFromBody(bodyText, /auction\s*date:|closing\s*date:|ends?:/i);
+    }
 
     // Image
     const imgEl = $('img.listing-image, img.equipment-photo, [class*="main-image"] img, .gallery img, [class*="primary-photo"] img').first();
-    const imageUrl = imgEl.attr('data-src') || imgEl.attr('src') || null;
+    const imageUrl = $('meta[property="og:image"]').attr('content') || imgEl.attr('data-src') || imgEl.attr('src') || null;
 
     // Mileage / hours from specs table or description
     let mileage = null;
-    const specsText = $('[class*="specs"], [class*="details"], .listing-details, table').text();
-    const descText = $('[class*="description"], #description, .listing-description').text();
-    const combinedText = specsText + ' ' + descText;
+    const specsText = normalizeText($('[class*="specs"], [class*="details"], .listing-details, table').text());
+    const descText = normalizeText($('[class*="description"], #description, .listing-description').text());
+    const combinedText = `${specsText} ${descText} ${bodyText}`;
 
     const mileageMatch = combinedText.match(/(\d[\d,]+)\s*(?:miles?|mi\.?)\b/i);
     if (mileageMatch) mileage = parseInt(mileageMatch[1].replace(/,/g, ''));
