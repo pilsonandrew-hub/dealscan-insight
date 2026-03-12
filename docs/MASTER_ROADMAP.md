@@ -116,6 +116,13 @@ Now that the system is stable, OpenClaw becomes the amplifier.
 
 **Cut entirely from this phase:** Canvas skill, Oracle skill, post-commit memory hooks — add overhead before they add value.
 
+### model-usage skill
+- [ ] Install `model-usage` skill — answers OpenAI/Claude spend questions in real time
+
+### OpenClaw Webhook Ingress
+- [ ] Enable OpenClaw webhook ingress in `openclaw.json` (after Phase 0 control plane decision)
+- [ ] Wire as optional inspection layer before Railway for scrape payloads
+
 ---
 
 ## PHASE 5 — Advanced Scraper Ops
@@ -156,6 +163,11 @@ Force multipliers — only valuable on a working foundation.
 - [ ] `agent:pipeline-supervisor` — monitors run_ids, escalates failures
 - [ ] `agent:alert-auditor` — verifies delivery receipts
 - Consider `agent:memory-curator` for daily memory maintenance
+
+### Notion Feedback Loop
+- [ ] Add Status workflow to Notion: `New → Watching → Bid → Won/Lost`
+- [ ] Notion status change webhook → Railway → bump Rover affinity weights
+- [ ] Daily top-3 digest page auto-generated in Notion from Supabase deals
 
 ---
 
