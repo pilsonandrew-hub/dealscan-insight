@@ -222,7 +222,7 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
                 .execute()
             )
             if not result.data:
-                return {"is_duplicate": True, "canonical_record_id": canonical_id}
+                return {"is_duplicate": True, "canonical_record_id": None}
 
             existing = result.data[0]
             existing_id = existing["id"]
@@ -236,7 +236,7 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
             return {"is_duplicate": True, "canonical_record_id": existing_id}
         except Exception as lookup_error:
             logger.warning(f"[DEDUP] conflict lookup failed: {lookup_error}")
-            return {"is_duplicate": True, "canonical_record_id": canonical_id}
+            return {"is_duplicate": True, "canonical_record_id": None}
 
 
 @router.post("/apify")
@@ -726,7 +726,7 @@ async def sync_to_notion(vehicle: dict) -> bool:
 async def send_telegram_alert(deal: dict) -> Optional[str]:
     """Send a single Telegram alert, log the receipt, and return the Telegram message_id."""
     # Kill switch
-    if os.getenv("ALERTS_ENABLED", "true").lower() != "true":
+    if os.getenv("ALERTS_ENABLED", "false").lower() != "true":
         logger.info("[ALERTS DISABLED] skipping alert")
         return None
 
