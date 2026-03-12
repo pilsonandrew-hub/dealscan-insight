@@ -865,7 +865,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "duplicate_count": vehicle.get("duplicate_count", 0),
         "run_id": vehicle.get("run_id"),
         "source_run_id": vehicle.get("source_run_id"),
-        "pipeline_step": "saved",
+        "pipeline_step": "ingested",
         "step_status": "complete",
         "processed_at": vehicle.get("processed_at") or datetime.utcnow().isoformat(),
     }
