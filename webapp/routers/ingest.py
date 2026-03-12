@@ -722,7 +722,7 @@ async def sync_to_notion(vehicle: dict) -> bool:
 
 
 async def send_telegram_alert(deal: dict) -> Optional[str]:
-    """Send a single Telegram alert and return the Telegram message_id."""
+    """Send a single Telegram alert, log the receipt, and return the Telegram message_id."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("[TELEGRAM] Missing bot token or chat ID; skipping alert")
         return None
@@ -760,7 +760,10 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         logger.warning(f"[TELEGRAM] Missing message_id in response for run_id={deal.get('run_id')}")
         return None
 
-    return str(message_id)
+    message_id_str = str(message_id)
+    deal["message_id"] = message_id_str
+    await insert_alert_log(deal, message_id_str)
+    return message_id_str
 
 
 async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
@@ -865,7 +868,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "duplicate_count": vehicle.get("duplicate_count", 0),
         "run_id": vehicle.get("run_id"),
         "source_run_id": vehicle.get("source_run_id"),
-        "pipeline_step": "ingested",
+        "pipeline_step": "saved",
         "step_status": "complete",
         "processed_at": vehicle.get("processed_at") or datetime.utcnow().isoformat(),
     }
