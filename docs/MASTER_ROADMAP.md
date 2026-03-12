@@ -160,7 +160,6 @@ Force multipliers — only valuable on a working foundation.
 ---
 
 ## DEFERRED (Not This Month)
-- Gmail PubSub monitoring
 - Canvas visual dashboard
 - TTS / voice alerts
 - Node management (multi-device)
