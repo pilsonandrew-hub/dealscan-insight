@@ -200,8 +200,14 @@ export const api = {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+      const userId = session?.user?.id;
 
-      const res = await fetch(`${API_BASE}/api/rover/recommendations`, {
+      if (!userId) {
+        throw new Error('Missing authenticated user for Rover recommendations');
+      }
+
+      const params = new URLSearchParams({ user_id: userId });
+      const res = await fetch(`${API_BASE}/api/rover/recommendations?${params.toString()}`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
@@ -229,7 +235,10 @@ export const api = {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ deal_id: dealId, event_type: event })
+        body: JSON.stringify({
+          event,
+          item: { deal_id: dealId }
+        })
       });
     } catch (error) {
       console.error('trackRoverEvent failed:', error);
