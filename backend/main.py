@@ -6,6 +6,7 @@ Combines the FastAPI webapp routers with the scrape/score pipeline.
 import asyncio
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -86,10 +87,18 @@ _pipeline_state: dict = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting DealerScope unified backend")
-    # Critical env var validation
-    for var in ("SUPABASE_SERVICE_ROLE_KEY", "APIFY_TOKEN", "APIFY_WEBHOOK_SECRET"):
+    required_vars = [
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "TELEGRAM_BOT_TOKEN",
+        "APIFY_WEBHOOK_SECRET",
+        "APIFY_TOKEN",
+        "SECRET_KEY",
+    ]
+    for var in required_vars:
         if not os.getenv(var):
-            logger.critical(f"MISSING REQUIRED ENV VAR: {var} — system will not function correctly")
+            logger.critical(f"STARTUP FATAL: {var} is not set. Refusing to start.")
+            if os.getenv("ENVIRONMENT") == "production":
+                sys.exit(1)
     if not PIPELINE_SECRET:
         logger.critical("MISSING REQUIRED ENV VAR: PIPELINE_SECRET — pipeline routes are disabled")
     try:
@@ -225,8 +234,7 @@ async def pipeline_status(_: None = Depends(require_pipeline_auth)):
 async def health():
     return {
         "status": "ok",
-        "routers_loaded": list(_routers.keys()),
-        "routes_count": len(app.routes),
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
