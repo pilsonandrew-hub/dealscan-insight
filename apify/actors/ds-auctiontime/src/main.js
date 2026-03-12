@@ -234,7 +234,7 @@ const crawler = new CheerioCrawler({
                 totalAfterFilters++;
                 log.info(`[PASS-INLINE] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
                 allListings.push(listing);
-                Actor.pushData(listing);
+                await Actor.pushData(listing);
             }
             totalFound++;
         });

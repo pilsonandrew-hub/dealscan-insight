@@ -28,7 +28,8 @@ const API_ENDPOINTS = [
     `${BASE}/auctions.json?category=vehicle`,
 ];
 
-const WEB_SEARCH_URL = `${BASE}/auctions?category=vehicle`;
+// Municibid vehicle search — category slug from observed site navigation
+const WEB_SEARCH_URL = `${BASE}/government-surplus-auction/vehicles`;
 
 await Actor.init();
 
