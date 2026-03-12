@@ -26,8 +26,11 @@ router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8770839167:AAEPvbNtS5Fr3LPmoEUM-9CJ14r7OXhIgzI")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7529788084")
+# ALERT CONTROL PLANE: FastAPI -> Telegram directly
+# Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
+# Reason: already deployed, working, single path
 
 # Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
 _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
@@ -168,31 +171,69 @@ def compute_canonical_id(vehicle: dict) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
-def check_and_handle_duplicate(supabase_client, canonical_id: str, new_source: str) -> dict:
-    try:
-        result = (
-            supabase_client.table("opportunities")
-            .select("id, all_sources")
-            .eq("canonical_id", canonical_id)
-            .eq("is_duplicate", False)
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
-            return {"is_duplicate": False, "canonical_record_id": None}
-        existing = result.data[0]
-        existing_id = existing["id"]
-        existing_sources = existing.get("all_sources") or []
-        if new_source and new_source not in existing_sources:
-            updated = existing_sources + [new_source]
-            supabase_client.table("opportunities").update({
-                "all_sources": updated,
-                "duplicate_count": len(updated) - 1,
-            }).eq("id", existing_id).execute()
-        return {"is_duplicate": True, "canonical_record_id": existing_id}
-    except Exception as e:
-        logger.warning(f"[DEDUP] check failed: {e}")
+def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
+    if supabase_client is None:
         return {"is_duplicate": False, "canonical_record_id": None}
+
+    canonical_id = vehicle.get("canonical_id", "")
+    new_source = vehicle.get("source_site", "")
+    row = build_opportunity_row(vehicle)
+
+    try:
+        supabase_client.table("opportunities").insert(row).execute()
+        return {"is_duplicate": False, "canonical_record_id": None}
+    except Exception as e:
+        error_text = str(e)
+        if "duplicate key value violates unique constraint" not in error_text:
+            logger.warning(f"[DEDUP] check failed: {e}")
+            return {"is_duplicate": False, "canonical_record_id": None}
+
+        if "canonical" not in error_text:
+            try:
+                existing = (
+                    supabase_client.table("opportunities")
+                    .select("id, is_duplicate, canonical_record_id")
+                    .eq("listing_url", row["listing_url"])
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    existing_row = existing.data[0]
+                    return {
+                        "is_duplicate": existing_row.get("is_duplicate", False),
+                        "canonical_record_id": existing_row.get("canonical_record_id"),
+                    }
+            except Exception as lookup_error:
+                logger.warning(f"[DEDUP] listing lookup failed: {lookup_error}")
+
+            logger.warning(f"[DEDUP] non-canonical unique conflict: {e}")
+            return {"is_duplicate": False, "canonical_record_id": None}
+
+        try:
+            result = (
+                supabase_client.table("opportunities")
+                .select("id, all_sources")
+                .eq("canonical_id", canonical_id)
+                .eq("is_duplicate", False)
+                .limit(1)
+                .execute()
+            )
+            if not result.data:
+                return {"is_duplicate": True, "canonical_record_id": canonical_id}
+
+            existing = result.data[0]
+            existing_id = existing["id"]
+            existing_sources = existing.get("all_sources") or []
+            if new_source and new_source not in existing_sources:
+                updated = existing_sources + [new_source]
+                supabase_client.table("opportunities").update({
+                    "all_sources": updated,
+                    "duplicate_count": len(updated) - 1,
+                }).eq("id", existing_id).execute()
+            return {"is_duplicate": True, "canonical_record_id": existing_id}
+        except Exception as lookup_error:
+            logger.warning(f"[DEDUP] conflict lookup failed: {lookup_error}")
+            return {"is_duplicate": True, "canonical_record_id": canonical_id}
 
 
 @router.post("/apify")
@@ -270,11 +311,9 @@ async def apify_webhook(
             continue
 
         # Deduplication check
-        dedup = check_and_handle_duplicate(
-            supabase_client,
-            vehicle.get("canonical_id", ""),
-            vehicle.get("source_site", ""),
-        )
+        dedup = {"is_duplicate": False, "canonical_record_id": None}
+        if vehicle["dos_score"] >= 50:
+            dedup = check_and_handle_duplicate(supabase_client, vehicle)
         is_dup = dedup["is_duplicate"]
         if is_dup:
             vehicle["is_duplicate"] = True
@@ -695,8 +734,22 @@ async def save_opportunity_to_supabase(vehicle: dict) -> bool:
     else:
         status = "moderate"
 
+    row = build_opportunity_row(vehicle)
+
+    try:
+        supabase_client.table("opportunities").upsert(
+            row, on_conflict="listing_url"
+        ).execute()
+        return True
+    except Exception as e:
+        title = vehicle.get("title", "unknown")[:80]
+        logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
+        return False
+
+
+def build_opportunity_row(vehicle: dict) -> dict:
     breakdown = vehicle.get("score_breakdown", {})
-    row = {
+    return {
         "listing_id": vehicle.get("listing_url", "")[-80:],  # truncated unique ID
         "listing_url": vehicle.get("listing_url", ""),
         "source": vehicle.get("source_site"),
@@ -722,13 +775,3 @@ async def save_opportunity_to_supabase(vehicle: dict) -> bool:
         "all_sources": vehicle.get("all_sources", []),
         "duplicate_count": vehicle.get("duplicate_count", 0),
     }
-
-    try:
-        supabase_client.table("opportunities").upsert(
-            row, on_conflict="listing_url"
-        ).execute()
-        return True
-    except Exception as e:
-        title = vehicle.get("title", "unknown")[:80]
-        logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
-        return False

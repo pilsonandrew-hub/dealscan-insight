@@ -1,8 +1,6 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
-const WEBHOOK_URL = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
-const WEBHOOK_SECRET = 'sbEC0dNgb7Ohg3rDV';
 const SOURCE = 'hibid';
 
 const TARGET_STATES = new Set([
@@ -427,38 +425,6 @@ function processExtractedLots(lots, auctionLocation, sourceUrl, log) {
     }
 }
 
-async function sendWebhook(listings, log) {
-    if (listings.length === 0) {
-        log.info('[Webhook] No listings to send.');
-        return;
-    }
-
-    const payload = {
-        source: SOURCE,
-        listings,
-    };
-
-    try {
-        log.info(`[Webhook] Sending ${listings.length} listings to ${WEBHOOK_URL}`);
-        const response = await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Apify-Webhook-Secret': WEBHOOK_SECRET,
-            },
-            body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            log.error(`[Webhook] Failed: HTTP ${response.status} — ${body}`);
-        } else {
-            log.info(`[Webhook] Success: HTTP ${response.status}`);
-        }
-    } catch (err) {
-        log.error(`[Webhook] Error: ${err.message}`);
-    }
-}
-
 // Start crawl
 await crawler.run(
     SEARCH_URLS.map((url, i) => ({
@@ -471,7 +437,5 @@ await crawler.run(
 
 const log = crawler.log ?? console;
 console.log(`[HIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
-
-await sendWebhook(allListings, { info: console.log, error: console.error });
 
 await Actor.exit();
