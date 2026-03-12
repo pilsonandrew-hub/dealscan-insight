@@ -7,7 +7,8 @@ const HIGH_RUST_STATES = new Set([
     'CT','NJ','MD','DE'
 ]);
 
-const BASE_URL = 'https://www.publicsurplus.com/sms/browse/cataucs?catid=1&page={PAGE}';
+// catid=57 = Vehicles & Transportation on PublicSurplus
+const BASE_URL = 'https://www.publicsurplus.com/sms/browse/cataucs?catid=57&page={PAGE}';
 
 await Actor.init();
 
@@ -39,21 +40,21 @@ const crawler = new PlaywrightCrawler({
             return;
         }
 
-        // Listing page
-        await page.waitForSelector('body', { timeout: 30000 });
+        // Listing page — wait for auction rows or table
+        await page.waitForSelector('table tr a, a[href*="/sms/auction/view"], body', { timeout: 30000 });
 
         // Extract listing rows from PublicSurplus table layout
         const listings = await page.evaluate(() => {
             const links = [];
-            // PublicSurplus uses table rows for auction listings
-            const rows = document.querySelectorAll('table.auctions-table tr, .auction-list-item, tr[class*="auction"]');
-            rows.forEach(row => {
-                const link = row.querySelector('a[href*="auc/view"]');
-                if (link) links.push(link.href);
-            });
-            // Fallback: any link matching auction detail pattern
+            // Primary: PublicSurplus auction detail links
+            document.querySelectorAll('a[href*="/sms/auction/view"]').forEach(a => links.push(a.href));
+            // Secondary: table rows with auction links (odd/even row classes)
             if (links.length === 0) {
-                document.querySelectorAll('a[href*="/sms/auction/view"]').forEach(a => links.push(a.href));
+                const rows = document.querySelectorAll('table tr.odd, table tr.even, table tr');
+                rows.forEach(row => {
+                    const link = row.querySelector('a[href*="auction"]');
+                    if (link && link.href.includes('/sms/')) links.push(link.href);
+                });
             }
             return [...new Set(links)];
         });
