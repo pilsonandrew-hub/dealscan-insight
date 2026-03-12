@@ -1,5 +1,5 @@
-// STATUS: BLOCKED — Angular/React SPA requires OpenClaw browser recon (Phase 5)
-// See REVERSE_ENGINEER.md for investigation notes
+// STATUS: BLOCKED - requires OpenClaw browser recon (Phase 5)
+// See apify/actors/ds-govdeals/REVERSE_ENGINEER.md
 
 import { Actor } from 'apify';
 import { CheerioCrawler } from 'crawlee';

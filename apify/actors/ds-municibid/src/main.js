@@ -28,8 +28,8 @@ const API_ENDPOINTS = [
     `${BASE}/auctions.json?category=vehicle`,
 ];
 
-// Municibid vehicle search — category slug from observed site navigation
-const WEB_SEARCH_URL = `${BASE}/government-surplus-auction/vehicles`;
+// Municibid automotive browse page
+const WEB_SEARCH_URL = `${BASE}/Browse/C160883/Automotive?ViewStyle=list&StatusFilter=active_only&SortFilterOptions=1`;
 
 await Actor.init();
 
@@ -46,6 +46,29 @@ const targetStateSet = new Set(targetStates.map(s => s.toUpperCase()));
 const allListings = [];
 let totalFound = 0;
 let totalAfterFilters = 0;
+
+function normalizeText(value) {
+    return String(value ?? '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\s*\n\s*/g, '\n')
+        .trim();
+}
+
+function extractLabelValue(lines, label) {
+    const normalizedLabel = label.toLowerCase();
+    const index = lines.findIndex((line) => {
+        const lower = line.toLowerCase();
+        return lower === normalizedLabel || lower.startsWith(`${normalizedLabel}:`);
+    });
+
+    if (index === -1) return '';
+
+    const inlineValue = lines[index].slice(label.length).replace(/^[:\s-]+/, '').trim();
+    if (inlineValue) return inlineValue;
+
+    return lines[index + 1] ?? '';
+}
 
 function isVehicle(title) {
     const lower = title.toLowerCase();
@@ -222,23 +245,20 @@ const crawler = new CheerioCrawler({
         // LIST page
         const listingLinks = [];
 
-        // Municibid auction listing links
-        $('a[href*="/auctions/"], a[href*="/item/"], a[href*="itemId="]').each((_, el) => {
-            const href = $(el).attr('href');
+        $('.row.browse-item, .card.d-md-none.col-md-3, .browse-image').each((_, row) => {
+            const href = $(row).find('a.btn-viewbox[href*="/Listing/Details/"], a[href*="/Listing/Details/"]').first().attr('href');
             if (!href) return;
             const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            if (abs.match(/\/(auctions?|item)\/\d+/) || abs.includes('itemId=')) {
-                listingLinks.push(abs);
-            }
+            listingLinks.push(abs);
         });
 
-        // Fallback: table rows with auction data
+        // Fallback: any Municibid listing detail link
         if (listingLinks.length === 0) {
-            $('table tr a, .auction-row a, .listing-row a, .item-listing a').each((_, el) => {
+            $('a[href*="/Listing/Details/"]').each((_, el) => {
                 const href = $(el).attr('href');
                 if (!href) return;
                 const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                listingLinks.push(abs);
+                if (/\/Listing\/Details\/\d+/i.test(abs)) listingLinks.push(abs);
             });
         }
 
@@ -256,21 +276,33 @@ const crawler = new CheerioCrawler({
         // Pagination
         const currentPage = request.userData?.pageNum ?? 1;
         if (uniqueLinks.length > 0 && currentPage < maxPages) {
-            const nextUrl = new URL(url);
-            nextUrl.searchParams.set('page', currentPage + 1);
-            await enqueueLinks({
-                urls: [nextUrl.toString()],
-                label: 'LIST',
-                userData: { pageNum: currentPage + 1 },
-            });
+            const nextHref = $('a[rel="next"], .pagination a[aria-label*="Next"], .PagedList-skipToNext a').attr('href');
+            if (nextHref) {
+                const nextAbs = nextHref.startsWith('http') ? nextHref : `${BASE}${nextHref}`;
+                await enqueueLinks({
+                    urls: [nextAbs],
+                    label: 'LIST',
+                    userData: { pageNum: currentPage + 1 },
+                });
+            } else {
+                const nextUrl = new URL(url);
+                nextUrl.searchParams.set('page', currentPage + 1);
+                await enqueueLinks({
+                    urls: [nextUrl.toString()],
+                    label: 'LIST',
+                    userData: { pageNum: currentPage + 1 },
+                });
+            }
         }
     },
 });
 
 async function handleDetailPage($, request, log) {
-    // Title
-    const title = $('h1, .auction-title, [class*="item-title"], .listing-title')
-        .first().text().trim() ||
+    const bodyText = normalizeText($('body').text());
+    const lines = bodyText.split('\n').map((line) => line.trim()).filter(Boolean);
+
+    const title = normalizeText($('h1.titleTextForItem, h1.text-truncate.text-card, h1').first().text()) ||
+        normalizeText($('meta[property="og:title"]').attr('content')).replace(/\s+Online Government Auctions.*$/i, '') ||
         $('title').text().split('|')[0].trim();
 
     if (!title) {
@@ -278,73 +310,59 @@ async function handleDetailPage($, request, log) {
         return;
     }
 
-    // Current bid
-    let bidText = '';
-    for (const sel of ['.current-bid', '[class*="current-bid"]', '[class*="high-bid"]',
-                        '#high-bid', '.bid-amount', '[class*="bid-value"]']) {
-        const t = $(sel).first().text().trim();
-        if (t) { bidText = t; break; }
-    }
-    // Fallback: scan for "Current Bid" label
-    if (!bidText) {
-        $('td, th, dt, label').each((_, el) => {
-            if ($(el).text().match(/current\s*bid/i)) {
-                bidText = $(el).next().text().trim() ||
-                          $(el).parent().next().text().trim();
-            }
-        });
-    }
+    const bidText = normalizeText($('.containerBid, .awe-rt-BuyBox').first().text()) ||
+        extractLabelValue(lines, 'Current Highest Bid') ||
+        extractLabelValue(lines, 'Current Price');
     const bid = parseBid(bidText);
 
-    // Buy now
-    let buyNowText = '';
-    for (const sel of ['.buy-now-price', '[class*="buy-now"]', '[class*="buy_now"]']) {
-        const t = $(sel).first().text().trim();
-        if (t) { buyNowText = t; break; }
-    }
-    const buyNow = parseBid(buyNowText) || null;
+    const buyNow = null;
 
-    // Location
-    let location = '';
-    for (const sel of ['[class*="location"]', '.auction-location', '[class*="city"]', '.seller-info']) {
-        const t = $(sel).first().text().trim();
-        if (t) { location = t; break; }
-    }
+    const headerText = normalizeText($('.listing-data-div').first().text());
+    const locationMatch = headerText.match(/Listing\s+#\s*\d+\s*[•|]\s*([^•\n]+?)\s*[•|]\s*([^•\n+]+)/i);
+    const location = normalizeText(locationMatch?.[1]) || extractLabelValue(lines, 'Item Location');
+    const seller = normalizeText(locationMatch?.[2]);
 
-    // End date
-    let endText = '';
-    for (const sel of ['[class*="end-time"]', '[class*="closes"]', '[data-end]', '.auction-end', '.close-date']) {
-        const el = $(sel).first();
-        endText = el.attr('data-end') || el.attr('datetime') || el.text().trim();
-        if (endText) break;
-    }
+    const endText = normalizeText($('.auctiontimeEndingText').first().text()) ||
+        extractLabelValue(lines, 'End Date');
 
-    // Image
-    const imgEl = $('img.auction-image, img.item-photo, [class*="main-image"] img, .gallery img, .lot-image img').first();
-    const imageUrl = imgEl.attr('data-src') || imgEl.attr('src') || null;
+    const imageUrl = $('meta[property="og:image"]').attr('content') ||
+        $('img[src*="/listing/"], img[src*="/thumb"], .listing-data-div img').first().attr('src') ||
+        null;
 
-    // Item ID from URL
-    const idMatch = request.url.match(/\/(\d+)\/?(?:\?|$)/) ||
-                    request.url.match(/[Ii]tem[Ii]d=(\d+)/);
+    const idMatch = request.url.match(/\/Details\/(\d+)/i);
     const itemId = idMatch ? idMatch[1] : `municibid-${Date.now()}`;
 
-    // Description text for mileage/VIN
-    const description = $('[class*="description"], #description, .item-description').text();
-    const mileageMatch = description.match(/(\d[\d,]+)\s*(?:miles?|mi\.?)\b/i);
+    const descriptionStart = lines.findIndex((line) => line.toLowerCase() === 'item description');
+    const descriptionEnd = lines.findIndex((line) => {
+        const lower = line.toLowerCase();
+        return lower.includes('seller’s terms & conditions') || lower.includes("seller's terms & conditions");
+    });
+    const description = descriptionStart === -1
+        ? ''
+        : lines
+            .slice(descriptionStart + 1, descriptionEnd === -1 ? descriptionStart + 14 : descriptionEnd)
+            .join(' ')
+            .trim();
+
+    const mileageText = extractLabelValue(lines, 'Miles') || description;
+    const mileageMatch = mileageText.match(/(\d[\d,]+)\s*(?:miles?|mi\.?)?\b/i);
     const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, '')) : null;
-    const vinMatch = description.match(/\bVIN[:\s#]*([A-HJ-NPR-Z0-9]{17})\b/i) ||
-                     description.match(/\b([A-HJ-NPR-Z0-9]{17})\b/);
+    const vinSource = extractLabelValue(lines, 'VIN') || description;
+    const vinMatch = vinSource.match(/\bVIN[:\s#]*([A-HJ-NPR-Z0-9]{17})\b/i) ||
+                     vinSource.match(/\b([A-HJ-NPR-Z0-9]{17})\b/);
     const vin = vinMatch ? vinMatch[1] : null;
 
     const state = parseState(location);
-    const { year, make, model } = parseVehicleTitle(title);
+    const year = parseInt(extractLabelValue(lines, 'Year'), 10) || parseVehicleTitle(title).year;
+    const make = extractLabelValue(lines, 'Make') || parseVehicleTitle(title).make;
+    const model = extractLabelValue(lines, 'Model') || parseVehicleTitle(title).model;
 
     const listing = {
         listing_id: itemId,
         title,
         current_bid: bid,
         buy_now_price: buyNow,
-        auction_end_date: parseDate(endText),
+        auction_end_date: parseDate(extractLabelValue(lines, 'End Date')) || endText || null,
         state,
         listing_url: request.url,
         image_url: imageUrl,
@@ -353,6 +371,7 @@ async function handleDetailPage($, request, log) {
         year,
         make,
         model,
+        seller: seller || null,
         scraped_at: new Date().toISOString(),
     };
 

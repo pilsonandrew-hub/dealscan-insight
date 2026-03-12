@@ -7,8 +7,8 @@ const HIGH_RUST_STATES = new Set([
     'CT','NJ','MD','DE'
 ]);
 
-// catid=57 = Vehicles & Transportation on PublicSurplus
-const BASE_URL = 'https://www.publicsurplus.com/sms/browse/cataucs?catid=57&page={PAGE}';
+// catid=4 = Motor Pool on PublicSurplus
+const BASE_URL = 'https://www.publicsurplus.com/sms/all,wa/browse/cataucs?catid=4&page={PAGE}';
 
 await Actor.init();
 
@@ -22,6 +22,27 @@ const {
 
 let totalFound = 0;
 let totalAfterFilters = 0;
+
+function normalizeText(value) {
+    return String(value ?? '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\s*\n\s*/g, '\n')
+        .trim();
+}
+
+function parseMoney(value) {
+    const match = normalizeText(value).match(/\$?([\d,]+(?:\.\d+)?)/);
+    return match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+}
+
+function parseAuctionDate(value) {
+    const normalized = normalizeText(value);
+    if (!normalized) return null;
+
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? normalized : parsed.toISOString();
+}
 
 const crawler = new PlaywrightCrawler({
     launchContext: {
@@ -40,31 +61,38 @@ const crawler = new PlaywrightCrawler({
             return;
         }
 
-        // Listing page — wait for auction rows or table
-        await page.waitForSelector('table tr a, a[href*="/sms/auction/view"], body', { timeout: 30000 });
+        await page.waitForSelector('#auctionTableView tbody tr[id$="catList"], a[href*="/auction/view?auc="], body', { timeout: 30000 });
 
-        // Extract listing rows from PublicSurplus table layout
         const listings = await page.evaluate(() => {
-            const links = [];
-            // Primary: PublicSurplus auction detail links
-            document.querySelectorAll('a[href*="/sms/auction/view"]').forEach(a => links.push(a.href));
-            // Secondary: table rows with auction links (odd/even row classes)
-            if (links.length === 0) {
-                const rows = document.querySelectorAll('table tr.odd, table tr.even, table tr');
-                rows.forEach(row => {
-                    const link = row.querySelector('a[href*="auction"]');
-                    if (link && link.href.includes('/sms/')) links.push(link.href);
-                });
-            }
-            return [...new Set(links)];
+            const rows = Array.from(document.querySelectorAll('#auctionTableView tbody tr[id$="catList"]'));
+
+            return rows.map((row) => {
+                const titleLink = row.querySelector('td.text-start a[href*="/auction/view?auc="]');
+                if (!titleLink) return null;
+
+                const title = titleLink.textContent?.trim() ?? '';
+                const bidText = row.querySelector('td[id^="val_"]')?.textContent ?? '';
+                const location = row.querySelector('td.text-success.fw-bold')?.textContent?.trim() ?? '';
+                const endDate = row.querySelector('.auction-time_left span, [id^="timeLeftValue"]')?.textContent?.trim() ?? '';
+                const itemNumber = row.querySelector('td:first-child')?.textContent?.trim() ?? '';
+
+                return {
+                    itemNumber,
+                    title,
+                    currentBid: bidText,
+                    location,
+                    endDate,
+                    listingUrl: titleLink.href,
+                };
+            }).filter(Boolean);
         });
 
-        log.info(`Found ${listings.length} listing links on page`);
+        log.info(`Found ${listings.length} listing rows on page`);
         totalFound += listings.length;
 
         if (listings.length > 0) {
             await enqueueLinks({
-                urls: listings,
+                urls: listings.map((listing) => listing.listingUrl),
                 label: 'DETAIL',
             });
         }
@@ -86,125 +114,109 @@ async function handleDetailPage(page, request, log) {
     await page.waitForSelector('body', { timeout: 30000 });
 
     const data = await page.evaluate(() => {
-        const getText = (selector) => {
-            const el = document.querySelector(selector);
-            return el ? el.textContent.trim() : '';
+        const lines = document.body.innerText
+            .replace(/\u00a0/g, ' ')
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+        const findLineValue = (label) => {
+            const normalizedLabel = label.toLowerCase();
+            const index = lines.findIndex((line) => {
+                const lower = line.toLowerCase();
+                return lower === normalizedLabel || lower.startsWith(`${normalizedLabel}:`);
+            });
+
+            if (index === -1) return '';
+
+            const inlineValue = lines[index].slice(label.length).replace(/^[:\s-]+/, '').trim();
+            if (inlineValue) return inlineValue;
+
+            return lines[index + 1] ?? '';
         };
 
-        // Item number from URL
-        const urlMatch = window.location.href.match(/auctionId=(\d+)/i) ||
-                         window.location.href.match(/\/(\d+)\/?$/);
-        const itemNumber = urlMatch ? urlMatch[1] : '';
+        const titleLine = lines.find((line) => /^Auction #\d+\s+-\s+/.test(line)) ?? '';
+        const title = titleLine.replace(/^Auction #\d+\s+-\s+/, '').trim() || document.title.split(':').slice(1).join(':').trim();
 
-        // Title
-        const title = getText('h1.auc-title, h1, .auction-title, [class*="title"]') ||
-                      document.title.split('|')[0].trim();
+        const itemNumber = window.location.href.match(/[?&]auc=(\d+)/i)?.[1] ?? '';
+        const currentBid = findLineValue('Current Price');
+        const state = findLineValue('Region');
 
-        // Current bid
-        const bidSelectors = [
-            '.current-bid', '[class*="current-bid"]', '#high-bid-amount',
-            '[class*="high-bid"]', '.bid-value'
-        ];
-        let currentBidText = '';
-        for (const sel of bidSelectors) {
-            const el = document.querySelector(sel);
-            if (el) { currentBidText = el.textContent; break; }
-        }
-        // Fallback: search for "$X,XXX" pattern near "Current Bid" label
-        if (!currentBidText) {
-            const labels = document.querySelectorAll('td, th, dt, .label');
-            labels.forEach(label => {
-                if (label.textContent.match(/current\s*bid/i)) {
-                    const next = label.nextElementSibling || label.parentElement?.nextElementSibling;
-                    if (next) currentBidText = next.textContent;
-                }
-            });
-        }
-        const bidMatch = currentBidText.match(/[\d,]+\.?\d*/);
-        const currentBid = bidMatch ? parseFloat(bidMatch[0].replace(/,/g, '')) : 0;
+        const pickupIndex = lines.findIndex((line) => line.toLowerCase() === 'pick-up location');
+        const locationLines = pickupIndex === -1 ? [] : lines.slice(pickupIndex + 1).filter((line) => {
+            const lower = line.toLowerCase();
+            return ![
+                'auction contact',
+                'payment',
+                'shipping',
+                'bid on item',
+                'region:',
+            ].includes(lower);
+        });
+        const location = locationLines.slice(0, 2).join(' ').trim();
 
-        // Location — PublicSurplus shows "City, ST" format
-        const locationSelectors = [
-            '.auction-location', '[class*="location"]',
-            'td[data-label="Location"]', '.seller-location'
-        ];
-        let location = '';
-        for (const sel of locationSelectors) {
-            const el = document.querySelector(sel);
-            if (el) { location = el.textContent.trim(); break; }
-        }
-        // Fallback: scan table for Location label
-        if (!location) {
-            const cells = document.querySelectorAll('td, th');
-            cells.forEach((cell, i) => {
-                if (cell.textContent.match(/^location$/i)) {
-                    const next = cells[i + 1];
-                    if (next) location = next.textContent.trim();
-                }
-            });
-        }
+        const descriptionStart = lines.findIndex((line) => line.toLowerCase() === 'description');
+        const descriptionEnd = lines.findIndex((line) => line.toLowerCase() === 'online payment instructions');
+        const description = descriptionStart === -1
+            ? ''
+            : lines
+                .slice(descriptionStart + 1, descriptionEnd === -1 ? descriptionStart + 16 : descriptionEnd)
+                .join(' ')
+                .trim();
 
-        const stateMatch = location.match(/,\s*([A-Z]{2})\s*(\d{5})?$/i) ||
-                           location.match(/\b([A-Z]{2})\b/);
-        const state = stateMatch ? stateMatch[1].toUpperCase() : '';
+        const agencyLink = Array.from(document.querySelectorAll('a[href]')).find((anchor) => /View .* Auctions/i.test(anchor.textContent ?? ''));
+        const agencyName = agencyLink
+            ? (agencyLink.textContent ?? '').replace(/^\[?View\s+/i, '').replace(/\s+Auctions\]?$/i, '').trim()
+            : '';
 
-        // End time
-        const endSelectors = ['.auc-ends', '[class*="end-time"]', '[data-end]', '.countdown'];
-        let auctionEndTime = '';
-        for (const sel of endSelectors) {
-            const el = document.querySelector(sel);
-            if (el) { auctionEndTime = el.getAttribute('data-end') || el.textContent.trim(); break; }
-        }
+        const photo = Array.from(document.querySelectorAll('img'))
+            .map((img) => img.getAttribute('data-src') || img.getAttribute('src') || '')
+            .find((src) => /cloudfront|docviewer|thumb/i.test(src));
 
-        // Photo
-        const imgEl = document.querySelector('#main-photo img, .auc-photo img, [class*="photo"] img, .gallery img');
-        const photoUrl = imgEl ? (imgEl.getAttribute('data-src') || imgEl.src) : null;
-
-        // Description
-        const descEl = document.querySelector('.auc-description, #description, [class*="description"]');
-        const description = descEl ? descEl.textContent.trim().slice(0, 1000) : '';
-
-        // Agency / seller
-        const agencySelectors = ['.agency-name', '[class*="agency"]', '.seller-name', '[class*="seller"]'];
-        let agencyName = '';
-        for (const sel of agencySelectors) {
-            const el = document.querySelector(sel);
-            if (el) { agencyName = el.textContent.trim(); break; }
-        }
-
-        return { title, currentBid, location, state, auctionEndTime, photoUrl, description, agencyName, itemNumber };
+        return {
+            title,
+            currentBid,
+            location,
+            state,
+            auctionEndTime: findLineValue('Auction Ends'),
+            photoUrl: photo || null,
+            description,
+            agencyName,
+            itemNumber,
+        };
     });
 
-    const bid = data.currentBid || 0;
-    const state = data.state || '';
+    const bid = parseMoney(data.currentBid);
+    const state = normalizeText(data.state).toUpperCase().slice(0, 2);
+    const title = normalizeText(data.title);
 
     // Apply filters
     if (HIGH_RUST_STATES.has(state)) {
-        log.debug(`Skipping high-rust state: ${state} — ${data.title}`);
+        log.debug(`Skipping high-rust state: ${state} - ${title}`);
         return;
     }
     if (bid < minBid || bid > maxBid) {
-        log.debug(`Skipping out-of-range bid $${bid} — ${data.title}`);
+        log.debug(`Skipping out-of-range bid $${bid} - ${title}`);
         return;
     }
-    if (!data.title) {
+    if (!title) {
         log.debug(`Skipping listing with no title: ${request.url}`);
         return;
     }
 
     const vehicle = {
-        title: data.title,
+        title,
         current_bid: bid,
         buyer_premium: 0.10,
         doc_fee: 50,
-        auction_end_time: data.auctionEndTime || null,
-        location: data.location,
+        auction_end_time: parseAuctionDate(data.auctionEndTime),
+        location: normalizeText(data.location),
         state,
         listing_url: request.url,
-        item_number: data.itemNumber || '',
+        item_number: normalizeText(data.itemNumber),
         photo_url: data.photoUrl || null,
-        description: data.description || '',
-        agency_name: data.agencyName || '',
+        description: normalizeText(data.description),
+        agency_name: normalizeText(data.agencyName),
         source_site: 'publicsurplus',
         scraped_at: new Date().toISOString(),
     };
