@@ -42,17 +42,22 @@ interface SavedTarget {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LOW_RUST_STATES: { value: string; label: string; transport: number }[] = [
+  { value: 'AL', label: 'Alabama', transport: 625 },
+  { value: 'AR', label: 'Arkansas', transport: 550 },
   { value: 'AZ', label: 'Arizona', transport: 350 },
   { value: 'CA', label: 'California', transport: 500 },
   { value: 'CO', label: 'Colorado', transport: 400 },
   { value: 'FL', label: 'Florida', transport: 600 },
   { value: 'GA', label: 'Georgia', transport: 550 },
-  { value: 'KS', label: 'Kansas', transport: 350 },
+  { value: 'HI', label: 'Hawaii', transport: 1200 },
+  { value: 'LA', label: 'Louisiana', transport: 575 },
+  { value: 'MS', label: 'Mississippi', transport: 600 },
+  { value: 'NC', label: 'North Carolina', transport: 575 },
   { value: 'NM', label: 'New Mexico', transport: 375 },
   { value: 'NV', label: 'Nevada', transport: 450 },
-  { value: 'NC', label: 'North Carolina', transport: 575 },
   { value: 'OK', label: 'Oklahoma', transport: 325 },
   { value: 'OR', label: 'Oregon', transport: 550 },
+  { value: 'SC', label: 'South Carolina', transport: 575 },
   { value: 'TN', label: 'Tennessee', transport: 525 },
   { value: 'TX', label: 'Texas', transport: 400 },
   { value: 'UT', label: 'Utah', transport: 425 },
@@ -61,8 +66,10 @@ const LOW_RUST_STATES: { value: string; label: string; transport: number }[] = [
 ];
 
 const STATE_SALES_TAX: Record<string, number> = {
-  AZ: 5.6, CA: 7.25, CO: 2.9, FL: 6.0, GA: 4.0, NC: 4.75,
-  NV: 6.85, OR: 0.0, TN: 7.0, TX: 6.25, VA: 4.3, WA: 6.5,
+  AL: 4.0, AR: 6.5, AZ: 5.6, CA: 7.25, CO: 2.9, FL: 6.0,
+  GA: 4.0, HI: 4.0, LA: 4.45, MS: 7.0, NC: 4.75, NM: 5.0,
+  NV: 6.85, OK: 4.5, OR: 0.0, SC: 6.0, TN: 7.0, TX: 6.25,
+  UT: 5.95, VA: 4.3, WA: 6.5,
 };
 
 const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: boolean }[] = [

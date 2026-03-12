@@ -151,6 +151,9 @@ async def apify_webhook(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Unexpected payload format")
+
     # Extract and validate dataset ID
     dataset_id = payload.get("resource", {}).get("defaultDatasetId", "")
     if not dataset_id:
@@ -201,6 +204,12 @@ async def apify_webhook(
         vehicle["dos_score"] = score_result["dos_score"]
         vehicle["score_breakdown"] = score_result
         vehicle["ingested_at"] = datetime.utcnow().isoformat()
+
+        # $1500 margin floor — capital protection
+        if score_result.get("margin", 0) < 1500:
+            logger.info(f"[MARGIN] below $1500 floor (${score_result.get('margin', 0):,.0f}): {vehicle.get('title','?')[:60]}")
+            skipped += 1
+            continue
 
         await save_opportunity_to_supabase(vehicle)
 
@@ -407,6 +416,13 @@ def passes_basic_gates(vehicle: dict) -> dict:
                 return {"pass": False, "reason": f"mileage_exceeded ({mileage:,} mi)"}
         except (ValueError, TypeError):
             pass  # No mileage data is OK at this stage
+
+    # 88% MMR ceiling — capital protection
+    make = vehicle.get("make", "")
+    model = vehicle.get("model", "")
+    mmr = _estimate_mmr(make, model)
+    if mmr > 0 and bid > mmr * 0.88:
+        return {"pass": False, "reason": f"bid_exceeds_88pct_mmr (${bid:,.0f} > ${mmr * 0.88:,.0f})"}
 
     if not vehicle.get("listing_url"):
         return {"pass": False, "reason": "no_listing_url"}
@@ -630,5 +646,6 @@ async def save_opportunity_to_supabase(vehicle: dict) -> bool:
         ).execute()
         return True
     except Exception as e:
-        logger.error(f"[INGEST] Supabase save failed: {e}")
+        title = vehicle.get("title", "unknown")[:80]
+        logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
         return False

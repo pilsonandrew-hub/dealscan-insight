@@ -3,6 +3,7 @@
 DOS = (Margin Score × 0.35) + (Velocity Score × 0.25) +
       (Segment Score × 0.20) + (Model Score × 0.12) + (Source Score × 0.08)
 """
+import functools
 import os
 from datetime import datetime
 
@@ -48,6 +49,7 @@ _MODEL_SEGMENT_MAP = {
 }
 
 
+@functools.lru_cache(maxsize=1)
 def _load_fees() -> dict:
     with open(os.path.join(_CONFIGS_DIR, "fees.yml")) as f:
         return yaml.safe_load(f).get("sites", {})

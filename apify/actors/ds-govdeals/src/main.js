@@ -118,11 +118,12 @@ function normalizeLot(lot) {
 }
 
 async function applyFilters(vehicle) {
-    const { state, current_bid: bid, title } = vehicle;
+    const { state, current_bid: bid, title, mileage } = vehicle;
     if (HIGH_RUST_STATES.has(state)) return false;
     if (bid < minBid || bid > maxBid)  return false;
     const year = extractYearFromTitle(title);
     if (year && (new Date().getFullYear() - year) > 4) return false;
+    if (mileage && mileage > 50000) return false;
     return true;
 }
 

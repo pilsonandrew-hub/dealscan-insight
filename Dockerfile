@@ -44,4 +44,4 @@ LABEL maintainer="DealerScope Team" \
       security.scan="enabled"
 
 # Run application with fallback to simple mode
-CMD ["sh", "-c", "uvicorn webapp.simple_main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level info --access-log --timeout-keep-alive 120 --timeout-graceful-shutdown 30 || uvicorn webapp.main_minimal:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
