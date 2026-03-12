@@ -17,7 +17,6 @@ Fixes applied (2026-03-11):
 from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
 import hashlib
-import json
 import re
 import os
 import logging
@@ -27,7 +26,7 @@ from datetime import datetime, timedelta
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
-_alerts_per_run: dict = {}
+alerts_this_run: dict = {}
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -728,48 +727,50 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
     """Send a single Telegram alert, log the receipt, and return the Telegram message_id."""
     # Kill switch
     if os.getenv("ALERTS_ENABLED", "true").lower() != "true":
-        logger.info("[ALERTS DISABLED] skipping alert via kill switch")
+        logger.info("[ALERTS DISABLED] skipping alert")
         return None
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("[TELEGRAM] Missing bot token or chat ID; skipping alert")
         return None
 
+    opp_id = deal.get("opportunity_id")
+
     # 6-hour suppression check
-    if supabase_client is not None:
+    if supabase_client is not None and opp_id:
         try:
-            cutoff = (datetime.utcnow() - timedelta(hours=6)).isoformat()
+            alert_suppression_cutoff = (datetime.utcnow() - timedelta(hours=6)).isoformat()
             recent = (
                 supabase_client.table("alert_log")
                 .select("id")
-                .eq("opportunity_id", deal.get("id"))
-                .gte("sent_at", cutoff)
+                .eq("opportunity_id", opp_id)
+                .gte("sent_at", alert_suppression_cutoff)
                 .execute()
             )
             if recent.data:
-                logger.info(f"[SUPPRESSED] already alerted within 6hrs for {deal.get('title', '?')[:40]}")
+                logger.info("[ALERT SUPPRESSED] already alerted within 6hrs")
                 return None
         except Exception as e:
             logger.warning(f"[SUPPRESSION CHECK] failed: {e}")
 
     # Per-run alert cap (max 5)
     run_id = deal.get("run_id", "unknown")
-    _alerts_per_run[run_id] = _alerts_per_run.get(run_id, 0) + 1
-    if _alerts_per_run[run_id] > 5:
-        logger.info(f"[ALERT CAP] max 5 alerts reached for run {run_id}")
+    if alerts_this_run.get(run_id, 0) >= 5:
+        logger.info(f"[ALERT CAP] max alerts reached for run {run_id}")
         return None
+    alerts_this_run[run_id] = alerts_this_run.get(run_id, 0) + 1
 
     try:
         import httpx
 
-        opp_id = deal.get("id", "unknown")
-        reply_markup = json.dumps({
+        callback_id = opp_id or "unknown"
+        reply_markup = {
             "inline_keyboard": [[
-                {"text": "🔥 BUY", "callback_data": f"buy_{opp_id}"},
-                {"text": "👀 WATCH", "callback_data": f"watch_{opp_id}"},
-                {"text": "❌ PASS", "callback_data": f"pass_{opp_id}"},
+                {"text": "🔥 BUY", "callback_data": f"buy_{callback_id}"},
+                {"text": "👀 WATCH", "callback_data": f"watch_{callback_id}"},
+                {"text": "❌ PASS", "callback_data": f"pass_{callback_id}"},
             ]]
-        })
+        }
 
         msg = (
             f"🔥 *HOT DEAL ALERT*\n"
@@ -822,6 +823,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
         "message_id": message_id,
         "channel": "telegram",
         "delivery_state": "sent",
+        "sent_at": datetime.utcnow().isoformat(),
         "dos_score": vehicle.get("dos_score"),
         "vehicle_title": (
             f"{vehicle.get('year', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip()
@@ -839,7 +841,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
 
 async def send_telegram_alerts(hot_deals: list) -> None:
     """Send Telegram alerts for hot deals (DOS >= 80) and store receipts."""
-    for deal in hot_deals[:5]:  # Max 5 alerts per run
+    for deal in hot_deals:
         await send_telegram_alert(deal)
 
 
