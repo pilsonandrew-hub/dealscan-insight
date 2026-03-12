@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -67,6 +67,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+PIPELINE_SECRET = os.getenv("PIPELINE_SECRET")
 
 # ---------------------------------------------------------------------------
 # Pipeline state (in-memory; production should use Redis/DB)
@@ -89,6 +90,8 @@ async def lifespan(app: FastAPI):
     for var in ("SUPABASE_SERVICE_ROLE_KEY", "APIFY_TOKEN", "APIFY_WEBHOOK_SECRET"):
         if not os.getenv(var):
             logger.critical(f"MISSING REQUIRED ENV VAR: {var} — system will not function correctly")
+    if not PIPELINE_SECRET:
+        logger.critical("MISSING REQUIRED ENV VAR: PIPELINE_SECRET — pipeline routes are disabled")
     try:
         await init_db()
         logger.info("Database initialized")
@@ -178,8 +181,23 @@ async def _run_pipeline_async():
         logger.exception("Pipeline failed")
 
 
+async def require_pipeline_auth(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    if not PIPELINE_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+    if authorization != f"Bearer {PIPELINE_SECRET}":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+        )
+
+
 @app.post("/api/pipeline/run", tags=["pipeline"])
-async def trigger_pipeline():
+async def trigger_pipeline(_: None = Depends(require_pipeline_auth)):
     """Kick off the scrape + score pipeline as a background task."""
     if _pipeline_state["status"] == "running":
         return {"status": "already_running", "message": "Pipeline is already in progress"}
@@ -190,7 +208,7 @@ async def trigger_pipeline():
 
 
 @app.get("/api/pipeline/status", tags=["pipeline"])
-async def pipeline_status():
+async def pipeline_status(_: None = Depends(require_pipeline_auth)):
     """Return current pipeline run state."""
     return {
         "status": _pipeline_state["status"],
