@@ -146,48 +146,62 @@ const crawler = new PlaywrightCrawler({
     async requestHandler({ page, log }) {
         log.info('Loading GovDeals homepage...');
 
-        // ── Intercept ALL JSON API responses ──────────────────
-        const interceptedRequests = [];
-        page.on('response', async (response) => {
-            const url = response.url();
-            const ct  = response.headers()['content-type'] || '';
-            if (!ct.includes('json')) return;
-            if (!url.includes('lqdt') && !url.includes('govdeals') && !url.includes('liquidity')) return;
-            try {
-                const body = await response.json().catch(() => null);
-                if (!body) return;
-                const lots = extractLotsFromJson(body);
-                if (lots.length > 0) {
-                    log.info(`[INTERCEPT] ${url} → ${lots.length} items`);
-                    interceptedRequests.push({ url, lots, body });
-                    // Save the base API URL for pagination
-                    if (!capturedLotApiUrl.base) {
-                        capturedLotApiUrl.base = url;
+        // ── Helper: register intercept on current page ─────────
+        const interceptedLots = [];
+        let searchApiUrl = null;
+
+        const registerIntercept = (pg) => {
+            pg.on('response', async (response) => {
+                const url = response.url();
+                const ct  = response.headers()['content-type'] || '';
+                if (!ct.includes('json')) return;
+                // Skip navigation/menu/recommendation APIs — we want search/lot APIs
+                if (url.includes('/menus/') || url.includes('/recommendations') ||
+                    url.includes('/navigation') || url.includes('/config')) return;
+                if (!url.includes('lqdt') && !url.includes('govdeals') && !url.includes('liquidity')) return;
+                try {
+                    const body = await response.json().catch(() => null);
+                    if (!body) return;
+                    const lots = extractLotsFromJson(body);
+                    if (lots.length > 0) {
+                        log.info(`[INTERCEPT] ${url} → ${lots.length} items`);
+                        interceptedLots.push(...lots);
+                        if (!searchApiUrl) searchApiUrl = url;
                     }
-                }
-            } catch (_) { /* ignore */ }
-        });
+                } catch (_) { /* ignore */ }
+            });
+        };
+
+        registerIntercept(page);
 
         // ── Navigate and wait for Angular to boot ─────────────
         await page.goto(HOMEPAGE, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        // Wait for Angular root element and some navigation to render
         await page.waitForSelector('app-root, [class*="header"], nav', { timeout: 30000 })
-            .catch(() => log.warning('Angular root not found — continuing anyway'));
+            .catch(() => log.warning('Angular root not found'));
+        await page.waitForTimeout(4000);
 
-        // Give Angular time to hydrate and register routes
-        await page.waitForTimeout(5000);
-
-        // ── Find and navigate to Vehicles category ────────────
-        log.info('Looking for Vehicles/Transportation category link...');
+        // ── Find the MAIN Vehicles/Transportation category ─────
+        // Prefer links that say "vehicles and transportation" or just "vehicles"
+        // NOT sub-categories like "all-terrain-vehicles", "motorcycles", etc.
+        log.info('Finding main Vehicles & Transportation category link...');
 
         const vehicleHref = await page.evaluate(() => {
             const links = Array.from(document.querySelectorAll('a[href]'));
-            const kws   = ['vehicle','vehicles','transportation','automobile','auto','truck'];
+            const exact  = ['vehicles and transportation', 'vehicles & transportation', 'vehicles'];
+            const broad  = ['vehicle', 'transportation', 'automobile'];
+            const exclude= ['terrain', 'motorcycle', 'boat', 'watercraft', 'aircraft', 'trailer', 'rv', 'recreational'];
+
+            // First pass: exact match on text
+            for (const link of links) {
+                const text = (link.textContent || '').trim().toLowerCase();
+                if (exact.includes(text)) return link.href;
+            }
+            // Second pass: broad match, excluding sub-categories
             for (const link of links) {
                 const text = (link.textContent || '').trim().toLowerCase();
                 const href = (link.href || '').toLowerCase();
-                if (kws.some(k => text.includes(k) || href.includes(k))) {
+                const isExcluded = exclude.some(e => text.includes(e) || href.includes(e));
+                if (!isExcluded && broad.some(k => text.includes(k) || href.includes(k))) {
                     return link.href;
                 }
             }
@@ -195,34 +209,96 @@ const crawler = new PlaywrightCrawler({
         });
 
         if (vehicleHref) {
-            log.info(`Found vehicle category link: ${vehicleHref}`);
+            log.info(`Navigating to: ${vehicleHref}`);
             await page.goto(vehicleHref, { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await page.waitForTimeout(8000); // Wait for Angular to fetch search results
-        } else {
-            // Try Angular router navigation via evaluate
-            log.info('No direct link found — trying Angular router navigation...');
-            await page.evaluate(() => {
-                // Look for Angular router instance and navigate
-                const routerLinks = Array.from(document.querySelectorAll('[routerLink], [ng-reflect-router-link]'));
-                for (const el of routerLinks) {
-                    const val = el.getAttribute('routerLink') || el.getAttribute('ng-reflect-router-link') || '';
-                    if (val.toLowerCase().includes('vehicle') || val.toLowerCase().includes('transport')) {
-                        el.click();
-                        return;
-                    }
-                }
-                // Last resort: search for vehicles via URL injection
-                window.location.hash = '#/search?categoryId=1050';
-            });
             await page.waitForTimeout(8000);
+        } else {
+            // Try known GovDeals Angular route patterns for vehicles
+            const candidates = [
+                'https://www.govdeals.com/en/vehicles-and-transportation',
+                'https://www.govdeals.com/en/vehicles',
+                'https://www.govdeals.com/en/automobiles',
+                'https://www.govdeals.com/search?categoryId=1050',
+            ];
+            log.info('No nav link found — trying known Angular route patterns');
+            for (const url of candidates) {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+                await page.waitForTimeout(6000);
+                if (interceptedLots.length > 0) {
+                    log.info(`Got results from: ${url}`);
+                    break;
+                }
+            }
         }
 
-        // ── Collect from first page ────────────────────────────
-        log.info(`Intercepted ${interceptedRequests.length} API response(s) so far`);
+        // ── Process page 1 results ─────────────────────────────
+        log.info(`Page 1: intercepted ${interceptedLots.length} lots total`);
 
-        // Process all intercepted lots from first page
-        for (const { lots } of interceptedRequests) {
-            for (const lot of lots) {
+        for (const lot of interceptedLots) {
+            if (!isVehicleLot(lot)) continue;
+            totalFound++;
+            const vehicle = normalizeLot(lot);
+            if (!(await applyFilters(vehicle))) continue;
+            totalAfterFilters++;
+            await Actor.pushData(vehicle);
+        }
+        log.info(`Page 1: found=${totalFound} passed=${totalAfterFilters}`);
+
+        // ── Paginate via page.goto (avoids CORS) ──────────────
+        if (searchApiUrl) {
+            log.info(`Paginating via: ${searchApiUrl}`);
+        } else if (vehicleHref) {
+            // No API captured — paginate via Angular URL by appending page param
+            log.info('No search API captured — will paginate via URL page params');
+        } else {
+            log.warning('Could not paginate — no API URL or category URL');
+        }
+
+        const baseNavUrl = vehicleHref || null;
+
+        for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
+            const prevCount = interceptedLots.length;
+            const pageLots  = [];
+
+            // Register fresh intercept for this page's response
+            page.on('response', async (response) => {
+                const url = response.url();
+                const ct  = response.headers()['content-type'] || '';
+                if (!ct.includes('json')) return;
+                if (url.includes('/menus/') || url.includes('/recommendations') ||
+                    url.includes('/navigation') || url.includes('/config')) return;
+                if (!url.includes('lqdt') && !url.includes('govdeals') && !url.includes('liquidity')) return;
+                try {
+                    const body = await response.json().catch(() => null);
+                    if (!body) return;
+                    const lots = extractLotsFromJson(body);
+                    if (lots.length > 0) {
+                        log.info(`[P${pageNum} INTERCEPT] ${url} → ${lots.length} items`);
+                        pageLots.push(...lots);
+                    }
+                } catch (_) { /* ignore */ }
+            });
+
+            // Navigate to next page
+            let nextUrl;
+            if (baseNavUrl) {
+                const sep = baseNavUrl.includes('?') ? '&' : '?';
+                nextUrl = `${baseNavUrl}${sep}page=${pageNum}`;
+            } else {
+                break;
+            }
+
+            log.info(`Navigating page ${pageNum}: ${nextUrl}`);
+            await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+            await page.waitForTimeout(6000);
+
+            if (!pageLots.length) {
+                log.info(`Page ${pageNum}: 0 lots captured — done`);
+                break;
+            }
+
+            log.info(`Page ${pageNum}: ${pageLots.length} lots`);
+            for (const lot of pageLots) {
                 if (!isVehicleLot(lot)) continue;
                 totalFound++;
                 const vehicle = normalizeLot(lot);
@@ -230,63 +306,8 @@ const crawler = new PlaywrightCrawler({
                 totalAfterFilters++;
                 await Actor.pushData(vehicle);
             }
-        }
 
-        log.info(`Page 1: found=${totalFound} passed=${totalAfterFilters}`);
-
-        // ── Paginate via direct API calls ──────────────────────
-        if (capturedLotApiUrl.base) {
-            log.info(`Paginating via captured API: ${capturedLotApiUrl.base}`);
-
-            for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
-                // Build next-page URL — try common pagination param patterns
-                let nextUrl = capturedLotApiUrl.base
-                    .replace(/([?&]page=)\d+/, `$1${pageNum}`)
-                    .replace(/([?&]pageNumber=)\d+/, `$1${pageNum}`)
-                    .replace(/([?&]pageNum=)\d+/, `$1${pageNum}`)
-                    .replace(/([?&]offset=)\d+/, (_, prefix) => `${prefix}${(pageNum - 1) * 20}`);
-
-                // If no page param found, append it
-                if (!nextUrl.match(/[?&]page=/)) {
-                    nextUrl += (nextUrl.includes('?') ? '&' : '?') + `page=${pageNum}`;
-                }
-
-                log.info(`Fetching page ${pageNum}: ${nextUrl}`);
-
-                try {
-                    const resp = await page.evaluate(async (url) => {
-                        const r = await fetch(url, {
-                            credentials: 'include',
-                            headers: { 'Accept': 'application/json' },
-                        });
-                        return r.ok ? r.json() : null;
-                    }, nextUrl);
-
-                    if (!resp) { log.info(`Page ${pageNum}: no response`); break; }
-
-                    const lots = extractLotsFromJson(resp);
-                    if (!lots.length) { log.info(`Page ${pageNum}: 0 lots — done`); break; }
-
-                    log.info(`Page ${pageNum}: ${lots.length} lots`);
-                    for (const lot of lots) {
-                        if (!isVehicleLot(lot)) continue;
-                        totalFound++;
-                        const vehicle = normalizeLot(lot);
-                        if (!(await applyFilters(vehicle))) continue;
-                        totalAfterFilters++;
-                        await Actor.pushData(vehicle);
-                    }
-                } catch (err) {
-                    log.warning(`Page ${pageNum} fetch failed: ${err.message}`);
-                    break;
-                }
-
-                await page.waitForTimeout(2000); // polite delay
-            }
-        } else {
-            log.warning('No API URL captured — could not paginate. DOM body preview:');
-            const preview = await page.evaluate(() => document.body.innerText.slice(0, 500));
-            log.warning(preview);
+            await page.waitForTimeout(1500);
         }
     },
 });
