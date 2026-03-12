@@ -16,6 +16,7 @@ Fixes applied (2026-03-11):
 """
 from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
+import hashlib
 import re
 import os
 import logging
@@ -137,6 +138,63 @@ _MODEL_PATTERNS = [
 ]
 
 
+MAKE_ALIASES = {
+    "chev": "chevrolet", "chevy": "chevrolet", "vw": "volkswagen",
+    "mercedes-benz": "mercedes", "mercedesbenz": "mercedes",
+}
+
+
+def _normalize_make(make: str) -> str:
+    m = re.sub(r"[^a-z0-9]", "", (make or "").lower().strip())
+    return MAKE_ALIASES.get(m, m)
+
+
+def _normalize_model(model: str) -> str:
+    words = re.sub(r"[^a-z0-9 ]", "", (model or "").lower().strip()).split()
+    return " ".join(words[:2])
+
+
+def compute_canonical_id(vehicle: dict) -> str:
+    vin = (vehicle.get("vin") or "").strip().upper()
+    if len(vin) == 17:
+        return hashlib.sha256(vin.encode()).hexdigest()[:32]
+    year = str(vehicle.get("year") or vehicle.get("model_year") or "")
+    make = _normalize_make(vehicle.get("make") or "")
+    model = _normalize_model(vehicle.get("model") or "")
+    state = (vehicle.get("state") or vehicle.get("location_state") or "")[:2].upper()
+    mileage = int(vehicle.get("mileage") or vehicle.get("meter_count") or 0)
+    bucket = round(mileage / 2500) * 2500
+    key = f"{year}_{make}_{model}_{state}_{bucket}"
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def check_and_handle_duplicate(supabase_client, canonical_id: str, new_source: str) -> dict:
+    try:
+        result = (
+            supabase_client.table("opportunities")
+            .select("id, all_sources")
+            .eq("canonical_id", canonical_id)
+            .eq("is_duplicate", False)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return {"is_duplicate": False, "canonical_record_id": None}
+        existing = result.data[0]
+        existing_id = existing["id"]
+        existing_sources = existing.get("all_sources") or []
+        if new_source and new_source not in existing_sources:
+            updated = existing_sources + [new_source]
+            supabase_client.table("opportunities").update({
+                "all_sources": updated,
+                "duplicate_count": len(updated) - 1,
+            }).eq("id", existing_id).execute()
+        return {"is_duplicate": True, "canonical_record_id": existing_id}
+    except Exception as e:
+        logger.warning(f"[DEDUP] check failed: {e}")
+        return {"is_duplicate": False, "canonical_record_id": None}
+
+
 @router.post("/apify")
 async def apify_webhook(
     request: Request,
@@ -211,20 +269,34 @@ async def apify_webhook(
             skipped += 1
             continue
 
+        # Deduplication check
+        dedup = check_and_handle_duplicate(
+            supabase_client,
+            vehicle.get("canonical_id", ""),
+            vehicle.get("source_site", ""),
+        )
+        is_dup = dedup["is_duplicate"]
+        if is_dup:
+            vehicle["is_duplicate"] = True
+            vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+            logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
+
+        # Save to Supabase always (audit trail)
         await save_opportunity_to_supabase(vehicle)
 
-        # Sync to Notion for DOS >= 65 (good + hot deals)
-        if vehicle["dos_score"] >= 65:
+        # Only alert and sync Notion on canonical records
+        if not is_dup and vehicle["dos_score"] >= 65:
             await sync_to_notion(vehicle)
 
         logger.info(
             f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
             f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
             f"| Margin=${score_result.get('margin',0):,.0f} | {vehicle.get('state')}"
+            + (" [DUP]" if is_dup else "")
         )
 
         processed += 1
-        if vehicle["dos_score"] >= 80:
+        if not is_dup and vehicle["dos_score"] >= 80:
             hot_deals.append(vehicle)
 
     # Fire Telegram alerts for hot deals
@@ -299,7 +371,7 @@ def normalize_apify_vehicle(item: dict) -> Optional[dict]:
         # Source
         source = item.get("source_site") or item.get("source") or "govdeals"
 
-        return {
+        normalized = {
             "title": title,
             "current_bid": current_bid,
             "buyer_premium_pct": float(item.get("buyer_premium_pct") or 10.0),
@@ -320,6 +392,12 @@ def normalize_apify_vehicle(item: dict) -> Optional[dict]:
             "make": make,
             "model": model,
         }
+        normalized["canonical_id"] = compute_canonical_id(normalized)
+        normalized["all_sources"] = [normalized.get("source_site", "unknown")]
+        normalized["is_duplicate"] = False
+        normalized["canonical_record_id"] = None
+        normalized["duplicate_count"] = 0
+        return normalized
     except Exception as e:
         logger.error(f"[INGEST] Normalize error: {e}")
         return None
@@ -638,6 +716,11 @@ async def save_opportunity_to_supabase(vehicle: dict) -> bool:
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
         "raw_data": vehicle,
+        "canonical_id": vehicle.get("canonical_id"),
+        "is_duplicate": vehicle.get("is_duplicate", False),
+        "canonical_record_id": vehicle.get("canonical_record_id"),
+        "all_sources": vehicle.get("all_sources", []),
+        "duplicate_count": vehicle.get("duplicate_count", 0),
     }
 
     try:
