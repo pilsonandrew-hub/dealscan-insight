@@ -20,6 +20,7 @@ import hashlib
 import re
 import os
 import logging
+import uuid
 from datetime import datetime
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -253,6 +254,31 @@ async def apify_webhook(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Unexpected payload format")
 
+    apify_run_id = payload.get("resource", {}).get("id", "") or str(uuid.uuid4())[:8]
+    logger.info(f"[INGEST] Webhook received for run_id={apify_run_id}")
+
+    if supabase_client is not None:
+        try:
+            existing = (
+                supabase_client.table("opportunities")
+                .select("id")
+                .eq("run_id", apify_run_id)
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                logger.info(f"[IDEMPOTENCY] run_id={apify_run_id} already processed; skipping batch")
+                return {
+                    "status": "ok",
+                    "run_id": apify_run_id,
+                    "processed": 0,
+                    "skipped": 0,
+                    "hot_deals": 0,
+                    "message": "Duplicate run_id skipped",
+                }
+        except Exception as e:
+            logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
+
     # Extract and validate dataset ID
     dataset_id = payload.get("resource", {}).get("defaultDatasetId", "")
     if not dataset_id:
@@ -287,7 +313,7 @@ async def apify_webhook(
     hot_deals = []
 
     for item in items:
-        vehicle = normalize_apify_vehicle(item)
+        vehicle = normalize_apify_vehicle(item, apify_run_id)
         if vehicle is None:
             skipped += 1
             continue
@@ -321,7 +347,9 @@ async def apify_webhook(
             logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
 
         # Save to Supabase always (audit trail)
-        await save_opportunity_to_supabase(vehicle)
+        saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
+        if saved_opportunity_id:
+            vehicle["opportunity_id"] = saved_opportunity_id
 
         # Only alert and sync Notion on canonical records
         if not is_dup and vehicle["dos_score"] >= 65:
@@ -344,6 +372,7 @@ async def apify_webhook(
 
     return {
         "status": "ok",
+        "run_id": apify_run_id,
         "processed": processed,
         "skipped": skipped,
         "hot_deals": len(hot_deals),
@@ -351,11 +380,11 @@ async def apify_webhook(
             f"{v.get('year')} {v.get('make')} {v.get('model')} | "
             f"DOS={v['dos_score']} | ${v.get('current_bid'):,.0f}"
             for v in hot_deals
-        ]
+        ],
     }
 
 
-def normalize_apify_vehicle(item: dict) -> Optional[dict]:
+def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
     """Normalize raw Apify scraper output to DealerScope vehicle format.
 
     Handles two formats:
@@ -430,6 +459,8 @@ def normalize_apify_vehicle(item: dict) -> Optional[dict]:
             "year": year,
             "make": make,
             "model": model,
+            "run_id": run_id,
+            "source_run_id": run_id,
         }
         normalized["canonical_id"] = compute_canonical_id(normalized)
         normalized["all_sources"] = [normalized.get("source_site", "unknown")]
@@ -690,61 +721,119 @@ async def sync_to_notion(vehicle: dict) -> bool:
         return False
 
 
-async def send_telegram_alerts(hot_deals: list) -> None:
-    """Send Telegram alert for hot deals (DOS >= 80)."""
+async def send_telegram_alert(deal: dict) -> Optional[str]:
+    """Send a single Telegram alert and return the Telegram message_id."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("[TELEGRAM] Missing bot token or chat ID; skipping alert")
+        return None
+
     try:
         import httpx
-        for deal in hot_deals[:5]:  # Max 5 alerts per run
-            msg = (
-                f"🔥 *HOT DEAL ALERT*\n"
-                f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
-                f"DOS Score: *{deal['dos_score']}*\n"
-                f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
-                f"State: {deal.get('state', '?')}\n"
-                f"Margin: ${deal.get('score_breakdown', {}).get('margin', 0):,.0f}\n"
-                f"[View Listing]({deal.get('listing_url', '')})"
+
+        msg = (
+            f"🔥 *HOT DEAL ALERT*\n"
+            f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
+            f"DOS Score: *{deal['dos_score']}*\n"
+            f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
+            f"State: {deal.get('state', '?')}\n"
+            f"Margin: ${deal.get('score_breakdown', {}).get('margin', 0):,.0f}\n"
+            f"[View Listing]({deal.get('listing_url', '')})"
+        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": msg,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": False,
+                },
             )
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                    json={
-                        "chat_id": TELEGRAM_CHAT_ID,
-                        "text": msg,
-                        "parse_mode": "Markdown",
-                        "disable_web_page_preview": False,
-                    }
-                )
+            resp.raise_for_status()
+            payload = resp.json()
     except Exception as e:
         logger.error(f"[TELEGRAM] Alert failed (non-fatal): {e}")
+        return None
+
+    message_id = payload.get("result", {}).get("message_id")
+    if message_id is None:
+        logger.warning(f"[TELEGRAM] Missing message_id in response for run_id={deal.get('run_id')}")
+        return None
+
+    return str(message_id)
 
 
-async def save_opportunity_to_supabase(vehicle: dict) -> bool:
-    """Save scored vehicle to Supabase. Min DOS 50 to save."""
+async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
+    """Persist a Telegram delivery receipt to Supabase."""
     if supabase_client is None:
         return False
 
-    score = vehicle.get("dos_score", 0)
-    if score < 50:
+    alert_key = vehicle.get("opportunity_id") or vehicle.get("listing_url") or vehicle.get("title") or "unknown"
+    alert_id = hashlib.sha256(f"{vehicle.get('run_id', '')}:{alert_key}".encode()).hexdigest()[:64]
+    row = {
+        "opportunity_id": vehicle.get("opportunity_id"),
+        "run_id": vehicle.get("run_id"),
+        "alert_id": alert_id,
+        "message_id": message_id,
+        "channel": "telegram",
+        "delivery_state": "sent",
+        "dos_score": vehicle.get("dos_score"),
+        "vehicle_title": (
+            f"{vehicle.get('year', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip()
+            or vehicle.get("title")
+        ),
+    }
+
+    try:
+        supabase_client.table("alert_log").insert(row).execute()
+        return True
+    except Exception as e:
+        logger.error(f"[ALERT_LOG] Failed to write receipt for run_id={vehicle.get('run_id')}: {e}")
         return False
 
-    if score >= 80:
-        status = "hot"
-    elif score >= 65:
-        status = "good"
-    else:
-        status = "moderate"
+
+async def send_telegram_alerts(hot_deals: list) -> None:
+    """Send Telegram alerts for hot deals (DOS >= 80) and store receipts."""
+    for deal in hot_deals[:5]:  # Max 5 alerts per run
+        message_id = await send_telegram_alert(deal)
+        if message_id is None:
+            continue
+        deal["message_id"] = message_id
+        await insert_alert_log(deal, message_id)
+
+
+async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
+    """Save scored vehicle to Supabase. Min DOS 50 to save."""
+    if supabase_client is None:
+        return None
+
+    score = vehicle.get("dos_score", 0)
+    if score < 50:
+        return None
 
     row = build_opportunity_row(vehicle)
 
     try:
-        supabase_client.table("opportunities").upsert(
+        result = supabase_client.table("opportunities").upsert(
             row, on_conflict="listing_url"
         ).execute()
-        return True
+        if result.data:
+            return result.data[0].get("id")
+
+        lookup = (
+            supabase_client.table("opportunities")
+            .select("id")
+            .eq("listing_url", row["listing_url"])
+            .limit(1)
+            .execute()
+        )
+        if lookup.data:
+            return lookup.data[0].get("id")
+        return None
     except Exception as e:
         title = vehicle.get("title", "unknown")[:80]
         logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
-        return False
+        return None
 
 
 def build_opportunity_row(vehicle: dict) -> dict:
@@ -765,7 +854,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "estimated_transport": breakdown.get("transport"),
         "auction_fees": breakdown.get("premium"),
         "gross_margin": breakdown.get("margin"),
-        "dos_score": score,
+        "dos_score": vehicle.get("dos_score"),
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
         "raw_data": vehicle,
@@ -774,4 +863,9 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "canonical_record_id": vehicle.get("canonical_record_id"),
         "all_sources": vehicle.get("all_sources", []),
         "duplicate_count": vehicle.get("duplicate_count", 0),
+        "run_id": vehicle.get("run_id"),
+        "source_run_id": vehicle.get("source_run_id"),
+        "pipeline_step": "saved",
+        "step_status": "complete",
+        "processed_at": vehicle.get("processed_at") or datetime.utcnow().isoformat(),
     }
