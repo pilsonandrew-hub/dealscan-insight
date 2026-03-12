@@ -6,8 +6,8 @@
  * Strategy:
  * 1. Load GovDeals homepage in Playwright
  * 2. Intercept ALL requests to maestro.lqdt1.com (not just responses)
- * 3. Capture the Authorization/auth headers from the first API call
- * 4. Use those headers to call the search API directly for all pages
+ * 3. Capture the x-api-key header and POST payload shape from search/list
+ * 4. Use those values to call the search API directly for all pages
  * 5. No DOM scraping — pure JSON API calls after auth capture
  *
  * This replaces parseforge~govdeals-scraper ($14.99/mo) once validated.
@@ -27,12 +27,18 @@ const input = await Actor.getInput() ?? {};
 const { maxPages = 10, minBid = 500, maxBid = 35000 } = input;
 
 let totalFound = 0, totalPassed = 0;
-const capturedAuth = { headers: null, searchUrl: null };
+const capturedApi = {
+    apiKey: null,
+    searchUrl: 'https://maestro.lqdt1.com/search/list',
+    searchPayload: null,
+    requestHeaders: null,
+};
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
 function extractLots(json) {
     if (!json || typeof json !== 'object') return [];
     const candidates = [
+        json.assetSearchResults,
         json.assets, json.lots, json.items, json.results,
         json.data?.assets, json.data?.lots, json.data?.items,
         json.payload?.assets, json.payload?.lots,
@@ -46,7 +52,7 @@ function extractLots(json) {
 function passes(item) {
     const state = (item.locationState || item.state || '').toUpperCase();
     if (HIGH_RUST_STATES.has(state)) return false;
-    const bid = item.currentBid || item.current_bid || 0;
+    const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;
     const year = parseInt(item.modelYear || item.year || 0);
     if (year && (new Date().getFullYear() - year) > 4) return false;
@@ -57,42 +63,49 @@ const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: 1,
     requestHandlerTimeoutSecs: 180,
     async requestHandler({ page, log }) {
-        log.info('Loading GovDeals — capturing auth token...');
+        log.info('Loading GovDeals — capturing maestro API key and search payload...');
 
-        // ── Intercept REQUESTS to capture auth headers ────────
+        // ── Intercept REQUESTS to capture the x-api-key and search payload ──
         page.on('request', (request) => {
             const url = request.url();
             if (!url.includes('maestro.lqdt1.com')) return;
             const headers = request.headers();
-            // Capture first request with meaningful auth
-            if (!capturedAuth.headers && (
-                headers['authorization'] ||
-                headers['x-api-key'] ||
-                headers['cookie']
-            )) {
-                log.info(`[AUTH CAPTURED] ${url}`);
-                log.info(`Auth headers: ${JSON.stringify({
-                    authorization: headers['authorization'],
+
+            if (!capturedApi.apiKey && headers['x-api-key']) {
+                capturedApi.apiKey = headers['x-api-key'];
+                capturedApi.requestHeaders = {
+                    accept: headers.accept || 'application/json, text/plain, */*',
+                    'content-type': headers['content-type'] || 'application/json',
                     'x-api-key': headers['x-api-key'],
-                    cookie: headers['cookie'] ? '[present]' : null,
-                })}`);
-                capturedAuth.headers = headers;
+                };
+                log.info(`[API KEY CAPTURED] ${headers['x-api-key']} via ${url}`);
+            }
+
+            if (url.includes('/search/list') && request.method() === 'POST') {
+                const postData = request.postData();
+                if (!postData) return;
+                try {
+                    capturedApi.searchPayload = JSON.parse(postData);
+                    capturedApi.searchUrl = url;
+                    log.info(`[SEARCH PAYLOAD CAPTURED] ${url}`);
+                } catch (err) {
+                    log.warning(`Failed to parse search payload: ${err.message}`);
+                }
             }
         });
 
-        // ── Also capture responses to find search endpoint ────
+        // ── Capture response metadata to confirm the real search endpoint ───
         page.on('response', async (response) => {
             const url = response.url();
             const ct = response.headers()['content-type'] || '';
             if (!url.includes('maestro.lqdt1.com') || !ct.includes('json')) return;
-            if (url.includes('/menus/') || url.includes('/recommendations')) return;
             try {
                 const body = await response.json().catch(() => null);
                 if (!body) return;
                 const lots = extractLots(body);
-                if (lots.length > 0 && !capturedAuth.searchUrl) {
+                if (lots.length > 0 && url.includes('/search/list')) {
                     log.info(`[SEARCH URL FOUND] ${url} → ${lots.length} items`);
-                    capturedAuth.searchUrl = url;
+                    capturedApi.searchUrl = url;
                 }
             } catch (_) {}
         });
@@ -129,71 +142,82 @@ const crawler = new PlaywrightCrawler({
             await page.waitForTimeout(8000);
         }
 
-        // ── Report auth capture results ────────────────────────
-        if (capturedAuth.headers) {
-            log.info('✅ Auth headers captured successfully');
-            log.info(`Search API URL: ${capturedAuth.searchUrl || 'NOT FOUND'}`);
+        // ── Report capture results ─────────────────────────────
+        if (capturedApi.apiKey) {
+            log.info('✅ maestro x-api-key captured successfully');
+            log.info(`Search API URL: ${capturedApi.searchUrl || 'NOT FOUND'}`);
 
-            // If we have both auth + search URL, paginate directly
-            if (capturedAuth.searchUrl) {
+            if (capturedApi.searchPayload) {
                 await paginateWithAuth(page, log);
+            } else {
+                log.warning('❌ Search payload not captured — no /search/list replay yet');
             }
         } else {
-            log.warning('❌ No auth headers captured — Angular may not have made authenticated calls yet');
-            log.warning('Possible reasons: token in JS bundle, not in request headers, or cookie-based auth');
+            log.warning('❌ No maestro x-api-key captured');
+            log.warning('Angular may not have hit maestro yet, or the request pattern changed');
         }
     },
 });
 
 async function paginateWithAuth(page, log) {
-    const { headers, searchUrl } = capturedAuth;
+    const { requestHeaders, searchPayload, searchUrl } = capturedApi;
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-        const nextUrl = searchUrl
-            .replace(/([?&]page=)\d+/, `$1${pageNum}`)
-            .replace(/([?&]pageNumber=)\d+/, `$1${pageNum}`);
+        const payload = {
+            ...searchPayload,
+            page: pageNum,
+            displayRows: searchPayload.displayRows || 24,
+            requestType: searchPayload.requestType || 'search',
+            responseStyle: searchPayload.responseStyle || 'productsOnly',
+        };
 
-        const finalUrl = nextUrl.includes('page=')
-            ? nextUrl
-            : nextUrl + (nextUrl.includes('?') ? '&' : '?') + `page=${pageNum}`;
-
-        log.info(`Fetching page ${pageNum}: ${finalUrl}`);
+        log.info(`Fetching page ${pageNum}: ${searchUrl}`);
 
         try {
-            const resp = await page.evaluate(async ({ url, hdrs }) => {
+            const resp = await page.evaluate(async ({ url, hdrs, body }) => {
                 const r = await fetch(url, {
-                    method: 'GET',
+                    method: 'POST',
                     headers: hdrs,
-                    credentials: 'include',
+                    body: JSON.stringify(body),
                 });
-                return r.ok ? r.json() : null;
-            }, { url: finalUrl, hdrs: headers });
+                const json = r.ok ? await r.json() : null;
+                return {
+                    ok: r.ok,
+                    status: r.status,
+                    total: r.headers.get('x-total-count'),
+                    json,
+                };
+            }, { url: searchUrl, hdrs: requestHeaders, body: payload });
 
-            if (!resp) { log.info(`Page ${pageNum}: no response`); break; }
-            const lots = extractLots(resp);
+            if (!resp?.ok || !resp.json) {
+                log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'})`);
+                break;
+            }
+
+            const lots = extractLots(resp.json);
             if (!lots.length) { log.info(`Page ${pageNum}: empty — done`); break; }
 
-            log.info(`Page ${pageNum}: ${lots.length} lots`);
+            log.info(`Page ${pageNum}: ${lots.length} lots (x-total-count: ${resp.total || 'n/a'})`);
             for (const lot of lots) {
                 totalFound++;
                 if (!passes(lot)) continue;
                 totalPassed++;
                 await Actor.pushData({
-                    title:         lot.title || '',
-                    make:          lot.make || '',
+                    title:         lot.assetShortDescription || lot.title || '',
+                    make:          lot.makebrand || lot.make || '',
                     model:         lot.model || '',
                     modelYear:     lot.modelYear || lot.year || null,
-                    currentBid:    lot.currentBid || lot.current_bid || 0,
+                    currentBid:    lot.currentBid || lot.current_bid || lot.assetBidPrice || 0,
                     locationState: lot.locationState || lot.state || '',
-                    locationCity:  lot.locationCity || '',
-                    auctionEndUtc: lot.auctionEndUtc || lot.auctionEnd || null,
-                    url:           lot.url || `https://www.govdeals.com/en/asset/${lot.accountId}/${lot.assetId}`,
-                    seller:        lot.seller || '',
-                    imageUrl:      lot.imageUrl || '',
-                    photos:        lot.photos || [],
+                    locationCity:  lot.locationCity || lot.city || '',
+                    auctionEndUtc: lot.assetAuctionEndDateUtc || lot.auctionEndUtc || lot.auctionEnd || null,
+                    url:           lot.url || `https://www.govdeals.com/asset/${lot.assetId}/${lot.accountId}`,
+                    seller:        lot.displaySellerName || lot.companyName || lot.seller || '',
+                    imageUrl:      lot.imageUrl || (lot.photo ? `https://webassets.lqdt1.com/assets/photos/${lot.photo}` : ''),
+                    photos:        lot.photos || (lot.photo ? [`https://webassets.lqdt1.com/assets/photos/${lot.photo}`] : []),
                     vin:           lot.vin || null,
                     meterCount:    lot.meterCount || null,
-                    breadcrumbs:   lot.breadcrumbs || [],
+                    breadcrumbs:   lot.breadcrumbs || [lot.categoryDescription].filter(Boolean),
                     source_site:   'govdeals',
                     scraped_at:    new Date().toISOString(),
                 });
@@ -208,5 +232,5 @@ async function paginateWithAuth(page, log) {
 
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
 console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
-console.log(`Auth captured: ${!!capturedAuth.headers} | Search URL: ${capturedAuth.searchUrl || 'none'}`);
+console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
 await Actor.exit();

@@ -103,3 +103,100 @@ when volume justifies the engineering time.
 - [ ] Implement `src/main_api.js` with token-capture + bulk API calls
 - [ ] Test on Apify, validate output matches parseforge format
 - [ ] Cancel parseforge subscription once validated
+
+## Phase 5 Browser Recon - Thu Mar 12 06:48:31 PDT 2026
+
+OpenClaw browser profile `openclaw` was started successfully and GovDeals loaded
+cleanly in Chrome over CDP port `18800`. `openclaw browser snapshot` confirmed
+the Angular-rendered homepage DOM, including direct category routes like
+`/en/automobiles-cars` and `/en/passenger-vehicles`.
+
+`openclaw browser requests > /tmp/govdeals_requests.json` only emitted a single
+StackAdapt tracking request in this environment, so I supplemented the recon by
+attaching Playwright to the same OpenClaw-backed Chrome target and replaying the
+homepage plus `/en/passenger-vehicles`. That capture was saved to
+`/tmp/govdeals_requests_cdp.json`.
+
+Observed `maestro.lqdt1.com` requests:
+
+- `GET /buyers/servertimestamp`
+- `POST /menus/categories/alphabetical`
+- `POST /richrelevance/recommendations`
+- `POST /search/list`
+
+Observed auth pattern:
+
+- No `Authorization` bearer header was present on the captured GovDeals flow.
+- No request `Cookie` header was required on the captured maestro requests.
+- All captured maestro requests carried the same `x-api-key` header:
+  `af93060f-337e-428c-87b8-c74b5837d6cd`
+
+Observed search endpoint:
+
+- `POST https://maestro.lqdt1.com/search/list`
+- Content type: JSON
+- Response header `x-total-count` exposed total hits (`2363` on passenger
+  vehicles)
+- Response body contains `assetSearchResults`, which includes fields like
+  `accountId`, `assetId`, `assetShortDescription`, `makebrand`, `model`,
+  `modelYear`, `currentBid`, `locationCity`, `locationState`,
+  `assetAuctionEndDateUtc`, `photo`, and `categoryDescription`
+
+Observed payload pattern for passenger vehicles:
+
+```json
+{
+  "categoryIds": "",
+  "businessId": "GD",
+  "searchText": "*",
+  "isQAL": false,
+  "locationId": null,
+  "model": "",
+  "makebrand": "",
+  "auctionTypeId": null,
+  "page": 1,
+  "displayRows": 24,
+  "sortField": "currentbid",
+  "sortOrder": "desc",
+  "sessionId": "02a65be3-bb8a-4985-99b6-c8b39608e614",
+  "requestType": "search",
+  "responseStyle": "productsOnly",
+  "facets": [
+    "categoryName",
+    "auctionTypeID",
+    "condition",
+    "saleEventName",
+    "sellerDisplayName",
+    "product_pricecents",
+    "isReserveMet",
+    "hasBuyNowPrice",
+    "isReserveNotMet",
+    "sellerType",
+    "warehouseId",
+    "region",
+    "currencyTypeCode",
+    "categoryName",
+    "tierId"
+  ],
+  "facetsFilter": [
+    "{!tag=product_category_external_id}product_category_external_id:\"t6\"",
+    "{!tag=product_category_external_id}product_category_external_id:\"94Q\""
+  ],
+  "timeType": "",
+  "sellerTypeId": null,
+  "accountIds": []
+}
+```
+
+Vehicle-link probe result:
+
+- `openclaw browser evaluate --fn '() => document.querySelectorAll("a[href*=vehicle], a[href*=Vehicle], a[href*=automobile]").length + " vehicle links found"'`
+  returned `21 vehicle links found`
+
+Conclusion:
+
+- GovDeals does expose the lot search API directly.
+- The practical replay path is `POST /search/list` with JSON body pagination and
+  the captured `x-api-key`.
+- The remaining implementation risk is recapturing a valid `sessionId` and the
+  relevant `facetsFilter` set for the category being scraped.
