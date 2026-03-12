@@ -798,11 +798,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
 async def send_telegram_alerts(hot_deals: list) -> None:
     """Send Telegram alerts for hot deals (DOS >= 80) and store receipts."""
     for deal in hot_deals[:5]:  # Max 5 alerts per run
-        message_id = await send_telegram_alert(deal)
-        if message_id is None:
-            continue
-        deal["message_id"] = message_id
-        await insert_alert_log(deal, message_id)
+        await send_telegram_alert(deal)
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
