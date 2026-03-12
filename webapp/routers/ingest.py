@@ -17,14 +17,17 @@ Fixes applied (2026-03-11):
 from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
 import hashlib
+import json
 import re
 import os
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
+
+_alerts_per_run: dict = {}
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -723,12 +726,50 @@ async def sync_to_notion(vehicle: dict) -> bool:
 
 async def send_telegram_alert(deal: dict) -> Optional[str]:
     """Send a single Telegram alert, log the receipt, and return the Telegram message_id."""
+    # Kill switch
+    if os.getenv("ALERTS_ENABLED", "true").lower() != "true":
+        logger.info("[ALERTS DISABLED] skipping alert via kill switch")
+        return None
+
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("[TELEGRAM] Missing bot token or chat ID; skipping alert")
         return None
 
+    # 6-hour suppression check
+    if supabase_client is not None:
+        try:
+            cutoff = (datetime.utcnow() - timedelta(hours=6)).isoformat()
+            recent = (
+                supabase_client.table("alert_log")
+                .select("id")
+                .eq("opportunity_id", deal.get("id"))
+                .gte("sent_at", cutoff)
+                .execute()
+            )
+            if recent.data:
+                logger.info(f"[SUPPRESSED] already alerted within 6hrs for {deal.get('title', '?')[:40]}")
+                return None
+        except Exception as e:
+            logger.warning(f"[SUPPRESSION CHECK] failed: {e}")
+
+    # Per-run alert cap (max 5)
+    run_id = deal.get("run_id", "unknown")
+    _alerts_per_run[run_id] = _alerts_per_run.get(run_id, 0) + 1
+    if _alerts_per_run[run_id] > 5:
+        logger.info(f"[ALERT CAP] max 5 alerts reached for run {run_id}")
+        return None
+
     try:
         import httpx
+
+        opp_id = deal.get("id", "unknown")
+        reply_markup = json.dumps({
+            "inline_keyboard": [[
+                {"text": "🔥 BUY", "callback_data": f"buy_{opp_id}"},
+                {"text": "👀 WATCH", "callback_data": f"watch_{opp_id}"},
+                {"text": "❌ PASS", "callback_data": f"pass_{opp_id}"},
+            ]]
+        })
 
         msg = (
             f"🔥 *HOT DEAL ALERT*\n"
@@ -747,6 +788,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                     "text": msg,
                     "parse_mode": "Markdown",
                     "disable_web_page_preview": False,
+                    "reply_markup": reply_markup,
                 },
             )
             resp.raise_for_status()
