@@ -3,7 +3,7 @@ import { CheerioCrawler } from 'crawlee';
 
 const SOURCE = 'bidcal';
 
-const BASE = 'https://bidcal.com';
+const BASE = 'https://www.bidcal.com';
 
 const TARGET_STATES = new Set([
     'AZ','CA','NV','CO','NM','UT','TX','FL','GA','SC','TN','NC','VA','WA','OR','HI'
@@ -21,9 +21,9 @@ const VEHICLE_MAKES = ['ford','chevrolet','chevy','dodge','ram','toyota','honda'
     'cadillac','lincoln','buick','pontiac','mitsubishi','volvo','tesla','rivian','lucid','genesis'];
 
 const SEARCH_URLS = [
-    `${BASE}/auctions?type=vehicle`,
-    `${BASE}/search?q=car+truck`,
-    `${BASE}/search?q=suv+van+pickup`,
+    `${BASE}/`,
+    `${BASE}/auctions`,
+    `${BASE}/auctions/previous`,
 ];
 
 await Actor.init();
@@ -96,6 +96,10 @@ function parseDate(text) {
     return null;
 }
 
+function normalizeText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
 function applyFilters(listing, log) {
     if (!isVehicle(listing.title)) {
         log.debug(`[SKIP] Not a vehicle: ${listing.title}`);
@@ -144,45 +148,44 @@ const crawler = new CheerioCrawler({
             return;
         }
 
-        // LIST page — BidCal aggregator listing cards
+        // LIST page — BidCal auction cards and gallery pages
         const listingLinks = [];
 
-        // BidCal auction listing links
-        $('a[href*="/auction/"], a[href*="/lot/"], a[href*="/listing/"], a[href*="/item/"]').each((_, el) => {
+        $('div.auction-listing a[href^="/auctions/gallery/"], section.upcoming-auctions a[href^="/auctions/gallery/"], ul.gallery-thumbs .lot-link a[href*="hibid.com"]').each((_, el) => {
             const href = $(el).attr('href');
             if (!href) return;
             const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            if (abs.match(/\/(auction|lot|listing|item)\/[a-z0-9\-]+/i)) {
+            if (abs.match(/\/auctions\/gallery\/\d+$/i) || abs.includes('hibid.com')) {
                 listingLinks.push(abs);
             }
         });
 
-        // Fallback: any card-style links with auction data
+        // Fallback: gallery items and home page cards
         if (listingLinks.length === 0) {
-            $('.auction-card a, .listing-card a, .item-card a, [class*="auction-item"] a, [class*="result-item"] a').each((_, el) => {
+            $('.auction-listing h3 a, .auction-listing .listing-images a[href^="/auctions/gallery/"], .gallery-thumbs a.gallery-item[data-caption*="View Lot"]').each((_, el) => {
                 const href = $(el).attr('href');
                 if (!href) return;
                 const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                if (!abs.includes('#')) listingLinks.push(abs);
+                if (!abs.includes('#') && (abs.match(/\/auctions\/gallery\/\d+$/i) || abs.includes('hibid.com'))) listingLinks.push(abs);
             });
         }
 
-        // BidCal may embed inline listing data in cards — extract directly from list
-        $('[class*="auction-card"], [class*="listing-card"], [class*="item-row"], .result-item').each((_, card) => {
+        const inlineListings = [];
+        $('[class*="auction-listing"]').each((_, card) => {
             const el = $(card);
-            const title = el.find('h2, h3, h4, [class*="title"], [class*="name"]').first().text().trim();
+            const title = normalizeText(el.find('h3').first().text());
             if (!title || !isVehicle(title)) return;
 
-            const bidText = el.find('[class*="bid"], [class*="price"], [class*="amount"]').first().text().trim();
+            const bidText = normalizeText(el.find('.price, [class*="price"], [class*="amount"]').first().text());
             const bid = parseBid(bidText);
-            const locationText = el.find('[class*="location"], [class*="city"], [class*="address"]').first().text().trim();
+            const locationText = normalizeText(el.find('.listing-location, .listing-location a').first().text());
             const state = parseState(locationText);
-            const endText = el.find('[class*="end"], [class*="close"], [class*="date"], time').first().text().trim();
-            const auctionHouse = el.find('[class*="auction-house"], [class*="company"], [class*="seller"]').first().text().trim();
-            const linkEl = el.find('a').first();
+            const endText = normalizeText(el.find('.listing-date, .listing-time, time').first().text());
+            const auctionHouse = 'BidCal';
+            const linkEl = el.find('a[href^="/auctions/gallery/"]').first();
             const href = linkEl.attr('href') || '';
             const listingUrl = href ? (href.startsWith('http') ? href : `${BASE}${href}`) : url;
-            const imgEl = el.find('img').first();
+            const imgEl = el.find('.listing-images img, img').first();
             const imageUrl = imgEl.attr('data-src') || imgEl.attr('src') || null;
 
             const { year, make, model } = parseVehicleTitle(title);
@@ -210,10 +213,13 @@ const crawler = new CheerioCrawler({
                 totalAfterFilters++;
                 log.info(`[PASS-INLINE] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
                 allListings.push(listing);
-                await Actor.pushData(listing);
+                inlineListings.push(listing);
             }
             totalFound++;
         });
+        for (const listing of inlineListings) {
+            await Actor.pushData(listing);
+        }
 
         const uniqueLinks = [...new Set(listingLinks)];
         log.info(`Found ${uniqueLinks.length} detail links on page`);
@@ -252,7 +258,7 @@ const crawler = new CheerioCrawler({
 });
 
 async function handleDetailPage($, request, log) {
-    const title = $('h1, .lot-title, .listing-title, [class*="item-title"], [class*="lot-title"]')
+    const title = $('section.masthead h1, h1, .gallery-header h1')
         .first().text().trim() ||
         $('title').text().split('|')[0].trim();
 
@@ -280,7 +286,7 @@ async function handleDetailPage($, request, log) {
 
     // Location / city / state
     let location = '';
-    for (const sel of ['[class*="location"]', '.listing-location', '[class*="city"]',
+    for (const sel of ['.listing-location', '.listing-location a', '[class*="location"]',
                         '.auction-location', '[class*="address"]']) {
         const t = $(sel).first().text().trim();
         if (t) { location = t; break; }
@@ -288,7 +294,7 @@ async function handleDetailPage($, request, log) {
 
     // Auction house
     let auctionHouse = '';
-    for (const sel of ['[class*="auction-house"]', '[class*="company"]', '[class*="seller"]', '.auctioneer']) {
+    for (const sel of ['.header-logo a', '[class*="auction-house"]', '[class*="company"]', '[class*="seller"]', '.auctioneer']) {
         const t = $(sel).first().text().trim();
         if (t) { auctionHouse = t; break; }
     }
@@ -303,15 +309,17 @@ async function handleDetailPage($, request, log) {
     }
 
     // Image
-    const imgEl = $('img.listing-image, img.lot-photo, [class*="main-image"] img, .gallery img').first();
+    const imgEl = $('ul.gallery-thumbs a.gallery-item img, img.listing-image, img.lot-photo, .gallery img').first();
     const imageUrl = imgEl.attr('data-src') || imgEl.attr('src') || null;
 
     // ID from URL
-    const idMatch = request.url.match(/\/(auction|lot|listing|item)\/([a-z0-9\-]+)/i);
-    const itemId = idMatch ? `bidcal-${idMatch[2]}` : `bidcal-${Date.now()}`;
+    const idMatch = request.url.match(/\/auctions\/gallery\/(\d+)$/i) ||
+                    request.url.match(/catalog\/(\d+)\//i) ||
+                    request.url.match(/\/(auction|lot|listing|item)\/([a-z0-9\-]+)/i);
+    const itemId = idMatch ? `bidcal-${idMatch[2] || idMatch[1]}` : `bidcal-${Date.now()}`;
 
     // Description for mileage/VIN
-    const description = $('[class*="description"], #description, .listing-description, .lot-description').text();
+    const description = normalizeText($('body').text());
     const mileageMatch = description.match(/(\d[\d,]+)\s*(?:miles?|mi\.?)\b/i);
     const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, '')) : null;
     const vinMatch = description.match(/\bVIN[:\s#]*([A-HJ-NPR-Z0-9]{17})\b/i) ||

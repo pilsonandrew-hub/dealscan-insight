@@ -3,6 +3,7 @@ import { CheerioCrawler } from 'crawlee';
 const SOURCE = 'allsurplus';
 
 const BASE = 'https://www.allsurplus.com';
+const SEO_BASE = 'https://prod-seo.allsurplus.com';
 
 const TARGET_STATES = new Set([
     'AZ','CA','NV','CO','NM','UT','TX','FL','GA','SC','TN','NC','VA','WA','OR','HI'
@@ -27,7 +28,7 @@ const API_ENDPOINTS = [
     `${BASE}/api/lots?category=vehicle&status=open&limit=100`,
 ];
 
-const WEB_SEARCH_URL = `${BASE}/auctions?category=vehicles`;
+const WEB_SEARCH_URL = `${SEO_BASE}/pickup-trucks`;
 
 await Actor.init();
 
@@ -98,6 +99,17 @@ function parseDate(text) {
         if (!isNaN(d.getTime())) return d.toISOString();
     } catch {}
     return null;
+}
+
+function normalizeText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
+function readLabeledValue($, labelRegex) {
+    const node = $('p, li, div, span, td, th').filter((_, el) => labelRegex.test(normalizeText($(el).text()))).first();
+    if (!node.length) return '';
+    const text = normalizeText(node.text());
+    return normalizeText(text.replace(labelRegex, ''));
 }
 
 function applyFilters(listing, log) {
@@ -224,24 +236,71 @@ const crawler = new CheerioCrawler({
         // LIST page
         const listingLinks = [];
 
-        // AllSurplus lot links
-        $('a[href*="/lots/"], a[href*="/lot/"], a[href*="/auctions/"]').each((_, el) => {
+        // prod-seo browse pages expose stable asset cards and detail links.
+        $('div[id^="asset-"] a[name="lnkAssetDetails"][href^="/en/asset/"], div[id^="asset-"] a[name="lnkImageAssetDetails"][href^="/en/asset/"], app-sitebrowse .card-title a.link-click[href^="/en/asset/"]').each((_, el) => {
             const href = $(el).attr('href');
             if (!href) return;
             const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            if (abs.match(/\/(lots?|auctions?)\/[a-z0-9\-]+/i)) {
+            if (abs.match(/\/en\/asset\/\d+\/\d+/i)) {
                 listingLinks.push(abs);
             }
         });
 
-        // Fallback: card/tile links
+        // Fallback: the SEO pages still render the same card/search component.
         if (listingLinks.length === 0) {
-            $('.lot-card a, .auction-card a, .item-card a, [class*="lot-item"] a, [class*="auction-item"] a').each((_, el) => {
+            $('.card.card-search a[href^="/en/asset/"], [id^="asset-"] .card-title a[href^="/en/asset/"]').each((_, el) => {
                 const href = $(el).attr('href');
                 if (!href) return;
                 const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                listingLinks.push(abs);
+                if (abs.match(/\/en\/asset\/\d+\/\d+/i)) listingLinks.push(abs);
             });
+        }
+
+        const inlineListings = [];
+        $('div[id^="asset-"] .card.card-search.card-search-minh').each((_, card) => {
+            const el = $(card);
+            const title = normalizeText(el.find('p.card-title a.link-click').first().text());
+            if (!title || !isVehicle(title)) return;
+
+            const linkEl = el.find('a[name="lnkAssetDetails"], a[name="lnkImageAssetDetails"]').first();
+            const href = linkEl.attr('href') || '';
+            const listingUrl = href ? (href.startsWith('http') ? href : `${BASE}${href}`) : url;
+            const bid = parseBid(el.find('p[name="pAssetCurrentBid"], p.card-amount').first().text());
+            const locationText = normalizeText(el.find('p[name="pAssetLocation"], p.card-grey[title]').first().text());
+            const timerText = normalizeText(el.find('app-ux-timer .timerAttribute').text());
+            const lotText = normalizeText(el.find('p.card-grey').filter((__, node) => /lot#/i.test(normalizeText($(node).text()))).first().text());
+            const imgEl = el.find('a[name="lnkImageAssetDetails"] img, img').first();
+            const { year, make, model } = parseVehicleTitle(title);
+
+            const listing = {
+                listing_id: normalizeText(lotText.replace(/.*lot#:\s*/i, '')) || `allsurplus-inline-${Buffer.from(listingUrl).toString('base64').slice(0, 16)}`,
+                title,
+                current_bid: bid,
+                buy_now_price: null,
+                auction_end_date: parseDate(timerText),
+                state: parseState(locationText),
+                listing_url: listingUrl,
+                image_url: imgEl.attr('data-src') || imgEl.attr('src') || null,
+                lot_number: normalizeText(lotText.replace(/.*lot#:\s*/i, '')),
+                mileage: null,
+                vin: null,
+                year,
+                make,
+                model,
+                source: SOURCE,
+                scraped_at: new Date().toISOString(),
+            };
+
+            if (applyFilters(listing, log)) {
+                totalAfterFilters++;
+                log.info(`[PASS-INLINE] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
+                allListings.push(listing);
+                inlineListings.push(listing);
+            }
+            totalFound++;
+        });
+        for (const listing of inlineListings) {
+            await Actor.pushData(listing);
         }
 
         const uniqueLinks = [...new Set(listingLinks)];
@@ -270,7 +329,7 @@ const crawler = new CheerioCrawler({
 });
 
 async function handleDetailPage($, request, log) {
-    const title = $('h1, .lot-title, [class*="lot-title"], .item-title, [class*="item-title"]')
+    const title = $('h1, p.card-title a.link-click, a[name="lnkAssetDetails"].link-click')
         .first().text().trim() ||
         $('title').text().split('|')[0].trim();
 
@@ -281,18 +340,12 @@ async function handleDetailPage($, request, log) {
 
     // Current bid
     let bidText = '';
-    for (const sel of ['.current-bid', '[class*="current-bid"]', '[class*="high-bid"]',
-                        '[class*="current-price"]', '.bid-amount', '[class*="bid-value"]']) {
+    for (const sel of ['p[name="pAssetCurrentBid"]', '.card-amount', '.current-bid', '[class*="current-bid"]']) {
         const t = $(sel).first().text().trim();
         if (t) { bidText = t; break; }
     }
     if (!bidText) {
-        $('td, th, dt, label, span').each((_, el) => {
-            if ($(el).text().match(/current\s*bid|high\s*bid/i)) {
-                bidText = $(el).next().text().trim() ||
-                          $(el).parent().next().text().trim();
-            }
-        });
+        bidText = readLabeledValue($, /current\s*bid|high\s*bid/i);
     }
     const bid = parseBid(bidText);
 
@@ -306,26 +359,26 @@ async function handleDetailPage($, request, log) {
 
     // Location
     let location = '';
-    for (const sel of ['[class*="location"]', '.lot-location', '[class*="city"]', '.sale-location', '[class*="address"]']) {
+    for (const sel of ['p[name="pAssetLocation"]', '.card-grey[title]', '[class*="location"]', '.lot-location']) {
         const t = $(sel).first().text().trim();
         if (t) { location = t; break; }
     }
 
     // End date
     let endText = '';
-    for (const sel of ['[class*="end-time"]', '[class*="closes"]', '[data-end]', '.auction-end', '.close-date', '[class*="end-date"]']) {
+    for (const sel of ['app-ux-timer .timerAttribute', '[class*="end-time"]', '[class*="closes"]', '[data-end]', '.auction-end'] ) {
         const el = $(sel).first();
         endText = el.attr('data-end') || el.attr('datetime') || el.text().trim();
         if (endText) break;
     }
 
     // Image
-    const imgEl = $('img.lot-image, img.item-photo, [class*="main-image"] img, .gallery img, [class*="lot-photo"] img').first();
+    const imgEl = $('a[name="lnkImageAssetDetails"] img, img.lot-image, img.item-photo, [class*="main-image"] img, .gallery img').first();
     const imageUrl = imgEl.attr('data-src') || imgEl.attr('src') || null;
 
     // Lot number
-    const lotNumEl = $('[class*="lot-number"], [class*="lot-num"], [data-lot]').first();
-    const lotNumber = lotNumEl.text().trim() || lotNumEl.attr('data-lot') || '';
+    const lotNumEl = $('p.card-grey').filter((_, el) => /lot#/i.test(normalizeText($(el).text()))).first();
+    const lotNumber = normalizeText(lotNumEl.text().replace(/.*lot#:\s*/i, '')) || readLabeledValue($, /lot#/i);
 
     // ID from URL
     const idMatch = request.url.match(/\/lots?\/([a-z0-9\-]+)/i) ||
@@ -334,7 +387,7 @@ async function handleDetailPage($, request, log) {
     const itemId = idMatch ? idMatch[1] : `allsurplus-${Date.now()}`;
 
     // Description for mileage/VIN
-    const description = $('[class*="description"], #description, .lot-description, .item-description').text();
+    const description = normalizeText($('body').text());
     const mileageMatch = description.match(/(\d[\d,]+)\s*(?:miles?|mi\.?)\b/i);
     const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, '')) : null;
     const vinMatch = description.match(/\bVIN[:\s#]*([A-HJ-NPR-Z0-9]{17})\b/i) ||
