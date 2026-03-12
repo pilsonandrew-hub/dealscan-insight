@@ -5,10 +5,11 @@ _Research date: 2026-03-11 | Goal: replace parseforge~govdeals-scraper ($14.99/m
 
 ## Summary
 
-GovDeals is a Liquidity Services Angular SPA. All lot/search data comes from a
-backend API at **maestro.lqdt1.com** — but the API requires authentication.
-parseforge captures the auth token from the Angular app's initial page load, then
-calls the API directly for bulk data.
+GovDeals is a Liquidity Services Angular SPA. Phase 5 browser recon confirmed
+that lot/search data comes from **maestro.lqdt1.com** and that the browser flow
+replays cleanly with a captured `x-api-key` plus the observed `/search/list`
+payload shape. No bearer token or request cookies were present in the captured
+GovDeals requests.
 
 ---
 
@@ -23,23 +24,23 @@ calls the API directly for bulk data.
 | `maestro.lqdt1.com/` | 301 → index.html | — | Azure CDN |
 | All other guessed paths | 404 | — | — |
 
-**Key finding:** 401 on POST (not 403) = auth token required, not IP-blocked.
-The token is likely a per-session JWT or Bearer token issued when the Angular
-app boots.
+**Key finding:** the guessed endpoints returned 401 before recon because the SPA
+was supplying a required `x-api-key` header at runtime. Phase 5 capture showed
+the working browser flow did not use a bearer token or request cookies.
 
 ---
 
 ## How parseforge Likely Works
 
 1. **Playwright loads GovDeals homepage** → Angular boots
-2. **Angular calls maestro.lqdt1.com** with an auth token (JWT/Bearer) in the
-   Authorization header — this token is likely obtained from the Angular app's
-   init sequence (possibly from `environment.js` or a `/auth/token` endpoint)
-3. **parseforge intercepts that request**, extracts the auth token + discovers
+2. **Angular calls maestro.lqdt1.com** with an `x-api-key` header and a
+   category-specific JSON payload
+3. **parseforge intercepts that request**, extracts the API key + discovers
    the exact search API endpoint + URL structure
 4. **Calls the search API directly** with the captured token, paginating
    through all pages — no DOM scraping needed, pure API
-5. Token is short-lived → must re-capture on each run
+5. The practical replay requirement is recapturing the current `sessionId` and
+   relevant `facetsFilter` values on each run
 
 ---
 
@@ -49,13 +50,13 @@ app boots.
 Use Playwright to:
 1. Load `https://www.govdeals.com/`
 2. Intercept network requests to `maestro.lqdt1.com`
-3. Capture the **full request headers** (Authorization, Cookie, x-api-key, etc.)
-   from the FIRST API call that returns lot/asset data
+3. Capture the **full request headers** and payload from the first lot search
+   request, including `x-api-key`, `sessionId`, and category filters
 4. Use those headers to call the search/assets API directly for all pages
 5. No more DOM scraping — pure JSON API calls
 
-Key: capture `request.headers()` not just `response.json()`. We were only
-capturing responses before.
+Key: capture `request.headers()` and `request.postData()` from
+`POST /search/list`, not just `response.json()`.
 
 ### Approach B — Full Intercept Replay
 Capture the complete URL + headers + method of the search API call, then
@@ -91,16 +92,16 @@ when volume justifies the engineering time.
 ---
 
 ## Files
-- `src/main.js` — current Playwright click-nav + intercept attempt (partial)
-- `src/main_api.js` — token-capture replacement (see below, TODO: implement)
+- `src/main.js` — earlier Playwright click-nav + intercept attempt
+- `src/main_api.js` — Phase 5 token-capture + direct `/search/list` replay actor
 
 ---
 
 ## TODO for Free Replacement
-- [ ] Intercept `request.headers()` (not just response) in Playwright
-- [ ] Find the exact Authorization header format (Bearer JWT vs API key vs cookie)
-- [ ] Identify the search API endpoint path (not just /menus/ or /recommendations)
-- [ ] Implement `src/main_api.js` with token-capture + bulk API calls
+- [x] Intercept `request.headers()` (not just response) in Playwright
+- [x] Find the exact auth shape used by the browser flow (`x-api-key`, no bearer token, no request cookies)
+- [x] Identify the search API endpoint path (`POST /search/list`)
+- [x] Implement `src/main_api.js` with token-capture + bulk API calls
 - [ ] Test on Apify, validate output matches parseforge format
 - [ ] Cancel parseforge subscription once validated
 
@@ -200,3 +201,15 @@ Conclusion:
   the captured `x-api-key`.
 - The remaining implementation risk is recapturing a valid `sessionId` and the
   relevant `facetsFilter` set for the category being scraped.
+
+## Phase 5 Review Summary
+
+- Browser recon was attempted successfully with OpenClaw Chrome, browser
+  snapshots, and a Playwright/CDP fallback capture.
+- Captured `maestro.lqdt1.com` endpoints included `GET /buyers/servertimestamp`,
+  `POST /menus/categories/alphabetical`, `POST /richrelevance/recommendations`,
+  and `POST /search/list`.
+- This document now records the browser recon findings, including the observed
+  `x-api-key`, `/search/list` endpoint, and payload shape.
+- `src/main_api.js` was updated to capture the `x-api-key`, store the
+  `/search/list` payload, and replay paginated search requests directly.

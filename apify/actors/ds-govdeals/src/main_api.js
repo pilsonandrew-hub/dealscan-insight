@@ -1,16 +1,19 @@
 /**
  * GovDeals Free Replacement Scraper — Token Capture + Direct API
  *
- * STATUS: TEMPLATE — not yet validated. See REVERSE_ENGINEER.md.
+ * STATUS: Phase 5 recon wired in. See REVERSE_ENGINEER.md for captured traffic.
  *
  * Strategy:
  * 1. Load GovDeals homepage in Playwright
  * 2. Intercept ALL requests to maestro.lqdt1.com (not just responses)
- * 3. Capture the x-api-key header and POST payload shape from search/list
+ * 3. Capture the x-api-key header and POST payload shape from /search/list
  * 4. Use those values to call the search API directly for all pages
  * 5. No DOM scraping — pure JSON API calls after auth capture
  *
- * This replaces parseforge~govdeals-scraper ($14.99/mo) once validated.
+ * Phase 5 captured:
+ * - POST https://maestro.lqdt1.com/search/list
+ * - x-api-key auth header
+ * - assetSearchResults response shape
  */
 
 import { Actor } from 'apify';
@@ -63,7 +66,7 @@ const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: 1,
     requestHandlerTimeoutSecs: 180,
     async requestHandler({ page, log }) {
-        log.info('Loading GovDeals — capturing maestro API key and search payload...');
+        log.info('Loading GovDeals and capturing maestro /search/list traffic...');
 
         // ── Intercept REQUESTS to capture the x-api-key and search payload ──
         page.on('request', (request) => {

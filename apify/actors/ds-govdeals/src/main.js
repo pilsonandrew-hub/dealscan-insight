@@ -1,5 +1,5 @@
-// STATUS: BLOCKED - requires OpenClaw browser recon (Phase 5)
-// See apify/actors/ds-govdeals/REVERSE_ENGINEER.md
+// STATUS: Legacy intercept attempt retained for reference.
+// Phase 5 browser recon findings live in REVERSE_ENGINEER.md and power src/main_api.js.
 
 /**
  * GovDeals Apify Actor — Click-Navigation + API-Intercept approach
