@@ -1,8 +1,5 @@
 import { Actor } from 'apify';
 import { CheerioCrawler } from 'crawlee';
-
-const WEBHOOK_URL = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
-const WEBHOOK_SECRET = 'sbEC0dNgb7Ohg3rDV';
 const SOURCE = 'allsurplus';
 
 const BASE = 'https://www.allsurplus.com';
@@ -374,35 +371,6 @@ async function handleDetailPage($, request, log) {
     await Actor.pushData(listing);
 }
 
-async function sendWebhook(listings, log) {
-    if (listings.length === 0) {
-        log.info('[Webhook] No listings to send.');
-        return;
-    }
-
-    const payload = { source: SOURCE, listings };
-
-    try {
-        log.info(`[Webhook] Sending ${listings.length} listings to ${WEBHOOK_URL}`);
-        const response = await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Apify-Webhook-Secret': WEBHOOK_SECRET,
-            },
-            body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            console.error(`[Webhook] Failed: HTTP ${response.status} — ${body}`);
-        } else {
-            console.log(`[Webhook] Success: HTTP ${response.status}`);
-        }
-    } catch (err) {
-        console.error(`[Webhook] Error: ${err.message}`);
-    }
-}
-
 // Try API first, fall back to web crawl
 const log = { info: console.log, debug: () => {}, error: console.error };
 const apiSuccess = await tryApiFetch(log);
@@ -415,7 +383,5 @@ if (!apiSuccess) {
 }
 
 console.log(`[ALLSURPLUS COMPLETE] Used API: ${usedApi} | Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
-
-await sendWebhook(allListings, log);
 
 await Actor.exit();
