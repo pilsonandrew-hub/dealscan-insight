@@ -239,6 +239,74 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
             return {"is_duplicate": True, "canonical_record_id": None}
 
 
+def extract_apify_webhook_metadata(payload: dict) -> dict:
+    resource = payload.get("resource", {}) if isinstance(payload, dict) else {}
+    item_count = None
+    for candidate in (
+        payload.get("item_count"),
+        payload.get("itemCount"),
+        resource.get("item_count"),
+        resource.get("itemCount"),
+    ):
+        if candidate is not None:
+            item_count = candidate
+            break
+
+    if item_count is None and isinstance(payload.get("items"), list):
+        item_count = len(payload["items"])
+
+    try:
+        item_count = int(item_count) if item_count is not None else None
+    except (TypeError, ValueError):
+        item_count = None
+
+    return {
+        "source": payload.get("source") or "apify",
+        "actor_id": resource.get("actId") or resource.get("actorId") or payload.get("actor_id"),
+        "run_id": resource.get("id") or payload.get("run_id"),
+        "item_count": item_count,
+    }
+
+
+def insert_webhook_log(payload: dict) -> Optional[str]:
+    if supabase_client is None:
+        return None
+
+    metadata = extract_apify_webhook_metadata(payload)
+    row = {
+        "source": metadata["source"],
+        "actor_id": metadata["actor_id"],
+        "run_id": metadata["run_id"],
+        "item_count": metadata["item_count"],
+        "raw_payload": payload,
+        "processing_status": "pending",
+    }
+    result = supabase_client.table("webhook_log").insert(row).execute()
+    if result.data:
+        return result.data[0].get("id")
+    return None
+
+
+def update_webhook_log(
+    webhook_log_id: Optional[str],
+    processing_status: str,
+    *,
+    error_message: Optional[str] = None,
+    item_count: Optional[int] = None,
+) -> None:
+    if supabase_client is None or not webhook_log_id:
+        return
+
+    update_row = {
+        "processing_status": processing_status,
+        "error_message": error_message,
+    }
+    if item_count is not None:
+        update_row["item_count"] = item_count
+
+    supabase_client.table("webhook_log").update(update_row).eq("id", webhook_log_id).execute()
+
+
 @router.post("/apify")
 async def apify_webhook(
     request: Request,
@@ -256,134 +324,183 @@ async def apify_webhook(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Unexpected payload format")
 
-    apify_run_id = payload.get("resource", {}).get("id", "") or str(uuid.uuid4())[:8]
+    webhook_log_id = None
+    try:
+        webhook_log_id = insert_webhook_log(payload)
+    except Exception as e:
+        logger.warning(f"[WEBHOOK_LOG] insert failed (non-fatal): {e}")
+
+    metadata = extract_apify_webhook_metadata(payload)
+    apify_run_id = metadata["run_id"] or str(uuid.uuid4())[:8]
     logger.info(f"[INGEST] Webhook received for run_id={apify_run_id}")
 
-    if supabase_client is not None:
-        try:
-            existing = (
-                supabase_client.table("opportunities")
-                .select("id")
-                .eq("run_id", apify_run_id)
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                logger.info(f"[IDEMPOTENCY] run_id={apify_run_id} already processed; skipping batch")
-                return {
-                    "status": "ok",
-                    "run_id": apify_run_id,
-                    "processed": 0,
-                    "skipped": 0,
-                    "hot_deals": 0,
-                    "message": "Duplicate run_id skipped",
-                }
-        except Exception as e:
-            logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
-
-    # Extract and validate dataset ID
-    dataset_id = payload.get("resource", {}).get("defaultDatasetId", "")
-    if not dataset_id:
-        return {"status": "ok", "message": "No dataset to process"}
-
-    # Validate dataset ID format (alphanumeric, no path traversal)
-    if not re.match(r'^[a-zA-Z0-9_-]{5,50}$', dataset_id):
-        logger.warning(f"[INGEST] Suspicious dataset_id rejected: {dataset_id}")
-        raise HTTPException(status_code=400, detail="Invalid dataset ID")
-
-    # Fetch dataset items from Apify API using Authorization header (not query param)
-    import httpx
-    apify_token = os.getenv("APIFY_TOKEN", "")
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"https://api.apify.com/v2/datasets/{dataset_id}/items",
-                params={"format": "json"},
-                headers={"Authorization": f"Bearer {apify_token}"},
+        if supabase_client is not None:
+            try:
+                existing = (
+                    supabase_client.table("opportunities")
+                    .select("id")
+                    .eq("run_id", apify_run_id)
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    logger.info(f"[IDEMPOTENCY] run_id={apify_run_id} already processed; skipping batch")
+                    response = {
+                        "status": "ok",
+                        "run_id": apify_run_id,
+                        "processed": 0,
+                        "skipped": 0,
+                        "hot_deals": 0,
+                        "message": "Duplicate run_id skipped",
+                    }
+                    try:
+                        update_webhook_log(
+                            webhook_log_id,
+                            "processed",
+                            item_count=metadata["item_count"],
+                        )
+                    except Exception as e:
+                        logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+                    return response
+            except Exception as e:
+                logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
+
+        # Extract and validate dataset ID
+        dataset_id = payload.get("resource", {}).get("defaultDatasetId", "")
+        if not dataset_id:
+            response = {"status": "ok", "message": "No dataset to process"}
+            try:
+                update_webhook_log(
+                    webhook_log_id,
+                    "processed",
+                    item_count=metadata["item_count"],
+                )
+            except Exception as e:
+                logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+            return response
+
+        # Validate dataset ID format (alphanumeric, no path traversal)
+        if not re.match(r'^[a-zA-Z0-9_-]{5,50}$', dataset_id):
+            logger.warning(f"[INGEST] Suspicious dataset_id rejected: {dataset_id}")
+            raise HTTPException(status_code=400, detail="Invalid dataset ID")
+
+        # Fetch dataset items from Apify API using Authorization header (not query param)
+        import httpx
+        apify_token = os.getenv("APIFY_TOKEN", "")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"https://api.apify.com/v2/datasets/{dataset_id}/items",
+                    params={"format": "json"},
+                    headers={"Authorization": f"Bearer {apify_token}"},
+                )
+                resp.raise_for_status()
+                items = resp.json()
+        except Exception as e:
+            logger.error(f"[INGEST] Failed to fetch Apify dataset {dataset_id}: {e}")
+            raise HTTPException(status_code=502, detail="Failed to fetch dataset")
+
+        if not isinstance(items, list):
+            response = {"status": "ok", "message": "No items in dataset"}
+            try:
+                update_webhook_log(webhook_log_id, "processed", item_count=metadata["item_count"])
+            except Exception as e:
+                logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+            return response
+
+        processed = 0
+        skipped = 0
+        hot_deals = []
+        dataset_item_count = len(items)
+
+        for item in items:
+            vehicle = normalize_apify_vehicle(item, apify_run_id)
+            if vehicle is None:
+                skipped += 1
+                continue
+
+            gate_result = passes_basic_gates(vehicle)
+            if not gate_result["pass"]:
+                logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
+                skipped += 1
+                continue
+
+            # Score using real DOS formula
+            score_result = score_vehicle(vehicle)
+            vehicle["dos_score"] = score_result["dos_score"]
+            vehicle["score_breakdown"] = score_result
+            vehicle["ingested_at"] = datetime.utcnow().isoformat()
+
+            # $1500 margin floor — capital protection
+            if score_result.get("margin", 0) < 1500:
+                logger.info(f"[MARGIN] below $1500 floor (${score_result.get('margin', 0):,.0f}): {vehicle.get('title','?')[:60]}")
+                skipped += 1
+                continue
+
+            # Deduplication check
+            dedup = {"is_duplicate": False, "canonical_record_id": None}
+            if vehicle["dos_score"] >= 50:
+                dedup = check_and_handle_duplicate(supabase_client, vehicle)
+            is_dup = dedup["is_duplicate"]
+            if is_dup:
+                vehicle["is_duplicate"] = True
+                vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+                logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
+
+            # Save to Supabase always (audit trail)
+            saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
+            if saved_opportunity_id:
+                vehicle["opportunity_id"] = saved_opportunity_id
+
+            # Only alert and sync Notion on canonical records
+            if not is_dup and vehicle["dos_score"] >= 65:
+                await sync_to_notion(vehicle)
+
+            logger.info(
+                f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
+                f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
+                f"| Margin=${score_result.get('margin',0):,.0f} | {vehicle.get('state')}"
+                + (" [DUP]" if is_dup else "")
             )
-            resp.raise_for_status()
-            items = resp.json()
+
+            processed += 1
+            if not is_dup and vehicle["dos_score"] >= 80:
+                hot_deals.append(vehicle)
+
+        # Fire Telegram alerts for hot deals
+        if hot_deals:
+            await send_telegram_alerts(hot_deals)
+
+        response = {
+            "status": "ok",
+            "run_id": apify_run_id,
+            "processed": processed,
+            "skipped": skipped,
+            "hot_deals": len(hot_deals),
+            "hot_deal_vehicles": [
+                f"{v.get('year')} {v.get('make')} {v.get('model')} | "
+                f"DOS={v['dos_score']} | ${v.get('current_bid'):,.0f}"
+                for v in hot_deals
+            ],
+        }
+        try:
+            update_webhook_log(webhook_log_id, "processed", item_count=dataset_item_count)
+        except Exception as e:
+            logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+        return response
+    except HTTPException as e:
+        try:
+            update_webhook_log(webhook_log_id, "error", error_message=str(e.detail))
+        except Exception as update_error:
+            logger.warning(f"[WEBHOOK_LOG] error update failed (non-fatal): {update_error}")
+        raise
     except Exception as e:
-        logger.error(f"[INGEST] Failed to fetch Apify dataset {dataset_id}: {e}")
-        raise HTTPException(status_code=502, detail="Failed to fetch dataset")
-
-    if not isinstance(items, list):
-        return {"status": "ok", "message": "No items in dataset"}
-
-    processed = 0
-    skipped = 0
-    hot_deals = []
-
-    for item in items:
-        vehicle = normalize_apify_vehicle(item, apify_run_id)
-        if vehicle is None:
-            skipped += 1
-            continue
-
-        gate_result = passes_basic_gates(vehicle)
-        if not gate_result["pass"]:
-            logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
-            skipped += 1
-            continue
-
-        # Score using real DOS formula
-        score_result = score_vehicle(vehicle)
-        vehicle["dos_score"] = score_result["dos_score"]
-        vehicle["score_breakdown"] = score_result
-        vehicle["ingested_at"] = datetime.utcnow().isoformat()
-
-        # $1500 margin floor — capital protection
-        if score_result.get("margin", 0) < 1500:
-            logger.info(f"[MARGIN] below $1500 floor (${score_result.get('margin', 0):,.0f}): {vehicle.get('title','?')[:60]}")
-            skipped += 1
-            continue
-
-        # Deduplication check
-        dedup = {"is_duplicate": False, "canonical_record_id": None}
-        if vehicle["dos_score"] >= 50:
-            dedup = check_and_handle_duplicate(supabase_client, vehicle)
-        is_dup = dedup["is_duplicate"]
-        if is_dup:
-            vehicle["is_duplicate"] = True
-            vehicle["canonical_record_id"] = dedup["canonical_record_id"]
-            logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
-
-        # Save to Supabase always (audit trail)
-        saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
-        if saved_opportunity_id:
-            vehicle["opportunity_id"] = saved_opportunity_id
-
-        # Only alert and sync Notion on canonical records
-        if not is_dup and vehicle["dos_score"] >= 65:
-            await sync_to_notion(vehicle)
-
-        logger.info(
-            f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
-            f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
-            f"| Margin=${score_result.get('margin',0):,.0f} | {vehicle.get('state')}"
-            + (" [DUP]" if is_dup else "")
-        )
-
-        processed += 1
-        if not is_dup and vehicle["dos_score"] >= 80:
-            hot_deals.append(vehicle)
-
-    # Fire Telegram alerts for hot deals
-    if hot_deals:
-        await send_telegram_alerts(hot_deals)
-
-    return {
-        "status": "ok",
-        "run_id": apify_run_id,
-        "processed": processed,
-        "skipped": skipped,
-        "hot_deals": len(hot_deals),
-        "hot_deal_vehicles": [
-            f"{v.get('year')} {v.get('make')} {v.get('model')} | "
-            f"DOS={v['dos_score']} | ${v.get('current_bid'):,.0f}"
-            for v in hot_deals
-        ],
-    }
+        try:
+            update_webhook_log(webhook_log_id, "error", error_message=str(e))
+        except Exception as update_error:
+            logger.warning(f"[WEBHOOK_LOG] error update failed (non-fatal): {update_error}")
+        raise
 
 
 def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:

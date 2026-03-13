@@ -3,68 +3,48 @@
 ## Current Routing (ACTIVE)
 
 ```
-Apify Actor → Railway directly
+Apify Actor -> Railway directly
 POST https://dealscan-insight-production.up.railway.app/api/ingest/apify
 ```
 
-Webhook secret: `sbEC0dNgb7Ohg3rDV` (validated in ingest.py)
+This remains the production webhook path. The Apify webhook URL does not change.
 
-This works. Every actor run pushes data directly to Railway on completion.
+## Rejected Approach
 
----
-
-## Planned Routing (FUTURE)
+### OpenClaw Gateway Routing: REJECTED
 
 ```
-Apify Actor → OpenClaw Gateway → Railway
-POST http://<mac-ip>:18789/webhook/apify → forwards to Railway
+Apify Actor -> OpenClaw Gateway -> Railway
+POST http://<mac-ip>:18789/webhook/apify
 ```
 
-**Why route through OpenClaw first?**
-- Ja'various can inspect every payload before it hits the DB
-- Log raw payloads for debugging scraper issues
-- Apply pre-filter logic (block junk, flag anomalies) before ingest
-- Trigger Telegram/Slack alerts from OpenClaw side rather than Railway side
-- OpenClaw becomes the single alert control plane
+Reason:
+- OpenClaw runs on Andrew's Mac, which can be offline, asleep, or rebooting.
+- Apify requires a public internet endpoint; `127.0.0.1` and local-only ingress are not reachable from Apify.
+- Routing production ingestion through a laptop creates a hard single point of failure.
+- Railway already hosts the production webhook, so extra forwarding adds operational risk without adding durable observability.
 
----
+## Implemented Approach
 
-## What Needs to Happen to Switch
+### Railway + Supabase `webhook_log`: IMPLEMENTED
 
-1. **Configure OpenClaw webhook receiver**
-   - Add webhook ingress config to `openclaw.json`
-   - Point to a known path e.g. `/webhook/apify`
-   - Set up forwarding rule to `https://dealscan-insight-production.up.railway.app/api/ingest/apify`
+The existing `/api/ingest/apify` handler now writes every raw webhook payload into Supabase at the top of the request flow, immediately after webhook secret validation succeeds.
 
-2. **Test with a live payload**
-   - Trigger one Apify actor manually
-   - Confirm OpenClaw receives + forwards correctly
-   - Confirm Railway receives the forwarded payload
+Captured fields:
+- `source`
+- `actor_id`
+- `run_id`
+- `item_count`
+- `raw_payload`
+- `processing_status`
+- `error_message`
 
-3. **Update Apify webhook URL**
-   - Change all 7 actor webhooks from Railway URL → OpenClaw URL
-   - parseforge task webhook ID: `PgG3HFoKmjPD1GZMf`
+Behavior:
+- Raw payload is stored in `webhook_log` before dataset processing starts.
+- Logging is non-fatal; webhook ingestion continues even if the audit insert fails.
+- `processing_status` starts as `pending` and is finalized to `processed` or `error`.
+- This provides payload inspection, run-level observability, and anomaly review without any new routing layer.
 
-4. **Set Railway as fallback**
-   - If OpenClaw is down (Mac offline), Apify can't reach Railway
-   - Consider keeping Railway as a secondary direct webhook until OpenClaw routing is proven stable
+## Decision
 
----
-
-## Risk Assessment
-
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Mac goes offline | HIGH | Keep Railway direct URL as Apify fallback |
-| OpenClaw misconfigured | MEDIUM | Test with single actor before switching all |
-| Double-ingest if both URLs active | LOW | Dedup system handles it (canonical_id) |
-
----
-
-## Current Status
-
-**DO NOT SWITCH YET.** Direct Apify → Railway is working. 
-Switch only after:
-- [ ] OpenClaw webhook ingress config validated
-- [ ] At least one successful end-to-end test
-- [ ] Railway fallback confirmed
+OpenClaw ingress is not needed — Railway + Supabase provides full observability.
