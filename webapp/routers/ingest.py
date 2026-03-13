@@ -1012,9 +1012,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
     row = build_opportunity_row(vehicle)
 
     try:
-        result = supabase_client.table("opportunities").upsert(
-            row, on_conflict="listing_url"
-        ).execute()
+        result = supabase_client.table("opportunities").insert(row).execute()
         if result.data:
             return result.data[0].get("id")
 
