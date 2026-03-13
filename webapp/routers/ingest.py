@@ -669,7 +669,11 @@ def passes_basic_gates(vehicle: dict) -> dict:
     year = vehicle.get("year")
     mileage = vehicle.get("mileage")
 
-    if bid < 3000 or bid > 35000:
+    # Government sources often have lower opening bids on older fleet vehicles
+    gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions"}
+    source_bid = (vehicle.get("source_site") or "").lower()
+    min_bid = 500 if source_bid in gov_sources_bid else 3000
+    if bid < min_bid or bid > 35000:
         return {"pass": False, "reason": f"bid_out_of_range (${bid:,.0f})"}
 
     if state in HIGH_RUST_STATES:
@@ -680,8 +684,12 @@ def passes_basic_gates(vehicle: dict) -> dict:
 
     current_year = datetime.now().year
     age = current_year - year
-    if age > 4 or age < 0:  # SOP: max 4 years
-        return {"pass": False, "reason": f"age_exceeded ({age} years)"}
+    # Government/public auction sources run older fleet vehicles — allow up to 12 years
+    gov_sources = {"publicsurplus", "govdeals", "gsaauctions"}
+    source = (vehicle.get("source_site") or "").lower()
+    max_age = 12 if source in gov_sources else 4
+    if age > max_age or age < 0:
+        return {"pass": False, "reason": f"age_exceeded ({age} years, max {max_age} for {source})"}
 
     if mileage is not None:
         try:
