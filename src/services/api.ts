@@ -31,19 +31,19 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
     location: row.location || '',
     state: row.state || '',
     auction_end: row.auction_end,
-    source_site: row.source_site,
-    status: row.status || 'moderate',
-    total_cost: row.total_cost || row.current_bid,
-    transportation_cost: row.transportation_cost || 0,
-    fees_cost: row.fees_cost || 0,
-    estimated_sale_price: row.estimated_sale_price,
-    profit_margin: row.profit_margin || 0,
+    source_site: row.source || row.source_site,
+    status: row.step_status || row.status || 'moderate',
+    total_cost: row.current_bid,
+    transportation_cost: row.estimated_transport || 0,
+    fees_cost: row.auction_fees || 0,
+    estimated_sale_price: row.mmr,
+    profit_margin: row.gross_margin || row.profit_margin || 0,
     vin: row.vin,
     make: row.make,
     model: row.model,
     year: row.year,
     mileage: row.mileage,
-    score: row.score
+    score: row.dos_score || row.score
   };
 }
 
@@ -72,7 +72,7 @@ export const api = {
       let query = supabase
         .from('opportunities')
         .select('*', { count: 'exact' })
-        .eq('is_active', true);
+        .not('dos_score', 'is', null);
 
       // Apply filters
       if (filters?.make) query = query.ilike('make', `%${filters.make}%`);
@@ -80,16 +80,16 @@ export const api = {
       if (filters?.yearMin) query = query.gte('year', filters.yearMin);
       if (filters?.yearMax) query = query.lte('year', filters.yearMax);
       if (filters?.states && filters.states.length > 0) query = query.in('state', filters.states);
-      if (filters?.minScore) query = query.gte('score', filters.minScore);
+      if (filters?.minScore) query = query.gte('dos_score', filters.minScore);
       if (filters?.maxBid) query = query.lte('current_bid', filters.maxBid);
-      if (filters?.source) query = query.eq('source_site', filters.source);
+      if (filters?.source) query = query.eq('source', filters.source);
 
       // Sort
-      const sortField = filters?.sortBy === 'score' ? 'score'
-        : filters?.sortBy === 'profit_margin' ? 'profit_margin'
-        : filters?.sortBy === 'auction_end' ? 'auction_end'
+      const sortField = filters?.sortBy === 'score' ? 'dos_score'
+        : filters?.sortBy === 'profit_margin' ? 'gross_margin'
+        : filters?.sortBy === 'auction_end' ? 'auction_end_date'
         : filters?.sortBy === 'current_bid' ? 'current_bid'
-        : 'created_at';
+        : 'processed_at';
       const ascending = filters?.sortBy === 'auction_end';
       query = query.order(sortField, { ascending, nullsFirst: false });
 
@@ -114,9 +114,8 @@ export const api = {
       const { data, error } = await supabase
         .from('opportunities')
         .select('*')
-        .eq('is_active', true)
-        .gte('score', minScore)
-        .order('score', { ascending: false })
+        .gte('dos_score', minScore)
+        .order('dos_score', { ascending: false })
         .limit(limit);
 
       if (error) throw error;
@@ -140,18 +139,17 @@ export const api = {
 
       const { data, error } = await supabase
         .from('opportunities')
-        .select('score, profit_margin, created_at')
-        .eq('is_active', true);
+        .select('dos_score, gross_margin, processed_at');
 
       if (error) throw error;
 
       const rows = data || [];
-      const todayRows = rows.filter(r => r.created_at && new Date(r.created_at) >= today);
-      const hotDeals = rows.filter(r => (r.score || 0) >= 80);
+      const todayRows = rows.filter(r => r.processed_at && new Date(r.processed_at) >= today);
+      const hotDeals = rows.filter(r => (r.dos_score || 0) >= 80);
       const avgMargin = rows.length > 0
-        ? rows.reduce((sum, r) => sum + (r.profit_margin || 0), 0) / rows.length
+        ? rows.reduce((sum, r) => sum + (r.gross_margin || 0), 0) / rows.length
         : 0;
-      const topScore = rows.reduce((max, r) => Math.max(max, r.score || 0), 0);
+      const topScore = rows.reduce((max, r) => Math.max(max, r.dos_score || 0), 0);
 
       return {
         total_today: todayRows.length,
@@ -169,15 +167,15 @@ export const api = {
     try {
       const { data, error } = await supabase
         .from('opportunities')
-        .select('source_site, created_at')
-        .order('created_at', { ascending: false })
+        .select('source, processed_at')
+        .order('processed_at', { ascending: false })
         .limit(500);
 
       if (error) throw error;
 
       const sourceMap = new Map<string, { last_run: string; count: number }>();
       for (const row of data || []) {
-        const src = row.source_site;
+        const src = row.source;
         if (!sourceMap.has(src)) {
           sourceMap.set(src, { last_run: row.created_at, count: 1 });
         } else {
