@@ -1,3 +1,23 @@
+/**
+ * ds-auctiontime — AuctionTime (Sandhills Publishing) Scraper
+ *
+ * STATUS: BLOCKED + NOT_RELEVANT
+ *
+ * Bot protection (2026-03-13):
+ * - All URLs return HTTP 403 Forbidden — Distil Networks (now Imperva) protection is active.
+ * - No content returned to inspect for API patterns.
+ * - No public REST or RSS API found.
+ *
+ * Content relevance:
+ * - AuctionTime is a Sandhills Publishing platform primarily focused on AGRICULTURAL
+ *   and CONSTRUCTION equipment (tractors, combines, harvesters, plows, grain carts, etc.).
+ * - Passenger vehicle and consumer truck listings are a very small minority.
+ * - NOT a viable source for the DealerScope passenger vehicle arbitrage use case.
+ *
+ * Recommendation: DEPRIORITIZE. Even if bot protection were bypassed, the vehicle-to-noise
+ * ratio would be too low to justify the effort.
+ */
+
 import { Actor } from 'apify';
 import { CheerioCrawler } from 'crawlee';
 

@@ -1,3 +1,20 @@
+/**
+ * ds-municibid — MuniciPal Bid Government Surplus Scraper
+ *
+ * STATUS: PARTIAL — No Cloudflare/bot protection on the web pages (CheerioCrawler works),
+ * but no public JSON API is available.
+ *
+ * API investigation results (2026-03-13):
+ * - No public REST, GraphQL, or RSS API found.
+ * - /api/v1/auctions, /api/v1/items, /search.json, /auctions.json all return 404.
+ * - Pages are server-side rendered HTML — CheerioCrawler can access them directly.
+ * - The Automotive category has ~114 active listings.
+ * - /auctions/vehicles returns 404; use /Browse/ URLs or search instead.
+ *
+ * Current approach: API-first (always fails) → falls back to CheerioCrawler HTML scraping.
+ * The web fallback is the only working path.
+ */
+
 import { Actor } from 'apify';
 import { CheerioCrawler } from 'crawlee';
 
@@ -28,11 +45,11 @@ const API_ENDPOINTS = [
     `${BASE}/auctions.json?category=vehicle`,
 ];
 
-// Municibid vehicle browse/search pages. Use current-looking endpoints first.
+// Municibid vehicle browse/search pages.
+// Note: /auctions/vehicles returns 404 — use /Browse/ category URL and search instead.
 const WEB_SEARCH_URLS = [
-    `${BASE}/auctions/vehicles`,
-    `${BASE}/auctions?q=vehicle`,
     `${BASE}/Browse/C160883/Automotive?ViewStyle=list&StatusFilter=active_only&SortFilterOptions=1`,
+    `${BASE}/auctions?q=vehicle`,
 ];
 
 const LISTING_SELECTORS = [
