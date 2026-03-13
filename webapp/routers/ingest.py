@@ -541,6 +541,12 @@ def passes_basic_gates(vehicle: dict) -> dict:
     Five-layer institutional filter.
     Returns {"pass": bool, "reason": str}
     """
+    # Layer 0: Must be an actual vehicle (has make OR VIN — rejects equipment/parts)
+    make = vehicle.get("make", "") or ""
+    vin = vehicle.get("vin", "") or ""
+    if not make.strip() and len(vin) != 17:
+        return {"pass": False, "reason": "not_a_vehicle (no make or valid VIN)"}
+
     bid = vehicle.get("current_bid", 0)
     state = vehicle.get("state", "")
     year = vehicle.get("year")
