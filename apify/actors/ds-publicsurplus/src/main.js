@@ -17,13 +17,14 @@ const VEHICLE_MAKES = ['ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', '
     'cadillac', 'lincoln', 'buick', 'pontiac', 'mitsubishi', 'volvo', 'tesla', 'rivian', 'lucid', 'genesis'];
 
 const BASE_URL = 'https://www.publicsurplus.com';
-const BASE_LIST_URL = `${BASE_URL}/sms/all,wa/browse/cataucs?catid=4&page={PAGE}`;
+// 'all' = nationwide search across all agencies (not just WA)
+const BASE_LIST_URL = `${BASE_URL}/sms/all/browse/cataucs?catid=4&page={PAGE}`;
 
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 3,
+    maxPages = 5,
     minBid = 500,
     maxBid = 35000,
     targetStates = [...TARGET_STATES],
