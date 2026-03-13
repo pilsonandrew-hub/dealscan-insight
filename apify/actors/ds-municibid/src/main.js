@@ -28,8 +28,22 @@ const API_ENDPOINTS = [
     `${BASE}/auctions.json?category=vehicle`,
 ];
 
-// Municibid automotive browse page
-const WEB_SEARCH_URL = `${BASE}/Browse/C160883/Automotive?ViewStyle=list&StatusFilter=active_only&SortFilterOptions=1`;
+// Municibid vehicle browse/search pages. Use current-looking endpoints first.
+const WEB_SEARCH_URLS = [
+    `${BASE}/auctions/vehicles`,
+    `${BASE}/auctions?q=vehicle`,
+    `${BASE}/Browse/C160883/Automotive?ViewStyle=list&StatusFilter=active_only&SortFilterOptions=1`,
+];
+
+const LISTING_SELECTORS = [
+    '.auction-row a[href*="/auction/"]',
+    '.auction-item a[href*="/auction/"]',
+    '.lot-card a[href*="/auction/"]',
+    '.listing-item a[href*="/auction/"]',
+    'a[href*="/auction/"]',
+    '.row.browse-item a[href*="/Listing/Details/"]',
+    'a[href*="/Listing/Details/"]',
+];
 
 await Actor.init();
 
@@ -53,6 +67,15 @@ function normalizeText(value) {
         .replace(/[ \t]+/g, ' ')
         .replace(/\s*\n\s*/g, '\n')
         .trim();
+}
+
+function toAbsoluteUrl(href) {
+    if (!href) return '';
+    return href.startsWith('http') ? href : `${BASE}${href}`;
+}
+
+function isListingDetailUrl(url) {
+    return /\/auction\/[^/?#]+/i.test(url) || /\/Listing\/Details\/\d+/i.test(url);
 }
 
 function extractLabelValue(lines, label) {
@@ -245,20 +268,11 @@ const crawler = new CheerioCrawler({
         // LIST page
         const listingLinks = [];
 
-        $('.row.browse-item, .card.d-md-none.col-md-3, .browse-image').each((_, row) => {
-            const href = $(row).find('a.btn-viewbox[href*="/Listing/Details/"], a[href*="/Listing/Details/"]').first().attr('href');
-            if (!href) return;
-            const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            listingLinks.push(abs);
-        });
-
-        // Fallback: any Municibid listing detail link
-        if (listingLinks.length === 0) {
-            $('a[href*="/Listing/Details/"]').each((_, el) => {
+        for (const selector of LISTING_SELECTORS) {
+            $(selector).each((_, el) => {
                 const href = $(el).attr('href');
-                if (!href) return;
-                const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                if (/\/Listing\/Details\/\d+/i.test(abs)) listingLinks.push(abs);
+                const abs = toAbsoluteUrl(href);
+                if (isListingDetailUrl(abs)) listingLinks.push(abs);
             });
         }
 
@@ -275,16 +289,16 @@ const crawler = new CheerioCrawler({
 
         // Pagination
         const currentPage = request.userData?.pageNum ?? 1;
-        if (uniqueLinks.length > 0 && currentPage < maxPages) {
+        if (currentPage < maxPages) {
             const nextHref = $('a[rel="next"], .pagination a[aria-label*="Next"], .PagedList-skipToNext a').attr('href');
             if (nextHref) {
-                const nextAbs = nextHref.startsWith('http') ? nextHref : `${BASE}${nextHref}`;
+                const nextAbs = toAbsoluteUrl(nextHref);
                 await enqueueLinks({
                     urls: [nextAbs],
                     label: 'LIST',
                     userData: { pageNum: currentPage + 1 },
                 });
-            } else {
+            } else if (uniqueLinks.length > 0) {
                 const nextUrl = new URL(url);
                 nextUrl.searchParams.set('page', currentPage + 1);
                 await enqueueLinks({
@@ -389,9 +403,14 @@ const apiSuccess = await tryApiFetch(log);
 
 if (!apiSuccess) {
     console.log('[Municibid] API not available — falling back to web crawl');
-    await crawler.run([
-        { url: WEB_SEARCH_URL, label: 'LIST', userData: { pageNum: 1 } },
-    ]);
+    await crawler.run(
+        WEB_SEARCH_URLS.map((url, i) => ({
+            url,
+            label: 'LIST',
+            userData: { pageNum: 1 },
+            uniqueKey: `list-start-${i}`,
+        }))
+    );
 }
 
 console.log(`[MUNICIBID COMPLETE] Used API: ${usedApi} | Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
