@@ -36,8 +36,16 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7529788084")
 # Reason: already deployed, working, single path
 
 # Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
-_supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
-_supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+_supabase_url = (
+    os.getenv("SUPABASE_URL")
+    or os.getenv("VITE_SUPABASE_URL")
+    or "https://lbnxzvqppccajllsqaaw.supabase.co"
+)
+_supabase_key = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("VITE_SUPABASE_ANON_KEY")
+    or "SUPABASE_SERVICE_ROLE_KEY_REDACTED"
+)
 
 supabase_client = None
 try:
