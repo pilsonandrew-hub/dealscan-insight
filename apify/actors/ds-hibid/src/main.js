@@ -50,8 +50,18 @@ function normalizeText(value) {
 
 function isVehicle(title) {
     const lower = normalizeText(title).toLowerCase();
-    return VEHICLE_KEYWORDS.some((keyword) => lower.includes(keyword))
-        || VEHICLE_MAKES.some((make) => lower.includes(make));
+    // Must match a known make, OR a vehicle keyword + a model year (2000-2030)
+    // This prevents "car seats", "motor oil", "van accessories" etc from passing
+    const hasMake = VEHICLE_MAKES.some((make) => lower.includes(make));
+    const hasYear = /\b(200[0-9]|201[0-9]|202[0-9]|2030)\b/.test(lower);
+    const hasKeyword = VEHICLE_KEYWORDS.some((kw) => {
+        // Require word-boundary for short ambiguous keywords
+        if (['car', 'van', 'motor'].includes(kw)) {
+            return new RegExp(`\\b${kw}\\b`).test(lower) && hasYear;
+        }
+        return lower.includes(kw);
+    });
+    return hasMake || hasKeyword;
 }
 
 function parseVehicleTitle(title) {
