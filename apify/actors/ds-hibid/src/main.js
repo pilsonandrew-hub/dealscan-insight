@@ -825,8 +825,10 @@ const crawler = new PlaywrightCrawler({
         log.info(`[HiBid] Processing search page ${currentPage}: ${request.url}`);
 
         await page.waitForSelector('body', { timeout: 30000 });
-        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-        await page.waitForTimeout(3000);
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+        // Wait for Angular to render lot cards — up to 15s
+        await page.waitForSelector('a[href*="/lot/"], app-lot-card, .lot-card, [class*="lot"]', { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(2000);
 
         if (currentPage === 1 && !apiModeUsed) {
             const cookieHeader = (await page.context().cookies())
