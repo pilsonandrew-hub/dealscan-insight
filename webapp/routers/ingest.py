@@ -812,6 +812,30 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
     message_id_str = str(message_id)
     deal["message_id"] = message_id_str
     await insert_alert_log(deal, message_id_str)
+
+    # Also send to Slack #general (non-blocking — never fail the Telegram receipt on Slack error)
+    slack_token = os.getenv("SLACK_BOT_TOKEN")
+    slack_channel = os.getenv("SLACK_CHANNEL_ID", "C0ALM52FV25")
+    if slack_token:
+        try:
+            slack_text = (
+                f"🔥 *HOT DEAL* | {deal.get('year')} {deal.get('make')} {deal.get('model')} "
+                f"| DOS {deal['dos_score']} | ${deal.get('current_bid', 0):,.0f} "
+                f"| {deal.get('state', '?')} | <{deal.get('listing_url', '')}|View>"
+            )
+            async with httpx.AsyncClient(timeout=5.0) as sc:
+                slack_resp = await sc.post(
+                    "https://slack.com/api/chat.postMessage",
+                    headers={"Authorization": f"Bearer {slack_token}"},
+                    json={"channel": slack_channel, "text": slack_text},
+                )
+                if not slack_resp.json().get("ok"):
+                    logger.warning(f"[SLACK] Alert not ok: {slack_resp.json().get('error')}")
+                else:
+                    logger.info(f"[SLACK] Alert sent for {deal.get('make')} {deal.get('model')}")
+        except Exception as e:
+            logger.warning(f"[SLACK] Alert failed (non-fatal): {e}")
+
     return message_id_str
 
 
