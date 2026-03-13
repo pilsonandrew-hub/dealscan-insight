@@ -33,10 +33,20 @@ const EXCLUDE_KEYWORDS = ['tractor farm','combine','harvester','planter','cultiv
     'grain cart','hay baler','sprayer farm','corn head','header','auger','irrigation'];
 
 const SEARCH_URLS = [
-    `${BASE}/listings/trucks`,
-    `${BASE}/listings/trailers`,
-    `${BASE}/listings/trucks?sort=newest`,
-    `${BASE}/listings/trailers?sort=newest`,
+    `${BASE}/listings/pickup-trucks`,
+    `${BASE}/listings/search?q=truck`,
+    `${BASE}/listings/search?q=trailer`,
+    `${BASE}/listings/pickup-trucks?sort=newest`,
+];
+
+const LISTING_SELECTORS = [
+    '.listing-card a',
+    '.result-item a',
+    'a.listing-link',
+    '.vehicle-card a',
+    'a[href*="/listing/for-sale/"]',
+    'a[href*="/listing/upcoming-auctions/"]',
+    'a[href*="/listing/auction-results/"]',
 ];
 
 await Actor.init();
@@ -55,6 +65,21 @@ const targetStateSet = new Set(targetStates.map(s => s.toUpperCase()));
 const allListings = [];
 let totalFound = 0;
 let totalAfterFilters = 0;
+
+function toAbsoluteUrl(href) {
+    if (!href) return '';
+    return href.startsWith('http') ? href : `${BASE}${href}`;
+}
+
+function isDetailListingUrl(url) {
+    try {
+        const { pathname } = new URL(url);
+        if (!pathname.startsWith('/listing/')) return false;
+        return /\/for-sale\//i.test(pathname) || /\/\d+\/?$/i.test(pathname);
+    } catch {
+        return false;
+    }
+}
 
 function isCommercialVehicle(title) {
     const lower = title.toLowerCase();
@@ -178,22 +203,12 @@ const crawler = new CheerioCrawler({
         // LIST page — AuctionTime lot links follow Sandhills listing patterns.
         const listingLinks = [];
 
-        $('a[href*="/listing/upcoming-auctions/"][href*="/for-sale/"], a[href*="/listing/auction-results/"][href*="/for-sale/"], a[href*="/listing/for-sale/"]').each((_, el) => {
-            const href = $(el).attr('href');
-            if (!href) return;
-            const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            if (abs.match(/\/listing\/(?:upcoming-auctions|auction-results|for-sale)\/.+\/for-sale\/\d+/i)) {
-                listingLinks.push(abs);
-            }
-        });
-
-        // Fallback: keep only detail-shaped URLs rather than generic cards.
-        if (listingLinks.length === 0) {
-            $('a[href*="/listing/upcoming-auctions/"], a[href*="/listing/auction-results/"], a[href*="/listing/for-sale/"]').each((_, el) => {
+        for (const selector of LISTING_SELECTORS) {
+            $(selector).each((_, el) => {
                 const href = $(el).attr('href');
-                if (!href) return;
-                const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                if (!abs.includes('#') && abs !== url && abs.match(/\/listing\/.+\/for-sale\/\d+/i)) listingLinks.push(abs);
+                const abs = toAbsoluteUrl(href);
+                if (!abs || abs.includes('#') || abs === url) return;
+                if (isDetailListingUrl(abs)) listingLinks.push(abs);
             });
         }
 
@@ -213,7 +228,7 @@ const crawler = new CheerioCrawler({
         if (currentPage < maxPages) {
             const nextHref = $('a[rel="next"], [class*="pagination"] a[class*="next"], a[aria-label*="Next"]').attr('href');
             if (nextHref) {
-                const nextAbs = nextHref.startsWith('http') ? nextHref : `${BASE}${nextHref}`;
+                const nextAbs = toAbsoluteUrl(nextHref);
                 await enqueueLinks({
                     urls: [nextAbs],
                     label: 'LIST',

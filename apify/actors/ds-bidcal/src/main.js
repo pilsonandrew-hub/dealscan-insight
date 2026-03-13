@@ -21,9 +21,8 @@ const VEHICLE_MAKES = ['ford','chevrolet','chevy','dodge','ram','toyota','honda'
     'cadillac','lincoln','buick','pontiac','mitsubishi','volvo','tesla','rivian','lucid','genesis'];
 
 const SEARCH_URLS = [
-    `${BASE}/`,
-    `${BASE}/auctions`,
-    `${BASE}/auctions/previous`,
+    `${BASE}/?s=truck`,
+    `${BASE}/?s=car+suv`,
 ];
 
 await Actor.init();
@@ -100,6 +99,23 @@ function normalizeText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
+function toAbsoluteUrl(href) {
+    if (!href) return null;
+    try {
+        return new URL(href, BASE).toString();
+    } catch {
+        return null;
+    }
+}
+
+function isLikelyDetailUrl(url) {
+    if (!url) return false;
+    const normalized = url.toLowerCase();
+    if (normalized.includes('#')) return false;
+    return normalized.includes('hibid.com') ||
+        /\/(auction|auctions|listing|listings|item|items|lot|lots)\b/.test(normalized);
+}
+
 function applyFilters(listing, log) {
     if (!isVehicle(listing.title)) {
         log.debug(`[SKIP] Not a vehicle: ${listing.title}`);
@@ -151,23 +167,12 @@ const crawler = new CheerioCrawler({
         // LIST page — BidCal auction cards and gallery pages
         const listingLinks = [];
 
-        $('div.auction-listing a[href^="/auctions/gallery/"], section.upcoming-auctions a[href^="/auctions/gallery/"], ul.gallery-thumbs .lot-link a[href*="hibid.com"]').each((_, el) => {
-            const href = $(el).attr('href');
-            if (!href) return;
-            const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-            if (abs.match(/\/auctions\/gallery\/\d+$/i) || abs.includes('hibid.com')) {
-                listingLinks.push(abs);
-            }
-        });
-
-        // Fallback: gallery items and home page cards
-        if (listingLinks.length === 0) {
-            $('.auction-listing h3 a, .auction-listing .listing-images a[href^="/auctions/gallery/"], .gallery-thumbs a.gallery-item[data-caption*="View Lot"]').each((_, el) => {
-                const href = $(el).attr('href');
-                if (!href) return;
-                const abs = href.startsWith('http') ? href : `${BASE}${href}`;
-                if (!abs.includes('#') && (abs.match(/\/auctions\/gallery\/\d+$/i) || abs.includes('hibid.com'))) listingLinks.push(abs);
+        for (const selector of ['.auction-card a', '.listing a', 'h2 a', '.item-title a', `a[href*='auction']`]) {
+            $(selector).each((_, el) => {
+                const abs = toAbsoluteUrl($(el).attr('href'));
+                if (isLikelyDetailUrl(abs)) listingLinks.push(abs);
             });
+            if (listingLinks.length > 0) break;
         }
 
         const inlineListings = [];
