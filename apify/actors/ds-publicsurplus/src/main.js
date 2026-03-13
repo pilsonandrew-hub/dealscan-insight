@@ -14,7 +14,8 @@ const HIGH_RUST_STATES = new Set([
 const VEHICLE_KEYWORDS = ['car', 'truck', 'suv', 'van', 'pickup', 'sedan', 'coupe', 'wagon', 'vehicle', 'automobile', 'motor', '4wd', 'awd', 'hybrid'];
 const VEHICLE_MAKES = ['ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', 'honda', 'nissan', 'jeep', 'gmc', 'chrysler',
     'hyundai', 'kia', 'subaru', 'mazda', 'volkswagen', 'vw', 'bmw', 'mercedes', 'audi', 'lexus', 'acura', 'infiniti',
-    'cadillac', 'lincoln', 'buick', 'pontiac', 'mitsubishi', 'volvo', 'tesla', 'rivian', 'lucid', 'genesis'];
+    'cadillac', 'lincoln', 'buick', 'pontiac', 'mitsubishi', 'volvo', 'tesla', 'saturn', 'isuzu', 'hummer',
+    'rivian', 'lucid', 'genesis'];
 
 const BASE_URL = 'https://www.publicsurplus.com';
 // 'all' = nationwide search across all agencies (not just WA)
@@ -54,6 +55,70 @@ function isVehicle(title) {
 function parseMoney(value) {
     const match = normalizeText(value).match(/\$?([\d,]+(?:\.\d+)?)/);
     return match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+}
+
+// Canonical make list for normalization (lower-case keys → display name)
+const MAKE_CANONICAL = {
+    'ford': 'Ford', 'chevrolet': 'Chevrolet', 'chevy': 'Chevrolet',
+    'toyota': 'Toyota', 'honda': 'Honda', 'nissan': 'Nissan',
+    'dodge': 'Dodge', 'ram': 'RAM', 'jeep': 'Jeep', 'gmc': 'GMC',
+    'chrysler': 'Chrysler', 'hyundai': 'Hyundai', 'kia': 'Kia',
+    'subaru': 'Subaru', 'mazda': 'Mazda', 'bmw': 'BMW',
+    'mercedes': 'Mercedes', 'audi': 'Audi', 'lexus': 'Lexus',
+    'acura': 'Acura', 'infiniti': 'Infiniti', 'cadillac': 'Cadillac',
+    'lincoln': 'Lincoln', 'buick': 'Buick', 'pontiac': 'Pontiac',
+    'mitsubishi': 'Mitsubishi', 'volvo': 'Volvo', 'tesla': 'Tesla',
+    'saturn': 'Saturn', 'isuzu': 'Isuzu', 'hummer': 'Hummer',
+    'volkswagen': 'Volkswagen', 'vw': 'Volkswagen',
+    'rivian': 'Rivian', 'lucid': 'Lucid', 'genesis': 'Genesis',
+};
+
+/**
+ * Parse a PublicSurplus auction title into year/make/model.
+ * Handles formats like:
+ *   "2. 2017 Ford Explorer"
+ *   "6. Two (2) 2005 CHEVY TAHOES"
+ *   "ADOT - CF57 - 2013 FORD F250 P/U 3/4 TON"
+ *   "(APD-184) 2019 Dodge Charger"
+ */
+function parseVehicleTitle(rawTitle) {
+    let title = normalizeText(rawTitle);
+
+    // 1. Strip leading number/dot: "2. " or "12. "
+    title = title.replace(/^\d+\.\s*/, '');
+
+    // 2. Strip agency prefix patterns:
+    //    "ADOT - CF57 - "  (AGENCY - CODE - )
+    //    "(APD-184) "       (parens code)
+    title = title.replace(/^[A-Z0-9 ]{2,10}\s*-\s*[A-Z0-9 ]{2,10}\s*-\s*/i, '');
+    title = title.replace(/^\([^)]{1,20}\)\s*/i, '');
+    title = normalizeText(title);
+
+    // 3. Extract year 1990–2026
+    const yearMatch = title.match(/\b(199\d|200\d|201\d|202[0-6])\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+
+    // 4 & 5. Extract make and model
+    let make = null;
+    let model = null;
+    const lowerTitle = title.toLowerCase();
+
+    for (const lowerMake of Object.keys(MAKE_CANONICAL)) {
+        const idx = lowerTitle.indexOf(lowerMake);
+        if (idx === -1) continue;
+        // Ensure word boundary before and after to avoid partial matches (e.g. "ford" in "afford")
+        const before = idx === 0 || /\W/.test(lowerTitle[idx - 1]);
+        const after = idx + lowerMake.length >= lowerTitle.length || /\W/.test(lowerTitle[idx + lowerMake.length]);
+        if (!before || !after) continue;
+
+        make = MAKE_CANONICAL[lowerMake];
+        const afterMake = title.slice(idx + lowerMake.length).trim();
+        const modelMatch = afterMake.match(/^([A-Za-z0-9/-]+(?:\s+[A-Za-z0-9/-]+)?)/);
+        if (modelMatch) model = modelMatch[1].trim();
+        break;
+    }
+
+    return { year, make, model };
 }
 
 function parseAuctionDate(value) {
@@ -109,8 +174,13 @@ async function pushListing(listing, sourceUrl, log) {
     }
     seenListings.add(dedupeKey);
 
+    const { year, make, model } = parseVehicleTitle(title);
+
     const vehicle = {
         title,
+        year,
+        make,
+        model,
         current_bid: currentBid,
         buyer_premium: 0.10,
         doc_fee: 50,

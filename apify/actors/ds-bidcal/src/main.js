@@ -1,3 +1,21 @@
+/**
+ * ds-bidcal — BidCal Auction Scraper
+ *
+ * STATUS: NOT A SEPARATE SOURCE — BidCal is a HiBid white-label customer.
+ *
+ * Investigation results (2026-03-13):
+ * - bidcal.com loads without bot protection (200 OK on all pages).
+ * - However, BidCal's actual auction catalog lives at bidcal.hibid.com (HiBid white-label).
+ * - All lot/item links on bidcal.com redirect to the HiBid platform.
+ * - Scraping bidcal.com itself yields no lot data — only auction event listings with links
+ *   into the HiBid platform where Cloudflare Turnstile is enforced.
+ * - BidCal focuses on farm equipment, construction equipment, and Northern California
+ *   government surplus — not primarily consumer/passenger vehicles.
+ *
+ * This actor should be RETIRED. The ds-hibid actor covers the HiBid platform.
+ * No separate deployment needed for BidCal specifically.
+ */
+
 import { Actor } from 'apify';
 import { CheerioCrawler } from 'crawlee';
 

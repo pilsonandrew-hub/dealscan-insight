@@ -1,3 +1,31 @@
+/**
+ * ds-hibid — HiBid Auction Platform Scraper
+ *
+ * STATUS: BLOCKED — Cloudflare Turnstile prevents Playwright from rendering lot pages.
+ *
+ * What was tried:
+ * - PlaywrightCrawler with API traffic capture (XHR/fetch interception)
+ * - Cloudflare Turnstile challenges are injected before Angular mounts, blocking all
+ *   browser-based automation including headless Playwright.
+ *
+ * API investigation results (2026-03-13):
+ * - hibid.com/graphql endpoint exists and returns JSON ({"version":"1.0.0.0","site":"WWW"})
+ * - The site uses Apollo Client (GraphQL) — query shapes like `lotSearch` and `auctionSearch`
+ *   are visible in the Apollo state bundle.
+ * - GraphQL introspection is disabled; the exact query shapes are compiled into JS bundles.
+ * - api.hibid.com redirects to hibid.com — no separate API subdomain accessible publicly.
+ * - No public REST or RSS API found.
+ *
+ * Options to fix:
+ * 1. Reverse-engineer the Apollo GraphQL bundle to find working lotSearch query shape,
+ *    then POST to /graphql without triggering Turnstile (might work if /graphql has no challenge).
+ * 2. Use a residential proxy + Playwright with turnstile-solving service.
+ * 3. Use HiBid's official partner API (requires business relationship).
+ *
+ * Content note: HiBid hosts a broad range of auction content (estate, antiques, tools, coins).
+ * Vehicles are a subset and searches need careful filtering.
+ */
+
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 

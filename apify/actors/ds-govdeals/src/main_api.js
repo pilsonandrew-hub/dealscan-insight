@@ -58,7 +58,7 @@ function passes(item) {
     const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;
     const year = parseInt(item.modelYear || item.year || 0);
-    if (year && (new Date().getFullYear() - year) > 4) return false;
+    if (year && (new Date().getFullYear() - year) > 12) return false;
     return true;
 }
 

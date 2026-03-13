@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "DealerScope scraper for GovDeals vehicle auctions",
   "type": "module",
-  "main": "src/main.js",
+  "main": "src/main_api.js",
   "scripts": {
-    "start": "node src/main.js"
+    "start": "node src/main_api.js"
   },
   "dependencies": {
     "apify": "^3.0.0",

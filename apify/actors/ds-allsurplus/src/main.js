@@ -1,3 +1,22 @@
+/**
+ * ds-allsurplus — AllSurplus (Ritchie Bros.) Scraper
+ *
+ * STATUS: BLOCKED — Enterprise-grade bot protection returns HTTP 403 on all URLs.
+ *
+ * API investigation results (2026-03-13):
+ * - /api/search?q=truck returns 403 Forbidden immediately (no content, no headers to inspect).
+ * - All web pages (/search?q=truck, homepage) also return 403.
+ * - Ritchie Bros. uses server-side IP reputation + fingerprinting; no User-Agent header trick works.
+ * - No public REST, GraphQL, or RSS API found.
+ *
+ * Options to fix:
+ * 1. Use residential proxies with Playwright + realistic browser fingerprinting.
+ * 2. AllSurplus has a partner/dealer API — requires business account with Ritchie Bros.
+ * 3. Use IronPDF or Apify's SERP proxy to access results.
+ *
+ * This actor will always fail the API probe and the Playwright fallback will also 403.
+ */
+
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 const SOURCE = 'allsurplus';
