@@ -35,6 +35,7 @@ const capturedApi = {
     searchUrl: 'https://maestro.lqdt1.com/search/list',
     searchPayload: null,
     requestHeaders: null,
+    interceptedLots: [],  // lots captured directly from page responses
 };
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
@@ -109,6 +110,12 @@ const crawler = new PlaywrightCrawler({
                 if (lots.length > 0 && url.includes('/search/list')) {
                     log.info(`[SEARCH URL FOUND] ${url} → ${lots.length} items`);
                     capturedApi.searchUrl = url;
+                    // Save intercepted lots directly — don't rely on direct API replay
+                    for (const lot of lots) {
+                        if (!capturedApi.interceptedLots.find(l => l.assetId === lot.assetId)) {
+                            capturedApi.interceptedLots.push(lot);
+                        }
+                    }
                 }
             } catch (_) {}
         });
@@ -150,10 +157,22 @@ const crawler = new PlaywrightCrawler({
             log.info('✅ maestro x-api-key captured successfully');
             log.info(`Search API URL: ${capturedApi.searchUrl || 'NOT FOUND'}`);
 
+            // First: save all intercepted lots from the page load itself
+            if (capturedApi.interceptedLots.length > 0) {
+                log.info(`Saving ${capturedApi.interceptedLots.length} intercepted lots from page load`);
+                for (const lot of capturedApi.interceptedLots) {
+                    totalFound++;
+                    if (!passes(lot)) continue;
+                    totalPassed++;
+                    await Actor.pushData(normalizeLot(lot));
+                }
+            }
+
+            // Then: attempt direct API pagination for more pages
             if (capturedApi.searchPayload) {
                 await paginateWithAuth(page, log);
             } else {
-                log.warning('❌ Search payload not captured — no /search/list replay yet');
+                log.warning('No search payload for pagination — using intercepted data only');
             }
         } else {
             log.warning('❌ No maestro x-api-key captured');
@@ -161,6 +180,26 @@ const crawler = new PlaywrightCrawler({
         }
     },
 });
+
+function normalizeLot(lot) {
+    return {
+        title:         lot.assetShortDescription || lot.title || '',
+        make:          lot.makebrand || lot.make || '',
+        model:         lot.model || '',
+        year:          lot.modelYear || lot.year || null,
+        current_bid:   lot.currentBid || lot.current_bid || lot.assetBidPrice || 0,
+        state:         lot.locationState || lot.state || '',
+        city:          lot.locationCity || lot.city || '',
+        auction_end_time: lot.assetAuctionEndDateUtc || lot.auctionEndUtc || lot.auctionEnd || null,
+        listing_url:   lot.url || `https://www.govdeals.com/asset/${lot.assetId}/${lot.accountId}`,
+        seller:        lot.displaySellerName || lot.companyName || lot.seller || '',
+        photo_url:     lot.imageUrl || (lot.photo ? `https://webassets.lqdt1.com/assets/photos/${lot.photo}` : ''),
+        vin:           lot.vin || null,
+        mileage:       lot.meterCount || null,
+        source_site:   'govdeals',
+        scraped_at:    new Date().toISOString(),
+    };
+}
 
 async function paginateWithAuth(page, log) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
@@ -180,7 +219,8 @@ async function paginateWithAuth(page, log) {
             const resp = await page.evaluate(async ({ url, hdrs, body }) => {
                 const r = await fetch(url, {
                     method: 'POST',
-                    headers: hdrs,
+                    headers: { ...hdrs, origin: 'https://www.govdeals.com', referer: 'https://www.govdeals.com/' },
+                    credentials: 'include',
                     body: JSON.stringify(body),
                 });
                 const json = r.ok ? await r.json() : null;
@@ -205,25 +245,7 @@ async function paginateWithAuth(page, log) {
                 totalFound++;
                 if (!passes(lot)) continue;
                 totalPassed++;
-                await Actor.pushData({
-                    title:         lot.assetShortDescription || lot.title || '',
-                    make:          lot.makebrand || lot.make || '',
-                    model:         lot.model || '',
-                    modelYear:     lot.modelYear || lot.year || null,
-                    currentBid:    lot.currentBid || lot.current_bid || lot.assetBidPrice || 0,
-                    locationState: lot.locationState || lot.state || '',
-                    locationCity:  lot.locationCity || lot.city || '',
-                    auctionEndUtc: lot.assetAuctionEndDateUtc || lot.auctionEndUtc || lot.auctionEnd || null,
-                    url:           lot.url || `https://www.govdeals.com/asset/${lot.assetId}/${lot.accountId}`,
-                    seller:        lot.displaySellerName || lot.companyName || lot.seller || '',
-                    imageUrl:      lot.imageUrl || (lot.photo ? `https://webassets.lqdt1.com/assets/photos/${lot.photo}` : ''),
-                    photos:        lot.photos || (lot.photo ? [`https://webassets.lqdt1.com/assets/photos/${lot.photo}`] : []),
-                    vin:           lot.vin || null,
-                    meterCount:    lot.meterCount || null,
-                    breadcrumbs:   lot.breadcrumbs || [lot.categoryDescription].filter(Boolean),
-                    source_site:   'govdeals',
-                    scraped_at:    new Date().toISOString(),
-                });
+                await Actor.pushData(normalizeLot(lot));
             }
         } catch (err) {
             log.warning(`Page ${pageNum} failed: ${err.message}`);
