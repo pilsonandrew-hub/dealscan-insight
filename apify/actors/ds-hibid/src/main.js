@@ -3,7 +3,9 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'hibid-bidcal';
 const BASE_URL = 'https://hibid.com';
-const SEARCH_URL = `${BASE_URL}/auctions?category=vehicle&sort=newest`;
+// Lots search = individual items (not auction events). Vehicle keywords filter for relevant lots.
+const VEHICLE_SEARCH_TERMS = 'truck suv pickup ford chevrolet toyota honda nissan dodge jeep gmc ram';
+const SEARCH_URL = `${BASE_URL}/catalog/lots?keywords=${encodeURIComponent(VEHICLE_SEARCH_TERMS)}&status=OPEN&sort=newest`;
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
