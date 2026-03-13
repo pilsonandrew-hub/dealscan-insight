@@ -1,8 +1,9 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
-const SOURCE = 'hibid';
-const SEARCH_URL = 'https://hibid.com/auctions?category=vehicle&sort=newest';
+const SOURCE = 'hibid-bidcal';
+const BASE_URL = 'https://hibid.com';
+const SEARCH_URL = `${BASE_URL}/auctions?category=vehicle&sort=newest`;
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
@@ -23,7 +24,7 @@ await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 15,
+    maxPages = 6,
     minBid = 1000,
     maxMileage = 50000,
     minYear = 2022,
@@ -31,8 +32,13 @@ const {
 } = input;
 
 const targetStateSet = new Set(targetStates.map((state) => state.toUpperCase()));
+const effectiveMaxPages = Math.max(1, Math.min(maxPages, 6));
+const fallbackMaxPages = Math.min(effectiveMaxPages, 3);
+const seenListings = new Set();
+
 let totalFound = 0;
 let totalAfterFilters = 0;
+let apiModeUsed = false;
 
 function normalizeText(value) {
     return String(value ?? '')
@@ -119,172 +125,725 @@ function parseVin(text) {
     return match ? match[1] : null;
 }
 
-async function processSearchResults(results, sourceUrl, log) {
-    for (const result of results) {
-        const title = normalizeText(result.title);
-        if (!title || !isVehicle(title)) {
+function toAbsoluteUrl(value) {
+    const normalized = normalizeText(value);
+    if (!normalized) return null;
+
+    try {
+        return new URL(normalized, BASE_URL).toString();
+    } catch {
+        return null;
+    }
+}
+
+function pickFirst(objects, keys) {
+    for (const object of objects) {
+        if (!object || typeof object !== 'object') continue;
+        for (const key of keys) {
+            const value = object[key];
+            if (Array.isArray(value) && value.length > 0) {
+                return value;
+            }
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                if (normalizeText(value) !== '') {
+                    return value;
+                }
+            }
+            if (value instanceof Date) {
+                return value;
+            }
+        }
+    }
+    return null;
+}
+
+function getNestedObjects(item) {
+    const nestedObjects = [item];
+
+    for (const key of ['lot', 'item', 'auction', 'listing', 'result', 'data', 'vehicle']) {
+        const nested = item?.[key];
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+            nestedObjects.push(nested);
+        }
+    }
+
+    return nestedObjects;
+}
+
+function extractLocation(item) {
+    const sources = getNestedObjects(item);
+    const explicit = pickFirst(sources, [
+        'location',
+        'locationText',
+        'auctionLocation',
+        'saleLocation',
+        'address',
+        'cityState',
+        'city_state',
+        'auctionLocationText',
+    ]);
+
+    if (explicit) return normalizeText(explicit);
+
+    const city = normalizeText(pickFirst(sources, ['city', 'auctionCity', 'saleCity']));
+    const state = normalizeText(pickFirst(sources, ['state', 'stateCode', 'state_code', 'auctionState']));
+    const zip = normalizeText(pickFirst(sources, ['zip', 'zipcode', 'postalCode']));
+
+    return [city, state, zip].filter(Boolean).join(', ');
+}
+
+function extractImageUrl(item) {
+    const sources = getNestedObjects(item);
+    const direct = pickFirst(sources, [
+        'photo_url',
+        'photoUrl',
+        'image_url',
+        'imageUrl',
+        'thumbnail',
+        'thumbUrl',
+        'primaryImage',
+        'image',
+    ]);
+    if (direct) return toAbsoluteUrl(direct);
+
+    const images = pickFirst(sources, ['images', 'photos', 'media']);
+    if (Array.isArray(images)) {
+        for (const image of images) {
+            if (!image || typeof image !== 'object') continue;
+            const candidate = pickFirst([image], ['url', 'src', 'image_url', 'imageUrl', 'thumbnail']);
+            if (candidate) return toAbsoluteUrl(candidate);
+        }
+    }
+
+    return null;
+}
+
+function extractListingUrl(item) {
+    const sources = getNestedObjects(item);
+    const direct = pickFirst(sources, [
+        'listing_url',
+        'listingUrl',
+        'url',
+        'href',
+        'lotUrl',
+        'itemUrl',
+        'link',
+        'canonicalUrl',
+    ]);
+    if (direct) return toAbsoluteUrl(direct);
+
+    const lotId = normalizeText(pickFirst(sources, ['lotId', 'lot_id', 'itemId', 'item_id', 'id']));
+    return lotId ? `${BASE_URL}/lot/${lotId}` : null;
+}
+
+function createListingId(item, listingUrl) {
+    const sources = getNestedObjects(item);
+    const id = normalizeText(pickFirst(sources, ['lotId', 'lot_id', 'itemId', 'item_id', 'id', 'auctionLotId']));
+    if (id) return String(id);
+    if (listingUrl) return `hibid-${Buffer.from(listingUrl).toString('base64').slice(0, 20)}`;
+    return `hibid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildListing(rawResult, sourceUrl) {
+    const title = normalizeText(rawResult.title);
+    const location = normalizeText(rawResult.location);
+    const detailsText = [
+        title,
+        rawResult.description,
+        rawResult.cardText,
+        rawResult.location,
+        rawResult.endText,
+    ].map(normalizeText).filter(Boolean).join(' ');
+    const state = rawResult.state ? normalizeText(rawResult.state).toUpperCase() : parseState(location);
+    const bid = parseBid(rawResult.bidText ?? rawResult.currentBid ?? rawResult.current_bid);
+    const mileage = rawResult.mileage ?? parseMileage(detailsText);
+    const vin = rawResult.vin ?? parseVin(detailsText);
+    const listingUrl = toAbsoluteUrl(rawResult.listingUrl) || sourceUrl;
+    const { year, make, model } = parseVehicleTitle(title);
+
+    return {
+        listing_id: rawResult.lotId || createListingId(rawResult.originalItem ?? rawResult, listingUrl),
+        title,
+        current_bid: bid,
+        buy_now_price: null,
+        auction_end_date: parseDate(rawResult.endText),
+        state: state || null,
+        listing_url: listingUrl,
+        image_url: toAbsoluteUrl(rawResult.imageUrl) || null,
+        mileage: mileage || null,
+        vin: vin || null,
+        year,
+        make,
+        model,
+        source_site: SOURCE,
+        scraped_at: new Date().toISOString(),
+    };
+}
+
+function passesFilters(listing, log) {
+    if (!listing.title || !isVehicle(listing.title)) {
+        log.debug(`[SKIP] Not a vehicle: ${listing.title || 'unknown title'}`);
+        return false;
+    }
+    if (listing.state && HIGH_RUST_STATES.has(listing.state)) {
+        log.debug(`[SKIP] High-rust state: ${listing.state} - ${listing.title}`);
+        return false;
+    }
+    if (listing.state && !targetStateSet.has(listing.state)) {
+        log.debug(`[SKIP] Out-of-target state: ${listing.state} - ${listing.title}`);
+        return false;
+    }
+    if (listing.current_bid > 0 && listing.current_bid < minBid) {
+        log.debug(`[SKIP] Bid too low: $${listing.current_bid} - ${listing.title}`);
+        return false;
+    }
+    if (listing.year && listing.year < minYear) {
+        log.debug(`[SKIP] Too old: ${listing.year} - ${listing.title}`);
+        return false;
+    }
+    if (listing.mileage && listing.mileage > maxMileage) {
+        log.debug(`[SKIP] Too many miles: ${listing.mileage} - ${listing.title}`);
+        return false;
+    }
+    return true;
+}
+
+async function pushListing(rawResult, sourceUrl, log) {
+    const listing = buildListing(rawResult, sourceUrl);
+    if (!passesFilters(listing, log)) return false;
+
+    const dedupeKey = listing.listing_url || listing.listing_id || `${listing.title}-${listing.state}-${listing.current_bid}`;
+    if (seenListings.has(dedupeKey)) {
+        log.debug(`[SKIP] Duplicate listing: ${dedupeKey}`);
+        return false;
+    }
+
+    seenListings.add(dedupeKey);
+    totalAfterFilters++;
+    log.info(`[PASS] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
+    await Actor.pushData(listing);
+    return true;
+}
+
+function safeJsonParse(value) {
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+}
+
+function scoreItemArray(items) {
+    if (!Array.isArray(items) || items.length === 0 || typeof items[0] !== 'object') return 0;
+
+    let score = 0;
+    for (const item of items.slice(0, 5)) {
+        const keys = Object.keys(item).map((key) => key.toLowerCase());
+        if (keys.some((key) => /title|name|item|lot/.test(key))) score += 3;
+        if (keys.some((key) => /bid|price|current/.test(key))) score += 2;
+        if (keys.some((key) => /state|location|city|address/.test(key))) score += 1;
+        if (keys.some((key) => /end|close|time|date/.test(key))) score += 1;
+    }
+
+    return score;
+}
+
+function extractItemsFromPayload(payload) {
+    const seen = new WeakSet();
+    let best = { score: 0, items: [] };
+
+    const visit = (value, depth) => {
+        if (!value || depth > 5) return;
+
+        if (Array.isArray(value)) {
+            const score = scoreItemArray(value);
+            if (score > best.score) {
+                best = { score, items: value };
+            }
+            for (const entry of value.slice(0, 3)) {
+                visit(entry, depth + 1);
+            }
+            return;
+        }
+
+        if (typeof value !== 'object') return;
+        if (seen.has(value)) return;
+        seen.add(value);
+
+        for (const nested of Object.values(value)) {
+            visit(nested, depth + 1);
+        }
+    };
+
+    visit(payload, 0);
+    return best.items;
+}
+
+function isRelevantApiUrl(url) {
+    const lower = String(url).toLowerCase();
+    return lower.includes('hibid')
+        && (lower.includes('api')
+            || lower.includes('search')
+            || lower.includes('auction')
+            || lower.includes('lot')
+            || lower.includes('item')
+            || lower.includes('vehicle'));
+}
+
+function normalizeHeaderEntries(entries) {
+    const headers = {};
+    for (const [key, value] of Object.entries(entries ?? {})) {
+        if (!value) continue;
+        headers[key.toLowerCase()] = value;
+    }
+    return headers;
+}
+
+function selectApiCapture(traffic) {
+    const captures = [];
+
+    for (const response of traffic.responses) {
+        const payload = safeJsonParse(response.bodyText);
+        if (!payload) continue;
+
+        const items = extractItemsFromPayload(payload);
+        if (!items.length) continue;
+
+        const sampleTitles = items.slice(0, 5)
+            .map((item) => normalizeText(pickFirst(getNestedObjects(item), ['title', 'name', 'lotTitle', 'lot_title', 'itemTitle', 'item_title', 'description'])))
+            .filter(Boolean);
+        const vehicleHits = sampleTitles.filter((title) => isVehicle(title)).length;
+        const urlScore = isRelevantApiUrl(response.url) ? 4 : 0;
+        const score = (items.length > 0 ? 3 : 0) + vehicleHits * 3 + urlScore;
+
+        captures.push({
+            score,
+            payload,
+            items,
+            response,
+        });
+    }
+
+    captures.sort((a, b) => b.score - a.score || b.items.length - a.items.length);
+    return captures[0] || null;
+}
+
+function getPageSize(capture) {
+    const requestInfo = capture.response.request ?? {};
+    const requestUrl = requestInfo.url || capture.response.url;
+
+    try {
+        const parsedUrl = new URL(requestUrl);
+        for (const key of ['limit', 'pageSize', 'page_size', 'per_page', 'perPage', 'rows', 'size', 'take']) {
+            const value = parsedUrl.searchParams.get(key);
+            if (value && Number(value) > 0) return Number(value);
+        }
+    } catch {
+        // Ignore URL parsing failures.
+    }
+
+    const postData = requestInfo.postData;
+    if (postData) {
+        const parsed = safeJsonParse(postData);
+        if (parsed && typeof parsed === 'object') {
+            const size = findPaginationSize(parsed);
+            if (size) return size;
+        }
+    }
+
+    return Math.max(20, capture.items.length);
+}
+
+function findPaginationSize(value, depth = 0) {
+    if (!value || depth > 4 || typeof value !== 'object') return null;
+
+    for (const [key, entry] of Object.entries(value)) {
+        const lower = key.toLowerCase();
+        if (['limit', 'pagesize', 'page_size', 'perpage', 'per_page', 'size', 'rows', 'take'].includes(lower)) {
+            const numeric = Number(entry);
+            if (numeric > 0) return numeric;
+        }
+        if (entry && typeof entry === 'object') {
+            const nested = findPaginationSize(entry, depth + 1);
+            if (nested) return nested;
+        }
+    }
+
+    return null;
+}
+
+function updateUrlPagination(url, pageNum, pageSize) {
+    const parsed = new URL(url);
+    let touched = false;
+
+    for (const key of ['page', 'pageNum', 'page_num', 'pageNumber', 'page_number', 'currentPage']) {
+        if (parsed.searchParams.has(key)) {
+            parsed.searchParams.set(key, String(pageNum));
+            touched = true;
+        }
+    }
+
+    for (const key of ['offset', 'start', 'skip', 'from']) {
+        if (parsed.searchParams.has(key)) {
+            parsed.searchParams.set(key, String((pageNum - 1) * pageSize));
+            touched = true;
+        }
+    }
+
+    if (!touched) {
+        parsed.searchParams.set('page', String(pageNum));
+    }
+
+    return parsed.toString();
+}
+
+function mutatePagination(value, pageNum, pageSize, depth = 0) {
+    if (!value || depth > 5 || typeof value !== 'object') return false;
+
+    let touched = false;
+
+    for (const [key, entry] of Object.entries(value)) {
+        const lower = key.toLowerCase();
+
+        if (['page', 'pagenum', 'page_num', 'pagenumber', 'page_number', 'currentpage'].includes(lower)) {
+            value[key] = pageNum;
+            touched = true;
             continue;
         }
 
-        const location = normalizeText(result.location);
-        const state = parseState(location);
-        const bid = parseBid(result.bidText);
-        const detailsText = [title, result.description, result.cardText].map(normalizeText).filter(Boolean).join(' ');
-        const mileage = result.mileage ?? parseMileage(detailsText);
-        const vin = result.vin ?? parseVin(detailsText);
-        const { year, make, model } = parseVehicleTitle(title);
-
-        if (state && HIGH_RUST_STATES.has(state)) {
-            log.debug(`[SKIP] High-rust state: ${state} - ${title}`);
-            continue;
-        }
-        if (state && !targetStateSet.has(state)) {
-            log.debug(`[SKIP] Out-of-target state: ${state} - ${title}`);
-            continue;
-        }
-        if (bid > 0 && bid < minBid) {
-            log.debug(`[SKIP] Bid too low: $${bid} - ${title}`);
-            continue;
-        }
-        if (year && year < minYear) {
-            log.debug(`[SKIP] Too old: ${year} - ${title}`);
-            continue;
-        }
-        if (mileage && mileage > maxMileage) {
-            log.debug(`[SKIP] Too many miles: ${mileage} - ${title}`);
+        if (['offset', 'start', 'skip', 'from'].includes(lower)) {
+            value[key] = (pageNum - 1) * pageSize;
+            touched = true;
             continue;
         }
 
-        const listing = {
-            listing_id: result.lotId || `hibid-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            title,
-            current_bid: bid,
-            buy_now_price: null,
-            auction_end_date: parseDate(result.endText),
-            state: state || null,
-            listing_url: result.listingUrl || sourceUrl,
-            image_url: result.imageUrl || null,
-            mileage: mileage || null,
-            vin: vin || null,
-            year,
-            make,
-            model,
-            source_site: SOURCE,
-            scraped_at: new Date().toISOString(),
+        if (entry && typeof entry === 'object') {
+            touched = mutatePagination(entry, pageNum, pageSize, depth + 1) || touched;
+        }
+    }
+
+    return touched;
+}
+
+function updateBodyPagination(bodyText, pageNum, pageSize) {
+    if (!bodyText) return bodyText;
+
+    const jsonBody = safeJsonParse(bodyText);
+    if (jsonBody && typeof jsonBody === 'object') {
+        const clone = JSON.parse(JSON.stringify(jsonBody));
+        const touched = mutatePagination(clone, pageNum, pageSize);
+        if (!touched) {
+            clone.page = pageNum;
+        }
+        return JSON.stringify(clone);
+    }
+
+    const params = new URLSearchParams(bodyText);
+    let touched = false;
+
+    for (const key of ['page', 'pageNum', 'page_num', 'pageNumber', 'page_number', 'currentPage']) {
+        if (params.has(key)) {
+            params.set(key, String(pageNum));
+            touched = true;
+        }
+    }
+
+    for (const key of ['offset', 'start', 'skip', 'from']) {
+        if (params.has(key)) {
+            params.set(key, String((pageNum - 1) * pageSize));
+            touched = true;
+        }
+    }
+
+    if (!touched) {
+        params.set('page', String(pageNum));
+    }
+
+    return params.toString();
+}
+
+function buildFetchHeaders(requestHeaders, cookieHeader) {
+    const headers = {
+        accept: 'application/json, text/plain, */*',
+        'user-agent': 'Mozilla/5.0 (compatible; DealerScope/1.0)',
+    };
+
+    for (const key of ['accept', 'content-type', 'origin', 'referer', 'authorization', 'x-requested-with']) {
+        if (requestHeaders[key]) {
+            headers[key] = requestHeaders[key];
+        }
+    }
+
+    if (cookieHeader) {
+        headers.cookie = cookieHeader;
+    }
+
+    return headers;
+}
+
+function normalizeApiItem(item) {
+    const sources = getNestedObjects(item);
+    const title = normalizeText(pickFirst(sources, ['title', 'name', 'lotTitle', 'lot_title', 'itemTitle', 'item_title', 'description']));
+    const location = extractLocation(item);
+    const state = normalizeText(pickFirst(sources, ['state', 'stateCode', 'state_code'])).toUpperCase() || parseState(location);
+    const listingUrl = extractListingUrl(item);
+    const description = normalizeText(pickFirst(sources, ['description', 'subtitle', 'summary', 'notes']));
+    const bidValue = pickFirst(sources, ['currentBid', 'current_bid', 'highBid', 'high_bid', 'bidAmount', 'currentPrice', 'price']);
+    const endValue = pickFirst(sources, ['endTime', 'end_time', 'closeTime', 'close_time', 'endDate', 'end_date', 'closingDate', 'closesAt', 'closes_at']);
+    const mileageValue = pickFirst(sources, ['mileage', 'odometer']);
+    const vinValue = pickFirst(sources, ['vin', 'vehicleIdentificationNumber']);
+
+    return {
+        lotId: createListingId(item, listingUrl),
+        title,
+        bidText: bidValue,
+        location,
+        state,
+        endText: endValue,
+        listingUrl,
+        imageUrl: extractImageUrl(item),
+        mileage: mileageValue ? parseMileage(String(mileageValue)) ?? Number(mileageValue) : null,
+        vin: normalizeText(vinValue) || null,
+        description,
+        cardText: `${title} ${location} ${description}`.trim(),
+        originalItem: item,
+    };
+}
+
+async function processApiCapture(capture, cookieHeader, log) {
+    const pageSize = getPageSize(capture);
+    const seenPageSignatures = new Set();
+
+    for (let pageNum = 1; pageNum <= effectiveMaxPages; pageNum++) {
+        let payload;
+        let items;
+
+        if (pageNum === 1) {
+            payload = capture.payload;
+            items = capture.items;
+        } else {
+            const requestInfo = capture.response.request ?? {};
+            const method = (requestInfo.method || 'GET').toUpperCase();
+            const headers = buildFetchHeaders(normalizeHeaderEntries(requestInfo.headers), cookieHeader);
+            const url = updateUrlPagination(requestInfo.url || capture.response.url, pageNum, pageSize);
+            const body = method === 'GET' ? undefined : updateBodyPagination(requestInfo.postData, pageNum, pageSize);
+
+            try {
+                const response = await fetch(url, {
+                    method,
+                    headers,
+                    body,
+                    signal: AbortSignal.timeout(15000),
+                });
+                if (!response.ok) {
+                    log.debug(`[HiBid] API page ${pageNum} failed with status ${response.status}`);
+                    break;
+                }
+
+                const text = await response.text();
+                payload = safeJsonParse(text);
+                items = extractItemsFromPayload(payload);
+            } catch (error) {
+                log.debug(`[HiBid] API page ${pageNum} request failed: ${error.message}`);
+                break;
+            }
+        }
+
+        if (!payload || !items.length) {
+            log.info(`[HiBid] API page ${pageNum} returned no items`);
+            break;
+        }
+
+        const pageSignature = JSON.stringify(items.slice(0, 5).map((item) => {
+            const normalized = normalizeApiItem(item);
+            return normalized.listingUrl || normalized.lotId || normalized.title;
+        }));
+        if (seenPageSignatures.has(pageSignature)) {
+            log.info(`[HiBid] API page ${pageNum} repeated prior results, stopping pagination`);
+            break;
+        }
+        seenPageSignatures.add(pageSignature);
+
+        totalFound += items.length;
+        log.info(`[HiBid] API page ${pageNum} returned ${items.length} items`);
+
+        for (const item of items) {
+            await pushListing(normalizeApiItem(item), SEARCH_URL, log);
+            if (totalAfterFilters >= 100) return true;
+        }
+    }
+
+    return totalAfterFilters > 0;
+}
+
+async function extractCardsFromPage(page) {
+    return page.evaluate(() => {
+        const normalizeText = (value) => String(value ?? '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\s*\n\s*/g, '\n')
+            .trim();
+
+        const textFrom = (root, selectors) => {
+            for (const selector of selectors) {
+                const node = root.querySelector(selector);
+                const text = normalizeText(node?.textContent);
+                if (text) return text;
+            }
+            return '';
         };
 
-        totalAfterFilters++;
-        log.info(`[PASS] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
-        await Actor.pushData(listing);
-    }
+        const cards = Array.from(document.querySelectorAll('.auction-card, .lot-card, .item-card, [class*="card"], [class*="lot"]'));
+        const anchors = Array.from(document.querySelectorAll('a[href*="/lot/"], a[href*="/item/"]'));
+        const seen = new Set();
+        const items = [];
+
+        const candidates = cards.length > 0 ? cards : anchors.map((anchor) => anchor.closest('article, li, div') || anchor);
+
+        for (const candidate of candidates) {
+            const card = candidate;
+            const anchor = card.querySelector('a[href*="/lot/"], a[href*="/item/"]') || (card.matches('a') ? card : null);
+            const href = anchor?.href || '';
+            const key = href || normalizeText(card.innerText);
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+
+            const cardText = normalizeText(card.innerText);
+            const title = textFrom(card, [
+                'h1', 'h2', 'h3', 'h4',
+                '[class*="title"]',
+                '[class*="name"]',
+            ]) || normalizeText(anchor?.textContent);
+            if (!title) continue;
+
+            const bidText = textFrom(card, [
+                '[class*="current-bid"]',
+                '[class*="high-bid"]',
+                '[class*="bid"]',
+                '[class*="price"]',
+                '[class*="amount"]',
+            ]);
+            const endText = textFrom(card, [
+                'time',
+                '[datetime]',
+                '[class*="end"]',
+                '[class*="close"]',
+                '[class*="time-left"]',
+                '[class*="countdown"]',
+            ]);
+            const location = textFrom(card, [
+                '[class*="location"]',
+                '[class*="city"]',
+                '[class*="state"]',
+                '[class*="address"]',
+                '[data-location]',
+            ]);
+            const img = card.querySelector('img');
+            const imageUrl = img?.getAttribute('data-src') || img?.getAttribute('src') || null;
+            const lotIdMatch = href.match(/\/lot\/(\d+)/i)
+                || href.match(/\/item\/(\d+)/i)
+                || href.match(/[?&](?:lotId|id)=(\d+)/i);
+
+            items.push({
+                lotId: lotIdMatch ? lotIdMatch[1] : '',
+                title,
+                bidText,
+                endText,
+                location,
+                imageUrl,
+                listingUrl: href,
+                description: cardText,
+                cardText,
+            });
+        }
+
+        return items;
+    });
 }
 
 const crawler = new PlaywrightCrawler({
     launchContext: {
         launchOptions: { headless: true },
     },
-    maxRequestsPerCrawl: maxPages + 10,
+    maxRequestsPerCrawl: fallbackMaxPages + 3,
     navigationTimeoutSecs: 60,
     requestHandlerTimeoutSecs: 120,
     maxConcurrency: 2,
+    minConcurrency: 1,
+    preNavigationHooks: [
+        async ({ page, request }) => {
+            request.userData.apiTraffic = { responses: [] };
+
+            page.on('response', (response) => {
+                void (async () => {
+                    try {
+                        const requestInfo = response.request();
+                        const url = response.url();
+                        const resourceType = requestInfo.resourceType();
+                        const contentType = (response.headers()['content-type'] || '').toLowerCase();
+
+                        if (!['xhr', 'fetch'].includes(resourceType)) return;
+                        if (!contentType.includes('json') && !isRelevantApiUrl(url)) return;
+
+                        const bodyText = await response.text();
+                        if (!bodyText || bodyText.length > 1_000_000) return;
+
+                        request.userData.apiTraffic.responses.push({
+                            url,
+                            status: response.status(),
+                            headers: response.headers(),
+                            bodyText,
+                            request: {
+                                url: requestInfo.url(),
+                                method: requestInfo.method(),
+                                headers: requestInfo.headers(),
+                                postData: requestInfo.postData(),
+                            },
+                        });
+                    } catch {
+                        // Ignore response parsing issues and keep crawling.
+                    }
+                })();
+            });
+        },
+    ],
 
     async requestHandler({ page, request, enqueueLinks, log }) {
         const currentPage = request.userData?.pageNum ?? 1;
         log.info(`[HiBid] Processing search page ${currentPage}: ${request.url}`);
 
-        await page.waitForSelector('a[href*="/lot/"], a[href*="/item/"], [class*="lot"], [class*="item"], body', { timeout: 30000 });
-        await page.waitForTimeout(2000);
+        await page.waitForSelector('body', { timeout: 30000 });
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(3000);
 
-        const results = await page.evaluate(() => {
-            const normalizeText = (value) => String(value ?? '')
-                .replace(/\u00a0/g, ' ')
-                .replace(/[ \t]+/g, ' ')
-                .replace(/\s*\n\s*/g, '\n')
-                .trim();
+        if (currentPage === 1 && !apiModeUsed) {
+            const cookieHeader = (await page.context().cookies())
+                .map((cookie) => `${cookie.name}=${cookie.value}`)
+                .join('; ');
+            const apiCapture = selectApiCapture(request.userData.apiTraffic ?? { responses: [] });
 
-            const textFrom = (root, selectors) => {
-                for (const selector of selectors) {
-                    const node = root.querySelector(selector);
-                    const text = normalizeText(node?.textContent);
-                    if (text) return text;
+            if (apiCapture) {
+                log.info(`[HiBid] Captured API endpoint: ${apiCapture.response.url}`);
+                apiModeUsed = await processApiCapture(apiCapture, cookieHeader, log);
+                if (apiModeUsed) {
+                    return;
                 }
-                return '';
-            };
-
-            const anchors = Array.from(document.querySelectorAll('a[href*="/lot/"], a[href*="/item/"]'));
-            const seen = new Set();
-            const items = [];
-
-            for (const anchor of anchors) {
-                const href = anchor.href;
-                if (!href || seen.has(href)) continue;
-                seen.add(href);
-
-                const card = anchor.closest('article, li, .lot-card, .item-card, .search-result, .search-card, .card, [class*="lot"], [class*="item"]')
-                    || anchor.parentElement
-                    || anchor;
-
-                const cardText = normalizeText(card?.innerText);
-                const title = textFrom(card, [
-                    'h1', 'h2', 'h3', 'h4',
-                    '[class*="title"]',
-                    '[class*="name"]',
-                ]) || normalizeText(anchor.textContent);
-
-                const bidText = textFrom(card, [
-                    '[class*="current-bid"]',
-                    '[class*="high-bid"]',
-                    '[class*="bid"]',
-                    '[class*="price"]',
-                    '[class*="amount"]',
-                ]);
-
-                const endText = textFrom(card, [
-                    'time',
-                    '[datetime]',
-                    '[class*="end"]',
-                    '[class*="close"]',
-                    '[class*="time-left"]',
-                    '[class*="countdown"]',
-                ]);
-
-                const location = textFrom(card, [
-                    '[class*="location"]',
-                    '[class*="city"]',
-                    '[class*="state"]',
-                    '[class*="address"]',
-                    '[data-location]',
-                ]);
-
-                const img = card.querySelector('img');
-                const imageUrl = img?.getAttribute('data-src') || img?.getAttribute('src') || null;
-
-                const lotIdMatch = href.match(/\/lot\/(\d+)/i)
-                    || href.match(/\/item\/(\d+)/i)
-                    || href.match(/[?&](?:lotId|id)=(\d+)/i);
-
-                items.push({
-                    lotId: lotIdMatch ? lotIdMatch[1] : '',
-                    title,
-                    bidText,
-                    endText,
-                    location,
-                    imageUrl,
-                    listingUrl: href,
-                    description: cardText,
-                    cardText,
-                });
+                log.info('[HiBid] API capture did not yield usable results, falling back to card scraping');
+            } else {
+                log.info('[HiBid] No usable API response captured, falling back to card scraping');
             }
+        }
 
-            return items;
-        });
-
-        log.info(`[HiBid] Found ${results.length} result rows on page ${currentPage}`);
+        const results = await extractCardsFromPage(page);
         totalFound += results.length;
+        log.info(`[HiBid] Found ${results.length} result cards on page ${currentPage}`);
 
-        await processSearchResults(results, request.url, log);
+        for (const result of results) {
+            await pushListing(result, request.url, log);
+            if (totalAfterFilters >= 100) return;
+        }
 
-        if (results.length > 0 && currentPage < maxPages) {
+        if (!apiModeUsed && results.length > 0 && currentPage < fallbackMaxPages) {
             const nextUrl = new URL(SEARCH_URL);
             nextUrl.searchParams.set('page', String(currentPage + 1));
 
