@@ -146,7 +146,7 @@ async function pushListing(listing, sourceUrl, log) {
     const title = normalizeText(listing.title);
     const currentBid = parseMoney(listing.currentBid);
     const location = normalizeText(listing.location);
-    const state = parseState(location) || 'WA';
+    const state = parseState(location) || null;
 
     if (!title) {
         log.debug(`[SKIP] Missing title on ${sourceUrl}`);

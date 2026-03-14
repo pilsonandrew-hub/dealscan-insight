@@ -85,9 +85,11 @@ TARGET_STATES = {
 _COMMERCIAL_PATTERNS = [
     r"\bEconoline\b", r"\bExpress\s*Cargo\b", r"\bProMaster\s*Cargo\b",
     r"\bSprinter\s*Cargo\b", r"\bTransit\s*Cargo\b", r"\bSavana\s*Cargo\b",
-    r"\b4500\b", r"\b5500\b", r"\bCutaway\b", r"\bChasis\s*Cab\b",
+    r"\bE-250\b", r"\bE-350\b", r"\b2500\b", r"\b3500\b", r"\b4500\b", r"\b5500\b",
+    r"\bCutaway\b", r"\bChassis\s*Cab\b",
     r"\bDump\s*Truck\b", r"\bBox\s*Truck\b", r"\bBucket\s*Truck\b",
-    r"\bStake\s*Bed\b", r"\bRefrigerator\s*Truck\b",
+    r"\bStake\s*Bed\b", r"\bFlatbed\b", r"\bStep\s*Van\b", r"\bShuttle\b",
+    r"\bUtility\s*Bed\b", r"\bRefrigerator\s*Truck\b",
 ]
 
 # MMR estimates by model — much more accurate than segment-only
@@ -103,8 +105,8 @@ _MODEL_MMR = {
     "maverick": 24000,
     # SUVs large
     "explorer": 24000, "expedition": 42000,
-    "tahoe": 45000, "suburban": 50000, "yukon": 45000,
-    "highlander": 36000, "pilot": 34000, "sequoia": 46000,
+    "tahoe": 32000, "suburban": 38000, "yukon": 34000,
+    "highlander": 28000, "pilot": 34000, "sequoia": 46000,
     "pathfinder": 28000, "armada": 36000,
     "durango": 30000,
     # SUVs mid
@@ -120,7 +122,7 @@ _MODEL_MMR = {
     "elantra": 16000, "sonata": 18000, "optima": 17000,
     "malibu": 16000, "fusion": 17000, "impala": 14000,
     # EVs
-    "model y": 38000, "model 3": 32000, "model s": 42000, "model x": 45000,
+    "model y": 38000, "model 3": 32000, "model s": 35000, "model x": 38000,
     "ioniq 5": 30000, "ioniq 6": 28000,
     # Vans (passenger, not cargo)
     "odyssey": 26000, "sienna": 30000, "pacifica": 24000,
@@ -265,63 +267,51 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
 
     canonical_id = vehicle.get("canonical_id", "")
     new_source = vehicle.get("source_site", "")
-    row = build_opportunity_row(vehicle)
+    listing_url = vehicle.get("listing_url", "")
 
     try:
-        supabase_client.table("opportunities").insert(row).execute()
-        return {"is_duplicate": False, "canonical_record_id": None}
-    except Exception as e:
-        error_text = str(e)
-        if "duplicate key value violates unique constraint" not in error_text:
-            logger.warning(f"[DEDUP] check failed: {e}")
-            return {"is_duplicate": False, "canonical_record_id": None}
-
-        if "canonical" not in error_text:
-            try:
-                existing = (
-                    supabase_client.table("opportunities")
-                    .select("id, is_duplicate, canonical_record_id")
-                    .eq("listing_url", row["listing_url"])
-                    .limit(1)
-                    .execute()
-                )
-                if existing.data:
-                    existing_row = existing.data[0]
-                    return {
-                        "is_duplicate": existing_row.get("is_duplicate", False),
-                        "canonical_record_id": existing_row.get("canonical_record_id"),
-                    }
-            except Exception as lookup_error:
-                logger.warning(f"[DEDUP] listing lookup failed: {lookup_error}")
-
-            logger.warning(f"[DEDUP] non-canonical unique conflict: {e}")
-            return {"is_duplicate": False, "canonical_record_id": None}
-
-        try:
-            result = (
+        if listing_url:
+            existing = (
                 supabase_client.table("opportunities")
-                .select("id, all_sources")
-                .eq("canonical_id", canonical_id)
-                .eq("is_duplicate", False)
+                .select("id, is_duplicate, canonical_record_id")
+                .eq("listing_url", listing_url)
                 .limit(1)
                 .execute()
             )
-            if not result.data:
-                return {"is_duplicate": True, "canonical_record_id": None}
+            if existing.data:
+                existing_row = existing.data[0]
+                return {
+                    "is_duplicate": existing_row.get("is_duplicate", False),
+                    "canonical_record_id": existing_row.get("canonical_record_id"),
+                }
 
-            existing = result.data[0]
-            existing_id = existing["id"]
-            existing_sources = existing.get("all_sources") or []
-            if new_source and new_source not in existing_sources:
-                updated = existing_sources + [new_source]
-                supabase_client.table("opportunities").update({
-                    "all_sources": updated,
-                    "duplicate_count": len(updated) - 1,
-                }).eq("id", existing_id).execute()
-            return {"is_duplicate": True, "canonical_record_id": existing_id}
-        except Exception as lookup_error:
-            logger.warning(f"[DEDUP] conflict lookup failed: {lookup_error}")
-            return {"is_duplicate": True, "canonical_record_id": None}
+        if not canonical_id:
+            return {"is_duplicate": False, "canonical_record_id": None}
+
+        result = (
+            supabase_client.table("opportunities")
+            .select("id, all_sources")
+            .eq("canonical_id", canonical_id)
+            .eq("is_duplicate", False)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return {"is_duplicate": False, "canonical_record_id": None}
+
+        existing = result.data[0]
+        existing_id = existing["id"]
+        existing_sources = existing.get("all_sources") or []
+        if new_source and new_source not in existing_sources:
+            updated = existing_sources + [new_source]
+            supabase_client.table("opportunities").update({
+                "all_sources": updated,
+                "duplicate_count": len(updated) - 1,
+            }).eq("id", existing_id).execute()
+        return {"is_duplicate": True, "canonical_record_id": existing_id}
+    except Exception as lookup_error:
+        logger.warning(f"[DEDUP] check failed: {lookup_error}")
+        return {"is_duplicate": False, "canonical_record_id": None}
 
 
 def extract_apify_webhook_metadata(payload: dict) -> dict:
@@ -728,7 +718,8 @@ def _estimate_mmr(make: str, model: str) -> float:
     make_lower = (make or "").lower().strip()
 
     # 1. Direct model lookup (most accurate)
-    for key, val in _MODEL_MMR.items():
+    for key in sorted(_MODEL_MMR, key=len, reverse=True):
+        val = _MODEL_MMR[key]
         if key in model_lower or model_lower in key:
             return float(val)
 
@@ -830,6 +821,14 @@ def score_vehicle(vehicle: dict) -> dict:
         bid = vehicle.get("current_bid", 0)
         state = vehicle.get("state", "")
         source = vehicle.get("source_site", "GovDeals")
+        SOURCE_MAP = {
+            "govdeals": "GovDeals",
+            "publicsurplus": "PublicSurplus",
+            "gsaauctions": "GSAAuctions",
+            "municibid": "Municibid",
+            "govplanet": "GovPlanet",
+        }
+        source_site = SOURCE_MAP.get((source or "").lower(), source)
         make = vehicle.get("make", "")
         model = vehicle.get("model", "")
         year = vehicle.get("year")
@@ -839,7 +838,7 @@ def score_vehicle(vehicle: dict) -> dict:
             bid=bid,
             mmr_ca=mmr,
             state=state,
-            source_site=source,
+            source_site=source_site,
             model=model,
             make=make,
             year=year,
@@ -1152,6 +1151,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "model": vehicle.get("model"),
         "mileage": vehicle.get("mileage"),
         "state": vehicle.get("state"),
+        "city": vehicle.get("city") or vehicle.get("location_city") or "",
         "vin": vehicle.get("vin"),
         "current_bid": vehicle.get("current_bid"),
         "mmr": breakdown.get("mmr_estimated"),
