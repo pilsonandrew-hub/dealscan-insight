@@ -1382,6 +1382,15 @@ def build_opportunity_row(vehicle: dict) -> dict:
         year=vehicle.get("year") or 0,
         damage_type=vehicle.get("damage_type") or "",
     )
+    pricing_source = score_result.get("pricing_source")
+    if score_result.get("manheim_source_status") == "live":
+        pricing_maturity = "live_market"
+    elif pricing_source and pricing_source != "mmr_proxy":
+        pricing_maturity = "market_comp"
+    elif pricing_source == "mmr_proxy" or score_result.get("mmr_lookup_basis"):
+        pricing_maturity = "proxy"
+    else:
+        pricing_maturity = "unknown"
     return {
         "listing_id": vehicle.get("listing_url", "")[-80:],  # truncated unique ID
         "listing_url": vehicle.get("listing_url", ""),
@@ -1408,7 +1417,8 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "retail_comp_high": score_result.get("retail_comp_high"),
         "retail_comp_count": score_result.get("retail_comp_count"),
         "retail_comp_confidence": score_result.get("retail_comp_confidence"),
-        "pricing_source": score_result.get("pricing_source"),
+        "pricing_source": pricing_source,
+        "pricing_maturity": pricing_maturity,
         "pricing_updated_at": score_result.get("pricing_updated_at"),
         "manheim_mmr_mid": score_result.get("manheim_mmr_mid"),
         "manheim_mmr_low": score_result.get("manheim_mmr_low"),
@@ -1433,6 +1443,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "bid_headroom": score_result.get("bid_headroom"),
         "ceiling_reason": score_result.get("ceiling_reason"),
         "score_version": score_result.get("score_version"),
+        "legacy_dos_score": score_result.get("legacy_dos_score"),
         "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
