@@ -1,10 +1,14 @@
 """
 Application settings — Railway-safe, robust defaults
 """
+import logging
 import os
 from typing import Optional, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
 
 
 class Settings(BaseSettings):
@@ -21,8 +25,8 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "production"
 
-    # Security — SECRET_KEY must be set in environment; no default allowed
-    secret_key: str = ""
+    # Security
+    secret_key: str = SECRET_KEY
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
@@ -86,11 +90,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-# Hard-fail if secret_key is missing in production — no silent weak default
-import os as _os
-if not settings.secret_key and _os.getenv("ENVIRONMENT", "production").lower() != "development":
-    raise RuntimeError(
-        "SECRET_KEY environment variable is required and must not be empty. "
-        "Set it in Railway Variables or your .env file."
+if settings.secret_key == "dev-secret-change-in-prod" and settings.is_production:
+    logger.critical(
+        "SECRET_KEY is not set; using development fallback in production. "
+        "Set SECRET_KEY immediately."
     )

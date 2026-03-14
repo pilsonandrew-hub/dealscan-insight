@@ -69,6 +69,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 PIPELINE_SECRET = os.getenv("PIPELINE_SECRET")
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
 
 # ---------------------------------------------------------------------------
 # Pipeline state (in-memory; production should use Redis/DB)
@@ -92,13 +93,17 @@ async def lifespan(app: FastAPI):
         "TELEGRAM_BOT_TOKEN",
         "APIFY_WEBHOOK_SECRET",
         "APIFY_TOKEN",
-        "SECRET_KEY",
     ]
     for var in required_vars:
         if not os.getenv(var):
             logger.critical(f"STARTUP FATAL: {var} is not set. Refusing to start.")
             if os.getenv("ENVIRONMENT") == "production":
                 sys.exit(1)
+    if SECRET_KEY == "dev-secret-change-in-prod" and os.getenv("ENVIRONMENT", "production").lower() == "production":
+        logger.critical(
+            "SECRET_KEY is not set; using development fallback in production. "
+            "Set SECRET_KEY immediately."
+        )
     if not PIPELINE_SECRET:
         logger.critical("MISSING REQUIRED ENV VAR: PIPELINE_SECRET — pipeline routes are disabled")
     try:
@@ -136,11 +141,18 @@ if RequestIDMiddleware:
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 if RateLimitMiddleware:
     app.add_middleware(RateLimitMiddleware)
-_ALLOWED_ORIGINS = [
-    o.strip() for o in
-    os.getenv("ALLOWED_ORIGINS", "https://dealscan-insight-production.up.railway.app").split(",")
+_DEFAULT_ALLOWED_ORIGINS = [
+    "https://dealscan-insight.vercel.app",
+    "https://dealscan-insight-production.up.railway.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+_configured_allowed_origins = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "").split(",")
     if o.strip()
 ]
+_ALLOWED_ORIGINS = list(dict.fromkeys(_DEFAULT_ALLOWED_ORIGINS + _configured_allowed_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
@@ -207,14 +219,12 @@ async def require_pipeline_auth(
 
 
 @app.post("/api/pipeline/run", tags=["pipeline"])
-async def trigger_pipeline(_: None = Depends(require_pipeline_auth)):
-    """Kick off the scrape + score pipeline as a background task."""
-    if _pipeline_state["status"] == "running":
-        return {"status": "already_running", "message": "Pipeline is already in progress"}
-
-    # Fire and forget — Celery handles this in production; asyncio.create_task in dev
-    asyncio.create_task(_run_pipeline_async())
-    return {"status": "started", "message": "Pipeline triggered"}
+async def trigger_pipeline():
+    """Legacy pipeline trigger disabled in favor of Apify webhooks."""
+    return {
+        "status": "disabled",
+        "message": "Use Apify webhooks for scraping — /api/ingest/apify",
+    }
 
 
 @app.get("/api/pipeline/status", tags=["pipeline"])

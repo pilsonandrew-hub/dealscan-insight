@@ -207,7 +207,7 @@ async def track_event(
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     # Ensure userId matches authenticated user (prevent poisoning other users' vectors)
-    payload_user_id = payload.get("userId")
+    payload_user_id = payload.get("userId") or payload.get("user_id")
     if payload_user_id and payload_user_id != auth_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 

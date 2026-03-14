@@ -73,7 +73,7 @@ const DealCard = ({
   onSendToSniperScope
 }: {
   deal: Opportunity;
-  onAction?: (id: string, action: 'view' | 'save' | 'pass') => void;
+  onAction?: (deal: Opportunity, action: 'view' | 'save' | 'pass') => void;
   onSendToSniperScope?: (deal: Opportunity) => void;
 }) => (
   <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors">
@@ -99,7 +99,7 @@ const DealCard = ({
       <div>
         <p className="text-xs text-gray-500">Margin</p>
         <p className={`text-sm font-medium ${(deal.profit_margin || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-          {deal.profit_margin != null ? `${deal.profit_margin.toFixed(1)}%` : '—'}
+          {deal.profit_margin != null ? fmt$(deal.profit_margin) : '—'}
         </p>
       </div>
       <div>
@@ -143,13 +143,13 @@ const DealCard = ({
       {onAction && deal.id && (
         <>
           <button
-            onClick={() => onAction(deal.id!, 'save')}
+            onClick={() => onAction(deal, 'save')}
             className="flex items-center gap-1 text-xs bg-gray-800 hover:bg-emerald-900/50 text-gray-300 hover:text-emerald-400 py-1.5 px-2 rounded-lg transition-colors"
           >
             <Bookmark className="h-3 w-3" />
           </button>
           <button
-            onClick={() => onAction(deal.id!, 'pass')}
+            onClick={() => onAction(deal, 'pass')}
             className="flex items-center gap-1 text-xs bg-gray-800 hover:bg-red-900/50 text-gray-300 hover:text-red-400 py-1.5 px-2 rounded-lg transition-colors"
           >
             <ThumbsDown className="h-3 w-3" />
@@ -228,7 +228,7 @@ const DashboardTab = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Deals Today" value={metrics.total_today.toString()} />
         <StatCard label="Hot Deals" value={metrics.hot_deals.toString()} sub="DOS ≥ 80" accent />
-        <StatCard label="Avg Margin" value={`${metrics.avg_margin.toFixed(1)}%`} />
+        <StatCard label="Avg Margin" value={fmt$(metrics.avg_margin)} />
         <StatCard label="Top DOS Score" value={metrics.top_score.toString()} accent />
       </div>
 
@@ -439,9 +439,9 @@ const RoverTab = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleAction = async (id: string, action: 'view' | 'save' | 'pass') => {
-    await api.trackRoverEvent(id, action);
-    setActionedIds(prev => new Set([...prev, `${id}-${action}`]));
+  const handleAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
+    await api.trackRoverEvent(deal, action);
+    setActionedIds(prev => new Set([...prev, `${deal.id}-${action}`]));
   };
 
   return (
@@ -479,7 +479,7 @@ const RoverTab = () => {
               current_bid: rec.current_bid || 0,
               estimated_sale_price: rec.estimated_sale_price || 0,
               score: rec.score || rec.dos_score,
-              profit_margin: rec.profit_margin || 0,
+              profit_margin: rec.gross_margin ?? rec.potential_profit ?? rec.profit_margin ?? 0,
               state: rec.state,
               source_site: rec.source_site || '',
               auction_end: rec.auction_end,
@@ -491,7 +491,7 @@ const RoverTab = () => {
               profit: rec.potential_profit || 0,
               expected_price: rec.estimated_sale_price || 0,
               acquisition_cost: rec.total_cost || 0,
-              roi: rec.roi_percentage || 0,
+              roi: (rec.roi ?? rec.roi_percentage ?? 0) > 1 ? (rec.roi ?? rec.roi_percentage ?? 0) / 100 : (rec.roi ?? rec.roi_percentage ?? 0),
               confidence: rec.confidence_score || 0,
               vehicle: {
                 make: rec.make || '',
@@ -639,8 +639,8 @@ const AnalyticsTab = () => {
             <LineChart data={marginData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="day" tick={{ fill: '#9ca3af', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} unit="%" />
-              <ReTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }} formatter={(v: any) => [`${v}%`, 'Avg Margin']} />
+              <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} tickFormatter={(value: number) => fmt$(value)} />
+              <ReTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }} formatter={(value: number) => [fmt$(value), 'Avg Margin']} />
               <Line type="monotone" dataKey="avg_margin" stroke="#10b981" strokeWidth={2} dot={false} connectNulls />
             </LineChart>
           </ResponsiveContainer>
@@ -662,7 +662,7 @@ const AnalyticsTab = () => {
               ['DOS ≥ 80 (Hot)', allDeals.filter(d => (d.score || 0) >= 80).length.toString()],
               ['DOS ≥ 65 (Good+)', allDeals.filter(d => (d.score || 0) >= 65).length.toString()],
               ['Avg DOS Score', allDeals.length ? (allDeals.reduce((s, d) => s + (d.score || 0), 0) / allDeals.length).toFixed(1) : '—'],
-              ['Avg Margin', allDeals.length ? `${(allDeals.reduce((s, d) => s + (d.profit_margin || 0), 0) / allDeals.length).toFixed(1)}%` : '—'],
+              ['Avg Margin', allDeals.length ? fmt$(allDeals.reduce((s, d) => s + (d.profit_margin || 0), 0) / allDeals.length) : '—'],
               ['Unique Sources', Object.keys(srcMap).length.toString()],
               ['Unique States', Object.keys(stateMap).length.toString()],
             ].map(([label, value]) => (

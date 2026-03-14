@@ -1,6 +1,13 @@
 # DealerScope Overnight Progress Tracker
 Last updated: 2026-03-14 04:50 PDT
 
+## Holistic Audit Fixes
+- [x] Added `scripts/deal-alerts.sh` to the repo so the alert job is version controlled and deployable
+- [x] Removed `SECRET_KEY` import-time hard crash; app now falls back to `dev-secret-change-in-prod`
+- [x] Added `CRITICAL` production logging when the dev `SECRET_KEY` fallback is in use
+- [x] Disabled legacy `/api/pipeline/run` execution path and redirected operators to `/api/ingest/apify`
+- [x] Fixed `build_opportunity_row()` to store `buyer_premium` separately from total `auction_fees`
+
 ## Phase 1 — COMPLETED ✅ (commit 0b49621)
 - [x] Title/damage gate
 - [x] Recon cost in margin
