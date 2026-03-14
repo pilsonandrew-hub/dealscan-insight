@@ -156,7 +156,7 @@ ESTIMATED_DAYS_TO_SALE_BY_TIER = {
     3: 50,
     4: 70,
 }
-SCORE_VERSION = "retail_comps_v2"
+SCORE_VERSION = "manheim_ready_v3"
 INVESTMENT_GRADE_PROXY_SCORES = {
     "Platinum": 100.0,
     "Gold": 82.0,
@@ -312,6 +312,42 @@ def _weighted_score(
     )
 
 
+def _range_width_penalty(range_width_pct: Optional[float]) -> float:
+    if range_width_pct is None:
+        return 0.0
+    width = max(float(range_width_pct), 0.0)
+    if width >= 24:
+        return 22.0
+    if width >= 20:
+        return 16.0
+    if width >= 16:
+        return 10.0
+    if width >= 12:
+        return 5.0
+    return 0.0
+
+
+def _resolve_confidence_proxy(
+    mmr_confidence_proxy: Optional[float],
+    manheim_confidence: Optional[float],
+    manheim_source_status: Optional[str],
+    manheim_range_width_pct: Optional[float],
+) -> float:
+    if manheim_confidence is not None:
+        confidence_proxy = float(manheim_confidence)
+        if confidence_proxy <= 1.0:
+            confidence_proxy *= 100.0
+    elif mmr_confidence_proxy is not None:
+        confidence_proxy = float(mmr_confidence_proxy)
+    else:
+        confidence_proxy = 50.0
+
+    if manheim_source_status == "live":
+        confidence_proxy -= _range_width_penalty(manheim_range_width_pct)
+
+    return max(0.0, min(100.0, confidence_proxy))
+
+
 def compute_bid_ceiling(
     current_bid: float,
     mmr_ca: float,
@@ -322,6 +358,8 @@ def compute_bid_ceiling(
     doc_fee: float,
     transport: float,
     recon_reserve: float,
+    manheim_range_width_pct: Optional[float] = None,
+    manheim_source_status: Optional[str] = None,
 ) -> dict:
     if investment_grade == "Bronze":
         return {
@@ -351,6 +389,23 @@ def compute_bid_ceiling(
             "ceiling_reason": f"unsupported_grade_tier ({investment_grade}/Tier{segment_tier})",
             "ceiling_pass": False,
         }
+
+    if manheim_source_status == "live" and manheim_range_width_pct is not None:
+        width = max(float(manheim_range_width_pct), 0.0)
+        if width > 20:
+            ceiling_pct -= 4.0
+            reason = f"{reason}; live_range_penalty_4pct"
+        elif width > 16:
+            ceiling_pct -= 3.0
+            reason = f"{reason}; live_range_penalty_3pct"
+        elif width > 12:
+            ceiling_pct -= 2.0
+            reason = f"{reason}; live_range_penalty_2pct"
+        elif width > 8:
+            ceiling_pct -= 1.0
+            reason = f"{reason}; live_range_penalty_1pct"
+        else:
+            reason = f"{reason}; live_range_preserved"
 
     if mmr_ca <= 0:
         return {
@@ -415,6 +470,13 @@ def score_deal(
     retail_comp_confidence: Optional[float] = None,
     pricing_source: Optional[str] = None,
     pricing_updated_at: Optional[str] = None,
+    manheim_mmr_mid: Optional[float] = None,
+    manheim_mmr_low: Optional[float] = None,
+    manheim_mmr_high: Optional[float] = None,
+    manheim_range_width_pct: Optional[float] = None,
+    manheim_confidence: Optional[float] = None,
+    manheim_source_status: Optional[str] = None,
+    manheim_updated_at: Optional[str] = None,
 ) -> dict:
     """
     Compute full DOS score and deal metrics.
@@ -433,7 +495,8 @@ def score_deal(
     transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg)
     recon_reserve = _recon_reserve(mileage=mileage, is_police_or_fleet=is_police_or_fleet)
     total_cost = bid + premium + doc_fee + transport + recon_reserve
-    wholesale_margin = mmr_ca - total_cost
+    selected_mmr = float(manheim_mmr_mid) if manheim_mmr_mid is not None and float(manheim_mmr_mid) > 0 else float(mmr_ca or 0)
+    wholesale_margin = selected_mmr - total_cost
     retail_comp_result = {
         "retail_comp_price_estimate": retail_comp_price_estimate,
         "retail_comp_low": retail_comp_low,
@@ -447,22 +510,27 @@ def score_deal(
     retail_asking_price_estimate = (
         float(retail_comp_price_estimate)
         if use_retail_comps and retail_comp_price_estimate is not None
-        else mmr_ca * RETAIL_PROXY_MULTIPLIER
+        else selected_mmr * RETAIL_PROXY_MULTIPLIER
     )
     selected_pricing_source = (pricing_source or "retail_comps") if use_retail_comps else "mmr_proxy"
     gross_margin = retail_asking_price_estimate - total_cost
 
-    m_score = _margin_score(bid, mmr_ca, total_cost)
+    m_score = _margin_score(bid, selected_mmr, total_cost)
     v_score = _velocity_score(bid, year)
     seg_score = _segment_score(model, make)
     mod_score = _model_score(model)
     src_score = _source_score(source_site)
-    wholesale_ctm_pct = (total_cost / mmr_ca * 100.0) if mmr_ca > 0 else 100.0
+    wholesale_ctm_pct = (total_cost / selected_mmr * 100.0) if selected_mmr > 0 else 100.0
     retail_ctm_pct = (total_cost / retail_asking_price_estimate * 100.0) if retail_asking_price_estimate > 0 else 100.0
     segment_tier = _segment_tier(model, make)
     estimated_days_to_sale = _estimated_days_to_sale(segment_tier)
     roi_per_day = gross_margin / estimated_days_to_sale if estimated_days_to_sale > 0 else 0.0
-    confidence_proxy = 50.0 if mmr_confidence_proxy is None else float(mmr_confidence_proxy)
+    confidence_proxy = _resolve_confidence_proxy(
+        mmr_confidence_proxy=mmr_confidence_proxy,
+        manheim_confidence=manheim_confidence,
+        manheim_source_status=manheim_source_status,
+        manheim_range_width_pct=manheim_range_width_pct,
+    )
     investment_grade = _investment_grade(retail_ctm_pct, estimated_days_to_sale, segment_tier)
 
     legacy_dos_score = (
@@ -483,7 +551,7 @@ def score_deal(
     )
     ceiling_metrics = compute_bid_ceiling(
         current_bid=bid,
-        mmr_ca=mmr_ca,
+        mmr_ca=selected_mmr,
         total_cost=total_cost,
         segment_tier=segment_tier,
         investment_grade=investment_grade,
@@ -491,6 +559,8 @@ def score_deal(
         doc_fee=doc_fee,
         transport=transport,
         recon_reserve=recon_reserve,
+        manheim_range_width_pct=manheim_range_width_pct,
+        manheim_source_status=manheim_source_status,
     )
 
     return {
@@ -518,6 +588,13 @@ def score_deal(
         "retail_comp_confidence": round(float(retail_comp_confidence), 3) if retail_comp_confidence is not None else None,
         "pricing_source": selected_pricing_source,
         "pricing_updated_at": pricing_updated_at,
+        "manheim_mmr_mid": round(float(manheim_mmr_mid), 2) if manheim_mmr_mid is not None else None,
+        "manheim_mmr_low": round(float(manheim_mmr_low), 2) if manheim_mmr_low is not None else None,
+        "manheim_mmr_high": round(float(manheim_mmr_high), 2) if manheim_mmr_high is not None else None,
+        "manheim_range_width_pct": round(float(manheim_range_width_pct), 2) if manheim_range_width_pct is not None else None,
+        "manheim_confidence": round(float(manheim_confidence), 3) if manheim_confidence is not None else None,
+        "manheim_source_status": manheim_source_status or "unavailable",
+        "manheim_updated_at": manheim_updated_at,
         "ctm_pct": round(retail_ctm_pct, 2),
         "wholesale_ctm_pct": round(wholesale_ctm_pct, 2),
         "retail_ctm_pct": round(retail_ctm_pct, 2),

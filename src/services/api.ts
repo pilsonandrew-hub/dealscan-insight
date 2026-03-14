@@ -76,6 +76,13 @@ interface OpportunityRow {
   investment_grade?: Opportunity['investment_grade'];
   pricing_source?: string;
   pricing_updated_at?: string;
+  manheim_mmr_mid?: number;
+  manheim_mmr_low?: number;
+  manheim_mmr_high?: number;
+  manheim_range_width_pct?: number;
+  manheim_confidence?: number;
+  manheim_source_status?: string;
+  manheim_updated_at?: string;
   retail_asking_price_estimate?: number;
   retail_comp_price_estimate?: number;
   retail_comp_low?: number;
@@ -211,6 +218,13 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     investment_grade: row.investment_grade ?? undefined,
     pricing_source: typeof row.pricing_source === 'string' ? row.pricing_source : undefined,
     pricing_updated_at: typeof row.pricing_updated_at === 'string' ? row.pricing_updated_at : undefined,
+    manheim_mmr_mid: row.manheim_mmr_mid ?? undefined,
+    manheim_mmr_low: row.manheim_mmr_low ?? undefined,
+    manheim_mmr_high: row.manheim_mmr_high ?? undefined,
+    manheim_range_width_pct: row.manheim_range_width_pct ?? undefined,
+    manheim_confidence: row.manheim_confidence ?? undefined,
+    manheim_source_status: typeof row.manheim_source_status === 'string' ? row.manheim_source_status : undefined,
+    manheim_updated_at: typeof row.manheim_updated_at === 'string' ? row.manheim_updated_at : undefined,
     retail_asking_price_estimate: row.retail_asking_price_estimate ?? undefined,
     retail_comp_price_estimate: row.retail_comp_price_estimate ?? undefined,
     retail_comp_low: row.retail_comp_low ?? undefined,
