@@ -1,5 +1,5 @@
 # DealerScope Overnight Progress Tracker
-Last updated: 2026-03-14 00:27 PDT
+Last updated: 2026-03-14 04:10 PDT
 
 ## Phase 1 — COMPLETED ✅ (commit 0b49621)
 - [x] Title/damage gate
@@ -10,24 +10,26 @@ Last updated: 2026-03-14 00:27 PDT
 - [x] Crosshair real Supabase search
 - [x] SniperScope Crosshair handoff
 
-## Phase 2 — IN PROGRESS 🔄
-- [ ] Alert script fix (wrong actor IDs)
-- [ ] GovPlanet Apify webhook
-- [ ] Rover end-to-end wiring
-- [ ] dealer_sales outcome endpoint
-- [ ] Investment Grade implementation
-- [ ] Phase 1 scoring fields (ctm_pct, segment_tier, investment_grade in DB)
-- [ ] OpenAI/Gemini graceful fallbacks
+## Phase 2 — COMPLETE ✅
+- [x] Alert script fix (wrong actor IDs)
+- [x] GovPlanet Apify webhook
+- [x] Rover end-to-end wiring
+- [x] dealer_sales outcome endpoint
+- [x] Investment Grade implementation
+- [x] Phase 1 scoring fields (ctm_pct, segment_tier, investment_grade in DB)
+- [x] OpenAI/Gemini graceful fallbacks
 
-## Phase 3 — QUEUED 🟡
-- [ ] Title status extraction in scrapers
-- [ ] Condition grade proxy
+## Phase 3 — IN PROGRESS 🔄
+- [x] Title status extraction in scrapers
+- [~] Condition grade proxy (Claude Code running — session tidy-atlas)
 - [ ] Redis upgrade for Rover
-- [ ] Outcome tracking UI
-- [ ] Deploy GSA Auctions to Apify + webhook
-- [ ] Deploy GovPlanet fix to Apify + webhook
+- [x] Outcome tracking UI
+- [x] Deploy GSA Auctions to Apify + webhook (source pushed + built via API 4:10am PT)
+- [x] Deploy GovPlanet fix to Apify + webhook (source pushed + built + 3hr schedule created, webhookId: SINNRTPxfC8F5szXq)
 
 ## Notes
 - Codex strategy session: fresh-summit (running)
 - Andrew sleeping — autonomous mode active
 - Each phase runs sequentially; Ja'various checks and advances
+- GSA Auctions Apify deploy attempted from Codex, but outbound DNS blocked → Ja'various pushed directly via REST API from main session at 4:10am PT
+- ds-govplanet actor confirmed deployed (id: pO2t5UDoSVmO1gvKJ) + scheduleId: jijJOYPk449GYMD6b added to deployment.json
