@@ -120,36 +120,29 @@ const crawler = new PlaywrightCrawler({
             } catch (_) {}
         });
 
-        // ── Load homepage and navigate to vehicles ────────────
+        // ── Load homepage and navigate to passenger vehicles ────────────
+        // GovDeals category URLs for passenger/light vehicles:
+        // /en/passenger-vehicles  (sedans, SUVs, trucks)
+        // /en/trucks-and-vans     (pickup trucks, vans)
+        // We hit both to maximize coverage
+        const VEHICLE_CATEGORY_URLS = [
+            'https://www.govdeals.com/en/passenger-vehicles',
+            'https://www.govdeals.com/en/trucks-and-vans',
+            'https://www.govdeals.com/en/suvs',
+        ];
+
+        // Start with homepage to capture API key, then navigate to passenger vehicles
         await page.goto('https://www.govdeals.com/', {
             waitUntil: 'domcontentloaded', timeout: 60000
         });
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(4000);
 
-        // Navigate to vehicles category
-        const vehicleHref = await page.evaluate(() => {
-            const links = Array.from(document.querySelectorAll('a[href]'));
-            const exact = ['vehicles and transportation', 'vehicles & transportation', 'vehicles'];
-            for (const link of links) {
-                const text = (link.textContent || '').trim().toLowerCase();
-                if (exact.includes(text)) return link.href;
-            }
-            for (const link of links) {
-                const text = (link.textContent || '').trim().toLowerCase();
-                const href = (link.href || '').toLowerCase();
-                const exclude = ['terrain', 'motorcycle', 'boat', 'aircraft', 'trailer'];
-                if (!exclude.some(e => text.includes(e)) &&
-                    (text.includes('vehicle') || href.includes('vehicle'))) {
-                    return link.href;
-                }
-            }
-            return null;
-        });
-
-        if (vehicleHref) {
-            log.info(`Navigating to: ${vehicleHref}`);
-            await page.goto(vehicleHref, { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await page.waitForTimeout(8000);
+        // Navigate to first passenger vehicle category directly
+        for (const categoryUrl of VEHICLE_CATEGORY_URLS) {
+            if (capturedApi.interceptedLots.length >= 20) break;
+            log.info(`Navigating to: ${categoryUrl}`);
+            await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForTimeout(6000);
         }
 
         // ── Report capture results ─────────────────────────────
@@ -157,22 +150,20 @@ const crawler = new PlaywrightCrawler({
             log.info('✅ maestro x-api-key captured successfully');
             log.info(`Search API URL: ${capturedApi.searchUrl || 'NOT FOUND'}`);
 
-            // First: save all intercepted lots from the page load itself
-            if (capturedApi.interceptedLots.length > 0) {
-                log.info(`Saving ${capturedApi.interceptedLots.length} intercepted lots from page load`);
+            // Attempt direct API pagination
+            if (capturedApi.searchPayload) {
+                await paginateWithAuth(page, log);
+            }
+
+            // Fallback: if pagination saved nothing, use intercepted lots from response listener
+            if (totalPassed === 0 && capturedApi.interceptedLots.length > 0) {
+                log.info(`Pagination saved 0 — falling back to ${capturedApi.interceptedLots.length} intercepted lots`);
                 for (const lot of capturedApi.interceptedLots) {
                     totalFound++;
                     if (!passes(lot)) continue;
                     totalPassed++;
                     await Actor.pushData(normalizeLot(lot));
                 }
-            }
-
-            // Then: attempt direct API pagination for more pages
-            if (capturedApi.searchPayload) {
-                await paginateWithAuth(page, log);
-            } else {
-                log.warning('No search payload for pagination — using intercepted data only');
             }
         } else {
             log.warning('❌ No maestro x-api-key captured');
