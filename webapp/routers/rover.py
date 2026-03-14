@@ -235,7 +235,7 @@ async def track_event(
         if _redis_client:
             try:
                 from backend.rover.redis_affinity import increment_affinity
-                increment_affinity(_redis_client, auth_user_id, item_data, event_type, raw_weight)
+                increment_affinity(_redis_client, auth_user_id, payload, event_type, raw_weight)
             except Exception as _re:
                 logger.warning(f"[ROVER] Redis affinity update failed (non-fatal): {_re}")
 
