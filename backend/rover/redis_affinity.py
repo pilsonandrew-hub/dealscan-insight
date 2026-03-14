@@ -73,7 +73,7 @@ def _extract_dimensions(item_data: dict) -> list[str]:
 
     make = (item_data.get("make") or "").lower().strip()
     model = (item_data.get("model") or "").lower().strip()
-    segment = (item_data.get("segment_tier") or "").lower().strip()
+    segment = str(item_data.get("segment_tier") or "").strip().lower()
     source = (item_data.get("source_site") or item_data.get("source") or "").lower().strip()
 
     price_raw = item_data.get("current_bid") or item_data.get("buy_now_price") or \

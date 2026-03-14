@@ -44,6 +44,7 @@ numpy==1.26.4
 
 # Utilities
 python-dotenv==1.0.0
+PyYAML==6.0.1
 structlog==23.1.0
 pyotp==2.9.0
 qrcode==7.4.2

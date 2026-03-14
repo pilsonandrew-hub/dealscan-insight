@@ -161,30 +161,9 @@ async def get_recommendations(
             max_aff = max(affinity.values()) if affinity else 1.0
 
             def _affinity_boost(row: dict) -> float:
-                make = (row.get("make") or "").lower().strip()
-                model = (row.get("model") or "").lower().strip()
-                segment = (row.get("segment_tier") or "").lower().strip()
-                source = (row.get("source_site") or row.get("source") or "").lower().strip()
-                price_raw = row.get("current_bid") or row.get("buy_now_price") or \
-                            row.get("price") or row.get("estimated_sale_price") or 0
-                try:
-                    price = float(price_raw)
-                except (TypeError, ValueError):
-                    price = 0.0
+                from backend.rover.redis_affinity import _extract_dimensions
 
-                from backend.rover.redis_affinity import _price_bracket
-                dims = []
-                if make:
-                    dims.append(f"make:{make}")
-                if make and model:
-                    dims.append(f"model:{make}:{model}")
-                if segment:
-                    dims.append(f"segment:{segment}")
-                if source:
-                    dims.append(f"source:{source}")
-                if price > 0:
-                    dims.append(f"price_range:{_price_bracket(price)}")
-
+                dims = _extract_dimensions(row)
                 if not dims:
                     return 0.0
                 raw = sum(affinity.get(d, 0.0) for d in dims) / len(dims)

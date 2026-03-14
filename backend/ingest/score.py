@@ -7,7 +7,10 @@ import functools
 import os
 from datetime import datetime
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised in minimal local environments
+    from backend import yaml_compat as yaml
 
 from .transport import calc_transport_cost
 
@@ -145,10 +148,35 @@ _SEGMENT_TIER_2_MODELS = {
 _LUXURY_MAKES = {"bmw", "mercedes", "mercedes benz", "lexus", "cadillac", "lincoln", "audi"}
 
 
+def _is_hd_commercial_truck(
+    normalized_model: str,
+    normalized_model_compact: str,
+    normalized_make: str,
+) -> bool:
+    if "silverado" in normalized_model and ("2500" in normalized_model or "3500" in normalized_model):
+        return True
+    if "sierra" in normalized_model and ("2500" in normalized_model or "3500" in normalized_model):
+        return True
+    if "ram" in normalized_model and ("2500" in normalized_model or "3500" in normalized_model):
+        return True
+    if normalized_make in {"chevrolet", "chevy", "gmc", "ram"} and (
+        "2500" in normalized_model or "3500" in normalized_model
+    ):
+        return True
+    if any(token in normalized_model for token in ("f-250", "f 250", "f-350", "f 350")):
+        return True
+    if normalized_make == "ford" and any(token in normalized_model_compact for token in ("f250", "f350")):
+        return True
+    return False
+
+
 def _segment_tier(model: str, make: str) -> int:
     normalized_model = _normalize_vehicle_text(model)
     normalized_model_compact = normalized_model.replace(" ", "").replace("-", "")
     normalized_make = _normalize_vehicle_text(make)
+
+    if _is_hd_commercial_truck(normalized_model, normalized_model_compact, normalized_make):
+        return 3
 
     if any(token in normalized_model_compact for token in _SEGMENT_TIER_1_MODELS):
         return 1
