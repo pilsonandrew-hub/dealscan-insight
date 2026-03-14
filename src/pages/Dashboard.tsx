@@ -94,6 +94,11 @@ function fmtPct(n: number | null | undefined): string {
   return `${n.toFixed(1)}%`;
 }
 
+function fmtConfidence(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return `${Math.round(n * 100)}%`;
+}
+
 function fmtNum(n: number | null | undefined, digits = 0): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toFixed(digits);
@@ -115,6 +120,13 @@ function timeAgo(s: string | null | undefined): string {
   if (h > 0) return `${h}h ago`;
   if (m > 0) return `${m}m ago`;
   return 'Just now';
+}
+
+function pricingSourceLabel(source: string | null | undefined): string {
+  if (source === 'retail_market_cache') return 'Retail comps';
+  if (source === 'dealer_sales_history') return 'Dealer sales';
+  if (source === 'mmr_proxy') return 'MMR proxy';
+  return source || 'Unknown';
 }
 
 // ─── Deal Card ────────────────────────────────────────────────────────────────
@@ -184,6 +196,34 @@ const DealCard = ({
         <p className="text-xs text-gray-500">State / Source</p>
         <p className="text-sm text-gray-300 truncate">{[deal.state, deal.source_site].filter(Boolean).join(' • ') || '—'}</p>
       </div>
+    </div>
+
+    <div className="mb-3 rounded-lg border border-gray-800 bg-gray-950/60 p-3">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-xs text-gray-500">Pricing Source</p>
+          <p className="text-sm text-gray-300">{pricingSourceLabel(deal.pricing_source)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500">Comp Signal</p>
+          <p className="text-sm text-gray-300">
+            {deal.retail_comp_count
+              ? `${deal.retail_comp_count} comps • ${fmtConfidence(deal.retail_comp_confidence)}`
+              : 'Proxy fallback'}
+          </p>
+        </div>
+        <div className="col-span-2">
+          <p className="text-xs text-gray-500">Retail Band</p>
+          <p className="text-sm text-gray-300">
+            {deal.retail_comp_low != null && deal.retail_comp_high != null
+              ? `${fmt$(deal.retail_comp_low)} - ${fmt$(deal.retail_comp_high)}`
+              : fmt$(deal.retail_asking_price_estimate)}
+          </p>
+        </div>
+      </div>
+      {deal.pricing_updated_at && deal.pricing_source && deal.pricing_source !== 'mmr_proxy' && (
+        <p className="mt-2 text-[11px] text-gray-500">Pricing updated {timeAgo(deal.pricing_updated_at)}</p>
+      )}
     </div>
 
     {deal.auction_end && (

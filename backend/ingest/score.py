@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover - exercised in minimal local environment
     from backend import yaml_compat as yaml
 
 from .transport import calc_transport_cost
+from .retail_comps import retail_comp_is_usable
 
 _CONFIGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
@@ -155,7 +156,7 @@ ESTIMATED_DAYS_TO_SALE_BY_TIER = {
     3: 50,
     4: 70,
 }
-SCORE_VERSION = "proxy_v1"
+SCORE_VERSION = "retail_comps_v2"
 INVESTMENT_GRADE_PROXY_SCORES = {
     "Platinum": 100.0,
     "Gold": 82.0,
@@ -407,6 +408,13 @@ def score_deal(
     auction_end: Optional[str] = None,
     mmr_lookup_basis: Optional[str] = None,
     mmr_confidence_proxy: Optional[float] = None,
+    retail_comp_price_estimate: Optional[float] = None,
+    retail_comp_low: Optional[float] = None,
+    retail_comp_high: Optional[float] = None,
+    retail_comp_count: Optional[int] = None,
+    retail_comp_confidence: Optional[float] = None,
+    pricing_source: Optional[str] = None,
+    pricing_updated_at: Optional[str] = None,
 ) -> dict:
     """
     Compute full DOS score and deal metrics.
@@ -426,7 +434,22 @@ def score_deal(
     recon_reserve = _recon_reserve(mileage=mileage, is_police_or_fleet=is_police_or_fleet)
     total_cost = bid + premium + doc_fee + transport + recon_reserve
     wholesale_margin = mmr_ca - total_cost
-    retail_asking_price_estimate = mmr_ca * RETAIL_PROXY_MULTIPLIER
+    retail_comp_result = {
+        "retail_comp_price_estimate": retail_comp_price_estimate,
+        "retail_comp_low": retail_comp_low,
+        "retail_comp_high": retail_comp_high,
+        "retail_comp_count": retail_comp_count,
+        "retail_comp_confidence": retail_comp_confidence,
+        "pricing_source": pricing_source,
+        "pricing_updated_at": pricing_updated_at,
+    }
+    use_retail_comps = retail_comp_is_usable(retail_comp_result)
+    retail_asking_price_estimate = (
+        float(retail_comp_price_estimate)
+        if use_retail_comps and retail_comp_price_estimate is not None
+        else mmr_ca * RETAIL_PROXY_MULTIPLIER
+    )
+    selected_pricing_source = (pricing_source or "retail_comps") if use_retail_comps else "mmr_proxy"
     gross_margin = retail_asking_price_estimate - total_cost
 
     m_score = _margin_score(bid, mmr_ca, total_cost)
@@ -486,8 +509,15 @@ def score_deal(
         "segment_score": round(seg_score, 2),
         "model_score": round(mod_score, 2),
         "source_score": round(src_score, 2),
-        "retail_proxy_multiplier": RETAIL_PROXY_MULTIPLIER,
+        "retail_proxy_multiplier": None if use_retail_comps else RETAIL_PROXY_MULTIPLIER,
         "retail_asking_price_estimate": round(retail_asking_price_estimate, 2),
+        "retail_comp_price_estimate": round(float(retail_comp_price_estimate), 2) if retail_comp_price_estimate is not None else None,
+        "retail_comp_low": round(float(retail_comp_low), 2) if retail_comp_low is not None else None,
+        "retail_comp_high": round(float(retail_comp_high), 2) if retail_comp_high is not None else None,
+        "retail_comp_count": int(retail_comp_count or 0),
+        "retail_comp_confidence": round(float(retail_comp_confidence), 3) if retail_comp_confidence is not None else None,
+        "pricing_source": selected_pricing_source,
+        "pricing_updated_at": pricing_updated_at,
         "ctm_pct": round(retail_ctm_pct, 2),
         "wholesale_ctm_pct": round(wholesale_ctm_pct, 2),
         "retail_ctm_pct": round(retail_ctm_pct, 2),
