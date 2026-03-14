@@ -1,5 +1,5 @@
 # DealerScope Overnight Progress Tracker
-Last updated: 2026-03-14 04:10 PDT
+Last updated: 2026-03-14 04:30 PDT
 
 ## Phase 1 — COMPLETED ✅ (commit 0b49621)
 - [x] Title/damage gate
@@ -21,7 +21,7 @@ Last updated: 2026-03-14 04:10 PDT
 
 ## Phase 3 — IN PROGRESS 🔄
 - [x] Title status extraction in scrapers
-- [~] Condition grade proxy (Claude Code running — session tidy-atlas)
+- [x] Condition grade proxy (commit 3bc114f — 14 tests passing)
 - [ ] Redis upgrade for Rover
 - [x] Outcome tracking UI
 - [x] Deploy GSA Auctions to Apify + webhook (source pushed + built via API 4:10am PT)
