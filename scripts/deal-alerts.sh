@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# DealerScope Hot Deal Alerts — runs via cron, sends Telegram when DOS >= 80
-# Bypasses Railway entirely — queries Supabase directly
+# DealerScope alert runner — grade-first, env-driven, no backend hop.
 
 SUPABASE_URL="${SUPABASE_URL:-}"
 SUPABASE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}"
 TELEGRAM_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT="${TELEGRAM_CHAT_ID:-}"
+HOT_DEAL_MIN_SCORE="${HOT_DEAL_MIN_SCORE:-80}"
+PLATINUM_MIN_ROI_DAY="${PLATINUM_MIN_ROI_DAY:-75}"
+ALERT_LIMIT="${ALERT_LIMIT:-10}"
 
 if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_KEY" || -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT" ]]; then
   echo "Error: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, and TELEGRAM_CHAT_ID must be set." >&2
@@ -23,6 +25,9 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SERVICE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+HOT_DEAL_MIN_SCORE = float(os.environ.get("HOT_DEAL_MIN_SCORE", "80"))
+PLATINUM_MIN_ROI_DAY = float(os.environ.get("PLATINUM_MIN_ROI_DAY", "75"))
+ALERT_LIMIT = int(os.environ.get("ALERT_LIMIT", "10"))
 
 
 def supabase_get(path):
@@ -70,18 +75,38 @@ try:
 except Exception:
     pass
 
-hot_deals = supabase_get(
-    "opportunities?select=id,title,year,make,model,state,current_bid,dos_score,listing_url,image_url"
-    "&dos_score=gte.80&order=dos_score.desc&limit=10"
+deals = supabase_get(
+    "opportunities?select=id,title,year,make,model,state,current_bid,dos_score,listing_url,image_url,"
+    "investment_grade,roi_per_day,bid_headroom,max_bid,processed_at"
+    f"&or=(dos_score.gte.{HOT_DEAL_MIN_SCORE},investment_grade.eq.Platinum)"
+    f"&order=dos_score.desc&limit={max(ALERT_LIMIT * 3, 20)}"
 )
 
-new_alerts = [d for d in hot_deals if d["id"] not in alerted_ids]
+seen_ids = set()
+new_alerts = []
+for deal in deals:
+    deal_id = deal.get("id")
+    if not deal_id or deal_id in alerted_ids or deal_id in seen_ids:
+        continue
+    seen_ids.add(deal_id)
+    grade = deal.get("investment_grade")
+    roi_day = float(deal.get("roi_per_day") or 0)
+    headroom = float(deal.get("bid_headroom") or 0)
+    score = float(deal.get("dos_score") or 0)
+    is_platinum = grade == "Platinum" and roi_day >= PLATINUM_MIN_ROI_DAY and headroom > 0
+    is_hot = score >= HOT_DEAL_MIN_SCORE
+    if not (is_platinum or is_hot):
+        continue
+    deal["_alert_type"] = "platinum" if is_platinum else "hot"
+    new_alerts.append(deal)
+    if len(new_alerts) >= ALERT_LIMIT:
+        break
 
 if not new_alerts:
-    print("No new hot deals to alert")
+    print("No new alerts to send")
     sys.exit(0)
 
-print(f"Found {len(new_alerts)} new hot deals to alert")
+print(f"Found {len(new_alerts)} new alerts to send")
 
 for deal in new_alerts:
     title = deal.get("title", "Unknown Vehicle")
@@ -89,19 +114,39 @@ for deal in new_alerts:
     dos = deal.get("dos_score", 0)
     state = deal.get("state", "??")
     url = deal.get("listing_url", "")
+    grade = deal.get("investment_grade", "Watch")
+    alert_type = deal.get("_alert_type", "hot")
 
-    msg = (
-        f"🔥 <b>HOT DEAL — DOS {dos}</b>\n\n"
-        f"<b>{title}</b>\n"
-        f"💰 Current bid: <b>${bid:,.0f}</b>\n"
-        f"📍 {state}\n"
-        f"📊 Score: {dos}/100\n"
-        f"\n<a href=\"{url}\">View on auction site →</a>"
-    )
+    if alert_type == "platinum":
+        roi_day = float(deal.get("roi_per_day") or 0)
+        headroom = float(deal.get("bid_headroom") or 0)
+        max_bid = float(deal.get("max_bid") or 0)
+        msg = (
+            f"💎 <b>PLATINUM ALERT</b>\n\n"
+            f"<b>{title}</b>\n"
+            f"🏅 Grade: <b>{grade}</b>\n"
+            f"📊 Score: {dos}/100\n"
+            f"💰 Current bid: <b>${bid:,.0f}</b>\n"
+            f"🎯 Max bid: <b>${max_bid:,.0f}</b>\n"
+            f"📈 ROI/day: <b>${roi_day:,.0f}</b>\n"
+            f"🛟 Headroom: <b>${headroom:,.0f}</b>\n"
+            f"📍 {state}\n"
+            f"\n<a href=\"{url}\">View on auction site →</a>"
+        )
+    else:
+        msg = (
+            f"🔥 <b>HOT DEAL ALERT</b>\n\n"
+            f"<b>{title}</b>\n"
+            f"🏅 Grade: <b>{grade}</b>\n"
+            f"💰 Current bid: <b>${bid:,.0f}</b>\n"
+            f"📍 {state}\n"
+            f"📊 Score: {dos}/100\n"
+            f"\n<a href=\"{url}\">View on auction site →</a>"
+        )
 
     try:
         send_telegram(msg)
-        print(f"  ✅ Alerted: {title} | DOS:{dos}")
+        print(f"  ✅ Alerted ({alert_type}): {title} | Score:{dos}")
         supabase_post("alert_log", {
             "opportunity_id": deal["id"],
             "channel": "telegram",

@@ -6,6 +6,7 @@ DOS = (Margin Score × 0.35) + (Velocity Score × 0.25) +
 import functools
 import os
 from datetime import datetime
+from typing import Optional
 
 try:
     import yaml
@@ -147,6 +148,21 @@ _SEGMENT_TIER_2_MODELS = {
 
 _LUXURY_MAKES = {"bmw", "mercedes", "mercedes benz", "lexus", "cadillac", "lincoln", "audi"}
 
+RETAIL_PROXY_MULTIPLIER = 1.35
+ESTIMATED_DAYS_TO_SALE_BY_TIER = {
+    1: 25,
+    2: 35,
+    3: 50,
+    4: 70,
+}
+SCORE_VERSION = "proxy_v1"
+INVESTMENT_GRADE_PROXY_SCORES = {
+    "Platinum": 100.0,
+    "Gold": 82.0,
+    "Silver": 64.0,
+    "Bronze": 25.0,
+}
+
 
 def _is_hd_commercial_truck(
     normalized_model: str,
@@ -196,14 +212,174 @@ def _segment_tier(model: str, make: str) -> int:
     return 4
 
 
-def _investment_grade(ctm_pct: float, segment_tier: int) -> str:
-    if ctm_pct <= 72 and segment_tier <= 2:
+def _estimated_days_to_sale(segment_tier: int) -> int:
+    return int(ESTIMATED_DAYS_TO_SALE_BY_TIER.get(segment_tier, 70))
+
+
+def _investment_grade(retail_ctm_pct: float, estimated_days_to_sale: int, segment_tier: int) -> str:
+    if segment_tier >= 4:
+        return "Bronze"
+    if retail_ctm_pct <= 62 and estimated_days_to_sale <= 25 and segment_tier == 1:
         return "Platinum"
-    if ctm_pct <= 80 and segment_tier <= 3:
+    if retail_ctm_pct <= 66 and estimated_days_to_sale <= 35 and segment_tier <= 2:
         return "Gold"
-    if ctm_pct <= 88:
+    if retail_ctm_pct <= 72 and estimated_days_to_sale <= 50:
         return "Silver"
     return "Bronze"
+
+
+def _segment_tier_score(segment_tier: int) -> float:
+    return {
+        1: 100.0,
+        2: 80.0,
+        3: 55.0,
+        4: 30.0,
+    }.get(segment_tier, 30.0)
+
+
+def _roi_per_day_score(roi_per_day: float) -> float:
+    if roi_per_day <= 0:
+        return 0.0
+    if roi_per_day >= 250:
+        return 100.0
+    return max(0.0, min(100.0, (roi_per_day / 250.0) * 100.0))
+
+
+def _transport_cost_score(transport_cost: float) -> float:
+    if transport_cost <= 300:
+        return 100.0
+    if transport_cost <= 600:
+        return 80.0
+    if transport_cost <= 900:
+        return 60.0
+    if transport_cost <= 1200:
+        return 40.0
+    return 20.0
+
+
+def _time_pressure_score(auction_end: Optional[str]) -> float:
+    if not auction_end:
+        return 40.0
+
+    parsed_end: Optional[datetime] = None
+    try:
+        parsed_end = datetime.fromisoformat(str(auction_end).replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            from dateutil import parser as dateparser  # type: ignore
+            parsed_end = dateparser.parse(str(auction_end))
+        except Exception:
+            return 40.0
+
+    if parsed_end is None:
+        return 40.0
+
+    if parsed_end.tzinfo is not None:
+        now = datetime.now(parsed_end.tzinfo)
+    else:
+        now = datetime.now()
+    hours_remaining = max((parsed_end - now).total_seconds() / 3600.0, 0.0)
+
+    if hours_remaining <= 6:
+        return 100.0
+    if hours_remaining <= 24:
+        return 85.0
+    if hours_remaining <= 48:
+        return 65.0
+    if hours_remaining <= 72:
+        return 50.0
+    return 35.0
+
+
+def _weighted_score(
+    investment_grade: str,
+    roi_per_day: float,
+    segment_tier: int,
+    mmr_confidence_proxy: float,
+    transport_cost: float,
+    source_score: float,
+    auction_end: Optional[str],
+) -> float:
+    return (
+        INVESTMENT_GRADE_PROXY_SCORES.get(investment_grade, 25.0) * 0.30
+        + _roi_per_day_score(roi_per_day) * 0.20
+        + _segment_tier_score(segment_tier) * 0.15
+        + max(0.0, min(100.0, mmr_confidence_proxy)) * 0.10
+        + _transport_cost_score(transport_cost) * 0.10
+        + source_score * 0.10
+        + _time_pressure_score(auction_end) * 0.05
+    )
+
+
+def compute_bid_ceiling(
+    current_bid: float,
+    mmr_ca: float,
+    total_cost: float,
+    segment_tier: int,
+    investment_grade: str,
+    buyer_premium_pct: float,
+    doc_fee: float,
+    transport: float,
+    recon_reserve: float,
+) -> dict:
+    if investment_grade == "Bronze":
+        return {
+            "bid_ceiling_pct": None,
+            "max_bid": 0.0,
+            "bid_headroom": -max(float(current_bid or 0), 0.0),
+            "ceiling_reason": "bronze_reject",
+            "ceiling_pass": False,
+        }
+
+    ceiling_pct = None
+    reason = None
+    if investment_grade == "Platinum" and segment_tier == 1:
+        ceiling_pct = 88.0
+        reason = "platinum_tier1_all_in_le_88pct_mmr"
+    elif investment_grade in {"Platinum", "Gold"} and segment_tier in {1, 2}:
+        ceiling_pct = 85.0
+        reason = "gold_band_tier1_2_all_in_le_85pct_mmr"
+    elif investment_grade == "Silver":
+        ceiling_pct = 82.0
+        reason = "silver_all_in_le_82pct_mmr"
+    else:
+        return {
+            "bid_ceiling_pct": None,
+            "max_bid": 0.0,
+            "bid_headroom": -max(float(current_bid or 0), 0.0),
+            "ceiling_reason": f"unsupported_grade_tier ({investment_grade}/Tier{segment_tier})",
+            "ceiling_pass": False,
+        }
+
+    if mmr_ca <= 0:
+        return {
+            "bid_ceiling_pct": ceiling_pct,
+            "max_bid": 0.0,
+            "bid_headroom": -max(float(current_bid or 0), 0.0),
+            "ceiling_reason": "missing_mmr_for_ceiling",
+            "ceiling_pass": False,
+        }
+
+    ceiling_total_cost = mmr_ca * (ceiling_pct / 100.0)
+    fixed_costs = float(doc_fee or 0.0) + float(transport or 0.0) + float(recon_reserve or 0.0)
+    bid_multiplier = 1.0 + max(float(buyer_premium_pct or 0.0), 0.0)
+    max_bid = (ceiling_total_cost - fixed_costs) / bid_multiplier if bid_multiplier > 0 else 0.0
+    max_bid = max(0.0, max_bid)
+    bid_headroom = max_bid - max(float(current_bid or 0.0), 0.0)
+    ceiling_pass = total_cost <= ceiling_total_cost and bid_headroom >= 0
+
+    if not ceiling_pass and bid_headroom < 0:
+        reason = f"{reason}; negative_headroom"
+    elif not ceiling_pass:
+        reason = f"{reason}; total_cost_exceeds_ceiling"
+
+    return {
+        "bid_ceiling_pct": round(ceiling_pct, 2),
+        "max_bid": round(max_bid, 2),
+        "bid_headroom": round(bid_headroom, 2),
+        "ceiling_reason": reason,
+        "ceiling_pass": ceiling_pass,
+    }
 
 
 def _recon_reserve(mileage: float = None, is_police_or_fleet: bool = False) -> float:
@@ -228,6 +404,9 @@ def score_deal(
     miles_cfg: dict = None,
     mileage: float = None,
     is_police_or_fleet: bool = False,
+    auction_end: Optional[str] = None,
+    mmr_lookup_basis: Optional[str] = None,
+    mmr_confidence_proxy: Optional[float] = None,
 ) -> dict:
     """
     Compute full DOS score and deal metrics.
@@ -240,45 +419,87 @@ def score_deal(
         fees_cfg = _load_fees()
 
     site_fees = fees_cfg.get(source_site, {"buyers_premium_pct": 10.0, "doc_fee": 50})
-    premium = bid * site_fees.get("buyers_premium_pct", 10.0) / 100.0
+    buyer_premium_pct = site_fees.get("buyers_premium_pct", 10.0) / 100.0
+    premium = bid * buyer_premium_pct
     doc_fee = site_fees.get("doc_fee", 50)
     transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg)
     recon_reserve = _recon_reserve(mileage=mileage, is_police_or_fleet=is_police_or_fleet)
     total_cost = bid + premium + doc_fee + transport + recon_reserve
-    margin = mmr_ca - total_cost
+    wholesale_margin = mmr_ca - total_cost
+    retail_asking_price_estimate = mmr_ca * RETAIL_PROXY_MULTIPLIER
+    gross_margin = retail_asking_price_estimate - total_cost
 
     m_score = _margin_score(bid, mmr_ca, total_cost)
     v_score = _velocity_score(bid, year)
     seg_score = _segment_score(model, make)
     mod_score = _model_score(model)
     src_score = _source_score(source_site)
-    ctm_pct = (total_cost / mmr_ca * 100.0) if mmr_ca > 0 else 100.0
+    wholesale_ctm_pct = (total_cost / mmr_ca * 100.0) if mmr_ca > 0 else 100.0
+    retail_ctm_pct = (total_cost / retail_asking_price_estimate * 100.0) if retail_asking_price_estimate > 0 else 100.0
     segment_tier = _segment_tier(model, make)
-    investment_grade = _investment_grade(ctm_pct, segment_tier)
+    estimated_days_to_sale = _estimated_days_to_sale(segment_tier)
+    roi_per_day = gross_margin / estimated_days_to_sale if estimated_days_to_sale > 0 else 0.0
+    confidence_proxy = 50.0 if mmr_confidence_proxy is None else float(mmr_confidence_proxy)
+    investment_grade = _investment_grade(retail_ctm_pct, estimated_days_to_sale, segment_tier)
 
-    dos_score = (
+    legacy_dos_score = (
         m_score * 0.35
         + v_score * 0.25
         + seg_score * 0.20
         + mod_score * 0.12
         + src_score * 0.08
     )
+    weighted_score = _weighted_score(
+        investment_grade=investment_grade,
+        roi_per_day=roi_per_day,
+        segment_tier=segment_tier,
+        mmr_confidence_proxy=confidence_proxy,
+        transport_cost=transport,
+        source_score=src_score,
+        auction_end=auction_end,
+    )
+    ceiling_metrics = compute_bid_ceiling(
+        current_bid=bid,
+        mmr_ca=mmr_ca,
+        total_cost=total_cost,
+        segment_tier=segment_tier,
+        investment_grade=investment_grade,
+        buyer_premium_pct=buyer_premium_pct,
+        doc_fee=doc_fee,
+        transport=transport,
+        recon_reserve=recon_reserve,
+    )
 
     return {
         "premium": round(premium, 2),
+        "buyer_premium_amount": round(premium, 2),
+        "buyer_premium_pct": round(buyer_premium_pct, 4),
         "doc_fee": doc_fee,
         "transport": round(transport, 2),
         "recon_reserve": round(recon_reserve, 2),
         "total_cost": round(total_cost, 2),
-        "margin": round(margin, 2),
+        "margin": round(gross_margin, 2),
+        "gross_margin": round(gross_margin, 2),
+        "wholesale_margin": round(wholesale_margin, 2),
         "margin_score": round(m_score, 2),
         "velocity_score": round(v_score, 2),
         "segment_score": round(seg_score, 2),
         "model_score": round(mod_score, 2),
         "source_score": round(src_score, 2),
-        "ctm_pct": round(ctm_pct, 2),
+        "retail_proxy_multiplier": RETAIL_PROXY_MULTIPLIER,
+        "retail_asking_price_estimate": round(retail_asking_price_estimate, 2),
+        "ctm_pct": round(retail_ctm_pct, 2),
+        "wholesale_ctm_pct": round(wholesale_ctm_pct, 2),
+        "retail_ctm_pct": round(retail_ctm_pct, 2),
         "segment_tier": segment_tier,
+        "estimated_days_to_sale": estimated_days_to_sale,
+        "roi_per_day": round(roi_per_day, 2),
+        "mmr_lookup_basis": mmr_lookup_basis or "unknown",
+        "mmr_confidence_proxy": round(confidence_proxy, 2),
         "investment_grade": investment_grade,
-        "dos_score": round(dos_score, 2),
-        "score": round(dos_score, 2),  # alias for compatibility
+        "legacy_dos_score": round(legacy_dos_score, 2),
+        "dos_score": round(weighted_score, 2),
+        "score": round(weighted_score, 2),
+        "score_version": SCORE_VERSION,
+        **ceiling_metrics,
     }

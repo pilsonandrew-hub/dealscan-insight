@@ -34,24 +34,86 @@ export interface OpportunityDetail {
   source: string;
 }
 
-function getRowSource(row: any): string {
+interface OpportunityRow {
+  [key: string]: unknown;
+  id?: string;
+  created_at?: string;
+  source?: string;
+  source_site?: string;
+  auction_end_date?: string;
+  auction_end?: string;
+  auction_fees?: number;
+  fees_cost?: number;
+  estimated_transport?: number;
+  transportation_cost?: number;
+  mmr?: number;
+  estimated_sale_price?: number;
+  total_cost?: number;
+  acquisition_cost?: number;
+  current_bid?: number;
+  buy_now_price?: number;
+  gross_margin?: number;
+  potential_profit?: number;
+  profit?: number;
+  profit_margin?: number;
+  roi?: number;
+  roi_percentage?: number;
+  dos_score?: number;
+  score?: number;
+  buyer_premium?: number;
+  confidence_score?: number;
+  risk_score?: number;
+  location?: string;
+  state?: string;
+  step_status?: Opportunity['status'];
+  status?: Opportunity['status'];
+  vin?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  mileage?: number;
+  recon_reserve?: number;
+  investment_grade?: Opportunity['investment_grade'];
+  retail_asking_price_estimate?: number;
+  retail_proxy_multiplier?: number;
+  wholesale_ctm_pct?: number;
+  ctm_pct?: number;
+  retail_ctm_pct?: number;
+  estimated_days_to_sale?: number;
+  roi_per_day?: number;
+  mmr_lookup_basis?: string;
+  mmr_confidence_proxy?: number;
+  bid_ceiling_pct?: number;
+  max_bid?: number;
+  bid_headroom?: number;
+  ceiling_reason?: string;
+  score_version?: string;
+  legacy_dos_score?: number;
+  processed_at?: string;
+}
+
+function getRowSource(row: OpportunityRow): string {
   return row.source || row.source_site || '';
 }
 
-function getRowAuctionEnd(row: any): string | null {
+function getRowAuctionEnd(row: OpportunityRow): string | null {
   return row.auction_end_date || row.auction_end || null;
 }
 
-function getRowAuctionFees(row: any): number {
+function getRowAuctionFees(row: OpportunityRow): number {
   return row.auction_fees ?? row.fees_cost ?? 0;
 }
 
-function getRowTransport(row: any): number {
+function getRowTransport(row: OpportunityRow): number {
   return row.estimated_transport ?? row.transportation_cost ?? 0;
 }
 
-function getRowMMR(row: any): number {
+function getRowMMR(row: OpportunityRow): number {
   return row.mmr ?? row.estimated_sale_price ?? 0;
+}
+
+function getRowTotalCost(row: OpportunityRow): number {
+  return row.total_cost ?? row.acquisition_cost ?? row.current_bid ?? row.buy_now_price ?? 0;
 }
 
 function normalizeROI(value: number): number {
@@ -59,20 +121,20 @@ function normalizeROI(value: number): number {
   return value > 1 ? value / 100 : value;
 }
 
-function getRowGrossMargin(row: any): number {
+function getRowGrossMargin(row: OpportunityRow): number {
   return row.gross_margin ?? row.potential_profit ?? row.profit ?? row.profit_margin ?? 0;
 }
 
-function getRowROI(row: any): number {
+function getRowROI(row: OpportunityRow): number {
   const roi = row.roi ?? row.roi_percentage ?? 0;
   return normalizeROI(Number(roi) || 0);
 }
 
-function getRowProfit(row: any): number {
+function getRowProfit(row: OpportunityRow): number {
   return row.potential_profit ?? row.gross_margin ?? row.profit ?? 0;
 }
 
-function getRowScore(row: any): number | null {
+function getRowScore(row: OpportunityRow): number | null {
   return row.dos_score ?? row.score ?? null;
 }
 
@@ -96,11 +158,12 @@ function buildOpportunityQuery(filters?: CrosshairSearchFilters) {
 }
 
 // Transform database row to Opportunity type
-function transformOpportunity(row: any): Opportunity & { created_at: string; id: string } {
+function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: string; id: string } {
   const currentBid = row.current_bid ?? row.buy_now_price ?? 0;
   const buyerPremium = row.buyer_premium ?? 0;
   const auctionFees = getRowAuctionFees(row);
   const transport = getRowTransport(row);
+  const totalCost = getRowTotalCost(row);
 
   return {
     id: row.id,
@@ -115,7 +178,7 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
     },
     current_bid: currentBid,
     expected_price: getRowMMR(row),
-    acquisition_cost: currentBid + buyerPremium + auctionFees + transport,
+    acquisition_cost: totalCost,
     profit: getRowProfit(row),
     roi: getRowROI(row),
     confidence: row.confidence_score,
@@ -125,7 +188,7 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
     auction_end: getRowAuctionEnd(row),
     source_site: getRowSource(row),
     status: row.step_status || row.status || 'moderate',
-    total_cost: currentBid,
+    total_cost: totalCost,
     transportation_cost: transport,
     fees_cost: auctionFees,
     estimated_sale_price: getRowMMR(row),
@@ -135,7 +198,24 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
     model: row.model,
     year: row.year,
     mileage: row.mileage,
-    score: getRowScore(row) ?? undefined
+    score: getRowScore(row) ?? undefined,
+    buyer_premium: buyerPremium,
+    recon_reserve: row.recon_reserve ?? 0,
+    investment_grade: row.investment_grade ?? undefined,
+    retail_asking_price_estimate: row.retail_asking_price_estimate ?? undefined,
+    retail_proxy_multiplier: row.retail_proxy_multiplier ?? undefined,
+    wholesale_ctm_pct: row.wholesale_ctm_pct ?? undefined,
+    retail_ctm_pct: row.retail_ctm_pct ?? row.ctm_pct ?? undefined,
+    estimated_days_to_sale: row.estimated_days_to_sale ?? undefined,
+    roi_per_day: row.roi_per_day ?? undefined,
+    mmr_lookup_basis: row.mmr_lookup_basis ?? undefined,
+    mmr_confidence_proxy: row.mmr_confidence_proxy ?? undefined,
+    bid_ceiling_pct: row.bid_ceiling_pct ?? undefined,
+    max_bid: row.max_bid ?? undefined,
+    bid_headroom: row.bid_headroom ?? undefined,
+    ceiling_reason: row.ceiling_reason ?? undefined,
+    score_version: row.score_version ?? undefined,
+    legacy_dos_score: row.legacy_dos_score ?? undefined
   };
 }
 
@@ -257,12 +337,20 @@ export const api = {
       const { data, error } = await supabase
         .from('opportunities')
         .select('*')
-        .gte('dos_score', minScore)
+        .or(`dos_score.gte.${minScore},investment_grade.eq.Platinum`)
         .order('dos_score', { ascending: false })
-        .limit(limit);
+        .limit(limit * 3);
 
       if (error) throw error;
-      return (data || []).map(transformOpportunity);
+      return (data || [])
+        .map(transformOpportunity)
+        .sort((a, b) => {
+          const gradeRank = (grade?: string) => ({ Platinum: 4, Gold: 3, Silver: 2, Bronze: 1 }[grade || ''] || 0);
+          const gradeDelta = gradeRank(b.investment_grade) - gradeRank(a.investment_grade);
+          if (gradeDelta !== 0) return gradeDelta;
+          return (b.score || 0) - (a.score || 0);
+        })
+        .slice(0, limit);
     } catch (error) {
       console.error('getHotDeals failed:', error);
       return [];
@@ -273,7 +361,9 @@ export const api = {
   async getDashboardMetrics(): Promise<{
     total_today: number;
     hot_deals: number;
+    platinum_deals: number;
     avg_margin: number;
+    avg_roi_day: number;
     top_score: number;
   }> {
     try {
@@ -282,26 +372,32 @@ export const api = {
 
       const { data, error } = await supabase
         .from('opportunities')
-        .select('dos_score, gross_margin, processed_at');
+        .select('dos_score, gross_margin, processed_at, investment_grade, roi_per_day');
 
       if (error) throw error;
 
       const rows = data || [];
       const todayRows = rows.filter(r => r.processed_at && new Date(r.processed_at) >= today);
       const hotDeals = rows.filter(r => (r.dos_score || 0) >= 80);
+      const platinumDeals = rows.filter(r => r.investment_grade === 'Platinum');
       const avgMargin = rows.length > 0
         ? rows.reduce((sum, r) => sum + (r.gross_margin || 0), 0) / rows.length
+        : 0;
+      const avgRoiDay = rows.length > 0
+        ? rows.reduce((sum, r) => sum + (r.roi_per_day || 0), 0) / rows.length
         : 0;
       const topScore = rows.reduce((max, r) => Math.max(max, r.dos_score || 0), 0);
 
       return {
         total_today: todayRows.length,
         hot_deals: hotDeals.length,
+        platinum_deals: platinumDeals.length,
         avg_margin: avgMargin,
+        avg_roi_day: avgRoiDay,
         top_score: topScore
       };
     } catch {
-      return { total_today: 0, hot_deals: 0, avg_margin: 0, top_score: 0 };
+      return { total_today: 0, hot_deals: 0, platinum_deals: 0, avg_margin: 0, avg_roi_day: 0, top_score: 0 };
     }
   },
 
@@ -337,7 +433,7 @@ export const api = {
   },
 
   // Rover recommendations via Railway API
-  async getRoverRecommendations(): Promise<any[]> {
+  async getRoverRecommendations(): Promise<Array<Record<string, unknown>>> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
