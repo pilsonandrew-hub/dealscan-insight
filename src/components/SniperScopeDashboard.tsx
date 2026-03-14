@@ -1,5 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { Target, Lock, Trash2, Calculator, Upload } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Target, Lock, Trash2, Calculator, Upload, Search, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import api, { type OpportunityDetail } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SniperInputs {
@@ -87,8 +89,22 @@ function fmt$(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 }
 
+function fmtInput(n: number): string {
+  return Number.isFinite(n) ? n.toString() : '';
+}
+
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function normalizeAuctionSource(source?: string): string {
+  const normalized = (source || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (normalized.includes('govdeals')) return 'govdeals';
+  if (normalized.includes('gsa')) return 'gsaauctions';
+  if (normalized.includes('publicsurplus')) return 'publicsurplus';
+  if (normalized.includes('hibid')) return 'hibid';
+  if (normalized.includes('municibid')) return 'municibid';
+  return 'other';
 }
 
 const DEFAULT_INPUTS: SniperInputs = {
@@ -107,7 +123,12 @@ const DEFAULT_INPUTS: SniperInputs = {
 
 // ─── SniperScope Calculator ───────────────────────────────────────────────────
 export default function SniperScopeDashboard() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [inputs, setInputs] = useState<SniperInputs>(DEFAULT_INPUTS);
+  const [dealIdInput, setDealIdInput] = useState(searchParams.get('dealId') || '');
+  const [loadingDeal, setLoadingDeal] = useState(false);
+  const [dealError, setDealError] = useState<string | null>(null);
+  const [loadedDeal, setLoadedDeal] = useState<OpportunityDetail | null>(null);
 
   const [saved, setSaved] = useState<SavedTarget[]>(() => {
     try {
@@ -153,6 +174,69 @@ export default function SniperScopeDashboard() {
   // ─── Helpers ───────────────────────────────────────────────────────────────
   const set = (key: keyof SniperInputs, value: string) =>
     setInputs(prev => ({ ...prev, [key]: value }));
+
+  const populateFromDeal = (deal: OpportunityDetail) => {
+    const stateCode = (deal.state || '').toUpperCase();
+    const source = normalizeAuctionSource(deal.source);
+    const sourceData = AUCTION_SOURCES.find(entry => entry.value === source);
+    const salesTaxPct = sourceData?.noTax ? '0' : (STATE_SALES_TAX[stateCode] ?? parseFloat(DEFAULT_INPUTS.salesTaxPct)).toFixed(2);
+    const buyerPremiumPct = deal.current_bid > 0 && deal.buyer_premium > 0
+      ? ((deal.buyer_premium / deal.current_bid) * 100).toFixed(2)
+      : (sourceData?.premium ?? parseFloat(DEFAULT_INPUTS.buyerPremiumPct)).toString();
+
+    setInputs(prev => ({
+      ...prev,
+      year: deal.year ? deal.year.toString() : '',
+      make: deal.make || '',
+      model: deal.model || '',
+      mmr: deal.mmr ? fmtInput(deal.mmr) : '',
+      source,
+      buyerPremiumPct,
+      salesTaxPct,
+      auctionFees: fmtInput(deal.auction_fees),
+      transport: fmtInput(deal.estimated_transport),
+      state: stateCode,
+      currentBid: fmtInput(deal.current_bid),
+    }));
+    setLoadedDeal(deal);
+    setDealError(null);
+  };
+
+  const loadFromDeal = async (id: string, syncUrl = true) => {
+    const normalizedId = id.trim();
+    if (!normalizedId) {
+      setDealError('Enter an opportunity ID to load a deal.');
+      return;
+    }
+
+    setLoadingDeal(true);
+    setDealError(null);
+
+    try {
+      const deal = await api.getOpportunityById(normalizedId);
+      if (!deal) {
+        setLoadedDeal(null);
+        setDealError('Deal not found in Supabase.');
+        return;
+      }
+
+      populateFromDeal(deal);
+      setDealIdInput(deal.id);
+
+      if (syncUrl) {
+        const next = new URLSearchParams(searchParams);
+        next.set('tab', 'sniper');
+        next.set('dealId', deal.id);
+        setSearchParams(next);
+      }
+    } catch (error) {
+      console.error(error);
+      setLoadedDeal(null);
+      setDealError('Failed to load deal from Supabase.');
+    } finally {
+      setLoadingDeal(false);
+    }
+  };
 
   const handleStateChange = (state: string) => {
     const stateData  = LOW_RUST_STATES.find(s => s.value === state);
@@ -228,6 +312,16 @@ export default function SniperScopeDashboard() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const dealIdParam = searchParams.get('dealId') || '';
+
+  useEffect(() => {
+    setDealIdInput(dealIdParam);
+
+    if (dealIdParam && dealIdParam !== loadedDeal?.id) {
+      void loadFromDeal(dealIdParam, false);
+    }
+  }, [dealIdParam, loadedDeal?.id]);
+
   // ─── Derived UI state ──────────────────────────────────────────────────────
   const hasMMR = Boolean(inputs.mmr);
   const isViable = calc.maxBid > 0;
@@ -265,6 +359,38 @@ export default function SniperScopeDashboard() {
           <h2 className="text-xl font-bold text-white">SniperScope</h2>
           <p className="text-sm text-gray-400">Bid execution calculator — find your max bid before you raise your hand</p>
         </div>
+      </div>
+
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Search className="h-4 w-4 text-emerald-400" />
+          <h3 className="text-sm font-semibold text-gray-200">Load from deal</h3>
+        </div>
+        <div className="flex flex-col md:flex-row gap-3">
+          <input
+            type="text"
+            className="flex-1 bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 transition-colors"
+            placeholder="Opportunity ID"
+            value={dealIdInput}
+            onChange={e => setDealIdInput(e.target.value)}
+          />
+          <button
+            onClick={() => loadFromDeal(dealIdInput)}
+            disabled={loadingDeal}
+            className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {loadingDeal ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {loadingDeal ? 'Loading...' : 'Load from deal'}
+          </button>
+        </div>
+        {loadedDeal && (
+          <p className="text-xs text-gray-400">
+            Loaded {loadedDeal.year} {loadedDeal.make} {loadedDeal.model} from {loadedDeal.state || 'unknown state'}.
+          </p>
+        )}
+        {dealError && (
+          <p className="text-xs text-red-400">{dealError}</p>
+        )}
       </div>
 
       {/* Viability banners */}

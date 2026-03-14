@@ -92,6 +92,20 @@ _COMMERCIAL_PATTERNS = [
     r"\bUtility\s*Bed\b", r"\bRefrigerator\s*Truck\b",
 ]
 
+_TITLE_BRAND_PATTERNS = [
+    ("salvage", r"\bsalvage\b"),
+    ("rebuilt", r"\brebuilt\b"),
+    ("flood", r"\bflood\b"),
+    ("lemon", r"\blemon\b"),
+    ("frame damage", r"\bframe[\s-]+damage\b"),
+    ("structural damage", r"\bstructural[\s-]+damage\b"),
+    ("airbag deployed", r"\bair\s*bag\s+deployed\b"),
+    ("parts only", r"\bparts[\s-]+only\b"),
+    ("non-op", r"\bnon[\s-]?op\b"),
+    ("fire damage", r"\bfire[\s-]+damage\b"),
+    ("hail damage", r"\bhail[\s-]+damage\b"),
+]
+
 # MMR estimates by model — much more accurate than segment-only
 # Based on 2025-2026 wholesale (Manheim/Black Book averages)
 _MODEL_MMR = {
@@ -245,6 +259,22 @@ def _normalize_make(make: str) -> str:
 def _normalize_model(model: str) -> str:
     words = re.sub(r"[^a-z0-9 ]", "", (model or "").lower().strip()).split()
     return " ".join(words[:2])
+
+
+def _find_title_brand_issue(vehicle: dict) -> Optional[str]:
+    search_fields = [
+        ("title_status", vehicle.get("title_status")),
+        ("title", vehicle.get("title")),
+        ("vin", vehicle.get("vin")),
+    ]
+    for field_name, raw_value in search_fields:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        for label, pattern in _TITLE_BRAND_PATTERNS:
+            if re.search(pattern, value, re.IGNORECASE):
+                return f"title_brand_rejected ({field_name} matched '{label}')"
+    return None
 
 
 def compute_canonical_id(vehicle: dict) -> str:
@@ -635,6 +665,7 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
 
         normalized = {
             "title": title,
+            "title_status": item.get("title_status") or item.get("titleStatus") or "",
             "current_bid": current_bid,
             "buyer_premium_pct": float(item.get("buyer_premium_pct") or 10.0),
             "doc_fee": float(item.get("doc_fee") or 75),
@@ -773,6 +804,10 @@ def passes_basic_gates(vehicle: dict) -> dict:
     if state in HIGH_RUST_STATES:
         return {"pass": False, "reason": f"high_rust_state ({state})"}
 
+    title_brand_issue = _find_title_brand_issue(vehicle)
+    if title_brand_issue:
+        return {"pass": False, "reason": title_brand_issue}
+
     # Reject commercial/fleet vehicles (cargo vans, box trucks, cutaways)
     title = (vehicle.get("title") or "").strip()
     if any(re.search(p, title, re.IGNORECASE) for p in _COMMERCIAL_PATTERNS):
@@ -832,6 +867,15 @@ def score_vehicle(vehicle: dict) -> dict:
         make = vehicle.get("make", "")
         model = vehicle.get("model", "")
         year = vehicle.get("year")
+        mileage = vehicle.get("mileage")
+        police_fleet_text = " ".join(
+            str(vehicle.get(field) or "").lower()
+            for field in ("title", "model", "agency_name")
+        )
+        is_police_or_fleet = any(
+            term in police_fleet_text
+            for term in ("police", "interceptor", "ppv", "pursuit", "fleet")
+        )
         mmr = _estimate_mmr(make, model)
 
         result = score_deal(
@@ -842,6 +886,8 @@ def score_vehicle(vehicle: dict) -> dict:
             model=model,
             make=make,
             year=year,
+            mileage=mileage,
+            is_police_or_fleet=is_police_or_fleet,
         )
         result["mmr_estimated"] = mmr
         return result

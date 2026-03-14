@@ -8,8 +8,93 @@ import { supabase } from '@/integrations/supabase/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
 
+export interface CrosshairSearchFilters {
+  make?: string;
+  model?: string;
+  yearMin?: number;
+  yearMax?: number;
+  state?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minScore?: number;
+  limit?: number;
+}
+
+export interface OpportunityDetail {
+  id: string;
+  make: string;
+  model: string;
+  year: number;
+  state: string;
+  mmr: number;
+  current_bid: number;
+  estimated_transport: number;
+  auction_fees: number;
+  buyer_premium: number;
+  source: string;
+}
+
+function getRowSource(row: any): string {
+  return row.source || row.source_site || '';
+}
+
+function getRowAuctionEnd(row: any): string | null {
+  return row.auction_end_date || row.auction_end || null;
+}
+
+function getRowAuctionFees(row: any): number {
+  return row.auction_fees ?? row.fees_cost ?? 0;
+}
+
+function getRowTransport(row: any): number {
+  return row.estimated_transport ?? row.transportation_cost ?? 0;
+}
+
+function getRowMMR(row: any): number {
+  return row.mmr ?? row.estimated_sale_price ?? 0;
+}
+
+function getRowMargin(row: any): number {
+  return row.gross_margin ?? row.profit_margin ?? 0;
+}
+
+function getRowROI(row: any): number {
+  return row.roi ?? row.roi_percentage ?? 0;
+}
+
+function getRowProfit(row: any): number {
+  return row.potential_profit ?? row.profit ?? 0;
+}
+
+function getRowScore(row: any): number | null {
+  return row.dos_score ?? row.score ?? null;
+}
+
+function buildOpportunityQuery(filters?: CrosshairSearchFilters) {
+  let query = supabase
+    .from('opportunities')
+    .select('*', { count: 'exact' })
+    .not('dos_score', 'is', null);
+
+  if (filters?.make) query = query.ilike('make', `%${filters.make}%`);
+  if (filters?.model) query = query.ilike('model', `%${filters.model}%`);
+  if (filters?.yearMin != null) query = query.gte('year', filters.yearMin);
+  if (filters?.yearMax != null) query = query.lte('year', filters.yearMax);
+  if (filters?.state) query = query.ilike('state', `%${filters.state.trim().toUpperCase()}%`);
+  if (filters?.minPrice != null) query = query.gte('current_bid', filters.minPrice);
+  if (filters?.maxPrice != null) query = query.lte('current_bid', filters.maxPrice);
+  if (filters?.minScore != null) query = query.gte('dos_score', filters.minScore);
+
+  return query;
+}
+
 // Transform database row to Opportunity type
 function transformOpportunity(row: any): Opportunity & { created_at: string; id: string } {
+  const currentBid = row.current_bid ?? row.buy_now_price ?? 0;
+  const buyerPremium = row.buyer_premium ?? 0;
+  const auctionFees = getRowAuctionFees(row);
+  const transport = getRowTransport(row);
+
   return {
     id: row.id,
     created_at: row.created_at,
@@ -21,29 +106,29 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
       vin: row.vin || '',
       mileage: row.mileage || 0
     },
-    current_bid: row.current_bid,
-    expected_price: row.estimated_sale_price,
-    acquisition_cost: row.current_bid + (row.buyer_premium || 0) + (row.fees_cost || 0) + (row.transportation_cost || 0),
-    profit: row.potential_profit,
-    roi: row.roi_percentage,
+    current_bid: currentBid,
+    expected_price: getRowMMR(row),
+    acquisition_cost: currentBid + buyerPremium + auctionFees + transport,
+    profit: getRowProfit(row),
+    roi: getRowROI(row),
     confidence: row.confidence_score,
     risk_score: row.risk_score,
     location: row.location || '',
     state: row.state || '',
-    auction_end: row.auction_end,
-    source_site: row.source || row.source_site,
+    auction_end: getRowAuctionEnd(row),
+    source_site: getRowSource(row),
     status: row.step_status || row.status || 'moderate',
-    total_cost: row.current_bid,
-    transportation_cost: row.estimated_transport || 0,
-    fees_cost: row.auction_fees || 0,
-    estimated_sale_price: row.mmr,
-    profit_margin: row.gross_margin || row.profit_margin || 0,
+    total_cost: currentBid,
+    transportation_cost: transport,
+    fees_cost: auctionFees,
+    estimated_sale_price: getRowMMR(row),
+    profit_margin: getRowMargin(row),
     vin: row.vin,
     make: row.make,
     model: row.model,
     year: row.year,
     mileage: row.mileage,
-    score: row.dos_score || row.score
+    score: getRowScore(row) ?? undefined
   };
 }
 
@@ -52,36 +137,38 @@ export const api = {
   async getOpportunities(
     paramsOrPage?: number,
     limit?: number,
-    filters?: {
-      make?: string;
-      model?: string;
-      yearMin?: number;
-      yearMax?: number;
-      states?: string[];
-      minScore?: number;
-      maxBid?: number;
-      source?: string;
-      sortBy?: 'score' | 'profit_margin' | 'auction_end' | 'current_bid';
-    }
+      filters?: {
+        make?: string;
+        model?: string;
+        yearMin?: number;
+        yearMax?: number;
+        states?: string[];
+        state?: string;
+        minScore?: number;
+        minBid?: number;
+        maxBid?: number;
+        source?: string;
+        sortBy?: 'score' | 'profit_margin' | 'auction_end' | 'current_bid';
+      }
   ): Promise<{ data: Opportunity[]; total: number; hasMore: boolean }> {
     const page = typeof paramsOrPage === 'number' ? paramsOrPage : 1;
     const pageLimit = limit || 100;
     const offset = (page - 1) * pageLimit;
 
     try {
-      let query = supabase
-        .from('opportunities')
-        .select('*', { count: 'exact' })
-        .not('dos_score', 'is', null);
+      let query = buildOpportunityQuery({
+        make: filters?.make,
+        model: filters?.model,
+        yearMin: filters?.yearMin,
+        yearMax: filters?.yearMax,
+        state: filters?.state,
+        minPrice: filters?.minBid,
+        maxPrice: filters?.maxBid,
+        minScore: filters?.minScore
+      });
 
       // Apply filters
-      if (filters?.make) query = query.ilike('make', `%${filters.make}%`);
-      if (filters?.model) query = query.ilike('model', `%${filters.model}%`);
-      if (filters?.yearMin) query = query.gte('year', filters.yearMin);
-      if (filters?.yearMax) query = query.lte('year', filters.yearMax);
       if (filters?.states && filters.states.length > 0) query = query.in('state', filters.states);
-      if (filters?.minScore) query = query.gte('dos_score', filters.minScore);
-      if (filters?.maxBid) query = query.lte('current_bid', filters.maxBid);
       if (filters?.source) query = query.eq('source', filters.source);
 
       // Sort
@@ -105,6 +192,55 @@ export const api = {
     } catch (error) {
       console.error('getOpportunities failed:', error);
       return { data: [], total: 0, hasMore: false };
+    }
+  },
+
+  async searchCrosshairOpportunities(filters: CrosshairSearchFilters): Promise<{ data: Opportunity[]; total: number }> {
+    try {
+      const limit = filters.limit ?? 50;
+      const { data, error, count } = await buildOpportunityQuery(filters)
+        .order('dos_score', { ascending: false, nullsFirst: false })
+        .limit(limit);
+
+      if (error) throw error;
+
+      return {
+        data: (data || []).map(transformOpportunity),
+        total: count || 0
+      };
+    } catch (error) {
+      console.error('searchCrosshairOpportunities failed:', error);
+      return { data: [], total: 0 };
+    }
+  },
+
+  async getOpportunityById(id: string): Promise<OpportunityDetail | null> {
+    try {
+      const { data, error } = await supabase
+        .from('opportunities')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return null;
+
+      return {
+        id: data.id,
+        make: data.make || '',
+        model: data.model || '',
+        year: data.year || 0,
+        state: data.state || '',
+        mmr: getRowMMR(data),
+        current_bid: data.current_bid ?? 0,
+        estimated_transport: getRowTransport(data),
+        auction_fees: getRowAuctionFees(data),
+        buyer_premium: data.buyer_premium ?? 0,
+        source: getRowSource(data)
+      };
+    } catch (error) {
+      console.error('getOpportunityById failed:', error);
+      return null;
     }
   },
 

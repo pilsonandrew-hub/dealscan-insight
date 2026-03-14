@@ -1,545 +1,431 @@
-/**
- * ds-govplanet — GovPlanet Automotive Scraper
- *
- * GovPlanet (govplanet.com) is a Ritchie Bros government surplus auction site.
- * It is JS-rendered (React/Next.js) but scrapeable — no Cloudflare/403.
- *
- * Strategy:
- *   1. Load each category URL with PlaywrightCrawler
- *   2. Intercept ALL JSON responses looking for lot/vehicle arrays
- *   3. Capture the search API URL and paginate via direct API calls
- *      (page.goto on API URL — avoids CORS, response still intercepted)
- *   4. Filter and push results
- *
- * Category URLs:
- *   https://www.govplanet.com/Passenger+Vehicles
- *   https://www.govplanet.com/Trucks
- *   https://www.govplanet.com/en/govplanet-trucks  (variation)
- */
-
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
-
-/* ── Constants ──────────────────────────────────────────────── */
+import { CheerioCrawler } from 'crawlee';
 
 const SOURCE = 'govplanet';
-const BASE   = 'https://www.govplanet.com';
-
-const CATEGORY_URLS = [
-    `${BASE}/Passenger+Vehicles`,
-    `${BASE}/Trucks`,
-];
-
-// Fallback URL variations to try if category pages yield nothing
-const FALLBACK_URLS = [
-    `${BASE}/en/govplanet-trucks`,
-    `${BASE}/en/passenger-vehicles`,
-    `${BASE}/for-sale/Trucks`,
-    `${BASE}/for-sale/Passenger+Vehicles`,
-];
+const BASE = 'https://www.govplanet.com';
+const VEHICLES_URL = `${BASE}/jsp/s/search.ips?ct=13`;
 
 const HIGH_RUST = new Set([
-    'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA',
-    'ND','SD','NE','KS','WV','ME','NH','VT','MA','RI',
-    'CT','NJ','MD','DE',
+    'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
+    'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
+    'CT', 'NJ', 'MD', 'DE',
 ]);
 
 const US_STATES = new Set([
-    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-    'VA','WA','WV','WI','WY','DC',
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+    'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
+    'VA', 'WA', 'WV', 'WI', 'WY', 'DC',
 ]);
-
-const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box truck|stake bed|dump truck|flatbed|refuse|crane truck|utility body|work van|transit connect cargo|sprinter cargo|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck)\b/i;
 
 const MAKES = new Set([
-    'ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc',
-    'chrysler','hyundai','kia','subaru','mazda','volkswagen','vw','bmw','mercedes',
-    'audi','lexus','acura','infiniti','cadillac','lincoln','buick','pontiac',
-    'mitsubishi','volvo','tesla','saturn','isuzu','hummer','land rover','mini',
+    'ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', 'honda', 'nissan', 'jeep', 'gmc',
+    'chrysler', 'hyundai', 'kia', 'subaru', 'mazda', 'volkswagen', 'vw', 'bmw', 'mercedes',
+    'audi', 'lexus', 'acura', 'infiniti', 'cadillac', 'lincoln', 'buick', 'pontiac',
+    'mitsubishi', 'volvo', 'tesla', 'saturn', 'isuzu', 'hummer', 'land rover', 'mini',
 ]);
 
-/* ── Actor boot ─────────────────────────────────────────────── */
+const PASSENGER_KEYWORDS = [
+    'passenger', 'sedan', 'coupe', 'hatchback', 'wagon', 'convertible', 'crossover', 'suv',
+    'sport utility', 'crew cab', 'pickup', 'truck', 'car', '4x4', 'awd', 'minivan', 'van',
+];
+
+const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box truck|stake bed|dump truck|flatbed|refuse|crane truck|utility body|work van|sprinter cargo|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper)\b/i;
 
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
     maxPages = 10,
-    minBid   = 500,
-    maxBid   = 35000,
+    minBid = 500,
+    maxBid = 35000,
 } = input;
 
-const CURRENT_YEAR = new Date().getFullYear();
+const seenListingUrls = new Set();
+const enqueuedListingUrls = new Set();
+const discoveredCategoryUrls = new Set();
+
 let totalFound = 0;
 let totalPassed = 0;
 
-/* ── Helpers ─────────────────────────────────────────────────── */
+function normalizeText(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
 
-function parseBid(raw) {
-    if (typeof raw === 'number') return raw;
-    const s = String(raw ?? '').replace(/,/g, '').replace(/\$/g, '');
-    const m = s.match(/[\d.]+/);
-    return m ? parseFloat(m[0]) : 0;
+function toAbsoluteUrl(href) {
+    if (!href) return '';
+    try {
+        return new URL(href, BASE).toString();
+    } catch {
+        return '';
+    }
+}
+
+function parseBid(value) {
+    if (typeof value === 'number') return value;
+    const text = normalizeText(value).replace(/,/g, '');
+    const match = text.match(/\$?\s*([\d]+(?:\.\d+)?)/);
+    return match ? parseFloat(match[1]) : 0;
+}
+
+function parseDate(value) {
+    const text = normalizeText(value)
+        .replace(/^(closing time|close time|auction end|ends?|end date|time remaining)\s*:?\s*/i, '');
+    if (!text) return null;
+
+    const monthMatch = text.match(/([A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*[AP]M)?)\b/);
+    const numericMatch = text.match(/(\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M?)?)/i);
+    const candidate = monthMatch?.[1] ?? numericMatch?.[1] ?? text;
+    const parsed = new Date(candidate);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function extractState(value) {
+    const text = normalizeText(value).toUpperCase();
+    if (!text) return '';
+
+    const match = text.match(/,\s*([A-Z]{2})(?:\s+\d{5})?\b/)
+        ?? text.match(/\b([A-Z]{2})\s+\d{5}\b/)
+        ?? text.match(/\b([A-Z]{2})\b$/);
+    const state = match?.[1] ?? '';
+    return US_STATES.has(state) ? state : '';
+}
+
+function extractCity(value) {
+    const text = normalizeText(value);
+    const match = text.match(/^([^,]+),\s*[A-Z]{2}\b/);
+    return match ? normalizeText(match[1]) : '';
 }
 
 function extractYear(text = '') {
-    const m = String(text).match(/\b(19[89]\d|20[0-3]\d)\b/);
-    return m ? parseInt(m[1], 10) : null;
-}
-
-function extractState(text = '') {
-    // "City, ST" or "City, ST 12345" or standalone "TX"
-    const m = String(text).match(/,\s*([A-Z]{2})\s*(?:\d{5})?(?:\s|$)/)
-           || String(text).match(/\b([A-Z]{2})\b\s*\d{5}/)
-           || String(text).match(/\b([A-Z]{2})\b\s*$/);
-    return m ? m[1].toUpperCase() : '';
-}
-
-function extractCity(location = '') {
-    const m = String(location).match(/^([^,]+),/);
-    return m ? m[1].trim() : '';
+    const match = normalizeText(text).match(/\b(19[89]\d|20[0-3]\d)\b/);
+    return match ? parseInt(match[1], 10) : null;
 }
 
 function extractMake(title = '') {
-    const lower = title.toLowerCase();
-    for (const mk of MAKES) {
-        if (new RegExp(`\\b${mk.replace(/ /g,'\\s+')}\\b`).test(lower)) {
-            const canonical = { chevy: 'Chevrolet', vw: 'Volkswagen' };
-            return canonical[mk] ?? (mk.charAt(0).toUpperCase() + mk.slice(1));
-        }
+    const lowerTitle = normalizeText(title).toLowerCase();
+    for (const make of MAKES) {
+        const pattern = new RegExp(`\\b${make.replace(/\s+/g, '\\s+')}\\b`, 'i');
+        if (!pattern.test(lowerTitle)) continue;
+        return make === 'chevy'
+            ? 'Chevrolet'
+            : make === 'vw'
+                ? 'Volkswagen'
+                : make.replace(/\b\w/g, (char) => char.toUpperCase());
     }
     return null;
 }
 
 function extractModel(title = '', make = '') {
     if (!make) return null;
-    const lowerTitle = title.toLowerCase();
-    const lowerMake  = make.toLowerCase();
-    const idx = lowerTitle.indexOf(lowerMake);
-    if (idx === -1) return null;
-    const after = title.slice(idx + make.length).trim();
-    // Strip leading year
-    const clean = after.replace(/^(19|20)\d{2}\s+/, '').trim();
-    // Take first 1-2 words; strip trailing color names
-    const COLOR_STRIP = /\b(black|white|silver|gray|grey|red|blue|green|yellow|orange|brown|beige|tan|gold|maroon|charcoal|navy|cream|burgundy|pearl)\b.*/i;
-    const word_match = clean.match(/^([A-Za-z0-9][-A-Za-z0-9]*(?:\s+[A-Za-z0-9][-A-Za-z0-9]*)?)/);
-    return word_match ? word_match[1].replace(COLOR_STRIP, '').trim() : null;
+
+    const normalizedTitle = normalizeText(title);
+    const pattern = new RegExp(`\\b${make.replace(/\s+/g, '\\s+')}\\b`, 'i');
+    const match = normalizedTitle.match(pattern);
+    if (!match) return null;
+
+    const afterMake = normalizedTitle.slice(match.index + match[0].length)
+        .replace(/^[\s\-:]+/, '')
+        .replace(/\b(4x4|awd|fwd|rwd|vin|odometer)\b.*$/i, '')
+        .trim();
+    const modelMatch = afterMake.match(/^([A-Za-z0-9][A-Za-z0-9\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9\-]*)?)/);
+    return modelMatch ? modelMatch[1] : null;
 }
 
-/**
- * Walk a JSON object/array looking for arrays that look like lot lists.
- * Returns the best candidate array found.
- */
-function findLotsArray(json) {
-    if (!json || typeof json !== 'object') return [];
+function isPassengerVehicle(title = '') {
+    const normalizedTitle = normalizeText(title).toLowerCase();
+    if (!normalizedTitle) return false;
+    if (COMMERCIAL_PATTERN.test(normalizedTitle)) return false;
 
-    // Direct well-known keys
-    const KEYS = [
-        'items','lots','results','data','listings','assets','records',
-        'vehicles','auctions','searchResults','auctionItems','content',
-        'hits','documents','products',
-    ];
-
-    for (const key of KEYS) {
-        const val = json[key];
-        if (Array.isArray(val) && val.length > 0 && isLotArray(val)) return val;
-    }
-
-    // One level deep in data/response/payload wrappers
-    const WRAPPERS = ['data','response','payload','result','body'];
-    for (const wrap of WRAPPERS) {
-        if (json[wrap] && typeof json[wrap] === 'object') {
-            for (const key of KEYS) {
-                const val = json[wrap][key];
-                if (Array.isArray(val) && val.length > 0 && isLotArray(val)) return val;
-            }
-        }
-    }
-
-    // Root array
-    if (Array.isArray(json) && json.length > 0 && isLotArray(json)) return json;
-
-    return [];
+    return MAKES.has(normalizedTitle.split(' ')[1] ?? '')
+        || [...MAKES].some((make) => normalizedTitle.includes(make))
+        || PASSENGER_KEYWORDS.some((keyword) => normalizedTitle.includes(keyword));
 }
 
-/** Heuristic: does this array look like lot/listing objects? */
-function isLotArray(arr) {
-    if (!arr.length) return false;
-    const sample = arr[0];
-    if (typeof sample !== 'object' || !sample) return false;
-    // Must have at least one field that suggests it's a lot/listing
-    const keys = Object.keys(sample).join(' ').toLowerCase();
-    return /lot|item|title|name|bid|price|auction|listing|vehicle|make|model|year/.test(keys);
-}
-
-/**
- * Normalize a raw lot object into our output schema.
- * GovPlanet/Ritchie Bros lots tend to have fields like:
- *   lotId, title, makeModel, year, currentBidAmount, location, stateCode,
- *   lotDetailUrl, primaryImageUrl, vin, meterHours, meterReading
- */
-function normalizeLot(lot) {
-    // Title
-    const title = lot.title || lot.name || lot.description
-               || [lot.year, lot.make, lot.model].filter(Boolean).join(' ')
-               || '';
-
-    // Year
-    const year = lot.year
-              ?? lot.modelYear
-              ?? extractYear(lot.title || lot.name || '');
-
-    // Make / Model
-    const make  = lot.make  || lot.manufacturerName || lot.manufacturer || extractMake(title);
-    const model = lot.model || lot.modelName        || extractModel(title, make || '');
-
-    // Bid
-    const bid = parseBid(
-        lot.currentBidAmount  ?? lot.currentBid ?? lot.current_bid
-     ?? lot.price             ?? lot.amount     ?? lot.bidAmount
-     ?? lot.startingBid       ?? 0
-    );
-
-    // Location / State
-    const locationRaw = lot.location || lot.city || lot.address || lot.saleLocation || '';
-    const stateRaw    = lot.stateCode || lot.state || lot.stateAbbr || lot.province || '';
-    const state       = (stateRaw || extractState(locationRaw)).toUpperCase().slice(0, 2);
-    const city        = lot.city || lot.cityName || extractCity(locationRaw);
-
-    // URL
-    let listingUrl = lot.lotDetailUrl || lot.url || lot.lotUrl || lot.detailUrl || lot.link || '';
-    if (listingUrl && !listingUrl.startsWith('http')) {
-        listingUrl = `${BASE}${listingUrl.startsWith('/') ? '' : '/'}${listingUrl}`;
-    }
-
-    // Photo
-    const photo = lot.primaryImageUrl || lot.imageUrl || lot.photoUrl
-               || lot.image           || lot.thumbnailUrl
-               || (Array.isArray(lot.images) ? lot.images[0]?.url ?? lot.images[0] : '')
-               || '';
-
-    // VIN / Mileage
-    const vin     = lot.vin || lot.vinNumber || lot.serialNumber || '';
-    const mileage = parseBid(
-        lot.meterReading ?? lot.mileage ?? lot.odometer
-     ?? lot.meterHours   ?? lot.hours   ?? null
-    ) || null;
-
-    return { title, year, make, model, bid, state, city, listingUrl, photo, vin, mileage };
-}
-
-function passesFilters({ title, year, bid, state, mileage }) {
-    // US states only
-    if (!US_STATES.has(state)) return false;
-    // No high-rust states
+function passesFilters({ title, year, bid, state }) {
+    if (!title || !isPassengerVehicle(title)) return false;
+    if (!state || !US_STATES.has(state)) return false;
     if (HIGH_RUST.has(state)) return false;
-    // Year >= 2014 (no older than 12 years)
-    if (year && (CURRENT_YEAR - year) > 12) return false;
-    if (year && year < 1980) return false; // sanity: reject parse errors
-    // Bid range
+    if (year && year < 1980) return false;
+    if (year && (new Date().getFullYear() - year) > 12) return false;
     if (bid < minBid || bid > maxBid) return false;
-    // No commercial vehicles
-    if (COMMERCIAL_PATTERN.test(title)) return false;
     return true;
 }
 
-/* ── Main crawl ──────────────────────────────────────────────── */
+function findLabelValue($, labels) {
+    for (const selector of ['th', 'td', 'dt', 'label', '.label', '[class*="label"]', 'strong']) {
+        const nodes = $(selector).toArray();
+        for (const node of nodes) {
+            const text = normalizeText($(node).text()).toLowerCase();
+            if (!text) continue;
+            if (!labels.some((label) => text.includes(label))) continue;
 
-const crawler = new PlaywrightCrawler({
-    // One session per category — we handle pagination inside the handler
-    maxRequestsPerCrawl: CATEGORY_URLS.length + 5,
-    requestHandlerTimeoutSecs: 300,
-    launchContext: {
-        launchOptions: {
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-            ],
-        },
-    },
+            const adjacent = normalizeText($(node).next('td, dd, div, span').first().text());
+            if (adjacent) return adjacent;
 
-    async requestHandler({ page, request, log }) {
-        const startUrl = request.url;
-        log.info(`[GOVPLANET] Loading: ${startUrl}`);
-
-        // ── Intercept setup ────────────────────────────────────
-        const capturedApiUrls = [];  // API URLs that returned lots
-        const allLots = [];
-
-        function registerPageIntercept(pg, tag) {
-            pg.on('response', async (response) => {
-                const url = response.url();
-                const ct  = (response.headers()['content-type'] || '').toLowerCase();
-
-                // Only JSON
-                if (!ct.includes('json')) return;
-
-                // Skip noise: analytics, tracking, config, fonts, auth
-                if (/analytics|tracking|segment|gtm|amplitude|hotjar|mixpanel|sentry|rollbar|logrocket/.test(url)) return;
-                if (/\/auth\/|\/oauth\/|\/config$|\/health$|\/favicon/.test(url)) return;
-
-                try {
-                    const body = await response.json().catch(() => null);
-                    if (!body) return;
-
-                    const lots = findLotsArray(body);
-                    if (lots.length > 0) {
-                        log.info(`[${tag}] Intercepted ${lots.length} lots from: ${url}`);
-                        allLots.push(...lots);
-                        if (!capturedApiUrls.includes(url)) {
-                            capturedApiUrls.push(url);
-                        }
-                    }
-                } catch (_) { /* ignore parse errors */ }
-            });
+            const parentText = normalizeText($(node).parent().text());
+            if (parentText && parentText.toLowerCase() !== text) return parentText;
         }
+    }
+    return '';
+}
 
-        registerPageIntercept(page, 'P1');
+function extractCategoryRequests($) {
+    const requests = [];
 
-        // ── Navigate to category ───────────────────────────────
-        await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    $('a[href*="/jsp/s/search.ips?"]').each((_, element) => {
+        const href = $(element).attr('href');
+        const url = toAbsoluteUrl(href);
+        if (!url || discoveredCategoryUrls.has(url)) return;
 
-        // Wait for JS to fire API calls (GovPlanet is React/Next.js)
-        await page.waitForTimeout(8000);
+        const text = normalizeText($(element).text());
+        const haystack = `${text} ${url}`.toLowerCase();
+        if (!haystack.includes('ct=13')) return;
+        if (!/(passenger|sedan|car|suv|sport utility|crossover|pickup|crew cab)/.test(haystack)) return;
+        if (COMMERCIAL_PATTERN.test(haystack)) return;
 
-        // If no lots yet, wait for network to settle
-        if (allLots.length === 0) {
-            log.info('[GOVPLANET] No lots on first load — waiting for dynamic content...');
-            await page.waitForTimeout(5000);
+        discoveredCategoryUrls.add(url);
+        requests.push({
+            url,
+            uniqueKey: `govplanet-category:${url}`,
+            userData: {
+                label: 'LIST',
+                pageNum: 1,
+                category: text || 'discovered',
+                discoveredFromRoot: true,
+            },
+        });
+    });
+
+    return requests;
+}
+
+function extractSearchListings($) {
+    const listings = [];
+    const seenUrlsOnPage = new Set();
+
+    const cards = $('.featured-item, .searchResults .featured-item, .searchResults .searchResult, .searchResults li, .searchResults article');
+    const cardNodes = cards.length ? cards.toArray() : $('a[href*="/for-sale/"]').toArray().map((link) => $(link).closest('li, article, .featured-item').get(0)).filter(Boolean);
+
+    for (const node of cardNodes) {
+        const card = $(node);
+        const link = card.find('.itemTitle a[href*="/for-sale/"], a[href*="/for-sale/"]').first();
+        const listingUrl = toAbsoluteUrl(link.attr('href'));
+        if (!listingUrl || seenUrlsOnPage.has(listingUrl)) continue;
+        seenUrlsOnPage.add(listingUrl);
+
+        const title = normalizeText(link.text())
+            || normalizeText(card.find('h1, h2, h3, h4, [class*="title"]').first().text());
+        if (!title) continue;
+
+        const bidText = normalizeText(
+            card.find('.pdprice, .price, [class*="price"], [class*="Price"], [class*="bid"], [class*="Bid"]').first().text(),
+        );
+        const locationText = normalizeText(
+            card.find('.itemLocation, .location, [class*="location"], [class*="Location"]').first().text(),
+        ) || normalizeText(card.text());
+        const endText = normalizeText(
+            card.find('.timeLeft, .timeRemaining, [class*="time"], [class*="Time"], [class*="close"], [class*="Close"]').first().text(),
+        );
+        const imageUrl = toAbsoluteUrl(
+            card.find('img').first().attr('src')
+            || card.find('img').first().attr('data-src')
+            || '',
+        );
+
+        listings.push({
+            title,
+            current_bid: parseBid(bidText),
+            state: extractState(locationText),
+            city: extractCity(locationText),
+            auction_end_time: parseDate(endText),
+            listing_url: listingUrl,
+            photo_url: imageUrl || null,
+        });
+    }
+
+    return listings;
+}
+
+function findNextPageUrl($, currentUrl) {
+    const explicitNext = $('a[rel="next"], a:contains("Next"), a:contains("next")').first().attr('href');
+    if (explicitNext) return toAbsoluteUrl(explicitNext);
+
+    const current = new URL(currentUrl);
+    const currentStart = parseInt(current.searchParams.get('pstart') || '0', 10);
+    let nextUrl = '';
+
+    $('a[href*="pstart="]').each((_, element) => {
+        if (nextUrl) return;
+        const href = $(element).attr('href');
+        const absolute = toAbsoluteUrl(href);
+        if (!absolute) return;
+
+        const candidate = new URL(absolute);
+        const start = parseInt(candidate.searchParams.get('pstart') || '0', 10);
+        if (start > currentStart) {
+            nextUrl = absolute;
         }
+    });
 
-        // ── Fallback: try alternate category URLs ──────────────
-        if (allLots.length === 0 && startUrl === CATEGORY_URLS[0]) {
-            log.info('[GOVPLANET] Trying fallback URLs...');
-            for (const fallbackUrl of FALLBACK_URLS) {
-                await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
-                    .catch(() => {});
-                await page.waitForTimeout(5000);
-                if (allLots.length > 0) {
-                    log.info(`[GOVPLANET] Got lots from fallback: ${fallbackUrl}`);
-                    break;
-                }
-            }
-        }
+    return nextUrl;
+}
 
-        // ── DOM fallback: scrape visible lot cards ─────────────
-        if (allLots.length === 0) {
-            log.info('[GOVPLANET] API intercept empty — attempting DOM scrape');
-            const domLots = await page.evaluate(() => {
-                const results = [];
-                // GovPlanet uses card patterns like .lot-card, [data-lot-id], etc.
-                const CARD_SELECTORS = [
-                    '[data-lot-id]',
-                    '[class*="lot-card"]',
-                    '[class*="LotCard"]',
-                    '[class*="item-card"]',
-                    '[class*="ItemCard"]',
-                    '[class*="listing-card"]',
-                    '[class*="ListingCard"]',
-                    '[class*="search-result"]',
-                    'article[class*="lot"]',
-                    'li[class*="lot"]',
-                ];
-                let cards = [];
-                for (const sel of CARD_SELECTORS) {
-                    const found = document.querySelectorAll(sel);
-                    if (found.length > 0) { cards = Array.from(found); break; }
-                }
+function buildRecord(detail, partial) {
+    const title = normalizeText(detail.title || partial.title);
+    const year = detail.year ?? extractYear(title);
+    const make = detail.make || extractMake(title);
+    const model = detail.model || extractModel(title, make || '');
+    const currentBid = detail.current_bid || partial.current_bid || 0;
+    const locationText = detail.location || `${partial.city ? `${partial.city}, ` : ''}${partial.state || ''}`;
+    const state = detail.state || partial.state || extractState(locationText);
+    const city = detail.city || partial.city || extractCity(locationText);
 
-                for (const card of cards) {
-                    const titleEl  = card.querySelector('h2, h3, h4, [class*="title"], [class*="Title"]');
-                    const priceEl  = card.querySelector('[class*="bid"], [class*="Bid"], [class*="price"], [class*="Price"]');
-                    const locEl    = card.querySelector('[class*="location"], [class*="Location"]');
-                    const linkEl   = card.querySelector('a[href]');
-                    const imgEl    = card.querySelector('img');
+    return {
+        title,
+        year,
+        make,
+        model,
+        current_bid: currentBid,
+        state,
+        city,
+        auction_end_time: detail.auction_end_time || partial.auction_end_time || null,
+        listing_url: partial.listing_url,
+        photo_url: detail.photo_url || partial.photo_url || null,
+        vin: detail.vin || null,
+        mileage: detail.mileage || null,
+        source_site: SOURCE,
+        scraped_at: new Date().toISOString(),
+    };
+}
 
-                    const title = titleEl?.textContent?.trim() || '';
-                    const priceText = priceEl?.textContent?.replace(/[^0-9.]/g, '') || '0';
-                    const location  = locEl?.textContent?.trim() || '';
-                    const href      = linkEl?.href || '';
-                    const img       = imgEl?.src || imgEl?.dataset?.src || '';
-                    const lotId     = card.dataset?.lotId || card.dataset?.id || '';
+const crawler = new CheerioCrawler({
+    maxRequestsPerCrawl: maxPages * 250,
+    maxConcurrency: 4,
+    requestHandlerTimeoutSecs: 120,
 
-                    if (title || priceText !== '0') {
-                        results.push({
-                            title,
-                            currentBidAmount: parseFloat(priceText) || 0,
-                            location,
-                            lotDetailUrl: href,
-                            primaryImageUrl: img,
-                            lotId,
-                        });
-                    }
-                }
-                return results;
-            });
+    async requestHandler({ $, request, log }) {
+        const label = request.userData.label || 'LIST';
 
-            if (domLots.length > 0) {
-                log.info(`[GOVPLANET] DOM scrape found ${domLots.length} lots`);
-                allLots.push(...domLots);
-            } else {
-                log.warning('[GOVPLANET] DOM scrape also empty — page may require login or different URL');
-            }
-        }
+        if (label === 'DETAIL') {
+            const partial = request.userData.partial || {};
+            const bodyText = normalizeText($('body').text());
+            const title = normalizeText(
+                $('h1, .itemTitle, [class*="hero-title"], meta[property="og:title"]').first().text()
+                || $('meta[property="og:title"]').attr('content'),
+            ) || partial.title;
 
-        log.info(`[GOVPLANET] Page 1 total intercepted: ${allLots.length} lots`);
+            const currentBidText = findLabelValue($, ['current bid']) || bodyText.match(/Current Bid[^$]*\$[\d,]+(?:\.\d+)?/i)?.[0] || '';
+            const closingText = findLabelValue($, ['closing time', 'close time', 'auction end', 'ends'])
+                || bodyText.match(/(Closing Time|Auction End|Ends)[^A-Z0-9]{0,8}[A-Za-z]{3,9}[^.|\n]+\d{4}(?:[^.|\n]+(?:AM|PM))?/i)?.[0]
+                || '';
+            const locationText = findLabelValue($, ['item location', 'located in', 'location'])
+                || bodyText.match(/(Item Location|Located in|Location)[^A-Z0-9]{0,8}[^.|\n]+,\s*[A-Z]{2}(?:\s+\d{5})?/i)?.[0]
+                || '';
+            const vin = bodyText.match(/\bVIN[:\s#-]*([A-HJ-NPR-Z0-9]{17})\b/i)?.[1] || null;
+            const mileageMatch = bodyText.match(/(\d[\d,]+)\s*(miles?|mi\.?|odometer)\b/i);
+            const imageUrl = toAbsoluteUrl(
+                $('meta[property="og:image"]').attr('content')
+                || $('img[src]').first().attr('src')
+                || $('img[data-src]').first().attr('data-src')
+                || '',
+            );
 
-        // ── Pagination ─────────────────────────────────────────
-        // Detect the search API URL and paginate by modifying page/offset params
-        const searchApiBase = capturedApiUrls.find(u =>
-            /search|listing|lot|inventory|result|browse/i.test(u)
-        ) || capturedApiUrls[0];
-
-        if (searchApiBase && maxPages > 1) {
-            log.info(`[GOVPLANET] Paginating from: ${searchApiBase}`);
-
-            for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
-                const pageLots = [];
-
-                // Register per-page intercept
-                const onResponse = async (response) => {
-                    const url = response.url();
-                    const ct  = (response.headers()['content-type'] || '').toLowerCase();
-                    if (!ct.includes('json')) return;
-                    try {
-                        const body = await response.json().catch(() => null);
-                        if (!body) return;
-                        const lots = findLotsArray(body);
-                        if (lots.length > 0) {
-                            log.info(`[P${pageNum}] ${lots.length} lots from: ${url}`);
-                            pageLots.push(...lots);
-                        }
-                    } catch (_) { /* ignore */ }
-                };
-                page.on('response', onResponse);
-
-                // Build paged URL — try common pagination param patterns
-                const nextUrl = buildPagedUrl(searchApiBase, pageNum);
-                log.info(`[GOVPLANET] Fetching page ${pageNum}: ${nextUrl}`);
-                await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
-                    .catch(() => {});
-                await page.waitForTimeout(4000);
-
-                page.off('response', onResponse);
-
-                if (pageLots.length === 0) {
-                    log.info(`[GOVPLANET] Page ${pageNum}: 0 lots — stopping pagination`);
-                    break;
-                }
-
-                allLots.push(...pageLots);
-                await page.waitForTimeout(1000);
-            }
-        } else if (capturedApiUrls.length === 0 && maxPages > 1) {
-            // No API URL captured — try paginating via category URL query param
-            log.info('[GOVPLANET] No API URL — paginating via category URL with ?page=N');
-            for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
-                const pageLots = [];
-
-                const onResponse = async (response) => {
-                    const url = response.url();
-                    const ct  = (response.headers()['content-type'] || '').toLowerCase();
-                    if (!ct.includes('json')) return;
-                    try {
-                        const body = await response.json().catch(() => null);
-                        if (!body) return;
-                        const lots = findLotsArray(body);
-                        if (lots.length > 0) pageLots.push(...lots);
-                    } catch (_) { /* ignore */ }
-                };
-                page.on('response', onResponse);
-
-                const sep = startUrl.includes('?') ? '&' : '?';
-                const nextUrl = `${startUrl}${sep}page=${pageNum}`;
-                await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
-                    .catch(() => {});
-                await page.waitForTimeout(5000);
-
-                page.off('response', onResponse);
-
-                if (pageLots.length === 0) {
-                    log.info(`[GOVPLANET] Category page ${pageNum}: 0 lots — stopping`);
-                    break;
-                }
-
-                allLots.push(...pageLots);
-                await page.waitForTimeout(1000);
-            }
-        }
-
-        // ── Filter & push ──────────────────────────────────────
-        const seen = new Set();
-        for (const raw of allLots) {
-            const { title, year, make, model, bid, state, city, listingUrl, photo, vin, mileage } = normalizeLot(raw);
-
-            // Dedup by listing URL or title+bid
-            const key = listingUrl || `${title}::${bid}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-
-            totalFound++;
-
-            if (!passesFilters({ title, year, bid, state, mileage })) continue;
-
-            totalPassed++;
-            await Actor.pushData({
+            const detail = {
                 title,
-                year,
-                make,
-                model,
-                current_bid:  bid,
-                state,
-                city,
-                listing_url:  listingUrl,
-                photo_url:    photo,
+                year: extractYear(title),
+                make: extractMake(title),
+                model: null,
+                current_bid: parseBid(currentBidText),
+                auction_end_time: parseDate(closingText),
+                location: locationText,
+                state: extractState(locationText),
+                city: extractCity(locationText),
+                photo_url: imageUrl || null,
                 vin,
-                mileage,
-                source_site:  SOURCE,
-                scraped_at:   new Date().toISOString(),
+                mileage: mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, ''), 10) : null,
+            };
+
+            const record = buildRecord(detail, partial);
+            totalFound += 1;
+
+            if (!passesFilters({
+                title: record.title,
+                year: record.year,
+                bid: record.current_bid,
+                state: record.state,
+            })) {
+                return;
+            }
+
+            totalPassed += 1;
+            await Actor.pushData(record);
+            return;
+        }
+
+        log.info(`[GOVPLANET] Parsing search page ${request.url}`);
+
+        if (request.userData.pageNum === 1) {
+            const categoryRequests = extractCategoryRequests($);
+            if (categoryRequests.length > 0) {
+                await crawler.addRequests(categoryRequests);
+                log.info(`[GOVPLANET] Discovered ${categoryRequests.length} passenger category URLs`);
+            }
+        }
+
+        const listings = extractSearchListings($);
+        log.info(`[GOVPLANET] Found ${listings.length} listing cards on ${request.url}`);
+
+        const detailRequests = [];
+        for (const partial of listings) {
+            if (!partial.listing_url || enqueuedListingUrls.has(partial.listing_url)) continue;
+            enqueuedListingUrls.add(partial.listing_url);
+
+            detailRequests.push({
+                url: partial.listing_url,
+                uniqueKey: `govplanet-detail:${partial.listing_url}`,
+                userData: {
+                    label: 'DETAIL',
+                    partial,
+                },
             });
         }
 
-        log.info(`[GOVPLANET] Category done — Found: ${totalFound} | Passed: ${totalPassed}`);
+        if (detailRequests.length > 0) {
+            await crawler.addRequests(detailRequests);
+        }
+
+        const currentPage = request.userData.pageNum || 1;
+        if (currentPage >= maxPages) return;
+
+        const nextUrl = findNextPageUrl($, request.url);
+        if (!nextUrl) return;
+
+        const nextPageKey = `govplanet-list:${request.userData.category || 'root'}:${nextUrl}`;
+        if (seenListingUrls.has(nextPageKey)) return;
+        seenListingUrls.add(nextPageKey);
+
+        await crawler.addRequests([{
+            url: nextUrl,
+            uniqueKey: nextPageKey,
+            userData: {
+                label: 'LIST',
+                pageNum: currentPage + 1,
+                category: request.userData.category || 'vehicles',
+            },
+        }]);
     },
 });
 
-/* ── URL pagination helper ───────────────────────────────────── */
-
-function buildPagedUrl(base, pageNum) {
-    try {
-        const u = new URL(base);
-        // Try common page/offset params in priority order
-        if (u.searchParams.has('page')) {
-            u.searchParams.set('page', pageNum);
-        } else if (u.searchParams.has('p')) {
-            u.searchParams.set('p', pageNum);
-        } else if (u.searchParams.has('offset')) {
-            const size = parseInt(u.searchParams.get('size') || u.searchParams.get('limit') || '24', 10);
-            u.searchParams.set('offset', (pageNum - 1) * size);
-        } else if (u.searchParams.has('start')) {
-            const size = parseInt(u.searchParams.get('rows') || u.searchParams.get('size') || '24', 10);
-            u.searchParams.set('start', (pageNum - 1) * size);
-        } else if (u.searchParams.has('from')) {
-            const size = parseInt(u.searchParams.get('size') || '24', 10);
-            u.searchParams.set('from', (pageNum - 1) * size);
-        } else {
-            // Default: append page param
-            u.searchParams.set('page', pageNum);
-        }
-        return u.toString();
-    } catch (_) {
-        // Not a full URL (relative path or malformed) — append page param
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}page=${pageNum}`;
-    }
-}
-
-/* ── Run ─────────────────────────────────────────────────────── */
-
-await crawler.run(CATEGORY_URLS.map(url => ({ url })));
+await crawler.run([{
+    url: VEHICLES_URL,
+    uniqueKey: 'govplanet-root-vehicles',
+    userData: {
+        label: 'LIST',
+        pageNum: 1,
+        category: 'vehicles',
+    },
+}]);
 
 console.log(`[GOVPLANET] Found: ${totalFound} | Passed: ${totalPassed}`);
 await Actor.exit();

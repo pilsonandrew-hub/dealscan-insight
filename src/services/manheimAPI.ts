@@ -46,21 +46,17 @@ export class ManheimAPIConnector {
   private async initializeAPI(): Promise<void> {
     try {
       await this.authenticate();
-      logger.info('Manheim API initialized successfully');
+      if (this.authToken) {
+        logger.info('Manheim API initialized successfully');
+      }
     } catch (error) {
       console.error('Failed to initialize Manheim API:', error);
     }
   }
 
   private async authenticate(): Promise<void> {
-    try {
-      // In production, this would use actual Manheim OAuth2 flow
-      // For now, we'll simulate authentication
-      this.authToken = 'simulated_manheim_token_' + Date.now();
-      logger.info('Manheim API authentication successful');
-    } catch (error) {
-      throw new Error(`Manheim authentication failed: ${error}`);
-    }
+    this.authToken = null;
+    logger.warn('Manheim API not connected — real credentials required');
   }
 
   private async checkRateLimit(endpoint: string): Promise<void> {
@@ -80,10 +76,11 @@ export class ManheimAPIConnector {
     await this.checkRateLimit('market-value');
     
     try {
-      // Simulate Manheim MMR API call
       const marketData = this.simulateManheimMarketData(vin);
-      
-      // Cache the market data in Supabase
+      if (!marketData) {
+        return null;
+      }
+
       await this.cacheMarketData(marketData);
       
       return marketData;
@@ -104,10 +101,11 @@ export class ManheimAPIConnector {
     await this.checkRateLimit('auction-listings');
     
     try {
-      // Simulate fetching auction listings
       const listings = this.simulateAuctionListings(filters);
-      
-      // Store listings in Supabase for analysis
+      if (listings.length === 0) {
+        return [];
+      }
+
       await this.storeAuctionListings(listings);
       
       return listings;
@@ -156,60 +154,21 @@ export class ManheimAPIConnector {
     }
   }
 
-  private simulateManheimMarketData(vin: string): ManheimMarketData {
-    // Simulate realistic Manheim market data
-    const baseMMR = 15000 + Math.random() * 30000;
-    const variance = baseMMR * 0.15; // 15% variance
-
-    return {
-      vin,
-      mmr: Math.round(baseMMR),
-      marketRange: {
-        low: Math.round(baseMMR - variance),
-        average: Math.round(baseMMR),
-        high: Math.round(baseMMR + variance)
-      },
-      daysToSell: Math.floor(Math.random() * 60) + 15, // 15-75 days
-      demandIndex: Math.random() * 100,
-      lastUpdated: new Date().toISOString()
-    };
+  private simulateManheimMarketData(_vin: string): ManheimMarketData | null {
+    logger.warn('Manheim API not connected — real credentials required');
+    return null;
   }
 
-  private simulateAuctionListings(filters: any): ManheimVehicle[] {
-    const makes = ['Toyota', 'Honda', 'Ford', 'Chevrolet', 'BMW', 'Mercedes-Benz'];
-    const models = ['Camry', 'Accord', 'F-150', 'Silverado', '3 Series', 'C-Class'];
-    const grades = ['A', 'B', 'C', 'D'];
-    const locations = ['Atlanta', 'Dallas', 'Phoenix', 'Seattle', 'Denver'];
-
-    const listings: ManheimVehicle[] = [];
-    const count = Math.floor(Math.random() * 50) + 10; // 10-60 listings
-
-    for (let i = 0; i < count; i++) {
-      const make = makes[Math.floor(Math.random() * makes.length)];
-      const model = models[Math.floor(Math.random() * models.length)];
-      const year = 2015 + Math.floor(Math.random() * 9); // 2015-2023
-      const mileage = Math.floor(Math.random() * 150000) + 10000;
-
-      listings.push({
-        vin: this.generateRandomVIN(),
-        make,
-        model,
-        year,
-        mileage,
-        mmr: 15000 + Math.random() * 25000,
-        grade: grades[Math.floor(Math.random() * grades.length)],
-        saleDate: new Date(Date.now() + Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
-        salePrice: 12000 + Math.random() * 30000,
-        location: locations[Math.floor(Math.random() * locations.length)],
-        condition: {
-          exterior: Math.floor(Math.random() * 5) + 1,
-          interior: Math.floor(Math.random() * 5) + 1,
-          mechanical: Math.floor(Math.random() * 5) + 1
-        }
-      });
-    }
-
-    return listings;
+  private simulateAuctionListings(_filters: {
+    make?: string;
+    model?: string;
+    yearMin?: number;
+    yearMax?: number;
+    location?: string;
+    grade?: string;
+  }): ManheimVehicle[] {
+    logger.warn('Manheim API not connected — real credentials required');
+    return [];
   }
 
   private parsePostSaleReportLine(line: string): ManheimVehicle | null {
@@ -240,16 +199,6 @@ export class ManheimAPIConnector {
     } catch (error) {
       throw new Error(`Invalid data format: ${error}`);
     }
-  }
-
-  private generateRandomVIN(): string {
-    const chars = 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789';
-    let vin = '';
-    for (let i = 0; i < 17; i++) {
-      if (i === 8) vin += Math.floor(Math.random() * 10); // Check digit
-      else vin += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return vin;
   }
 
   private async cacheMarketData(data: ManheimMarketData): Promise<void> {
@@ -339,9 +288,8 @@ export class ManheimAPIConnector {
       if (!this.authToken) {
         await this.authenticate();
       }
-      
-      // Test API connectivity
-      return true;
+
+      return false;
     } catch (error) {
       console.error('Manheim API validation failed:', error);
       return false;
