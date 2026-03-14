@@ -127,6 +127,15 @@ def _source_score(source_site: str) -> float:
     }.get(source_site, 60.0)
 
 
+def _recon_reserve(mileage: float = None, is_police_or_fleet: bool = False) -> float:
+    miles = max(float(mileage or 0), 0.0)
+    mileage_component = 3.0 * (miles / 1000.0)
+    reserve = min(500.0 + mileage_component, 1200.0)
+    if is_police_or_fleet:
+        reserve += 300.0
+    return reserve
+
+
 def score_deal(
     bid: float,
     mmr_ca: float,
@@ -138,13 +147,15 @@ def score_deal(
     fees_cfg: dict = None,
     rates_cfg: dict = None,
     miles_cfg: dict = None,
+    mileage: float = None,
+    is_police_or_fleet: bool = False,
 ) -> dict:
     """
     Compute full DOS score and deal metrics.
 
-    Returns a dict with premium, doc_fee, transport, total_cost, margin,
-    margin_score, velocity_score, segment_score, model_score, source_score,
-    and dos_score (0-100).
+    Returns a dict with premium, doc_fee, transport, recon_reserve, total_cost,
+    margin, margin_score, velocity_score, segment_score, model_score,
+    source_score, and dos_score (0-100).
     """
     if fees_cfg is None:
         fees_cfg = _load_fees()
@@ -153,7 +164,8 @@ def score_deal(
     premium = bid * site_fees.get("buyers_premium_pct", 10.0) / 100.0
     doc_fee = site_fees.get("doc_fee", 50)
     transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg)
-    total_cost = bid + premium + doc_fee + transport
+    recon_reserve = _recon_reserve(mileage=mileage, is_police_or_fleet=is_police_or_fleet)
+    total_cost = bid + premium + doc_fee + transport + recon_reserve
     margin = mmr_ca - total_cost
 
     m_score = _margin_score(bid, mmr_ca, total_cost)
@@ -174,6 +186,7 @@ def score_deal(
         "premium": round(premium, 2),
         "doc_fee": doc_fee,
         "transport": round(transport, 2),
+        "recon_reserve": round(recon_reserve, 2),
         "total_cost": round(total_cost, 2),
         "margin": round(margin, 2),
         "margin_score": round(m_score, 2),

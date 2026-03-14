@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend
@@ -66,7 +67,15 @@ function timeAgo(s: string | null | undefined): string {
 }
 
 // ─── Deal Card ────────────────────────────────────────────────────────────────
-const DealCard = ({ deal, onAction }: { deal: Opportunity; onAction?: (id: string, action: 'view' | 'save' | 'pass') => void }) => (
+const DealCard = ({
+  deal,
+  onAction,
+  onSendToSniperScope
+}: {
+  deal: Opportunity;
+  onAction?: (id: string, action: 'view' | 'save' | 'pass') => void;
+  onSendToSniperScope?: (deal: Opportunity) => void;
+}) => (
   <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors">
     <div className="flex items-start justify-between mb-3">
       <div>
@@ -111,6 +120,15 @@ const DealCard = ({ deal, onAction }: { deal: Opportunity; onAction?: (id: strin
     )}
 
     <div className="flex items-center gap-2">
+      {onSendToSniperScope && deal.id && (
+        <button
+          onClick={() => onSendToSniperScope(deal)}
+          className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 px-2 rounded-lg transition-colors"
+        >
+          <Target className="h-3 w-3" />
+          Send to SniperScope
+        </button>
+      )}
       {deal.vin && (
         <a
           href={`https://www.google.com/search?q=${encodeURIComponent(`${deal.year} ${deal.make} ${deal.model} ${deal.vin}`)}`}
@@ -266,36 +284,31 @@ const CrosshairTab = () => {
   const [filters, setFilters] = useState({
     make: '', model: '',
     yearMin: '', yearMax: '',
-    minScore: '', maxBid: '',
-    source: '',
-    sortBy: 'score' as 'score' | 'profit_margin' | 'auction_end' | 'current_bid'
+    state: '',
+    minScore: '',
+    minBid: '',
+    maxBid: ''
   });
   const [results, setResults] = useState<Opportunity[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-
-  const SOURCES = ['GovDeals', 'HiBid', 'Municibid', 'GSAauctions', 'PublicSurplus', 'AuctionTime', 'BidCal', 'AllSurplus'];
-  const SORT_OPTIONS = [
-    { value: 'score', label: 'DOS Score' },
-    { value: 'profit_margin', label: 'Margin' },
-    { value: 'auction_end', label: 'Auction End' },
-    { value: 'current_bid', label: 'Bid Price' },
-  ];
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const search = async () => {
     setLoading(true);
     setSearched(true);
     try {
-      const { data, total: t } = await api.getOpportunities(1, 50, {
+      const { data, total: t } = await api.searchCrosshairOpportunities({
         make: filters.make || undefined,
         model: filters.model || undefined,
         yearMin: filters.yearMin ? parseInt(filters.yearMin) : undefined,
         yearMax: filters.yearMax ? parseInt(filters.yearMax) : undefined,
+        state: filters.state || undefined,
         minScore: filters.minScore ? parseInt(filters.minScore) : undefined,
-        maxBid: filters.maxBid ? parseInt(filters.maxBid) : undefined,
-        source: filters.source || undefined,
-        sortBy: filters.sortBy
+        minPrice: filters.minBid ? parseInt(filters.minBid) : undefined,
+        maxPrice: filters.maxBid ? parseInt(filters.maxBid) : undefined,
+        limit: 50
       });
       setResults(data);
       setTotal(t);
@@ -304,6 +317,14 @@ const CrosshairTab = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSendToSniperScope = (deal: Opportunity) => {
+    if (!deal.id) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'sniper');
+    next.set('dealId', deal.id);
+    setSearchParams(next);
   };
 
   const inputCls = "w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500";
@@ -345,34 +366,32 @@ const CrosshairTab = () => {
               onChange={e => setFilters(f => ({ ...f, minScore: e.target.value }))} />
           </div>
           <div>
-            <label className={labelCls}>Max Bid ($)</label>
+            <label className={labelCls}>State</label>
+            <input className={inputCls} placeholder="CA" value={filters.state}
+              onChange={e => setFilters(f => ({ ...f, state: e.target.value.toUpperCase() }))} />
+          </div>
+          <div>
+            <label className={labelCls}>Bid Min ($)</label>
+            <input className={inputCls} type="number" placeholder="5000" value={filters.minBid}
+              onChange={e => setFilters(f => ({ ...f, minBid: e.target.value }))} />
+          </div>
+          <div>
+            <label className={labelCls}>Bid Max ($)</label>
             <input className={inputCls} type="number" placeholder="25000" value={filters.maxBid}
               onChange={e => setFilters(f => ({ ...f, maxBid: e.target.value }))} />
           </div>
-          <div>
-            <label className={labelCls}>Source</label>
-            <select className={inputCls} value={filters.source}
-              onChange={e => setFilters(f => ({ ...f, source: e.target.value }))}>
-              <option value="">All Sources</option>
-              {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>Sort By</label>
-            <select className={inputCls} value={filters.sortBy}
-              onChange={e => setFilters(f => ({ ...f, sortBy: e.target.value as typeof filters.sortBy }))}>
-              {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
         </div>
-        <button
-          onClick={search}
-          disabled={loading}
-          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors flex items-center gap-2"
-        >
-          <Filter className="h-4 w-4" />
-          {loading ? 'Searching...' : 'Search Deals'}
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-gray-500">Results are pulled from the live `opportunities` table and ranked by DOS score.</p>
+          <button
+            onClick={search}
+            disabled={loading}
+            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors flex items-center gap-2"
+          >
+            <Filter className="h-4 w-4" />
+            {loading ? 'Searching...' : 'Search Deals'}
+          </button>
+        </div>
       </div>
 
       {/* Results */}
@@ -385,7 +404,13 @@ const CrosshairTab = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {results.map(deal => <DealCard key={deal.id} deal={deal} />)}
+              {results.map(deal => (
+                <DealCard
+                  key={deal.id}
+                  deal={deal}
+                  onSendToSniperScope={handleSendToSniperScope}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -788,8 +813,19 @@ const TABS: { id: Tab; label: string; Icon: React.FC<any> }[] = [
   { id: 'settings', label: 'Settings', Icon: Settings },
 ];
 
+function parseTab(tab: string | null): Tab {
+  return TABS.some(({ id }) => id === tab) ? (tab as Tab) : 'dashboard';
+}
+
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = parseTab(searchParams.get('tab'));
+
+  const navigateToTab = (tab: Tab) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', tab);
+    setSearchParams(next);
+  };
 
   const renderTab = () => {
     switch (activeTab) {
@@ -814,7 +850,7 @@ export default function Dashboard() {
           {TABS.map(({ id, label, Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id)}
+              onClick={() => navigateToTab(id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === id
                   ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
@@ -842,7 +878,7 @@ export default function Dashboard() {
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
+            onClick={() => navigateToTab(id)}
             className={`flex flex-col items-center gap-1 py-2 px-3 text-xs transition-colors min-w-[72px] ${
               activeTab === id ? 'text-emerald-400' : 'text-gray-500'
             }`}
