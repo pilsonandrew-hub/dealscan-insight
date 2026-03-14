@@ -1,0 +1,14 @@
+{
+  "name": "ds-govplanet-scraper",
+  "version": "1.0.0",
+  "description": "DealerScope scraper for GovPlanet government surplus vehicle auctions",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.0.0",
+    "crawlee": "^3.0.0"
+  }
+}
