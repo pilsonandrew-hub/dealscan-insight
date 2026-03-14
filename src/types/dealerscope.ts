@@ -130,6 +130,13 @@ export interface Opportunity {
   investment_grade?: "Platinum" | "Gold" | "Silver" | "Bronze";
   pricing_source?: string;
   pricing_updated_at?: string;
+  manheim_mmr_mid?: number;
+  manheim_mmr_low?: number;
+  manheim_mmr_high?: number;
+  manheim_range_width_pct?: number;
+  manheim_confidence?: number;
+  manheim_source_status?: "live" | "fallback" | "unavailable";
+  manheim_updated_at?: string;
   retail_asking_price_estimate?: number;
   retail_comp_price_estimate?: number;
   retail_comp_low?: number;

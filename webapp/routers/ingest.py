@@ -923,6 +923,7 @@ def score_vehicle(vehicle: dict) -> dict:
     """
     try:
         from backend.ingest.score import score_deal
+        from backend.ingest.manheim_market import get_manheim_market_data
         from backend.ingest.retail_comps import get_retail_comps
 
         bid = vehicle.get("current_bid", 0)
@@ -949,7 +950,22 @@ def score_vehicle(vehicle: dict) -> dict:
             for term in ("police", "interceptor", "ppv", "pursuit", "fleet")
         )
         mmr_details = _estimate_mmr_details(make, model)
-        mmr = mmr_details["mmr"]
+        manheim_result = get_manheim_market_data(
+            year=year,
+            make=make,
+            model=model,
+            state=state,
+            mileage=mileage,
+            proxy_mmr=mmr_details.get("mmr"),
+            proxy_basis=mmr_details.get("basis"),
+            proxy_confidence=mmr_details.get("confidence_proxy"),
+        )
+        mmr = manheim_result.get("manheim_mmr_mid") or mmr_details["mmr"]
+        mmr_lookup_basis = (
+            "manheim_live"
+            if manheim_result.get("manheim_source_status") == "live"
+            else mmr_details.get("basis")
+        )
         retail_comp_result = get_retail_comps(
             year=year,
             make=make,
@@ -969,7 +985,7 @@ def score_vehicle(vehicle: dict) -> dict:
             mileage=mileage,
             is_police_or_fleet=is_police_or_fleet,
             auction_end=vehicle.get("auction_end_time"),
-            mmr_lookup_basis=mmr_details.get("basis"),
+            mmr_lookup_basis=mmr_lookup_basis,
             mmr_confidence_proxy=mmr_details.get("confidence_proxy"),
             retail_comp_price_estimate=retail_comp_result.get("retail_comp_price_estimate"),
             retail_comp_low=retail_comp_result.get("retail_comp_low"),
@@ -978,6 +994,13 @@ def score_vehicle(vehicle: dict) -> dict:
             retail_comp_confidence=retail_comp_result.get("retail_comp_confidence"),
             pricing_source=retail_comp_result.get("pricing_source"),
             pricing_updated_at=retail_comp_result.get("pricing_updated_at"),
+            manheim_mmr_mid=manheim_result.get("manheim_mmr_mid"),
+            manheim_mmr_low=manheim_result.get("manheim_mmr_low"),
+            manheim_mmr_high=manheim_result.get("manheim_mmr_high"),
+            manheim_range_width_pct=manheim_result.get("manheim_range_width_pct"),
+            manheim_confidence=manheim_result.get("manheim_confidence"),
+            manheim_source_status=manheim_result.get("manheim_source_status"),
+            manheim_updated_at=manheim_result.get("manheim_updated_at"),
         )
         result["mmr_estimated"] = mmr
         return result
@@ -1016,6 +1039,13 @@ def _fallback_score(vehicle: dict) -> dict:
         "retail_comp_confidence": None,
         "pricing_source": "mmr_proxy",
         "pricing_updated_at": None,
+        "manheim_mmr_mid": None,
+        "manheim_mmr_low": None,
+        "manheim_mmr_high": None,
+        "manheim_range_width_pct": None,
+        "manheim_confidence": None,
+        "manheim_source_status": "unavailable",
+        "manheim_updated_at": None,
         "retail_proxy_multiplier": 1.35,
         "wholesale_ctm_pct": None,
         "retail_ctm_pct": None,
@@ -1380,6 +1410,13 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "retail_comp_confidence": score_result.get("retail_comp_confidence"),
         "pricing_source": score_result.get("pricing_source"),
         "pricing_updated_at": score_result.get("pricing_updated_at"),
+        "manheim_mmr_mid": score_result.get("manheim_mmr_mid"),
+        "manheim_mmr_low": score_result.get("manheim_mmr_low"),
+        "manheim_mmr_high": score_result.get("manheim_mmr_high"),
+        "manheim_range_width_pct": score_result.get("manheim_range_width_pct"),
+        "manheim_confidence": score_result.get("manheim_confidence"),
+        "manheim_source_status": score_result.get("manheim_source_status"),
+        "manheim_updated_at": score_result.get("manheim_updated_at"),
         "retail_proxy_multiplier": score_result.get("retail_proxy_multiplier"),
         "dos_score": vehicle.get("dos_score"),
         "ctm_pct": score_result.get("ctm_pct"),

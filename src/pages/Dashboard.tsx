@@ -129,6 +129,13 @@ function pricingSourceLabel(source: string | null | undefined): string {
   return source || 'Unknown';
 }
 
+function manheimSourceLabel(source: Opportunity['manheim_source_status']): string {
+  if (source === 'live') return 'Live Manheim';
+  if (source === 'fallback') return 'Proxy fallback';
+  if (source === 'unavailable') return 'Unavailable';
+  return 'Unknown';
+}
+
 // ─── Deal Card ────────────────────────────────────────────────────────────────
 const DealCard = ({
   deal,
@@ -212,6 +219,14 @@ const DealCard = ({
               : 'Proxy fallback'}
           </p>
         </div>
+        <div>
+          <p className="text-xs text-gray-500">Wholesale Source</p>
+          <p className="text-sm text-gray-300">{manheimSourceLabel(deal.manheim_source_status)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500">MMR Confidence</p>
+          <p className="text-sm text-gray-300">{fmtConfidence(deal.manheim_confidence)}</p>
+        </div>
         <div className="col-span-2">
           <p className="text-xs text-gray-500">Retail Band</p>
           <p className="text-sm text-gray-300">
@@ -220,9 +235,24 @@ const DealCard = ({
               : fmt$(deal.retail_asking_price_estimate)}
           </p>
         </div>
+        <div className="col-span-2">
+          <p className="text-xs text-gray-500">MMR Band</p>
+          <p className="text-sm text-gray-300">
+            {deal.manheim_mmr_low != null && deal.manheim_mmr_mid != null && deal.manheim_mmr_high != null
+              ? `${fmt$(deal.manheim_mmr_low)} - ${fmt$(deal.manheim_mmr_mid)} - ${fmt$(deal.manheim_mmr_high)}`
+              : fmt$(deal.manheim_mmr_mid ?? deal.expected_price)}
+          </p>
+        </div>
+        <div className="col-span-2">
+          <p className="text-xs text-gray-500">MMR Range Width</p>
+          <p className="text-sm text-gray-300">{fmtPct(deal.manheim_range_width_pct)}</p>
+        </div>
       </div>
       {deal.pricing_updated_at && deal.pricing_source && deal.pricing_source !== 'mmr_proxy' && (
         <p className="mt-2 text-[11px] text-gray-500">Pricing updated {timeAgo(deal.pricing_updated_at)}</p>
+      )}
+      {deal.manheim_updated_at && deal.manheim_source_status === 'live' && (
+        <p className="mt-1 text-[11px] text-gray-500">Manheim updated {timeAgo(deal.manheim_updated_at)}</p>
       )}
     </div>
 

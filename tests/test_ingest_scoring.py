@@ -3,6 +3,7 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backend.ingest.manheim_market import get_manheim_market_data
 from backend.ingest.score import score_deal
 from webapp.routers.ingest import passes_basic_gates, score_vehicle
 
@@ -87,3 +88,47 @@ def test_score_vehicle_adds_police_fleet_recon_buffer():
     result = score_vehicle(vehicle)
 
     assert result["recon_reserve"] == 950.0
+    assert result["manheim_source_status"] == "fallback"
+
+
+def test_manheim_market_data_uses_proxy_fallback_without_live_config(monkeypatch):
+    monkeypatch.delenv("MANHEIM_MARKET_DATA_URL", raising=False)
+    result = get_manheim_market_data(
+        year=2024,
+        make="Toyota",
+        model="Camry",
+        state="CA",
+        mileage=12000,
+        proxy_mmr=20000,
+        proxy_basis="model:camry",
+        proxy_confidence=90.0,
+    )
+
+    assert result["manheim_source_status"] == "fallback"
+    assert result["manheim_mmr_mid"] == 20000.0
+    assert result["manheim_mmr_low"] < result["manheim_mmr_mid"] < result["manheim_mmr_high"]
+
+
+def test_score_deal_penalizes_wide_live_manheim_ranges_in_ceiling():
+    result = score_deal(
+        bid=10000,
+        mmr_ca=20000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=2024,
+        mileage=20000,
+        fees_cfg={"GovDeals": {"buyers_premium_pct": 10.0, "doc_fee": 50}},
+        rates_cfg={"mileage_bands": [{"max_miles": 5000, "rate_per_mile": 1.0}]},
+        miles_cfg={"CA": 100},
+        manheim_mmr_mid=20000,
+        manheim_mmr_low=18000,
+        manheim_mmr_high=22000,
+        manheim_range_width_pct=20.0,
+        manheim_confidence=0.82,
+        manheim_source_status="live",
+    )
+
+    assert result["bid_ceiling_pct"] == 85.0
+    assert "live_range_penalty_3pct" in result["ceiling_reason"]
