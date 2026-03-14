@@ -26,6 +26,12 @@ from datetime import datetime, timedelta
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
+try:
+    from backend.ingest.condition import compute_condition_grade as _compute_condition_grade
+except ImportError:
+    def _compute_condition_grade(**kwargs):  # type: ignore[misc]
+        return None
+
 alerts_this_run: dict = {}
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
@@ -1187,6 +1193,13 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
 
 def build_opportunity_row(vehicle: dict) -> dict:
     breakdown = vehicle.get("score_breakdown", {})
+    condition_grade = _compute_condition_grade(
+        title=vehicle.get("title") or "",
+        description=vehicle.get("description") or "",
+        mileage=vehicle.get("mileage") or 0,
+        year=vehicle.get("year") or 0,
+        damage_type=vehicle.get("damage_type") or "",
+    )
     return {
         "listing_id": vehicle.get("listing_url", "")[-80:],  # truncated unique ID
         "listing_url": vehicle.get("listing_url", ""),
@@ -1205,6 +1218,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "auction_fees": breakdown.get("premium"),
         "gross_margin": breakdown.get("margin"),
         "dos_score": vehicle.get("dos_score"),
+        "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
         "raw_data": vehicle,
