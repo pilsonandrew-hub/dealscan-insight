@@ -29,6 +29,55 @@ except Exception as _e:
     logger.warning(f"Rover Supabase client init failed (non-fatal): {_e}")
 
 
+def _coerce_number(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _serialize_recommendation(row: dict) -> dict:
+    dos_score = _coerce_number(row.get("dos_score", row.get("score")), 0.0)
+    current_bid = _coerce_number(row.get("current_bid", row.get("buy_now_price")), 0.0)
+    estimated_sale_price = _coerce_number(row.get("estimated_sale_price", row.get("mmr")), 0.0)
+    price = current_bid or estimated_sale_price
+    roi = _coerce_number(row.get("roi_percentage", row.get("roi")), 0.0)
+    profit = _coerce_number(row.get("potential_profit", row.get("gross_margin", row.get("profit_margin"))), 0.0)
+
+    return {
+        "id": row.get("id"),
+        "make": row.get("make"),
+        "model": row.get("model"),
+        "year": row.get("year"),
+        "price": price,
+        "current_bid": current_bid,
+        "estimated_sale_price": estimated_sale_price,
+        "mileage": row.get("mileage"),
+        "source": row.get("source") or row.get("source_site"),
+        "source_site": row.get("source_site") or row.get("source"),
+        "state": row.get("state"),
+        "vin": row.get("vin"),
+        "mmr": _coerce_number(row.get("mmr", row.get("estimated_sale_price")), 0.0),
+        "dos_score": round(dos_score, 2),
+        "score": round(dos_score, 2),
+        "match_pct": round(dos_score, 2),
+        "_score": round(max(0.0, min(1.0, dos_score / 100.0)), 4),
+        "arbitrage_score": round(dos_score, 2),
+        "roi_percentage": round(roi, 2),
+        "potential_profit": round(profit, 2),
+        "total_cost": _coerce_number(row.get("total_cost"), current_bid),
+        "transportation_cost": _coerce_number(row.get("transportation_cost", row.get("estimated_transport")), 0.0),
+        "fees_cost": _coerce_number(row.get("fees_cost", row.get("auction_fees")), 0.0),
+        "buyer_premium": _coerce_number(row.get("buyer_premium"), 0.0),
+        "confidence_score": round(dos_score, 2),
+        "auction_end": row.get("auction_end") or row.get("auction_end_date"),
+        "created_at": row.get("created_at"),
+        "investment_grade": row.get("investment_grade"),
+    }
+
+
 def _verify_auth(authorization: Optional[str]) -> str:
     """
     Validate Supabase JWT. Returns user_id on success.
@@ -56,7 +105,7 @@ def _verify_auth(authorization: Optional[str]) -> str:
 @router.get("/recommendations")
 async def get_recommendations(
     user_id: str,
-    limit: int = 25,
+    limit: int = 20,
     authorization: Optional[str] = Header(None),
 ):
     """Get personalized deal recommendations for a user."""
@@ -69,51 +118,25 @@ async def get_recommendations(
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     try:
-        from backend.rover.heuristic_scorer import build_preference_vector, rank_opportunities
-
-        # Load user event history (last 200 events)
-        events_resp = supa.table("rover_events")\
-            .select("*")\
-            .eq("user_id", user_id)\
-            .order("timestamp", desc=True)\
-            .limit(200)\
-            .execute()
-
-        events = events_resp.data or []
-
-        # Convert timestamps to ms for decay calculation
         now_ms = time.time() * 1000
-        for e in events:
-            if e.get("timestamp"):
-                from datetime import datetime, timezone
-                try:
-                    dt = datetime.fromisoformat(e["timestamp"].replace("Z", "+00:00"))
-                    e["timestamp_ms"] = dt.timestamp() * 1000
-                except Exception:
-                    e["timestamp_ms"] = now_ms
-
-        # Build preference vector from event history
-        prefs = build_preference_vector(events, now_ms)
-
-        # Load recent high-quality opportunities
+        effective_limit = max(1, min(limit, 20))
         opps_resp = supa.table("opportunities")\
             .select("*")\
-            .in_("status", ["hot", "good"])\
+            .gte("dos_score", 65)\
             .order("dos_score", desc=True)\
-            .limit(200)\
+            .limit(effective_limit)\
             .execute()
 
-        opportunities = opps_resp.data or []
-
-        # Rank by preference vector
-        ranked = rank_opportunities(prefs, opportunities, top_n=limit)
+        items = [_serialize_recommendation(row) for row in (opps_resp.data or [])]
 
         return {
             "precomputedAt": int(now_ms),
-            "items": ranked,
-            "totalCount": len(ranked),
-            "confidence": min(1.0, len(events) / 50),
-            "coldStart": len(events) == 0,
+            "items": items,
+            "recommendations": items,
+            "data": items,
+            "totalCount": len(items),
+            "confidence": min(1.0, len(items) / 20),
+            "coldStart": False,
         }
 
     except HTTPException:
