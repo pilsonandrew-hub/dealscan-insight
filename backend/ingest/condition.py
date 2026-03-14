@@ -32,6 +32,21 @@ def _clamp(index: int) -> str:
     return _TIERS[max(0, min(len(_TIERS) - 1, index))]
 
 
+def _grade_to_score(grade: str) -> float:
+    return float(_tier_index(grade))
+
+
+def _score_to_grade(score: float) -> str:
+    bounded = max(0.0, min(float(len(_TIERS) - 1), float(score)))
+    if bounded >= 2.5:
+        return "Excellent"
+    if bounded >= 1.5:
+        return "Good"
+    if bounded >= 0.5:
+        return "Fair"
+    return "Poor"
+
+
 def compute_condition_grade(
     title: str = "",
     description: str = "",
@@ -47,8 +62,8 @@ def compute_condition_grade(
     1. damage_type signals → "Poor" immediately
     2. Explicit "no start"/"not running" in description → "Poor"
     3. "runs and drives"/"starts and runs" → upgrade one tier
-    4. Age-based baseline (0-1yr: Excellent, 2yr: Good, 3-4yr: Fair)
-    5. Mileage adjustment (<15k: +1 tier, 35k-50k: -1 tier)
+    4. Age-based baseline (0-1yr: Excellent, 2-3yr: Good, 4-6yr: Fair, 7+yr: Poor)
+    5. Mileage adjustment (<30k: no penalty, 30k-60k: -0.5, 60k-90k: -1, 90k+: -2)
     6. Parse condition codes like "Grade 3" or "Condition 2" in description
     7. Default: "Fair"
     """
@@ -93,36 +108,38 @@ def compute_condition_grade(
         }[code_num]
 
     if code_grade is not None:
-        idx = _tier_index(code_grade)
+        score = _grade_to_score(code_grade)
         if runs_drives_bump:
-            idx += 1
-        return _clamp(idx)
+            score += 1.0
+        return _score_to_grade(score)
 
     # 4. Age-based baseline
     if year and year > 1900:
         age = current_year - year
         if age <= 1:
             base_grade = "Excellent"
-        elif age == 2:
+        elif age <= 3:
             base_grade = "Good"
-        elif age <= 4:
+        elif age <= 6:
             base_grade = "Fair"
         else:
-            base_grade = "Fair"
+            base_grade = "Poor"
     else:
         base_grade = "Fair"
 
-    idx = _tier_index(base_grade)
+    score = _grade_to_score(base_grade)
 
     # 5. Mileage adjustment
     if mileage:
-        if mileage < 15000:
-            idx += 1
-        elif 35000 <= mileage <= 50000:
-            idx -= 1
+        if 30000 <= mileage < 60000:
+            score -= 0.5
+        elif 60000 <= mileage < 90000:
+            score -= 1.0
+        elif mileage >= 90000:
+            score -= 2.0
 
     # 3. "Runs and drives" bump
     if runs_drives_bump:
-        idx += 1
+        score += 1.0
 
-    return _clamp(idx)
+    return _score_to_grade(score)

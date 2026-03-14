@@ -100,9 +100,9 @@ _COMMERCIAL_PATTERNS = [
 
 _TITLE_BRAND_PATTERNS = [
     ("salvage", r"\bsalvage\b"),
-    ("rebuilt", r"\brebuilt\b"),
+    ("rebuilt", r"\brebuilt\s+title\b"),
     ("flood", r"\bflood\b"),
-    ("lemon", r"\blemon\b"),
+    ("lemon", r"\blemon\s+law\b|\blemon\s+title\b"),
     ("frame damage", r"\bframe[\s-]+damage\b"),
     ("structural damage", r"\bstructural[\s-]+damage\b"),
     ("airbag deployed", r"\bair\s*bag\s+deployed\b"),
@@ -268,9 +268,14 @@ def _normalize_model(model: str) -> str:
 
 
 def _find_title_brand_issue(vehicle: dict) -> Optional[str]:
+    text_to_check = " ".join(filter(None, [
+        vehicle.get("title", ""),
+        vehicle.get("description", ""),
+        vehicle.get("notes", ""),
+    ]))
     search_fields = [
         ("title_status", vehicle.get("title_status")),
-        ("title", vehicle.get("title")),
+        ("listing_text", text_to_check),
         ("vin", vehicle.get("vin")),
     ]
     for field_name, raw_value in search_fields:
@@ -650,7 +655,8 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
         auction_end = (
             item.get("auctionEndUtc") or
             item.get("auction_end_time") or
-            item.get("auction_end_date")
+            item.get("auction_end_date") or
+            item.get("auction_end")
         )
 
         # URL: parseforge uses url, ours uses listing_url
@@ -659,8 +665,8 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
         # Photo: parseforge uses imageUrl or photos[]
         photos = item.get("photos", [])
         photo_url = (
-            item.get("imageUrl") or item.get("photo_url") or
-            item.get("image_url") or (photos[0] if photos else "")
+            item.get("image_url") or item.get("photo_url") or
+            item.get("imageUrl") or (photos[0] if photos else "")
         )
 
         # Agency: parseforge uses seller
@@ -1192,7 +1198,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
 
 
 def build_opportunity_row(vehicle: dict) -> dict:
-    breakdown = vehicle.get("score_breakdown", {})
+    score_result = vehicle.get("score_breakdown", {})
     condition_grade = _compute_condition_grade(
         title=vehicle.get("title") or "",
         description=vehicle.get("description") or "",
@@ -1213,11 +1219,14 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "city": vehicle.get("city") or vehicle.get("location_city") or "",
         "vin": vehicle.get("vin"),
         "current_bid": vehicle.get("current_bid"),
-        "mmr": breakdown.get("mmr_estimated"),
-        "estimated_transport": breakdown.get("transport"),
-        "auction_fees": breakdown.get("premium"),
-        "gross_margin": breakdown.get("margin"),
+        "mmr": score_result.get("mmr_estimated"),
+        "estimated_transport": score_result.get("transport"),
+        "auction_fees": score_result.get("premium"),
+        "gross_margin": score_result.get("margin"),
         "dos_score": vehicle.get("dos_score"),
+        "ctm_pct": score_result.get("ctm_pct"),
+        "segment_tier": score_result.get("segment_tier"),
+        "investment_grade": score_result.get("investment_grade"),
         "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),

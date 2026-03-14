@@ -71,6 +71,26 @@ function parseBid(raw) {
     return m ? parseFloat(m[0]) : 0;
 }
 
+function parseTitleStatus(text = '') {
+    const normalized = String(text ?? '').toLowerCase();
+    const damageKeywords = [
+        ['frame damage', 'frame damage'],
+        ['salvage', 'salvage'],
+        ['rebuilt', 'rebuilt'],
+        ['flood', 'flood'],
+        ['lemon', 'lemon'],
+    ];
+
+    for (const [keyword, label] of damageKeywords) {
+        if (normalized.includes(keyword)) return label;
+    }
+
+    if (normalized.includes('clean title')) return 'clean';
+    if (normalized.includes('title')) return 'clean';
+
+    return 'unknown';
+}
+
 function extractLotsFromJson(json) {
     if (!json || typeof json !== 'object') return [];
     // Try known Liquidity Services response shapes
@@ -100,6 +120,7 @@ function normalizeLot(lot) {
     const state     = lot.state || lot.stateCode || extractStateFromLocation(location);
     const bid       = parseBid(lot.currentBid ?? lot.current_bid ?? lot.amount ?? lot.price ?? 0);
     const endTime   = lot.auctionEndDate ?? lot.endDate ?? lot.closingDate ?? lot.endTime ?? null;
+    const description = lot.description || lot.notes || '';
     const url       = lot.url || lot.lotUrl || lot.listingUrl
         || (lot.lotId ? `https://www.govdeals.com/lot/${lot.lotId}` : '')
         || (lot.id    ? `https://www.govdeals.com/lot/${lot.id}`    : '');
@@ -113,7 +134,8 @@ function normalizeLot(lot) {
         state:          String(state).toUpperCase().slice(0, 2),
         listing_url:    url,
         photo_url:      lot.photoUrl || lot.imageUrl || lot.image || '',
-        description:    lot.description || '',
+        description,
+        title_status:   parseTitleStatus([title, description, lot.notes].filter(Boolean).join(' ')),
         agency_name:    lot.agencyName || lot.agency || lot.sellerName || '',
         source_site:    'govdeals',
         scraped_at:     new Date().toISOString(),

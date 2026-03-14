@@ -72,9 +72,6 @@ async def create_outcome(
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
         opportunity = opportunities[0]
-        opportunity_user_id = opportunity.get("user_id")
-        if opportunity_user_id and opportunity_user_id != user_id:
-            raise HTTPException(status_code=403, detail="Forbidden")
 
         metadata = {
             "opportunity_id": payload.opportunity_id,

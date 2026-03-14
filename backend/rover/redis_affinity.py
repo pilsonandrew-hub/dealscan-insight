@@ -4,6 +4,7 @@ Redis-backed affinity vector tracking for Rover personalization.
 Key patterns:
   rover:affinity:{user_id}:{dimension}  → float score (HSET field per dimension)
   rover:last_event:{user_id}            → unix timestamp (float)
+  rover:last_updated:{user_id}          → unix timestamp (float)
   rover:active_users                    → SET of user_ids
 
 Decay: half-life of 72 hours applied on each write.
@@ -51,6 +52,10 @@ def _affinity_key(user_id: str, dimension: str) -> str:
 
 def _last_event_key(user_id: str) -> str:
     return f"rover:last_event:{user_id}"
+
+
+def _last_updated_key(user_id: str) -> str:
+    return f"rover:last_updated:{user_id}"
 
 
 def _price_bracket(price: float) -> str:
@@ -159,8 +164,11 @@ def increment_affinity(
         pipeline.expire(key, KEY_TTL)
 
     # Update last-event timestamp
+    now_ts = time.time()
     last_key = _last_event_key(user_id)
-    pipeline.set(last_key, time.time(), ex=KEY_TTL)
+    last_updated_key = _last_updated_key(user_id)
+    pipeline.set(last_key, now_ts, ex=KEY_TTL)
+    pipeline.set(last_updated_key, now_ts, ex=KEY_TTL)
     pipeline.sadd("rover:active_users", user_id)
     pipeline.execute()
 
@@ -169,6 +177,14 @@ def get_affinity_vector(redis_client, user_id: str) -> dict[str, float]:
     """Return {dimension: score} dict for the user. Empty dict if no data."""
     pattern = f"rover:affinity:{user_id}:*"
     prefix = f"rover:affinity:{user_id}:"
+    last_updated_ts = redis_client.get(_last_updated_key(user_id)) or redis_client.get(_last_event_key(user_id))
+    decay = 1.0
+    if last_updated_ts is not None:
+        try:
+            hours_elapsed = max(0.0, (time.time() - float(last_updated_ts)) / 3600.0)
+            decay = DECAY_FACTOR ** hours_elapsed
+        except (TypeError, ValueError):
+            decay = 1.0
     result: dict[str, float] = {}
 
     cursor = 0
@@ -179,7 +195,7 @@ def get_affinity_vector(redis_client, user_id: str) -> dict[str, float]:
             if val is not None:
                 try:
                     dim = key[len(prefix):]
-                    result[dim] = float(val)
+                    result[dim] = float(val) * decay
                 except (TypeError, ValueError):
                     pass
         if cursor == 0:

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Target, Lock, Trash2, Calculator, Upload, Search, RefreshCw } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
+import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import api, { type OpportunityDetail } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,6 +42,14 @@ interface SavedTarget {
     state: string;
     salesTaxPct: string;
   };
+}
+
+interface OutcomeForm {
+  opportunityId: string;
+  salePrice: string;
+  saleDate: string;
+  daysToSale: string;
+  notes: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -124,11 +134,20 @@ const DEFAULT_INPUTS: SniperInputs = {
 // ─── SniperScope Calculator ───────────────────────────────────────────────────
 export default function SniperScopeDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { toast } = useToast();
   const [inputs, setInputs] = useState<SniperInputs>(DEFAULT_INPUTS);
   const [dealIdInput, setDealIdInput] = useState(searchParams.get('dealId') || '');
   const [loadingDeal, setLoadingDeal] = useState(false);
   const [dealError, setDealError] = useState<string | null>(null);
   const [loadedDeal, setLoadedDeal] = useState<OpportunityDetail | null>(null);
+  const [savingOutcome, setSavingOutcome] = useState(false);
+  const [outcomeForm, setOutcomeForm] = useState<OutcomeForm>({
+    opportunityId: searchParams.get('dealId') || '',
+    salePrice: '',
+    saleDate: '',
+    daysToSale: '',
+    notes: '',
+  });
 
   const [saved, setSaved] = useState<SavedTarget[]>(() => {
     try {
@@ -222,6 +241,7 @@ export default function SniperScopeDashboard() {
 
       populateFromDeal(deal);
       setDealIdInput(deal.id);
+      setOutcomeForm(prev => ({ ...prev, opportunityId: deal.id }));
 
       if (syncUrl) {
         const next = new URLSearchParams(searchParams);
@@ -316,11 +336,85 @@ export default function SniperScopeDashboard() {
 
   useEffect(() => {
     setDealIdInput(dealIdParam);
+    if (dealIdParam) {
+      setOutcomeForm(prev => ({ ...prev, opportunityId: dealIdParam }));
+    }
 
     if (dealIdParam && dealIdParam !== loadedDeal?.id) {
       void loadFromDeal(dealIdParam, false);
     }
   }, [dealIdParam, loadedDeal?.id]);
+
+  const setOutcomeField = (key: keyof OutcomeForm, value: string) =>
+    setOutcomeForm(prev => ({ ...prev, [key]: value }));
+
+  const handleOutcomeSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const opportunityId = (dealIdParam || outcomeForm.opportunityId).trim();
+    if (!opportunityId) {
+      toast({
+        title: 'Opportunity ID required',
+        description: 'Provide an opportunity ID before logging a sale.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSavingOutcome(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      if (!token) {
+        throw new Error('You must be signed in to log a sale outcome.');
+      }
+
+      const response = await fetch('/api/outcomes', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          opportunity_id: opportunityId,
+          sale_price: parseFloat(outcomeForm.salePrice),
+          sale_date: outcomeForm.saleDate,
+          days_to_sale: parseInt(outcomeForm.daysToSale, 10),
+          notes: outcomeForm.notes.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.detail || `Request failed with status ${response.status}`);
+      }
+
+      setOutcomeForm(prev => ({
+        ...prev,
+        opportunityId,
+        salePrice: '',
+        saleDate: '',
+        daysToSale: '',
+        notes: '',
+      }));
+
+      toast({
+        title: 'Sale logged',
+        description: 'Outcome saved successfully.',
+      });
+    } catch (error) {
+      console.error('Failed to log outcome:', error);
+      toast({
+        title: 'Could not log sale',
+        description: error instanceof Error ? error.message : 'Unknown error occurred.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingOutcome(false);
+    }
+  };
 
   // ─── Derived UI state ──────────────────────────────────────────────────────
   const hasMMR = Boolean(inputs.mmr);
@@ -622,6 +716,81 @@ export default function SniperScopeDashboard() {
             <Lock className="h-4 w-4" />
             Lock Target
           </button>
+
+          <form onSubmit={handleOutcomeSubmit} className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-200">Log Sale Outcome</h3>
+              <p className="text-xs text-gray-400 mt-1">Capture the final result after the unit sells.</p>
+            </div>
+
+            {!dealIdParam && (
+              <div>
+                <label className={labelCls}>Opportunity ID</label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  placeholder="Enter opportunity ID"
+                  value={outcomeForm.opportunityId}
+                  onChange={e => setOutcomeField('opportunityId', e.target.value)}
+                />
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Sale Price ($)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  className={inputCls}
+                  value={outcomeForm.salePrice}
+                  onChange={e => setOutcomeField('salePrice', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Sale Date</label>
+                <input
+                  type="date"
+                  required
+                  className={inputCls}
+                  value={outcomeForm.saleDate}
+                  onChange={e => setOutcomeField('saleDate', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Days to Sale</label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  className={inputCls}
+                  value={outcomeForm.daysToSale}
+                  onChange={e => setOutcomeField('daysToSale', e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className={labelCls}>Notes (optional)</label>
+              <textarea
+                className={`${inputCls} min-h-24 resize-y`}
+                placeholder="Anything notable about the sale outcome"
+                value={outcomeForm.notes}
+                onChange={e => setOutcomeField('notes', e.target.value)}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingOutcome}
+              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2.5 px-4 rounded-lg transition-colors"
+            >
+              {savingOutcome ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+              {savingOutcome ? 'Saving...' : 'Log Sale'}
+            </button>
+          </form>
         </div>
       </div>
 
