@@ -923,6 +923,7 @@ def score_vehicle(vehicle: dict) -> dict:
     """
     try:
         from backend.ingest.score import score_deal
+        from backend.ingest.retail_comps import get_retail_comps
 
         bid = vehicle.get("current_bid", 0)
         state = vehicle.get("state", "")
@@ -949,6 +950,13 @@ def score_vehicle(vehicle: dict) -> dict:
         )
         mmr_details = _estimate_mmr_details(make, model)
         mmr = mmr_details["mmr"]
+        retail_comp_result = get_retail_comps(
+            year=year,
+            make=make,
+            model=model,
+            state=state,
+            supabase_client=supabase_client,
+        )
 
         result = score_deal(
             bid=bid,
@@ -963,6 +971,13 @@ def score_vehicle(vehicle: dict) -> dict:
             auction_end=vehicle.get("auction_end_time"),
             mmr_lookup_basis=mmr_details.get("basis"),
             mmr_confidence_proxy=mmr_details.get("confidence_proxy"),
+            retail_comp_price_estimate=retail_comp_result.get("retail_comp_price_estimate"),
+            retail_comp_low=retail_comp_result.get("retail_comp_low"),
+            retail_comp_high=retail_comp_result.get("retail_comp_high"),
+            retail_comp_count=retail_comp_result.get("retail_comp_count"),
+            retail_comp_confidence=retail_comp_result.get("retail_comp_confidence"),
+            pricing_source=retail_comp_result.get("pricing_source"),
+            pricing_updated_at=retail_comp_result.get("pricing_updated_at"),
         )
         result["mmr_estimated"] = mmr
         return result
@@ -993,6 +1008,21 @@ def _fallback_score(vehicle: dict) -> dict:
         "margin": 0,
         "gross_margin": 0,
         "wholesale_margin": 0,
+        "retail_asking_price_estimate": 0,
+        "retail_comp_price_estimate": None,
+        "retail_comp_low": None,
+        "retail_comp_high": None,
+        "retail_comp_count": 0,
+        "retail_comp_confidence": None,
+        "pricing_source": "mmr_proxy",
+        "pricing_updated_at": None,
+        "retail_proxy_multiplier": 1.35,
+        "wholesale_ctm_pct": None,
+        "retail_ctm_pct": None,
+        "ctm_pct": None,
+        "estimated_days_to_sale": None,
+        "roi_per_day": None,
+        "investment_grade": None,
         "bid_ceiling_pct": None,
         "max_bid": 0,
         "bid_headroom": 0,
@@ -1343,6 +1373,13 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "total_cost": score_result.get("total_cost"),
         "gross_margin": score_result.get("gross_margin", score_result.get("margin")),
         "retail_asking_price_estimate": score_result.get("retail_asking_price_estimate"),
+        "retail_comp_price_estimate": score_result.get("retail_comp_price_estimate"),
+        "retail_comp_low": score_result.get("retail_comp_low"),
+        "retail_comp_high": score_result.get("retail_comp_high"),
+        "retail_comp_count": score_result.get("retail_comp_count"),
+        "retail_comp_confidence": score_result.get("retail_comp_confidence"),
+        "pricing_source": score_result.get("pricing_source"),
+        "pricing_updated_at": score_result.get("pricing_updated_at"),
         "retail_proxy_multiplier": score_result.get("retail_proxy_multiplier"),
         "dos_score": vehicle.get("dos_score"),
         "ctm_pct": score_result.get("ctm_pct"),

@@ -128,7 +128,14 @@ export interface Opportunity {
   year: number;
   mileage?: number;
   investment_grade?: "Platinum" | "Gold" | "Silver" | "Bronze";
+  pricing_source?: string;
+  pricing_updated_at?: string;
   retail_asking_price_estimate?: number;
+  retail_comp_price_estimate?: number;
+  retail_comp_low?: number;
+  retail_comp_high?: number;
+  retail_comp_count?: number;
+  retail_comp_confidence?: number;
   retail_proxy_multiplier?: number;
   wholesale_ctm_pct?: number;
   retail_ctm_pct?: number;

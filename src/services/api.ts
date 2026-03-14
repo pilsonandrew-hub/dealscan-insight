@@ -74,7 +74,14 @@ interface OpportunityRow {
   mileage?: number;
   recon_reserve?: number;
   investment_grade?: Opportunity['investment_grade'];
+  pricing_source?: string;
+  pricing_updated_at?: string;
   retail_asking_price_estimate?: number;
+  retail_comp_price_estimate?: number;
+  retail_comp_low?: number;
+  retail_comp_high?: number;
+  retail_comp_count?: number;
+  retail_comp_confidence?: number;
   retail_proxy_multiplier?: number;
   wholesale_ctm_pct?: number;
   ctm_pct?: number;
@@ -202,7 +209,14 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     buyer_premium: buyerPremium,
     recon_reserve: row.recon_reserve ?? 0,
     investment_grade: row.investment_grade ?? undefined,
+    pricing_source: typeof row.pricing_source === 'string' ? row.pricing_source : undefined,
+    pricing_updated_at: typeof row.pricing_updated_at === 'string' ? row.pricing_updated_at : undefined,
     retail_asking_price_estimate: row.retail_asking_price_estimate ?? undefined,
+    retail_comp_price_estimate: row.retail_comp_price_estimate ?? undefined,
+    retail_comp_low: row.retail_comp_low ?? undefined,
+    retail_comp_high: row.retail_comp_high ?? undefined,
+    retail_comp_count: row.retail_comp_count ?? undefined,
+    retail_comp_confidence: row.retail_comp_confidence ?? undefined,
     retail_proxy_multiplier: row.retail_proxy_multiplier ?? undefined,
     wholesale_ctm_pct: row.wholesale_ctm_pct ?? undefined,
     retail_ctm_pct: row.retail_ctm_pct ?? row.ctm_pct ?? undefined,
