@@ -80,7 +80,8 @@ function buildOpportunityQuery(filters?: CrosshairSearchFilters) {
   let query = supabase
     .from('opportunities')
     .select('*', { count: 'exact' })
-    .not('dos_score', 'is', null);
+    .not('dos_score', 'is', null)
+    .or('is_duplicate.is.null,is_duplicate.eq.false');
 
   if (filters?.make) query = query.ilike('make', `%${filters.make}%`);
   if (filters?.model) query = query.ilike('model', `%${filters.model}%`);

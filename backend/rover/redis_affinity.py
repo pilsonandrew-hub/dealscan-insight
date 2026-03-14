@@ -76,16 +76,36 @@ def _get_first(item_data: dict, *keys: str):
 
 
 def _extract_dimensions(item_data: dict) -> list[str]:
-    """Extract affinity dimension strings from item_data."""
+    """Extract affinity dimension strings from top-level or nested item payloads."""
     dims = []
 
-    make = str(_get_first(item_data, "make") or "").lower().strip()
-    model = str(_get_first(item_data, "model") or "").lower().strip()
-    segment = str(_get_first(item_data, "segment_tier", "segmentTier", "segment") or "").strip().lower()
-    source = str(_get_first(item_data, "source_site", "sourceSite", "source") or "").lower().strip()
+    data = item_data or {}
+    item = data.get("item", data)
+
+    make = str(_get_first(item, "make") or _get_first(data, "make") or "").lower().strip()
+    model = str(_get_first(item, "model") or _get_first(data, "model") or "").lower().strip()
+    segment = str(
+        _get_first(item, "segment_tier", "segmentTier", "segment")
+        or _get_first(data, "segment_tier", "segmentTier", "segment")
+        or ""
+    ).strip().lower()
+    source = str(
+        _get_first(item, "source_site", "sourceSite", "source")
+        or _get_first(data, "source_site", "sourceSite", "source")
+        or ""
+    ).lower().strip()
 
     price_raw = _get_first(
-        item_data,
+        item,
+        "current_bid",
+        "currentBid",
+        "buy_now_price",
+        "buyNowPrice",
+        "price",
+        "estimated_sale_price",
+        "estimatedSalePrice",
+    ) or _get_first(
+        data,
         "current_bid",
         "currentBid",
         "buy_now_price",

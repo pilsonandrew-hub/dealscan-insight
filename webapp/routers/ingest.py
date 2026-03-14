@@ -1226,8 +1226,9 @@ def build_opportunity_row(vehicle: dict) -> dict:
         buyer_premium_pct = float(buyer_premium_pct)
         if buyer_premium_pct > 1:
             buyer_premium_pct /= 100.0
+    buyer_premium = round(current_bid * buyer_premium_pct, 2)
     doc_fee = float(score_result.get("doc_fee", 75) or 75)
-    auction_fees = doc_fee + (current_bid * buyer_premium_pct)
+    auction_fees = round(doc_fee, 2)
     condition_grade = _compute_condition_grade(
         title=vehicle.get("title") or "",
         description=vehicle.get("description") or "",
@@ -1250,8 +1251,8 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "current_bid": vehicle.get("current_bid"),
         "mmr": score_result.get("mmr_estimated"),
         "estimated_transport": score_result.get("transport"),
-        "buyer_premium": round(float(buyer_premium), 2),
-        "auction_fees": round(auction_fees, 2),
+        "buyer_premium": buyer_premium,
+        "auction_fees": auction_fees,
         "gross_margin": score_result.get("margin"),
         "dos_score": vehicle.get("dos_score"),
         "ctm_pct": score_result.get("ctm_pct"),
