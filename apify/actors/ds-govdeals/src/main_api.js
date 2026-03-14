@@ -145,25 +145,27 @@ const crawler = new PlaywrightCrawler({
             await page.waitForTimeout(6000);
         }
 
-        // ── Report capture results ─────────────────────────────
+        // ── Save results ───────────────────────────────────────
         if (capturedApi.apiKey) {
             log.info('✅ maestro x-api-key captured successfully');
             log.info(`Search API URL: ${capturedApi.searchUrl || 'NOT FOUND'}`);
 
-            // Attempt direct API pagination
-            if (capturedApi.searchPayload) {
-                await paginateWithAuth(page, log);
-            }
-
-            // Fallback: if pagination saved nothing, use intercepted lots from response listener
-            if (totalPassed === 0 && capturedApi.interceptedLots.length > 0) {
-                log.info(`Pagination saved 0 — falling back to ${capturedApi.interceptedLots.length} intercepted lots`);
+            // Step 1: Save intercepted lots from page load (guaranteed to work, page 1)
+            const seenIds = new Set();
+            if (capturedApi.interceptedLots.length > 0) {
+                log.info(`Saving ${capturedApi.interceptedLots.length} intercepted lots from page load`);
                 for (const lot of capturedApi.interceptedLots) {
+                    seenIds.add(lot.assetId);
                     totalFound++;
                     if (!passes(lot)) continue;
                     totalPassed++;
                     await Actor.pushData(normalizeLot(lot));
                 }
+            }
+
+            // Step 2: Attempt direct API pagination for pages 2+ (Node.js fetch, no CORS)
+            if (capturedApi.searchPayload) {
+                await paginateWithAuth(page, log, seenIds);
             }
         } else {
             log.warning('❌ No maestro x-api-key captured');
@@ -192,7 +194,7 @@ function normalizeLot(lot) {
     };
 }
 
-async function paginateWithAuth(page, log) {
+async function paginateWithAuth(page, log, seenIds = new Set()) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
@@ -204,24 +206,26 @@ async function paginateWithAuth(page, log) {
             responseStyle: searchPayload.responseStyle || 'productsOnly',
         };
 
-        log.info(`Fetching page ${pageNum}: ${searchUrl}`);
+        log.info(`Fetching page ${pageNum} via Node fetch: ${searchUrl}`);
 
         try {
-            const resp = await page.evaluate(async ({ url, hdrs, body }) => {
-                const r = await fetch(url, {
-                    method: 'POST',
-                    headers: { ...hdrs, origin: 'https://www.govdeals.com', referer: 'https://www.govdeals.com/' },
-                    credentials: 'include',
-                    body: JSON.stringify(body),
-                });
-                const json = r.ok ? await r.json() : null;
-                return {
-                    ok: r.ok,
-                    status: r.status,
-                    total: r.headers.get('x-total-count'),
-                    json,
-                };
-            }, { url: searchUrl, hdrs: requestHeaders, body: payload });
+            // Use Node.js fetch (no CORS restrictions, unlike page.evaluate browser fetch)
+            const nodeResp = await fetch(searchUrl, {
+                method: 'POST',
+                headers: {
+                    ...requestHeaders,
+                    'content-type': 'application/json',
+                    'origin': 'https://www.govdeals.com',
+                    'referer': 'https://www.govdeals.com/',
+                },
+                body: JSON.stringify(payload),
+            });
+            const resp = {
+                ok: nodeResp.ok,
+                status: nodeResp.status,
+                total: nodeResp.headers.get('x-total-count'),
+                json: nodeResp.ok ? await nodeResp.json() : null,
+            };
 
             if (!resp?.ok || !resp.json) {
                 log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'})`);
@@ -233,6 +237,8 @@ async function paginateWithAuth(page, log) {
 
             log.info(`Page ${pageNum}: ${lots.length} lots (x-total-count: ${resp.total || 'n/a'})`);
             for (const lot of lots) {
+                if (seenIds.has(lot.assetId)) continue; // already saved from intercept
+                seenIds.add(lot.assetId);
                 totalFound++;
                 if (!passes(lot)) continue;
                 totalPassed++;
