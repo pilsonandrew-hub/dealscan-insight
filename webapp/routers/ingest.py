@@ -575,9 +575,25 @@ async def apify_webhook(
             vehicle["score_breakdown"] = score_result
             vehicle["ingested_at"] = datetime.utcnow().isoformat()
 
-            # $1500 margin floor — capital protection
-            if score_result.get("margin", 0) < 1500:
-                logger.info(f"[MARGIN] below $1500 floor (${score_result.get('margin', 0):,.0f}): {vehicle.get('title','?')[:60]}")
+            # $1500 wholesale margin floor — capital protection
+            if score_result.get("wholesale_margin", 0) < 1500:
+                logger.info(
+                    f"[MARGIN] below $1500 wholesale floor (${score_result.get('wholesale_margin', 0):,.0f}): "
+                    f"{vehicle.get('title','?')[:60]}"
+                )
+                skipped += 1
+                continue
+
+            if score_result.get("investment_grade") == "Bronze":
+                logger.info(f"[CEILING] bronze reject: {vehicle.get('title','?')[:60]}")
+                skipped += 1
+                continue
+
+            if not score_result.get("ceiling_pass", True):
+                logger.info(
+                    f"[CEILING] rejected — {score_result.get('ceiling_reason')} | "
+                    f"headroom=${score_result.get('bid_headroom', 0):,.0f}: {vehicle.get('title','?')[:60]}"
+                )
                 skipped += 1
                 continue
 
@@ -603,12 +619,13 @@ async def apify_webhook(
             logger.info(
                 f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
                 f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
-                f"| Margin=${score_result.get('margin',0):,.0f} | {vehicle.get('state')}"
+                f"| Gross=${score_result.get('gross_margin',0):,.0f} "
+                f"| Headroom=${score_result.get('bid_headroom',0):,.0f} | {vehicle.get('state')}"
                 + (" [DUP]" if is_dup else "")
             )
 
             processed += 1
-            if not is_dup and vehicle["dos_score"] >= 80:
+            if not is_dup and (vehicle["dos_score"] >= 80 or _is_platinum_alert_candidate(vehicle)):
                 hot_deals.append(vehicle)
 
         # Fire Telegram alerts for hot deals
@@ -623,7 +640,8 @@ async def apify_webhook(
             "hot_deals": len(hot_deals),
             "hot_deal_vehicles": [
                 f"{v.get('year')} {v.get('make')} {v.get('model')} | "
-                f"DOS={v['dos_score']} | ${v.get('current_bid'):,.0f}"
+                f"{v.get('score_breakdown', {}).get('investment_grade', 'Watch')} | "
+                f"Score={v['dos_score']} | ${v.get('current_bid'):,.0f}"
                 for v in hot_deals
             ],
         }
@@ -737,6 +755,15 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
         return None
 
 
+def _is_platinum_alert_candidate(vehicle: dict) -> bool:
+    score_breakdown = vehicle.get("score_breakdown", {})
+    return (
+        score_breakdown.get("investment_grade") == "Platinum"
+        and float(score_breakdown.get("roi_per_day") or 0) > 0
+        and float(score_breakdown.get("bid_headroom") or 0) > 0
+    )
+
+
 def extract_year(title: str) -> Optional[int]:
     match = re.search(r"\b(20[12]\d|19[89]\d)\b", title)
     if match:
@@ -780,6 +807,10 @@ def extract_model(title: str, make: str) -> str:
 
 
 def _estimate_mmr(make: str, model: str) -> float:
+    return _estimate_mmr_details(make, model)["mmr"]
+
+
+def _estimate_mmr_details(make: str, model: str) -> dict:
     """
     Estimate MMR by model-level lookup first, then make fallback.
     Far more accurate than segment-only — a Ford Explorer ≠ a Ford Econoline.
@@ -791,26 +822,34 @@ def _estimate_mmr(make: str, model: str) -> float:
     for key in sorted(_MODEL_MMR, key=len, reverse=True):
         val = _MODEL_MMR[key]
         if key in model_lower or model_lower in key:
-            return float(val)
+            return {"mmr": float(val), "basis": f"model:{key}", "confidence_proxy": 90.0}
 
     # 2. Police/interceptor check
     if any(t in model_lower for t in ["interceptor", "ppv", "police", "pursuit"]):
-        return 22000.0
+        return {"mmr": 22000.0, "basis": "special:police_interceptor", "confidence_proxy": 62.0}
 
     # 3. Commercial vehicle detection — low MMR
     if any(t in model_lower for t in ["cargo", "cutaway", "chassis cab", "box truck",
                                        "econoline", "promaster", "sprinter", "express",
                                        "transit connect", "e-250", "e-350", "g2500",
                                        "g3500", "4500", "5500"]):
-        return 9000.0
+        return {"mmr": 9000.0, "basis": "special:commercial_vehicle", "confidence_proxy": 50.0}
 
     # 4. Make-level fallback
     if make_lower in _MAKE_SEGMENT_MMR:
-        return float(_MAKE_SEGMENT_MMR[make_lower])
+        return {
+            "mmr": float(_MAKE_SEGMENT_MMR[make_lower]),
+            "basis": f"make:{make_lower}",
+            "confidence_proxy": 72.0,
+        }
 
     # 5. Segment fallback (legacy)
     segment = _MAKE_SEGMENT.get(make_lower, "sedan_other")
-    return float(_SEGMENT_MMR.get(segment, 16000))
+    return {
+        "mmr": float(_SEGMENT_MMR.get(segment, 16000)),
+        "basis": f"segment:{segment}",
+        "confidence_proxy": 45.0,
+    }
 
 
 def passes_basic_gates(vehicle: dict) -> dict:
@@ -871,13 +910,6 @@ def passes_basic_gates(vehicle: dict) -> dict:
         except (ValueError, TypeError):
             pass  # No mileage data is OK at this stage
 
-    # 88% MMR ceiling — capital protection
-    make = vehicle.get("make", "")
-    model = vehicle.get("model", "")
-    mmr = _estimate_mmr(make, model)
-    if mmr > 0 and bid > mmr * 0.88:
-        return {"pass": False, "reason": f"bid_exceeds_88pct_mmr (${bid:,.0f} > ${mmr * 0.88:,.0f})"}
-
     if not vehicle.get("listing_url"):
         return {"pass": False, "reason": "no_listing_url"}
 
@@ -915,7 +947,8 @@ def score_vehicle(vehicle: dict) -> dict:
             term in police_fleet_text
             for term in ("police", "interceptor", "ppv", "pursuit", "fleet")
         )
-        mmr = _estimate_mmr(make, model)
+        mmr_details = _estimate_mmr_details(make, model)
+        mmr = mmr_details["mmr"]
 
         result = score_deal(
             bid=bid,
@@ -927,6 +960,9 @@ def score_vehicle(vehicle: dict) -> dict:
             year=year,
             mileage=mileage,
             is_police_or_fleet=is_police_or_fleet,
+            auction_end=vehicle.get("auction_end_time"),
+            mmr_lookup_basis=mmr_details.get("basis"),
+            mmr_confidence_proxy=mmr_details.get("confidence_proxy"),
         )
         result["mmr_estimated"] = mmr
         return result
@@ -948,7 +984,21 @@ def _fallback_score(vehicle: dict) -> dict:
     age = datetime.now().year - year
     if 1 <= age <= 4:
         score += 10
-    return {"dos_score": min(100, round(score, 1)), "score": min(100, round(score, 1)), "mmr_estimated": 0}
+    return {
+        "dos_score": min(100, round(score, 1)),
+        "score": min(100, round(score, 1)),
+        "legacy_dos_score": min(100, round(score, 1)),
+        "score_version": "fallback_v1",
+        "mmr_estimated": 0,
+        "margin": 0,
+        "gross_margin": 0,
+        "wholesale_margin": 0,
+        "bid_ceiling_pct": None,
+        "max_bid": 0,
+        "bid_headroom": 0,
+        "ceiling_reason": "fallback_score",
+        "ceiling_pass": True,
+    }
 
 
 async def sync_to_notion(vehicle: dict) -> bool:
@@ -1087,6 +1137,11 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         import httpx
 
         callback_id = opp_id or "unknown"
+        score_breakdown = deal.get("score_breakdown", {})
+        investment_grade = score_breakdown.get("investment_grade") or "Watch"
+        roi_per_day = float(score_breakdown.get("roi_per_day") or 0)
+        headroom = float(score_breakdown.get("bid_headroom") or 0)
+        is_platinum = _is_platinum_alert_candidate(deal)
         reply_markup = {
             "inline_keyboard": [[
                 {"text": "🔥 BUY", "callback_data": f"buy_{callback_id}"},
@@ -1095,15 +1150,26 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             ]]
         }
 
-        msg = (
-            f"🔥 *HOT DEAL ALERT*\n"
-            f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
-            f"DOS Score: *{deal['dos_score']}*\n"
-            f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
-            f"State: {deal.get('state', '?')}\n"
-            f"Margin: ${deal.get('score_breakdown', {}).get('margin', 0):,.0f}\n"
-            f"[View Listing]({deal.get('listing_url', '')})"
-        )
+        if is_platinum:
+            msg = (
+                f"💎 *PLATINUM ALERT*\n"
+                f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
+                f"Grade: *{investment_grade}* | Score: *{deal['dos_score']}*\n"
+                f"ROI/Day: ${roi_per_day:,.0f} | Headroom: ${headroom:,.0f}\n"
+                f"Bid: ${deal.get('current_bid', 0):,.0f} | Max Bid: ${score_breakdown.get('max_bid', 0):,.0f}\n"
+                f"State: {deal.get('state', '?')}\n"
+                f"[View Listing]({deal.get('listing_url', '')})"
+            )
+        else:
+            msg = (
+                f"🔥 *HOT DEAL ALERT*\n"
+                f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
+                f"Grade: *{investment_grade}* | Score: *{deal['dos_score']}*\n"
+                f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
+                f"State: {deal.get('state', '?')}\n"
+                f"Gross: ${score_breakdown.get('gross_margin', 0):,.0f}\n"
+                f"[View Listing]({deal.get('listing_url', '')})"
+            )
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -1135,9 +1201,10 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
     slack_channel = os.getenv("SLACK_CHANNEL_ID", "C0ALM52FV25")
     if slack_token:
         try:
+            prefix = "💎 *PLATINUM*" if is_platinum else "🔥 *HOT DEAL*"
             slack_text = (
-                f"🔥 *HOT DEAL* | {deal.get('year')} {deal.get('make')} {deal.get('model')} "
-                f"| DOS {deal['dos_score']} | ${deal.get('current_bid', 0):,.0f} "
+                f"{prefix} | {deal.get('year')} {deal.get('make')} {deal.get('model')} "
+                f"| {investment_grade} | Score {deal['dos_score']} | ${deal.get('current_bid', 0):,.0f} "
                 f"| {deal.get('state', '?')} | <{deal.get('listing_url', '')}|View>"
             )
             async with httpx.AsyncClient(timeout=5.0) as sc:
@@ -1274,11 +1341,24 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "auction_fees": auction_fees,
         "recon_reserve": score_result.get("recon_reserve"),
         "total_cost": score_result.get("total_cost"),
-        "gross_margin": score_result.get("margin"),
+        "gross_margin": score_result.get("gross_margin", score_result.get("margin")),
+        "retail_asking_price_estimate": score_result.get("retail_asking_price_estimate"),
+        "retail_proxy_multiplier": score_result.get("retail_proxy_multiplier"),
         "dos_score": vehicle.get("dos_score"),
         "ctm_pct": score_result.get("ctm_pct"),
+        "wholesale_ctm_pct": score_result.get("wholesale_ctm_pct"),
+        "retail_ctm_pct": score_result.get("retail_ctm_pct"),
         "segment_tier": score_result.get("segment_tier"),
+        "estimated_days_to_sale": score_result.get("estimated_days_to_sale"),
+        "roi_per_day": score_result.get("roi_per_day"),
+        "mmr_lookup_basis": score_result.get("mmr_lookup_basis"),
+        "mmr_confidence_proxy": score_result.get("mmr_confidence_proxy"),
         "investment_grade": score_result.get("investment_grade"),
+        "bid_ceiling_pct": score_result.get("bid_ceiling_pct"),
+        "max_bid": score_result.get("max_bid"),
+        "bid_headroom": score_result.get("bid_headroom"),
+        "ceiling_reason": score_result.get("ceiling_reason"),
+        "score_version": score_result.get("score_version"),
         "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),

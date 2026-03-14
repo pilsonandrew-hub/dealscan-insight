@@ -15,6 +15,7 @@ import {
   TrendingUp, Car, MapPin, Clock, Star, Filter, ChevronDown,
   ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,6 +25,38 @@ interface ScraperSource {
   name: string;
   last_run: string | null;
   count: number;
+}
+
+type DashboardOpportunity = Opportunity & { created_at?: string };
+
+interface RoverRecommendation {
+  id?: string;
+  opportunity_id?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  mileage?: number;
+  current_bid?: number;
+  estimated_sale_price?: number;
+  score?: number;
+  dos_score?: number;
+  gross_margin?: number;
+  potential_profit?: number;
+  profit_margin?: number;
+  state?: string;
+  source_site?: string;
+  auction_end?: string;
+  vin?: string;
+  total_cost?: number;
+  risk_score?: number;
+  transportation_cost?: number;
+  fees_cost?: number;
+  profit?: number;
+  roi?: number;
+  roi_percentage?: number;
+  confidence_score?: number;
+  match_pct?: number;
+  vehicle?: Partial<Opportunity['vehicle']>;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,9 +76,27 @@ function dosLabel(score: number | null | undefined): string {
   return 'COLD';
 }
 
+function gradeColor(grade: Opportunity['investment_grade']): string {
+  if (grade === 'Platinum') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30';
+  if (grade === 'Gold') return 'bg-amber-500/15 text-amber-300 border border-amber-500/30';
+  if (grade === 'Silver') return 'bg-slate-400/15 text-slate-200 border border-slate-400/30';
+  if (grade === 'Bronze') return 'bg-orange-500/15 text-orange-300 border border-orange-500/30';
+  return 'bg-gray-700 text-gray-200 border border-gray-600';
+}
+
 function fmt$(n: number | null | undefined): string {
   if (n == null) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+}
+
+function fmtPct(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return `${n.toFixed(1)}%`;
+}
+
+function fmtNum(n: number | null | undefined, digits = 0): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return n.toFixed(digits);
 }
 
 function fmtDate(s: string | null | undefined): string {
@@ -86,9 +137,14 @@ const DealCard = ({
           <p className="text-xs text-gray-400 mt-0.5">{deal.mileage.toLocaleString()} mi</p>
         )}
       </div>
-      <span className={`text-xs font-bold px-2 py-1 rounded-md ${dosColor(deal.score)}`}>
-        {deal.score ?? '—'} {dosLabel(deal.score)}
-      </span>
+      <div className="flex flex-col items-end gap-1">
+        <span className={`text-[11px] font-semibold px-2 py-1 rounded-md ${gradeColor(deal.investment_grade)}`}>
+          {deal.investment_grade || 'Watch'}
+        </span>
+        <span className={`text-xs font-bold px-2 py-1 rounded-md ${dosColor(deal.score)}`}>
+          {deal.score ?? '—'} {dosLabel(deal.score)}
+        </span>
+      </div>
     </div>
 
     <div className="grid grid-cols-2 gap-2 mb-3">
@@ -97,18 +153,36 @@ const DealCard = ({
         <p className="text-sm font-medium text-white">{fmt$(deal.current_bid)}</p>
       </div>
       <div>
-        <p className="text-xs text-gray-500">Margin</p>
+        <p className="text-xs text-gray-500">Gross</p>
         <p className={`text-sm font-medium ${(deal.profit_margin || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
           {deal.profit_margin != null ? fmt$(deal.profit_margin) : '—'}
         </p>
       </div>
       <div>
-        <p className="text-xs text-gray-500">State</p>
-        <p className="text-sm text-gray-300">{deal.state || '—'}</p>
+        <p className="text-xs text-gray-500">Retail CtM</p>
+        <p className="text-sm text-gray-300">{fmtPct(deal.retail_ctm_pct)}</p>
       </div>
       <div>
-        <p className="text-xs text-gray-500">Source</p>
-        <p className="text-sm text-gray-300 truncate">{deal.source_site}</p>
+        <p className="text-xs text-gray-500">ROI / Day</p>
+        <p className="text-sm text-gray-300">{fmt$(deal.roi_per_day)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">Days to Sale</p>
+        <p className="text-sm text-gray-300">{deal.estimated_days_to_sale ?? '—'}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">Headroom</p>
+        <p className={`text-sm font-medium ${(deal.bid_headroom || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          {fmt$(deal.bid_headroom)}
+        </p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">Max Bid</p>
+        <p className="text-sm text-gray-300">{fmt$(deal.max_bid)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">State / Source</p>
+        <p className="text-sm text-gray-300 truncate">{[deal.state, deal.source_site].filter(Boolean).join(' • ') || '—'}</p>
       </div>
     </div>
 
@@ -171,7 +245,14 @@ const StatCard = ({ label, value, sub, accent }: { label: string; value: string;
 
 // ─── TAB 1: Dashboard ─────────────────────────────────────────────────────────
 const DashboardTab = () => {
-  const [metrics, setMetrics] = useState({ total_today: 0, hot_deals: 0, avg_margin: 0, top_score: 0 });
+  const [metrics, setMetrics] = useState({
+    total_today: 0,
+    hot_deals: 0,
+    platinum_deals: 0,
+    avg_margin: 0,
+    avg_roi_day: 0,
+    top_score: 0
+  });
   const [hotDeals, setHotDeals] = useState<Opportunity[]>([]);
   const [sources, setSources] = useState<ScraperSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -227,21 +308,21 @@ const DashboardTab = () => {
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Deals Today" value={metrics.total_today.toString()} />
-        <StatCard label="Hot Deals" value={metrics.hot_deals.toString()} sub="DOS ≥ 80" accent />
-        <StatCard label="Avg Margin" value={fmt$(metrics.avg_margin)} />
-        <StatCard label="Top DOS Score" value={metrics.top_score.toString()} accent />
+        <StatCard label="Platinum Deals" value={metrics.platinum_deals.toString()} sub="Grade-first watchlist" accent />
+        <StatCard label="Avg ROI / Day" value={fmt$(metrics.avg_roi_day)} />
+        <StatCard label="Top Score" value={fmtNum(metrics.top_score, 1)} sub={`${metrics.hot_deals} score ≥ 80`} accent />
       </div>
 
       {/* Hot Deals */}
       <div>
         <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">
-          Hot Deals — DOS ≥ 80
+          Top Opportunities — Platinum first, then highest score
         </h2>
         {loading ? (
           <div className="text-center py-8 text-gray-500">Loading deals...</div>
         ) : hotDeals.length === 0 ? (
           <div className="text-center py-8 text-gray-500 bg-gray-900 rounded-xl border border-gray-800">
-            No hot deals right now. Pipeline may be between runs.
+            No high-priority opportunities right now. Pipeline may be between runs.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -421,7 +502,7 @@ const CrosshairTab = () => {
 
 // ─── TAB 3: Rover ─────────────────────────────────────────────────────────────
 const RoverTab = () => {
-  const [recs, setRecs] = useState<any[]>([]);
+  const [recs, setRecs] = useState<RoverRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
 
@@ -468,7 +549,7 @@ const RoverTab = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {recs.map((rec: any) => {
+          {recs.map((rec) => {
             const id = rec.id || rec.opportunity_id || Math.random().toString();
             const deal: Opportunity = {
               id,
@@ -520,7 +601,7 @@ const RoverTab = () => {
 
 // ─── TAB 4: Analytics ─────────────────────────────────────────────────────────
 const AnalyticsTab = () => {
-  const [allDeals, setAllDeals] = useState<Opportunity[]>([]);
+  const [allDeals, setAllDeals] = useState<DashboardOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -571,7 +652,7 @@ const AnalyticsTab = () => {
     const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     marginByDay[key] = [];
   }
-  allDeals.forEach((d: any) => {
+  allDeals.forEach((d) => {
     if (!d.created_at) return;
     const day = new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     if (marginByDay[day]) marginByDay[day].push(d.profit_margin || 0);
@@ -804,7 +885,7 @@ const SettingsTab = () => {
 };
 
 // ─── Main Dashboard Shell ─────────────────────────────────────────────────────
-const TABS: { id: Tab; label: string; Icon: React.FC<any> }[] = [
+const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
   { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
   { id: 'crosshair', label: 'Crosshair', Icon: Crosshair },
   { id: 'sniper', label: 'SniperScope', Icon: Target },

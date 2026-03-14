@@ -120,11 +120,28 @@ export interface Opportunity {
   profit_margin: number;
   source_site: string;
   current_bid: number;
+  buyer_premium?: number;
+  recon_reserve?: number;
   vin?: string;
   make: string;
   model: string;
   year: number;
   mileage?: number;
+  investment_grade?: "Platinum" | "Gold" | "Silver" | "Bronze";
+  retail_asking_price_estimate?: number;
+  retail_proxy_multiplier?: number;
+  wholesale_ctm_pct?: number;
+  retail_ctm_pct?: number;
+  estimated_days_to_sale?: number;
+  roi_per_day?: number;
+  mmr_lookup_basis?: string;
+  mmr_confidence_proxy?: number;
+  bid_ceiling_pct?: number;
+  max_bid?: number;
+  bid_headroom?: number;
+  ceiling_reason?: string;
+  score_version?: string;
+  legacy_dos_score?: number;
   // Enhanced ML predictions
   predicted_prices?: {
     p10: number;
