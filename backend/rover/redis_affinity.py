@@ -67,17 +67,33 @@ def _price_bracket(price: float) -> str:
         return "premium"
 
 
+def _get_first(item_data: dict, *keys: str):
+    for key in keys:
+        value = item_data.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def _extract_dimensions(item_data: dict) -> list[str]:
     """Extract affinity dimension strings from item_data."""
     dims = []
 
-    make = (item_data.get("make") or "").lower().strip()
-    model = (item_data.get("model") or "").lower().strip()
-    segment = str(item_data.get("segment_tier") or "").strip().lower()
-    source = (item_data.get("source_site") or item_data.get("source") or "").lower().strip()
+    make = str(_get_first(item_data, "make") or "").lower().strip()
+    model = str(_get_first(item_data, "model") or "").lower().strip()
+    segment = str(_get_first(item_data, "segment_tier", "segmentTier", "segment") or "").strip().lower()
+    source = str(_get_first(item_data, "source_site", "sourceSite", "source") or "").lower().strip()
 
-    price_raw = item_data.get("current_bid") or item_data.get("buy_now_price") or \
-                item_data.get("price") or item_data.get("estimated_sale_price") or 0
+    price_raw = _get_first(
+        item_data,
+        "current_bid",
+        "currentBid",
+        "buy_now_price",
+        "buyNowPrice",
+        "price",
+        "estimated_sale_price",
+        "estimatedSalePrice",
+    ) or 0
     try:
         price = float(price_raw)
     except (TypeError, ValueError):

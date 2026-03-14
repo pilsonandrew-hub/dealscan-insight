@@ -1,11 +1,14 @@
 """
 Database configuration and session management
 """
+import importlib
+import logging
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
-import logging
+
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -40,7 +43,15 @@ async def init_db():
     """Initialize database and create tables"""
     try:
         # Import all models to ensure they're registered
-        from webapp.models import user, vehicle, opportunity, audit_log
+        from webapp.models import user, vehicle, audit_log
+
+        try:
+            importlib.import_module("webapp.models.opportunity")
+        except ImportError:
+            logger.warning(
+                "Optional model module webapp.models.opportunity is unavailable; "
+                "continuing with registered models."
+            )
         
         # Create tables
         Base.metadata.create_all(bind=engine)

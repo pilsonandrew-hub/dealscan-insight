@@ -54,16 +54,22 @@ function getRowMMR(row: any): number {
   return row.mmr ?? row.estimated_sale_price ?? 0;
 }
 
-function getRowMargin(row: any): number {
-  return row.gross_margin ?? row.profit_margin ?? 0;
+function normalizeROI(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return value > 1 ? value / 100 : value;
+}
+
+function getRowGrossMargin(row: any): number {
+  return row.gross_margin ?? row.potential_profit ?? row.profit ?? row.profit_margin ?? 0;
 }
 
 function getRowROI(row: any): number {
-  return row.roi ?? row.roi_percentage ?? 0;
+  const roi = row.roi ?? row.roi_percentage ?? 0;
+  return normalizeROI(Number(roi) || 0);
 }
 
 function getRowProfit(row: any): number {
-  return row.potential_profit ?? row.profit ?? 0;
+  return row.potential_profit ?? row.gross_margin ?? row.profit ?? 0;
 }
 
 function getRowScore(row: any): number | null {
@@ -122,7 +128,7 @@ function transformOpportunity(row: any): Opportunity & { created_at: string; id:
     transportation_cost: transport,
     fees_cost: auctionFees,
     estimated_sale_price: getRowMMR(row),
-    profit_margin: getRowMargin(row),
+    profit_margin: getRowGrossMargin(row),
     vin: row.vin,
     make: row.make,
     model: row.model,
@@ -303,7 +309,7 @@ export const api = {
     try {
       const { data, error } = await supabase
         .from('opportunities')
-        .select('source, processed_at')
+        .select('source, processed_at, created_at')
         .order('processed_at', { ascending: false })
         .limit(500);
 
@@ -313,7 +319,7 @@ export const api = {
       for (const row of data || []) {
         const src = row.source;
         if (!sourceMap.has(src)) {
-          sourceMap.set(src, { last_run: row.created_at, count: 1 });
+          sourceMap.set(src, { last_run: row.processed_at || row.created_at, count: 1 });
         } else {
           sourceMap.get(src)!.count++;
         }
@@ -361,10 +367,18 @@ export const api = {
   },
 
   // Track rover event (view/save/pass)
-  async trackRoverEvent(dealId: string, event: 'view' | 'save' | 'pass'): Promise<void> {
+  async trackRoverEvent(
+    opportunity: Pick<Opportunity, 'id' | 'make' | 'model' | 'year' | 'source_site' | 'current_bid' | 'state' | 'mileage'>,
+    event: 'view' | 'save' | 'pass'
+  ): Promise<void> {
+    if (event === 'pass') {
+      return;
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+      const userId = session?.user?.id;
 
       await fetch(`${API_BASE}/api/rover/events`, {
         method: 'POST',
@@ -374,7 +388,21 @@ export const api = {
         },
         body: JSON.stringify({
           event,
-          item: { deal_id: dealId }
+          userId,
+          user_id: userId,
+          item: {
+            deal_id: opportunity.id,
+            id: opportunity.id,
+            make: opportunity.make,
+            model: opportunity.model,
+            year: opportunity.year,
+            source: opportunity.source_site,
+            source_site: opportunity.source_site,
+            price: opportunity.current_bid,
+            current_bid: opportunity.current_bid,
+            state: opportunity.state,
+            mileage: opportunity.mileage ?? null,
+          }
         })
       });
     } catch (error) {

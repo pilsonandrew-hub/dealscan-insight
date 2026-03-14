@@ -47,11 +47,19 @@ _supabase_url = (
     or os.getenv("VITE_SUPABASE_URL")
     or "https://lbnxzvqppccajllsqaaw.supabase.co"
 )
-_supabase_key = (
-    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    or os.getenv("VITE_SUPABASE_ANON_KEY")
-    or "SUPABASE_SERVICE_ROLE_KEY_REDACTED"
-)
+_supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+_supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
+
+if _supabase_service_role_key:
+    _supabase_key = _supabase_service_role_key
+elif _supabase_anon_key:
+    _supabase_key = _supabase_anon_key
+    logger.critical(
+        "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations; "
+        "falling back to anon key."
+    )
+else:
+    _supabase_key = None
 
 supabase_client = None
 try:
@@ -1199,6 +1207,27 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
 
 def build_opportunity_row(vehicle: dict) -> dict:
     score_result = vehicle.get("score_breakdown", {})
+    current_bid = float(vehicle.get("current_bid") or 0)
+    buyer_premium = score_result.get("buyer_premium_amount")
+    if buyer_premium is None:
+        buyer_premium = score_result.get("premium")
+    if buyer_premium is None:
+        buyer_premium = current_bid * 0.125
+    buyer_premium_pct = score_result.get("buyer_premium_pct")
+    if buyer_premium_pct is None:
+        premium_basis = score_result.get("buyer_premium_amount")
+        if premium_basis is None:
+            premium_basis = score_result.get("premium")
+        if premium_basis is not None and current_bid > 0:
+            buyer_premium_pct = float(premium_basis) / current_bid
+        else:
+            buyer_premium_pct = 0.125
+    else:
+        buyer_premium_pct = float(buyer_premium_pct)
+        if buyer_premium_pct > 1:
+            buyer_premium_pct /= 100.0
+    doc_fee = float(score_result.get("doc_fee", 75) or 75)
+    auction_fees = doc_fee + (current_bid * buyer_premium_pct)
     condition_grade = _compute_condition_grade(
         title=vehicle.get("title") or "",
         description=vehicle.get("description") or "",
@@ -1221,7 +1250,8 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "current_bid": vehicle.get("current_bid"),
         "mmr": score_result.get("mmr_estimated"),
         "estimated_transport": score_result.get("transport"),
-        "auction_fees": score_result.get("premium"),
+        "buyer_premium": round(float(buyer_premium), 2),
+        "auction_fees": round(auction_fees, 2),
         "gross_margin": score_result.get("margin"),
         "dos_score": vehicle.get("dos_score"),
         "ctm_pct": score_result.get("ctm_pct"),

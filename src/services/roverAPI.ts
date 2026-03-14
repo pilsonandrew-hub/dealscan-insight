@@ -10,13 +10,16 @@ export interface RoverEvent {
 
 export interface DealItem {
   id: string;
+  deal_id?: string;
   make: string;
   model: string;
   year: number;
   price: number;
+  current_bid?: number;
   mileage?: number;
   bodyType?: string;
   source?: string;
+  source_site?: string;
   sellerId?: string;
   mmr?: number;
   city?: string;
@@ -55,7 +58,27 @@ class RoverAPIService {
 
   private decayHalfLife = 72 * 60 * 60 * 1000; // 72 hours in ms
 
+  private buildEventItem(item: DealItem) {
+    return {
+      deal_id: item.deal_id || item.id,
+      id: item.id,
+      make: item.make,
+      model: item.model,
+      year: item.year,
+      source: item.source_site || item.source || "",
+      source_site: item.source_site || item.source || "",
+      price: item.current_bid ?? item.price ?? 0,
+      current_bid: item.current_bid ?? item.price ?? 0,
+      state: item.state || "",
+      mileage: item.mileage ?? null,
+    };
+  }
+
   async trackEvent(event: RoverEvent): Promise<void> {
+    if (event.event === "pass") {
+      return;
+    }
+
     try {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
       const { data: { session } } = await supabase.auth.getSession();
@@ -66,7 +89,12 @@ class RoverAPIService {
           "Content-Type": "application/json",
           Authorization: token ? `Bearer ${token}` : "",
         },
-        body: JSON.stringify(event),
+        body: JSON.stringify({
+          event: event.event,
+          userId: event.userId,
+          user_id: event.userId,
+          item: this.buildEventItem(event.item),
+        }),
       });
     } catch (error) {
       // Fire and forget - don't block UX on tracking failures
