@@ -350,7 +350,10 @@ export const api = {
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      return json.recommendations || json.data || json || [];
+      if (Array.isArray(json?.items)) return json.items;
+      if (Array.isArray(json?.recommendations)) return json.recommendations;
+      if (Array.isArray(json?.data)) return json.data;
+      return Array.isArray(json) ? json : [];
     } catch (error) {
       console.error('getRoverRecommendations failed:', error);
       return [];

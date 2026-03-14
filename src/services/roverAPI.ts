@@ -58,9 +58,14 @@ class RoverAPIService {
   async trackEvent(event: RoverEvent): Promise<void> {
     try {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       await fetch(`${apiUrl}/api/rover/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
         body: JSON.stringify(event),
       });
     } catch (error) {
@@ -71,11 +76,17 @@ class RoverAPIService {
 
   async getRecommendations(limit: number = 25): Promise<RoverRecommendations> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      const token = session?.access_token;
       if (!user) return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
 
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${user.id}&limit=${limit}`);
+      const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${user.id}&limit=${limit}`, {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+      });
 
       if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
 

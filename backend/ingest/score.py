@@ -13,6 +13,10 @@ from .transport import calc_transport_cost
 
 _CONFIGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
+
+def _normalize_vehicle_text(value: str) -> str:
+    return " ".join((value or "").strip().lower().replace("-", " ").split())
+
 SEGMENT_SCORES = {
     "truck": 95,
     "suv_large": 90,
@@ -127,6 +131,51 @@ def _source_score(source_site: str) -> float:
     }.get(source_site, 60.0)
 
 
+_SEGMENT_TIER_1_MODELS = {
+    "f 150", "silverado", "ram", "rav4", "rogue", "cr v", "tacoma",
+    "camry", "accord", "model 3", "model y", "tucson", "equinox", "escape",
+}
+
+_SEGMENT_TIER_2_MODELS = {
+    "tahoe", "suburban", "expedition", "tundra", "ranger", "explorer",
+    "highlander", "pilot", "durango", "traverse",
+}
+
+_LUXURY_MAKES = {"bmw", "mercedes", "mercedes benz", "lexus", "cadillac", "lincoln", "audi"}
+
+
+def _segment_tier(model: str, make: str) -> int:
+    normalized_model = _normalize_vehicle_text(model)
+    normalized_make = _normalize_vehicle_text(make)
+
+    if any(token in normalized_model for token in _SEGMENT_TIER_1_MODELS):
+        return 1
+    if any(token in normalized_model for token in _SEGMENT_TIER_2_MODELS):
+        return 2
+
+    if normalized_make in _LUXURY_MAKES:
+        return 3
+
+    segment = _MODEL_SEGMENT_MAP.get(model)
+    if segment in {"sedan_popular", "sedan_other", "luxury"}:
+        return 3
+
+    if "sedan" in normalized_model:
+        return 3
+
+    return 4
+
+
+def _investment_grade(ctm_pct: float, segment_tier: int) -> str:
+    if ctm_pct <= 85 and segment_tier <= 2:
+        return "Platinum"
+    if ctm_pct <= 90 and segment_tier <= 3:
+        return "Gold"
+    if ctm_pct <= 95:
+        return "Silver"
+    return "Bronze"
+
+
 def _recon_reserve(mileage: float = None, is_police_or_fleet: bool = False) -> float:
     miles = max(float(mileage or 0), 0.0)
     mileage_component = 3.0 * (miles / 1000.0)
@@ -173,6 +222,10 @@ def score_deal(
     seg_score = _segment_score(model, make)
     mod_score = _model_score(model)
     src_score = _source_score(source_site)
+    retail_target = mmr_ca * 1.35 if mmr_ca else 0.0
+    ctm_pct = (total_cost / retail_target * 100.0) if retail_target > 0 else 100.0
+    segment_tier = _segment_tier(model, make)
+    investment_grade = _investment_grade(ctm_pct, segment_tier)
 
     dos_score = (
         m_score * 0.35
@@ -194,6 +247,9 @@ def score_deal(
         "segment_score": round(seg_score, 2),
         "model_score": round(mod_score, 2),
         "source_score": round(src_score, 2),
+        "ctm_pct": round(ctm_pct, 2),
+        "segment_tier": segment_tier,
+        "investment_grade": investment_grade,
         "dos_score": round(dos_score, 2),
         "score": round(dos_score, 2),  # alias for compatibility
     }
