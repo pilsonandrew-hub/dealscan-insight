@@ -132,13 +132,14 @@ def _source_score(source_site: str) -> float:
 
 
 _SEGMENT_TIER_1_MODELS = {
-    "f 150", "silverado", "ram", "rav4", "rogue", "cr v", "tacoma",
-    "camry", "accord", "model 3", "model y", "tucson", "equinox", "escape",
+    "f150", "silverado", "ram1500", "rav4", "rogue", "crv", "tacoma",
+    "camry", "accord", "model3", "modely", "tucson", "equinox", "escape",
 }
 
 _SEGMENT_TIER_2_MODELS = {
     "tahoe", "suburban", "expedition", "tundra", "ranger", "explorer",
-    "highlander", "pilot", "durango", "traverse",
+    "highlander", "pilot", "durango", "traverse", "odyssey", "sienna",
+    "carnival", "pacifica",
 }
 
 _LUXURY_MAKES = {"bmw", "mercedes", "mercedes benz", "lexus", "cadillac", "lincoln", "audi"}
@@ -146,11 +147,12 @@ _LUXURY_MAKES = {"bmw", "mercedes", "mercedes benz", "lexus", "cadillac", "linco
 
 def _segment_tier(model: str, make: str) -> int:
     normalized_model = _normalize_vehicle_text(model)
+    normalized_model_compact = normalized_model.replace(" ", "").replace("-", "")
     normalized_make = _normalize_vehicle_text(make)
 
-    if any(token in normalized_model for token in _SEGMENT_TIER_1_MODELS):
+    if any(token in normalized_model_compact for token in _SEGMENT_TIER_1_MODELS):
         return 1
-    if any(token in normalized_model for token in _SEGMENT_TIER_2_MODELS):
+    if any(token in normalized_model_compact for token in _SEGMENT_TIER_2_MODELS):
         return 2
 
     if normalized_make in _LUXURY_MAKES:
@@ -167,11 +169,11 @@ def _segment_tier(model: str, make: str) -> int:
 
 
 def _investment_grade(ctm_pct: float, segment_tier: int) -> str:
-    if ctm_pct <= 85 and segment_tier <= 2:
+    if ctm_pct <= 72 and segment_tier <= 2:
         return "Platinum"
-    if ctm_pct <= 90 and segment_tier <= 3:
+    if ctm_pct <= 80 and segment_tier <= 3:
         return "Gold"
-    if ctm_pct <= 95:
+    if ctm_pct <= 88:
         return "Silver"
     return "Bronze"
 
@@ -222,8 +224,7 @@ def score_deal(
     seg_score = _segment_score(model, make)
     mod_score = _model_score(model)
     src_score = _source_score(source_site)
-    retail_target = mmr_ca * 1.35 if mmr_ca else 0.0
-    ctm_pct = (total_cost / retail_target * 100.0) if retail_target > 0 else 100.0
+    ctm_pct = (total_cost / mmr_ca * 100.0) if mmr_ca > 0 else 100.0
     segment_tier = _segment_tier(model, make)
     investment_grade = _investment_grade(ctm_pct, segment_tier)
 

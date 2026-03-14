@@ -57,6 +57,26 @@ function parseMoney(value) {
     return match ? parseFloat(match[1].replace(/,/g, '')) : 0;
 }
 
+function parseTitleStatus(text = '') {
+    const normalized = normalizeText(text).toLowerCase();
+    const damageKeywords = [
+        ['frame damage', 'frame damage'],
+        ['salvage', 'salvage'],
+        ['rebuilt', 'rebuilt'],
+        ['flood', 'flood'],
+        ['lemon', 'lemon'],
+    ];
+
+    for (const [keyword, label] of damageKeywords) {
+        if (normalized.includes(keyword)) return label;
+    }
+
+    if (normalized.includes('clean title')) return 'clean';
+    if (normalized.includes('title')) return 'clean';
+
+    return 'unknown';
+}
+
 // Canonical make list for normalization (lower-case keys → display name)
 const MAKE_CANONICAL = {
     'ford': 'Ford', 'chevrolet': 'Chevrolet', 'chevy': 'Chevrolet',
@@ -144,6 +164,7 @@ function parseState(location) {
 
 async function pushListing(listing, sourceUrl, log) {
     const title = normalizeText(listing.title);
+    const description = normalizeText(listing.description);
     const currentBid = parseMoney(listing.currentBid);
     const location = normalizeText(listing.location);
     const state = parseState(location) || null;
@@ -192,7 +213,8 @@ async function pushListing(listing, sourceUrl, log) {
         listing_url: listingUrl,
         item_number: normalizeText(listing.itemNumber),
         photo_url: normalizeText(listing.photoUrl) || null,
-        description: null,
+        description: description || null,
+        title_status: parseTitleStatus([title, description].filter(Boolean).join(' ')),
         agency_name: normalizeText(listing.agencyName),
         source_site: 'publicsurplus',
         scraped_at: new Date().toISOString(),

@@ -210,10 +210,11 @@ export class ProvenanceTracker {
           };
         }
       } catch (error) {
-        productionLogger.warn('LLM extraction failed', {
+        productionLogger.warn('OpenAI/Gemini not available — no billing', {
           field: fieldName,
           url: context.url,
-          error: error as Error
+          error: error as Error,
+          fallback: 'inferred_null'
         });
       }
     }
