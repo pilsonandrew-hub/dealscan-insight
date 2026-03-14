@@ -68,22 +68,85 @@ HIGH_RUST_STATES = {
     "ME","NH","VT","MA","RI","CT","NJ","MD","DE"
 }
 
-# MMR estimates by segment — placeholder until Manheim API is live
-# Based on 2024-2026 wholesale market averages
-_SEGMENT_MMR = {
-    "truck":        28000,
-    "suv_large":    26000,
-    "suv_mid":      22000,
-    "luxury":       24000,
-    "ev_trending":  25000,
-    "sedan_popular":18000,
-    "ev_other":     16000,
-    "sedan_other":  15000,
-    "coupe":        14000,
-    "minivan":      13000,
+# Whitelist of valid US state codes — reject anything else (Canadian provinces, garbage)
+US_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+    "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+    "VA","WA","WV","WI","WY","DC"
 }
 
-# Make → rough segment for MMR lookup
+# Passenger vehicle target states (no rust belt)
+TARGET_STATES = {
+    "AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"
+}
+
+# Commercial/fleet vehicle patterns to reject — not passenger cars
+_COMMERCIAL_PATTERNS = [
+    r"\bEconoline\b", r"\bExpress\s*Cargo\b", r"\bProMaster\s*Cargo\b",
+    r"\bSprinter\s*Cargo\b", r"\bTransit\s*Cargo\b", r"\bSavana\s*Cargo\b",
+    r"\b4500\b", r"\b5500\b", r"\bCutaway\b", r"\bChasis\s*Cab\b",
+    r"\bDump\s*Truck\b", r"\bBox\s*Truck\b", r"\bBucket\s*Truck\b",
+    r"\bStake\s*Bed\b", r"\bRefrigerator\s*Truck\b",
+]
+
+# MMR estimates by model — much more accurate than segment-only
+# Based on 2025-2026 wholesale (Manheim/Black Book averages)
+_MODEL_MMR = {
+    # Trucks — high demand
+    "f-150": 32000, "f-250": 38000, "f-350": 42000,
+    "silverado 1500": 30000, "silverado 2500": 38000,
+    "ram 1500": 29000, "ram 2500": 36000,
+    "tacoma": 31000, "tundra": 38000,
+    "colorado": 24000, "canyon": 24000,
+    "ranger": 26000, "frontier": 22000, "ridgeline": 28000,
+    "maverick": 24000,
+    # SUVs large
+    "explorer": 24000, "expedition": 42000,
+    "tahoe": 45000, "suburban": 50000, "yukon": 45000,
+    "highlander": 36000, "pilot": 34000, "sequoia": 46000,
+    "pathfinder": 28000, "armada": 36000,
+    "durango": 30000,
+    # SUVs mid
+    "rav4": 28000, "cr-v": 26000, "rogue": 24000,
+    "escape": 20000, "equinox": 21000, "terrain": 20000,
+    "tucson": 22000, "sportage": 21000, "forester": 23000,
+    "outback": 24000, "cx-5": 24000, "compass": 19000,
+    "cherokee": 20000, "grand cherokee": 28000, "wrangler": 34000,
+    "bronco": 36000,
+    # Sedans popular
+    "camry": 22000, "accord": 22000, "altima": 18000,
+    "civic": 20000, "corolla": 18000, "sentra": 16000,
+    "elantra": 16000, "sonata": 18000, "optima": 17000,
+    "malibu": 16000, "fusion": 17000, "impala": 14000,
+    # EVs
+    "model y": 38000, "model 3": 32000, "model s": 42000, "model x": 45000,
+    "ioniq 5": 30000, "ioniq 6": 28000,
+    # Vans (passenger, not cargo)
+    "odyssey": 26000, "sienna": 30000, "pacifica": 24000,
+    "town & country": 14000, "caravan": 12000,
+    # Commercial (low MMR — we reject these, but score accurately if they slip through)
+    "econoline": 9000, "express cargo": 9000, "promaster cargo": 10000,
+    "transit cargo": 9000, "sprinter cargo": 14000,
+    "transit connect": 11000,
+    # Interceptors (police) — popular resale
+    "explorer interceptor": 22000, "police interceptor": 22000,
+    "tahoe ppv": 28000,
+}
+
+# Fallback: make → segment MMR when model not found
+_MAKE_SEGMENT_MMR = {
+    "ford": 22000, "chevrolet": 22000, "chevy": 22000, "gmc": 24000,
+    "ram": 22000, "dodge": 16000, "toyota": 24000, "honda": 20000,
+    "nissan": 18000, "hyundai": 17000, "kia": 17000, "subaru": 20000,
+    "jeep": 22000, "bmw": 26000, "mercedes": 28000, "lexus": 28000,
+    "cadillac": 22000, "lincoln": 22000, "audi": 24000,
+    "tesla": 36000, "rivian": 40000, "volkswagen": 18000,
+    "buick": 16000, "mitsubishi": 14000, "mazda": 18000,
+    "acura": 22000, "infiniti": 20000, "volvo": 20000,
+}
+
+# Keep for backward compat
 _MAKE_SEGMENT = {
     "ford": "truck", "gmc": "truck", "ram": "truck", "chevrolet": "truck", "chevy": "truck",
     "toyota": "suv_mid", "honda": "suv_mid", "nissan": "sedan_popular",
@@ -93,6 +156,20 @@ _MAKE_SEGMENT = {
     "cadillac": "luxury", "lincoln": "luxury", "audi": "luxury",
     "tesla": "ev_trending", "rivian": "ev_trending",
     "volkswagen": "sedan_other", "buick": "sedan_other",
+}
+
+# Segment MMR fallback
+_SEGMENT_MMR = {
+    "truck":        28000,
+    "suv_large":    32000,
+    "suv_mid":      22000,
+    "luxury":       26000,
+    "ev_trending":  36000,
+    "sedan_popular":18000,
+    "ev_other":     16000,
+    "sedan_other":  15000,
+    "coupe":        14000,
+    "minivan":      22000,
 }
 
 KNOWN_MAKES = [
@@ -643,21 +720,35 @@ def extract_model(title: str, make: str) -> str:
 
 
 def _estimate_mmr(make: str, model: str) -> float:
-    """Estimate MMR by make/segment — placeholder until Manheim API is live."""
-    make_lower = make.lower()
+    """
+    Estimate MMR by model-level lookup first, then make fallback.
+    Far more accurate than segment-only — a Ford Explorer ≠ a Ford Econoline.
+    """
+    model_lower = (model or "").lower().strip()
+    make_lower = (make or "").lower().strip()
+
+    # 1. Direct model lookup (most accurate)
+    for key, val in _MODEL_MMR.items():
+        if key in model_lower or model_lower in key:
+            return float(val)
+
+    # 2. Police/interceptor check
+    if any(t in model_lower for t in ["interceptor", "ppv", "police", "pursuit"]):
+        return 22000.0
+
+    # 3. Commercial vehicle detection — low MMR
+    if any(t in model_lower for t in ["cargo", "cutaway", "chassis cab", "box truck",
+                                       "econoline", "promaster", "sprinter", "express",
+                                       "transit connect", "e-250", "e-350", "g2500",
+                                       "g3500", "4500", "5500"]):
+        return 9000.0
+
+    # 4. Make-level fallback
+    if make_lower in _MAKE_SEGMENT_MMR:
+        return float(_MAKE_SEGMENT_MMR[make_lower])
+
+    # 5. Segment fallback (legacy)
     segment = _MAKE_SEGMENT.get(make_lower, "sedan_other")
-
-    # Refine by model keywords
-    model_lower = model.lower()
-    if any(t in model_lower for t in ["f-150", "silverado", "ram 1500", "tacoma", "sierra", "tundra", "frontier", "colorado"]):
-        segment = "truck"
-    elif any(t in model_lower for t in ["model y", "model 3"]):
-        segment = "ev_trending"
-    elif any(t in model_lower for t in ["highlander", "pilot", "explorer", "grand cherokee", "telluride", "4runner"]):
-        segment = "suv_large"
-    elif any(t in model_lower for t in ["rav4", "cr-v", "rogue", "escape", "equinox", "tucson", "sorento", "cx-5", "outback", "forester"]):
-        segment = "suv_mid"
-
     return float(_SEGMENT_MMR.get(segment, 16000))
 
 
@@ -684,8 +775,17 @@ def passes_basic_gates(vehicle: dict) -> dict:
     if bid < min_bid or bid > 35000:
         return {"pass": False, "reason": f"bid_out_of_range (${bid:,.0f})"}
 
+    # Reject non-US states (Canadian provinces, garbage codes)
+    if state and state not in US_STATES:
+        return {"pass": False, "reason": f"non_us_state ({state})"}
+
     if state in HIGH_RUST_STATES:
         return {"pass": False, "reason": f"high_rust_state ({state})"}
+
+    # Reject commercial/fleet vehicles (cargo vans, box trucks, cutaways)
+    title = (vehicle.get("title") or "").strip()
+    if any(re.search(p, title, re.IGNORECASE) for p in _COMMERCIAL_PATTERNS):
+        return {"pass": False, "reason": f"commercial_vehicle ({title[:50]})"}
 
     if not year:
         return {"pass": False, "reason": "no_year"}

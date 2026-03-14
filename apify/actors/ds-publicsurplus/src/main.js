@@ -113,8 +113,10 @@ function parseVehicleTitle(rawTitle) {
 
         make = MAKE_CANONICAL[lowerMake];
         const afterMake = title.slice(idx + lowerMake.length).trim();
-        const modelMatch = afterMake.match(/^([A-Za-z0-9/-]+(?:\s+[A-Za-z0-9/-]+)?)/);
-        if (modelMatch) model = modelMatch[1].trim();
+        // Strip trailing color words from model
+        const COLOR_WORDS = /\b(black|white|silver|gray|grey|red|blue|green|yellow|orange|brown|beige|tan|gold|maroon|purple|pink|copper|charcoal|navy|cream|ivory|burgundy|champagne|bronze)\b.*/i;
+        const rawModel = afterMake.match(/^([A-Za-z0-9/-]+(?:\s+[A-Za-z0-9/-]+)?)/);
+        if (rawModel) model = rawModel[1].trim().replace(COLOR_WORDS, '').trim();
         break;
     }
 
