@@ -5,7 +5,10 @@ import json
 import logging
 import os
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised in minimal local environments
+    from backend import yaml_compat as yaml
 
 from .scrapers.registry import get_scrapers
 

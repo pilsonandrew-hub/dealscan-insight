@@ -1,7 +1,11 @@
 """Transport cost calculation based on distance bands."""
 import functools
 import os
-import yaml
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised in minimal local environments
+    from backend import yaml_compat as yaml
 
 
 _CONFIGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
