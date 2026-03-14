@@ -64,6 +64,7 @@ interface OpportunityRow {
   confidence_score?: number;
   risk_score?: number;
   location?: string;
+  city?: string;
   state?: string;
   step_status?: Opportunity['status'];
   status?: Opportunity['status'];
@@ -75,6 +76,7 @@ interface OpportunityRow {
   recon_reserve?: number;
   investment_grade?: Opportunity['investment_grade'];
   pricing_source?: string;
+  pricing_maturity?: Opportunity['pricing_maturity'];
   pricing_updated_at?: string;
   manheim_mmr_mid?: number;
   manheim_mmr_low?: number;
@@ -123,7 +125,14 @@ function getRowTransport(row: OpportunityRow): number {
 }
 
 function getRowMMR(row: OpportunityRow): number {
-  return row.mmr ?? row.estimated_sale_price ?? 0;
+  return (
+    row.retail_comp_price_estimate ??
+    row.retail_asking_price_estimate ??
+    row.manheim_mmr_mid ??
+    row.mmr ??
+    row.estimated_sale_price ??
+    0
+  );
 }
 
 function getRowTotalCost(row: OpportunityRow): number {
@@ -197,7 +206,7 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     roi: getRowROI(row),
     confidence: row.confidence_score,
     risk_score: row.risk_score,
-    location: row.location || '',
+    location: row.location || row.city || '',
     state: row.state || '',
     auction_end: getRowAuctionEnd(row),
     source_site: getRowSource(row),
@@ -217,6 +226,7 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     recon_reserve: row.recon_reserve ?? 0,
     investment_grade: row.investment_grade ?? undefined,
     pricing_source: typeof row.pricing_source === 'string' ? row.pricing_source : undefined,
+    pricing_maturity: typeof row.pricing_maturity === 'string' ? row.pricing_maturity : undefined,
     pricing_updated_at: typeof row.pricing_updated_at === 'string' ? row.pricing_updated_at : undefined,
     manheim_mmr_mid: row.manheim_mmr_mid ?? undefined,
     manheim_mmr_low: row.manheim_mmr_low ?? undefined,

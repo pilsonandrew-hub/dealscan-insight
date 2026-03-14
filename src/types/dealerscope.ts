@@ -129,6 +129,7 @@ export interface Opportunity {
   mileage?: number;
   investment_grade?: "Platinum" | "Gold" | "Silver" | "Bronze";
   pricing_source?: string;
+  pricing_maturity?: "live_market" | "market_comp" | "proxy" | "unknown";
   pricing_updated_at?: string;
   manheim_mmr_mid?: number;
   manheim_mmr_low?: number;

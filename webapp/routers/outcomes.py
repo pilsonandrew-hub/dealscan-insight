@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -49,6 +50,41 @@ def _verify_auth(authorization: Optional[str]) -> str:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+def _mirror_outcome_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> bool:
+    metadata = {
+        "opportunity_id": payload.opportunity_id,
+        "days_to_sale": payload.days_to_sale,
+        "notes": payload.notes or "",
+    }
+
+    insert_payload = {
+        "user_id": user_id,
+        "vin": opportunity.get("vin"),
+        "make": opportunity.get("make") or "Unknown",
+        "model": opportunity.get("model") or "Unknown",
+        "year": opportunity.get("year") or 0,
+        "mileage": opportunity.get("mileage"),
+        "sale_price": payload.sale_price,
+        "sale_date": payload.sale_date,
+        "location": opportunity.get("location") or opportunity.get("city"),
+        "state": opportunity.get("state"),
+        "source_type": "outcome_tracking",
+        "metadata": metadata,
+        "condition_grade": opportunity.get("condition_grade"),
+    }
+
+    try:
+        supa.table("dealer_sales").insert(insert_payload).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[OUTCOMES] dealer_sales mirror skipped for opportunity %s: %s",
+            payload.opportunity_id,
+            exc,
+        )
+        return False
+
+
 @router.post("/outcomes")
 async def create_outcome(
     payload: OutcomePayload,
@@ -72,30 +108,24 @@ async def create_outcome(
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
         opportunity = opportunities[0]
-
-        metadata = {
-            "opportunity_id": payload.opportunity_id,
-            "days_to_sale": payload.days_to_sale,
-            "notes": payload.notes or "",
+        update_payload = {
+            "outcome_sale_price": payload.sale_price,
+            "outcome_sale_date": payload.sale_date,
+            "outcome_days_to_sale": payload.days_to_sale,
+            "outcome_notes": payload.notes,
+            "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
         }
+        update_resp = (
+            supa.table("opportunities")
+            .update(update_payload)
+            .eq("id", payload.opportunity_id)
+            .execute()
+        )
+        if hasattr(update_resp, "data") and not update_resp.data:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
 
-        insert_payload = {
-            "user_id": user_id,
-            "vin": opportunity.get("vin"),
-            "make": opportunity.get("make") or "Unknown",
-            "model": opportunity.get("model") or "Unknown",
-            "year": opportunity.get("year") or 0,
-            "mileage": opportunity.get("mileage"),
-            "sale_price": payload.sale_price,
-            "sale_date": payload.sale_date,
-            "location": opportunity.get("location"),
-            "state": opportunity.get("state"),
-            "source_type": "outcome_tracking",
-            "metadata": metadata,
-        }
-
-        supa.table("dealer_sales").insert(insert_payload).execute()
-        return {"success": True}
+        mirrored = _mirror_outcome_to_dealer_sales(user_id, opportunity, payload)
+        return {"success": True, "dealer_sales_mirrored": mirrored}
 
     except HTTPException:
         raise

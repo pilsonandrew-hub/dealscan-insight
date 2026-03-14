@@ -1,11 +1,9 @@
 """Retail comp service layer for ingest scoring.
 
-This module intentionally prefers low-fragility sources:
-1. Cached retail market rows from `market_prices`
-2. Derived dealer sale history from `dealer_sales`
-
-If neither source can produce an adequate estimate, callers should fall back
-to the existing MMR proxy path.
+This module uses `market_prices` and `dealer_sales` only as supplemental ingest
+inputs. The launch-safe read model remains enriched `opportunities`; if these
+legacy sources are absent or stale, callers should fall back to the MMR proxy
+path instead of treating them as canonical live foundations.
 """
 from __future__ import annotations
 
