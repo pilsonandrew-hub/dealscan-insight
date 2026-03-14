@@ -39,9 +39,14 @@
       "id": "eb4oYXDf8qs1Ckbth",
       "scheduleId": "ayw0gnoHxgezNswF6",
       "webhookId": "IqLsgHfhiAT04sPtB"
+    },
+    "ds-govplanet": {
+      "id": "pO2t5UDoSVmO1gvKJ",
+      "scheduleId": "jijJOYPk449GYMD6b",
+      "webhookId": "SINNRTPxfC8F5szXq"
     }
   },
   "webhookSecret": "sbEC0dNgb7Ohg3rDV",
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
-  "deployedAt": "2026-03-11T14:20:00.000Z"
+  "deployedAt": "2026-03-14T11:10:00.000Z"
 }
