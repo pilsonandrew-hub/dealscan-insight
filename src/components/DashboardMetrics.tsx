@@ -72,11 +72,11 @@ export const DashboardMetrics = ({ metrics, pipelineStatus, isRealtime = false }
     },
     {
       title: "Avg. Margin",
-      value: `${((metrics?.avg_margin || 0.273) * 100).toFixed(1)}%`,
+      value: `$${(metrics?.avg_margin || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
       change: "+2.1% from last month",
       changeType: "positive" as const,
       icon: <TrendingUp className="h-4 w-4" />,
-      description: "Average profit margin across all deals"
+      description: "Average gross margin across all deals"
     },
     {
       title: "Potential Revenue",

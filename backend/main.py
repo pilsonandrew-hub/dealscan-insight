@@ -4,8 +4,10 @@ DealerScope — Unified Backend Entrypoint
 Combines the FastAPI webapp routers with the scrape/score pipeline.
 """
 import asyncio
+import base64
 import logging
 import os
+import secrets
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -69,6 +71,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 PIPELINE_SECRET = os.getenv("PIPELINE_SECRET")
+PIPELINE_BASIC_AUTH_USERNAME = os.getenv("PIPELINE_BASIC_AUTH_USERNAME", "")
+PIPELINE_BASIC_AUTH_PASSWORD = os.getenv("PIPELINE_BASIC_AUTH_PASSWORD", "")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
 
 # ---------------------------------------------------------------------------
@@ -218,13 +222,48 @@ async def require_pipeline_auth(
         )
 
 
+async def require_pipeline_basic_auth(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    if not PIPELINE_BASIC_AUTH_USERNAME or not PIPELINE_BASIC_AUTH_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+    if not authorization or not authorization.startswith("Basic "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    try:
+        encoded = authorization.split(" ", 1)[1]
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    if not (
+        secrets.compare_digest(username, PIPELINE_BASIC_AUTH_USERNAME)
+        and secrets.compare_digest(password, PIPELINE_BASIC_AUTH_PASSWORD)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
 @app.post("/api/pipeline/run", tags=["pipeline"])
-async def trigger_pipeline():
+async def trigger_pipeline(_: None = Depends(require_pipeline_basic_auth)):
     """Legacy pipeline trigger disabled in favor of Apify webhooks."""
-    return {
-        "status": "disabled",
-        "message": "Use Apify webhooks for scraping — /api/ingest/apify",
-    }
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="This endpoint is retired. Use Apify webhooks via /api/ingest/apify.",
+    )
 
 
 @app.get("/api/pipeline/status", tags=["pipeline"])

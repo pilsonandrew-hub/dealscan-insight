@@ -49,17 +49,36 @@ _supabase_url = (
 )
 _supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 _supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
+_environment = os.getenv("ENVIRONMENT", "production")
 
 if _supabase_service_role_key:
     _supabase_key = _supabase_service_role_key
 elif _supabase_anon_key:
-    _supabase_key = _supabase_anon_key
-    logger.critical(
-        "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations; "
-        "falling back to anon key."
-    )
+    if _environment == "development":
+        _supabase_key = _supabase_anon_key
+        logger.warning(
+            "SUPABASE_SERVICE_ROLE_KEY missing in development; falling back to anon key."
+        )
+    else:
+        logger.critical(
+            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations in production."
+        )
+        raise RuntimeError(
+            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations in production."
+        )
 else:
     _supabase_key = None
+    if _environment == "development":
+        logger.warning(
+            "SUPABASE_SERVICE_ROLE_KEY missing in development and no anon key is available."
+        )
+    else:
+        logger.critical(
+            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations."
+        )
+        raise RuntimeError(
+            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations."
+        )
 
 supabase_client = None
 try:
@@ -1253,6 +1272,8 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "estimated_transport": score_result.get("transport"),
         "buyer_premium": buyer_premium,
         "auction_fees": auction_fees,
+        "recon_reserve": score_result.get("recon_reserve"),
+        "total_cost": score_result.get("total_cost"),
         "gross_margin": score_result.get("margin"),
         "dos_score": vehicle.get("dos_score"),
         "ctm_pct": score_result.get("ctm_pct"),
