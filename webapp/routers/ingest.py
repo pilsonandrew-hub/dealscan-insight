@@ -404,7 +404,7 @@ def compute_canonical_id(vehicle: dict) -> str:
 
 def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
     if supabase_client is None:
-        return {"is_duplicate": False, "canonical_record_id": None}
+        return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
     canonical_id = vehicle.get("canonical_id", "")
     new_source = vehicle.get("source_site", "")
@@ -424,10 +424,11 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
                 return {
                     "is_duplicate": existing_row.get("is_duplicate", False),
                     "canonical_record_id": existing_row.get("canonical_record_id"),
+                    "canonical_update": None,
                 }
 
         if not canonical_id:
-            return {"is_duplicate": False, "canonical_record_id": None}
+            return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
         result = (
             supabase_client.table("opportunities")
@@ -438,21 +439,23 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
             .execute()
         )
         if not result.data:
-            return {"is_duplicate": False, "canonical_record_id": None}
+            return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
         existing = result.data[0]
         existing_id = existing["id"]
         existing_sources = existing.get("all_sources") or []
+        canonical_update = None
         if new_source and new_source not in existing_sources:
             updated = existing_sources + [new_source]
-            supabase_client.table("opportunities").update({
+            canonical_update = {
+                "id": existing_id,
                 "all_sources": updated,
                 "duplicate_count": len(updated) - 1,
-            }).eq("id", existing_id).execute()
-        return {"is_duplicate": True, "canonical_record_id": existing_id}
+            }
+        return {"is_duplicate": True, "canonical_record_id": existing_id, "canonical_update": canonical_update}
     except Exception as lookup_error:
         logger.warning(f"[DEDUP] check failed: {lookup_error}")
-        return {"is_duplicate": False, "canonical_record_id": None}
+        return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
 
 def _parse_datetime_utc(raw_value) -> Optional[datetime]:
@@ -736,7 +739,7 @@ async def apify_webhook(
                 continue
 
             # Deduplication check
-            dedup = {"is_duplicate": False, "canonical_record_id": None}
+            dedup = {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
             if vehicle["dos_score"] >= 50:
                 dedup = check_and_handle_duplicate(supabase_client, vehicle)
             is_dup = dedup["is_duplicate"]
@@ -775,6 +778,10 @@ async def apify_webhook(
                 failed_save_count += 1
 
             # Replay-safe side effects for canonical records; downstream sinks dedupe independently.
+            if save_succeeded and is_dup and dedup.get("canonical_update"):
+                if _apply_canonical_update(dedup.get("canonical_update")):
+                    logger.info("[DEDUP] canonical source update applied for %s", dedup.get("canonical_record_id"))
+
             if save_succeeded and not is_dup and vehicle["dos_score"] >= 65:
                 notion_synced = await sync_to_notion(vehicle)
                 if notion_synced:
@@ -1820,6 +1827,25 @@ def _compute_listing_id(source: str, listing_url: str) -> str:
     normalized_source = (source or "unknown").strip().lower()
     normalized_url = (listing_url or "").strip()
     return hashlib.sha256(f"{normalized_source}|{normalized_url}".encode()).hexdigest()[:40]
+
+
+def _apply_canonical_update(canonical_update: Optional[dict]) -> bool:
+    if supabase_client is None or not canonical_update or not canonical_update.get("id"):
+        return False
+    try:
+        (
+            supabase_client.table("opportunities")
+            .update({
+                "all_sources": canonical_update.get("all_sources") or [],
+                "duplicate_count": canonical_update.get("duplicate_count") or 0,
+            })
+            .eq("id", canonical_update["id"])
+            .execute()
+        )
+        return True
+    except Exception as e:
+        logger.warning("[DEDUP] canonical update failed for %s: %s", canonical_update.get("id"), e)
+        return False
 
 
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
