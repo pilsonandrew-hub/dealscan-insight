@@ -660,17 +660,30 @@ async def apify_webhook(
         skipped = 0
         hot_deals = []
         dataset_item_count = len(items)
+        skip_reasons: dict[str, int] = {}
+        save_outcomes: dict[str, int] = {}
+        duplicate_count = 0
+        notion_sync_count = 0
+
+        logger.info(
+            "[INGEST_RUN] start | run_id=%s | dataset_id=%s | items=%s",
+            apify_run_id,
+            dataset_id,
+            dataset_item_count,
+        )
 
         for item in items:
             vehicle = normalize_apify_vehicle(item, apify_run_id)
             if vehicle is None:
                 skipped += 1
+                _increment_reason_counter(skip_reasons, "normalize_rejected")
                 continue
 
             gate_result = passes_basic_gates(vehicle)
             if not gate_result["pass"]:
                 logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
                 skipped += 1
+                _increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
                 continue
 
             # Score using real DOS formula
@@ -686,11 +699,13 @@ async def apify_webhook(
                     f"{vehicle.get('title','?')[:60]}"
                 )
                 skipped += 1
+                _increment_reason_counter(skip_reasons, "margin_below_floor")
                 continue
 
             if score_result.get("investment_grade") == "Bronze":
                 logger.info(f"[CEILING] bronze reject: {vehicle.get('title','?')[:60]}")
                 skipped += 1
+                _increment_reason_counter(skip_reasons, "bronze_reject")
                 continue
 
             if not score_result.get("ceiling_pass", True):
@@ -699,6 +714,10 @@ async def apify_webhook(
                     f"headroom=${score_result.get('bid_headroom', 0):,.0f}: {vehicle.get('title','?')[:60]}"
                 )
                 skipped += 1
+                _increment_reason_counter(
+                    skip_reasons,
+                    f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
+                )
                 continue
 
             # Deduplication check
@@ -709,16 +728,20 @@ async def apify_webhook(
             if is_dup:
                 vehicle["is_duplicate"] = True
                 vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+                duplicate_count += 1
                 logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
 
             # Save to Supabase always (audit trail)
             saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
+            save_status = vehicle.get("_save_status", "unknown")
+            _increment_reason_counter(save_outcomes, save_status)
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
             # Only alert and sync Notion on canonical records
             if not is_dup and vehicle["dos_score"] >= 65:
                 await sync_to_notion(vehicle)
+                notion_sync_count += 1
 
             logger.info(
                 f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
@@ -726,6 +749,7 @@ async def apify_webhook(
                 f"| Gross=${score_result.get('gross_margin',0):,.0f} "
                 f"| Headroom=${score_result.get('bid_headroom',0):,.0f} | {vehicle.get('state')}"
                 + (" [DUP]" if is_dup else "")
+                + f" | save={save_status}"
             )
 
             processed += 1
@@ -754,11 +778,30 @@ async def apify_webhook(
         if hot_deals:
             await send_telegram_alerts(hot_deals)
 
+        logger.info(
+            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | processed=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
+            apify_run_id,
+            dataset_id,
+            dataset_item_count,
+            processed,
+            skipped,
+            duplicate_count,
+            notion_sync_count,
+            len(hot_deals),
+            save_outcomes,
+            skip_reasons,
+        )
+
         response = {
             "status": "ok",
             "run_id": apify_run_id,
+            "dataset_id": dataset_id,
             "processed": processed,
             "skipped": skipped,
+            "duplicates": duplicate_count,
+            "notion_sync": notion_sync_count,
+            "save_outcomes": save_outcomes,
+            "skip_reasons": skip_reasons,
             "hot_deals": len(hot_deals),
             "hot_deal_vehicles": [
                 f"{v.get('year')} {v.get('make')} {v.get('model')} | "
@@ -1546,6 +1589,10 @@ def _prepare_direct_pg_value(value):
     return value
 
 
+def _increment_reason_counter(counter: dict, reason: str) -> None:
+    counter[reason] = counter.get(reason, 0) + 1
+
+
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
     if supabase_client is not None:
         try:
@@ -1583,12 +1630,12 @@ def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Option
         return None
 
 
-def _save_opportunity_direct_pg(row: dict) -> Optional[str]:
+def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
     if not _direct_supabase_db_url:
         logger.warning(
             "[INGEST] Direct PG fallback unavailable; set SUPABASE_DB_URL or SUPABASE_DB_PASSWORD."
         )
-        return None
+        return None, "direct_pg_unavailable"
 
     columns = list(row.keys())
     values = [_prepare_direct_pg_value(row[column]) for column in columns]
@@ -1604,22 +1651,24 @@ def _save_opportunity_direct_pg(row: dict) -> Optional[str]:
             with conn.cursor() as cur:
                 cur.execute(insert_sql, values)
                 inserted = cur.fetchone()
-                return str(inserted[0]) if inserted and inserted[0] else None
+                return (str(inserted[0]) if inserted and inserted[0] else None), "saved_direct_pg"
     except psycopg2.errors.UniqueViolation:
-        return _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
+        existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
+        return existing_id, "duplicate_existing"
     except Exception as pg_err:
         logger.error(
             "[INGEST] Direct PG save FAILED for '%s': %s",
             (row.get("title") or "unknown")[:80],
             pg_err,
         )
-        return None
+        return None, "direct_pg_error"
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
     """Save scored vehicle to Supabase. Min DOS 50 to save."""
     score = vehicle.get("dos_score", 0)
     if score < 50:
+        vehicle["_save_status"] = "below_save_threshold"
         return None
 
     row = build_opportunity_row(vehicle)
@@ -1628,15 +1677,27 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
         try:
             result = supabase_client.table("opportunities").insert(row).execute()
             if result.data:
+                vehicle["_save_status"] = "saved_supabase"
                 return result.data[0].get("id")
 
             existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
             if existing_id:
+                vehicle["_save_status"] = "duplicate_existing"
                 return existing_id
         except Exception as e:
             title = vehicle.get("title", "unknown")[:80]
             logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
-            if "PGRST204" not in str(e):
+            error_text = str(e)
+            if "23505" in error_text or "duplicate key value" in error_text:
+                existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
+                if existing_id:
+                    logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
+                    vehicle["_save_status"] = "duplicate_existing"
+                    return existing_id
+                vehicle["_save_status"] = "duplicate_unresolved"
+                return None
+            if "PGRST204" not in error_text:
+                vehicle["_save_status"] = "supabase_error"
                 return None
             logger.warning(
                 "[INGEST] Falling back to direct Postgres insert for '%s' after PostgREST schema error.",
@@ -1645,7 +1706,9 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
     else:
         logger.warning("[INGEST] Supabase client unavailable; using direct Postgres fallback if configured.")
 
-    return _save_opportunity_direct_pg(row)
+    saved_id, save_status = _save_opportunity_direct_pg(row)
+    vehicle["_save_status"] = save_status
+    return saved_id
 
 
 def build_opportunity_row(vehicle: dict) -> dict:
