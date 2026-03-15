@@ -149,14 +149,15 @@ _SEGMENT_TIER_2_MODELS = {
 
 _LUXURY_MAKES = {"bmw", "mercedes", "mercedes benz", "lexus", "cadillac", "lincoln", "audi"}
 
-RETAIL_PROXY_MULTIPLIER = 1.35
+PROXY_RETAIL_MULTIPLIER_MIN = 1.10
+PROXY_RETAIL_MULTIPLIER_MAX = 1.28
 ESTIMATED_DAYS_TO_SALE_BY_TIER = {
     1: 25,
     2: 35,
     3: 50,
     4: 70,
 }
-SCORE_VERSION = "manheim_ready_v4"
+SCORE_VERSION = "manheim_ready_v5"
 INVESTMENT_GRADE_PROXY_SCORES = {
     "Platinum": 100.0,
     "Gold": 82.0,
@@ -349,6 +350,64 @@ def _resolve_confidence_proxy(
     return max(0.0, min(100.0, confidence_proxy))
 
 
+def _resolve_proxy_retail_multiplier(
+    mmr_lookup_basis: Optional[str],
+    confidence_proxy: float,
+) -> float:
+    basis = (mmr_lookup_basis or "unknown").strip().lower()
+    normalized_confidence = max(0.0, min(float(confidence_proxy or 0.0), 100.0))
+
+    if basis.startswith("model:"):
+        multiplier = 1.24
+    elif basis.startswith("make:"):
+        multiplier = 1.20
+    elif basis.startswith("special:police_interceptor"):
+        multiplier = 1.17
+    elif basis.startswith("special:commercial_vehicle"):
+        multiplier = 1.12
+    elif basis.startswith("segment:"):
+        multiplier = 1.15
+    else:
+        multiplier = 1.14
+
+    if normalized_confidence >= 85.0:
+        multiplier += 0.02
+    elif normalized_confidence >= 70.0:
+        multiplier += 0.0
+    elif normalized_confidence >= 55.0:
+        multiplier -= 0.02
+    else:
+        multiplier -= 0.04
+
+    return round(
+        max(PROXY_RETAIL_MULTIPLIER_MIN, min(PROXY_RETAIL_MULTIPLIER_MAX, multiplier)),
+        3,
+    )
+
+
+def _proxy_ceiling_penalty_pct(
+    *,
+    pricing_maturity: Optional[str],
+    mmr_lookup_basis: Optional[str],
+    confidence_proxy: float,
+    manheim_source_status: Optional[str],
+) -> float:
+    if manheim_source_status == "live" or pricing_maturity == "live_market":
+        return 0.0
+
+    normalized_confidence = max(0.0, min(float(confidence_proxy or 0.0), 100.0))
+    basis = (mmr_lookup_basis or "unknown").strip().lower()
+
+    if pricing_maturity == "market_comp":
+        return 0.0 if normalized_confidence >= 75.0 else 1.0
+
+    if basis.startswith("model:") and normalized_confidence >= 80.0:
+        return 2.0
+    if basis.startswith("make:") and normalized_confidence >= 65.0:
+        return 4.0
+    return 6.0
+
+
 def compute_bid_ceiling(
     current_bid: float,
     mmr_ca: float,
@@ -361,6 +420,9 @@ def compute_bid_ceiling(
     recon_reserve: float,
     manheim_range_width_pct: Optional[float] = None,
     manheim_source_status: Optional[str] = None,
+    pricing_maturity: Optional[str] = None,
+    mmr_lookup_basis: Optional[str] = None,
+    confidence_proxy: float = 0.0,
 ) -> dict:
     if investment_grade == "Bronze":
         return {
@@ -407,6 +469,16 @@ def compute_bid_ceiling(
             reason = f"{reason}; live_range_penalty_1pct"
         else:
             reason = f"{reason}; live_range_preserved"
+
+    proxy_penalty_pct = _proxy_ceiling_penalty_pct(
+        pricing_maturity=pricing_maturity,
+        mmr_lookup_basis=mmr_lookup_basis,
+        confidence_proxy=confidence_proxy,
+        manheim_source_status=manheim_source_status,
+    )
+    if proxy_penalty_pct > 0:
+        ceiling_pct = max(70.0, float(ceiling_pct) - proxy_penalty_pct)
+        reason = f"{reason}; proxy_penalty_{int(proxy_penalty_pct)}pct"
 
     if mmr_ca <= 0:
         return {
@@ -479,17 +551,18 @@ def resolve_pricing_maturity(
     retail_comp_price_estimate: Optional[float],
     retail_comp_count: Optional[int],
     retail_comp_confidence: Optional[float],
+    retail_comp_usable: bool,
     mmr_lookup_basis: Optional[str],
 ) -> str:
     if manheim_source_status == "live" and (manheim_mmr_mid or 0) > 0:
         return "live_market"
 
     market_comp_sources = {"retail_market_cache", "dealer_sales_history"}
-    if pricing_source in market_comp_sources:
+    if retail_comp_usable and pricing_source in market_comp_sources:
         return "market_comp"
-    if (retail_comp_price_estimate or 0) > 0 and int(retail_comp_count or 0) > 0:
+    if retail_comp_usable and (retail_comp_price_estimate or 0) > 0 and int(retail_comp_count or 0) > 0:
         return "market_comp"
-    if (retail_comp_confidence or 0) > 0:
+    if retail_comp_usable and (retail_comp_confidence or 0) > 0:
         return "market_comp"
 
     if pricing_source == "mmr_proxy":
@@ -523,10 +596,10 @@ def _current_bid_trust_score(
 
     maturity_adjustment = {
         "live_market": 0.05,
-        "market_comp": 0.0,
-        "proxy": -0.05,
-        "unknown": -0.1,
-    }.get(pricing_maturity, -0.1)
+        "market_comp": -0.05,
+        "proxy": -0.15,
+        "unknown": -0.25,
+    }.get(pricing_maturity, -0.25)
 
     return round(max(0.05, min(0.9, base_score + maturity_adjustment)), 2)
 
@@ -561,19 +634,19 @@ def _expected_close_floor_pct(
             base_floor_pct = 0.98
 
     maturity_adjustment = {
-        "live_market": 0.03,
+        "live_market": -0.01,
         "market_comp": 0.0,
-        "proxy": -0.03,
-        "unknown": -0.06,
-    }.get(pricing_maturity, -0.06)
+        "proxy": 0.04,
+        "unknown": 0.07,
+    }.get(pricing_maturity, 0.07)
 
     normalized_confidence = max(0.0, min(float(confidence_proxy or 0.0), 100.0))
     if normalized_confidence >= 80.0:
-        confidence_adjustment = 0.02
-    elif normalized_confidence >= 65.0:
-        confidence_adjustment = 0.01
-    elif normalized_confidence <= 45.0:
         confidence_adjustment = -0.02
+    elif normalized_confidence >= 65.0:
+        confidence_adjustment = -0.01
+    elif normalized_confidence <= 45.0:
+        confidence_adjustment = 0.02
     else:
         confidence_adjustment = 0.0
 
@@ -739,18 +812,26 @@ def score_deal(
         "pricing_updated_at": pricing_updated_at,
     }
     use_retail_comps = retail_comp_is_usable(retail_comp_result)
-    retail_asking_price_estimate = (
-        float(retail_comp_price_estimate)
-        if use_retail_comps and retail_comp_price_estimate is not None
-        else selected_mmr * RETAIL_PROXY_MULTIPLIER
-    )
-    selected_pricing_source = (pricing_source or "retail_comps") if use_retail_comps else "mmr_proxy"
     confidence_proxy = _resolve_confidence_proxy(
         mmr_confidence_proxy=mmr_confidence_proxy,
         manheim_confidence=manheim_confidence,
         manheim_source_status=manheim_source_status,
         manheim_range_width_pct=manheim_range_width_pct,
     )
+    retail_proxy_multiplier = (
+        None
+        if use_retail_comps
+        else _resolve_proxy_retail_multiplier(
+            mmr_lookup_basis=mmr_lookup_basis,
+            confidence_proxy=confidence_proxy,
+        )
+    )
+    retail_asking_price_estimate = (
+        float(retail_comp_price_estimate)
+        if use_retail_comps and retail_comp_price_estimate is not None
+        else selected_mmr * float(retail_proxy_multiplier or PROXY_RETAIL_MULTIPLIER_MIN)
+    )
+    selected_pricing_source = (pricing_source or "retail_comps") if use_retail_comps else "mmr_proxy"
     pricing_maturity = resolve_pricing_maturity(
         manheim_source_status=manheim_source_status,
         manheim_mmr_mid=manheim_mmr_mid,
@@ -758,6 +839,7 @@ def score_deal(
         retail_comp_price_estimate=retail_comp_price_estimate,
         retail_comp_count=retail_comp_count,
         retail_comp_confidence=retail_comp_confidence,
+        retail_comp_usable=use_retail_comps,
         mmr_lookup_basis=mmr_lookup_basis,
     )
     auction_stage_hours_remaining = _auction_stage_hours_remaining(auction_end)
@@ -789,6 +871,9 @@ def score_deal(
         recon_reserve=recon_reserve,
         manheim_range_width_pct=manheim_range_width_pct,
         manheim_source_status=manheim_source_status,
+        pricing_maturity=pricing_maturity,
+        mmr_lookup_basis=mmr_lookup_basis,
+        confidence_proxy=confidence_proxy,
     )
     expected_close_result = resolve_expected_close_bid(
         current_bid=raw_bid,
@@ -864,7 +949,7 @@ def score_deal(
         "segment_score": round(seg_score, 2),
         "model_score": round(mod_score, 2),
         "source_score": round(src_score, 2),
-        "retail_proxy_multiplier": None if use_retail_comps else RETAIL_PROXY_MULTIPLIER,
+        "retail_proxy_multiplier": retail_proxy_multiplier,
         "retail_asking_price_estimate": round(retail_asking_price_estimate, 2),
         "retail_comp_price_estimate": round(float(retail_comp_price_estimate), 2) if retail_comp_price_estimate is not None else None,
         "retail_comp_low": round(float(retail_comp_low), 2) if retail_comp_low is not None else None,

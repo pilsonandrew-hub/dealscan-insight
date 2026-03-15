@@ -1298,6 +1298,21 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         trust_score = gate_signals.get("current_bid_trust_score")
         confidence = gate_signals.get("confidence")
         expected_close_source = gate_signals.get("expected_close_source") or score_breakdown.get("expected_close_source") or "unknown"
+        acquisition_basis_source = gate_signals.get("acquisition_basis_source") or score_breakdown.get("acquisition_basis_source") or "unknown"
+        mmr_lookup_basis = gate_signals.get("mmr_lookup_basis") or score_breakdown.get("mmr_lookup_basis") or "unknown"
+        retail_comp_count = gate_signals.get("retail_comp_count")
+        retail_comp_confidence = gate_signals.get("retail_comp_confidence")
+        truth_note = ""
+        if pricing_maturity == "proxy":
+            truth_note = (
+                f"Proxy-priced: expected close and basis are synthetic ({mmr_lookup_basis})\n"
+            )
+        elif retail_comp_count is not None:
+            truth_note = (
+                "Retail evidence: "
+                f"count={int(float(retail_comp_count))}, "
+                f"conf={retail_comp_confidence if retail_comp_confidence is not None else 'n/a'}\n"
+            )
         reply_markup = {
             "inline_keyboard": [[
                 {"text": "🔥 BUY", "callback_data": f"buy_{callback_id}"},
@@ -1315,6 +1330,8 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"Bid: ${deal.get('current_bid', 0):,.0f} | Max Bid: ${score_breakdown.get('max_bid', 0):,.0f}\n"
                 f"Pricing: {pricing_maturity} via {pricing_source} | Trust: {trust_score if trust_score is not None else 'n/a'} | Conf: {confidence if confidence is not None else 'n/a'}\n"
                 f"Expected Close: {expected_close_source}\n"
+                f"Basis: {acquisition_basis_source}\n"
+                f"{truth_note}"
                 f"State: {deal.get('state', '?')}\n"
                 f"[View Listing]({deal.get('listing_url', '')})"
             )
@@ -1326,6 +1343,8 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
                 f"Pricing: {pricing_maturity} via {pricing_source} | Trust: {trust_score if trust_score is not None else 'n/a'} | Conf: {confidence if confidence is not None else 'n/a'}\n"
                 f"Expected Close: {expected_close_source}\n"
+                f"Basis: {acquisition_basis_source}\n"
+                f"{truth_note}"
                 f"State: {deal.get('state', '?')}\n"
                 f"Gross: ${score_breakdown.get('gross_margin', 0):,.0f}\n"
                 f"[View Listing]({deal.get('listing_url', '')})"
