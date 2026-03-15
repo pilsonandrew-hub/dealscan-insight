@@ -1022,6 +1022,19 @@ def _fallback_score(vehicle: dict) -> dict:
     age = datetime.now().year - year
     if 1 <= age <= 4:
         score += 10
+    auction_stage_hours_remaining = None
+    current_bid_trust_score = None
+    pricing_maturity = "proxy"
+    try:
+        from backend.ingest.score import _auction_stage_hours_remaining, _current_bid_trust_score
+
+        auction_stage_hours_remaining = _auction_stage_hours_remaining(vehicle.get("auction_end_time"))
+        current_bid_trust_score = _current_bid_trust_score(
+            auction_stage_hours_remaining=auction_stage_hours_remaining,
+            pricing_maturity=pricing_maturity,
+        )
+    except Exception:
+        pass
     return {
         "dos_score": min(100, round(score, 1)),
         "score": min(100, round(score, 1)),
@@ -1038,7 +1051,12 @@ def _fallback_score(vehicle: dict) -> dict:
         "retail_comp_count": 0,
         "retail_comp_confidence": None,
         "pricing_source": "mmr_proxy",
+        "pricing_maturity": pricing_maturity,
         "pricing_updated_at": None,
+        "expected_close_bid": None,
+        "expected_close_source": None,
+        "current_bid_trust_score": current_bid_trust_score,
+        "auction_stage_hours_remaining": auction_stage_hours_remaining,
         "manheim_mmr_mid": None,
         "manheim_mmr_low": None,
         "manheim_mmr_high": None,
@@ -1383,14 +1401,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
         damage_type=vehicle.get("damage_type") or "",
     )
     pricing_source = score_result.get("pricing_source")
-    if score_result.get("manheim_source_status") == "live":
-        pricing_maturity = "live_market"
-    elif pricing_source and pricing_source != "mmr_proxy":
-        pricing_maturity = "market_comp"
-    elif pricing_source == "mmr_proxy" or score_result.get("mmr_lookup_basis"):
-        pricing_maturity = "proxy"
-    else:
-        pricing_maturity = "unknown"
+    pricing_maturity = score_result.get("pricing_maturity") or "unknown"
     return {
         "listing_id": vehicle.get("listing_url", "")[-80:],  # truncated unique ID
         "listing_url": vehicle.get("listing_url", ""),
@@ -1420,6 +1431,10 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "pricing_source": pricing_source,
         "pricing_maturity": pricing_maturity,
         "pricing_updated_at": score_result.get("pricing_updated_at"),
+        "expected_close_bid": score_result.get("expected_close_bid"),
+        "current_bid_trust_score": score_result.get("current_bid_trust_score"),
+        "expected_close_source": score_result.get("expected_close_source"),
+        "auction_stage_hours_remaining": score_result.get("auction_stage_hours_remaining"),
         "manheim_mmr_mid": score_result.get("manheim_mmr_mid"),
         "manheim_mmr_low": score_result.get("manheim_mmr_low"),
         "manheim_mmr_high": score_result.get("manheim_mmr_high"),
