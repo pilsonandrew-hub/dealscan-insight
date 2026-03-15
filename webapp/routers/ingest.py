@@ -16,6 +16,7 @@ Fixes applied (2026-03-11):
 """
 from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
+import hmac
 import hashlib
 import re
 import os
@@ -61,6 +62,17 @@ def _env_float(name: str, default: float) -> float:
         return float(raw_value)
     except ValueError:
         logger.warning("[ALERT_GATE] Invalid %s=%r; using %s", name, raw_value, default)
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value in {None, ""}:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        logger.warning("[INGEST_AUTH] Invalid %s=%r; using %s", name, raw_value, default)
         return default
 
 
@@ -501,6 +513,11 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         "source": payload.get("source") or "apify",
         "actor_id": resource.get("actId") or resource.get("actorId") or payload.get("actor_id"),
         "run_id": resource.get("id") or payload.get("run_id"),
+        "dataset_id": (
+            resource.get("defaultDatasetId")
+            or payload.get("defaultDatasetId")
+            or payload.get("datasetId")
+        ),
         "item_count": item_count,
         "created_at": _parse_datetime_utc(
             payload.get("createdAt") or resource.get("createdAt") or resource.get("startedAt")
@@ -508,7 +525,12 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
     }
 
 
-def insert_webhook_log(payload: dict) -> Optional[str]:
+def insert_webhook_log(
+    payload: dict,
+    *,
+    processing_status: str = "pending",
+    error_message: Optional[str] = None,
+) -> Optional[str]:
     if supabase_client is None:
         return None
 
@@ -519,7 +541,8 @@ def insert_webhook_log(payload: dict) -> Optional[str]:
         "run_id": metadata["run_id"],
         "item_count": metadata["item_count"],
         "raw_payload": payload,
-        "processing_status": "pending",
+        "processing_status": processing_status,
+        "error_message": error_message,
     }
     result = supabase_client.table("webhook_log").insert(row).execute()
     if result.data:
@@ -547,13 +570,62 @@ def update_webhook_log(
     supabase_client.table("webhook_log").update(update_row).eq("id", webhook_log_id).execute()
 
 
+def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
+    return bool(WEBHOOK_SECRET) and hmac.compare_digest(presented_secret or "", WEBHOOK_SECRET)
+
+
+def _webhook_replay_window_seconds() -> int:
+    return max(_env_int("APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS", 3600), 0)
+
+
+def _webhook_max_age_seconds() -> int:
+    return max(_env_int("APIFY_WEBHOOK_MAX_AGE_SECONDS", 0), 0)
+
+
+def _find_recent_webhook_replay(run_id: Optional[str]) -> Optional[dict]:
+    replay_window_seconds = _webhook_replay_window_seconds()
+    if supabase_client is None or not run_id or replay_window_seconds <= 0:
+        return None
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=replay_window_seconds)
+    result = (
+        supabase_client.table("webhook_log")
+        .select("id, received_at, processing_status, error_message")
+        .eq("run_id", run_id)
+        .gte("received_at", cutoff.isoformat())
+        .order("received_at", desc=True)
+        .limit(5)
+        .execute()
+    )
+    for row in result.data or []:
+        status = str(row.get("processing_status") or "").lower()
+        if status in {"processed", "pending", "ignored_replay"}:
+            return row
+    return None
+
+
+def _stale_webhook_error(metadata: dict) -> Optional[str]:
+    max_age_seconds = _webhook_max_age_seconds()
+    created_at = metadata.get("created_at")
+    if max_age_seconds <= 0 or created_at is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    age_seconds = (now - created_at).total_seconds()
+    if age_seconds > max_age_seconds:
+        return f"Webhook createdAt is stale ({int(age_seconds)}s old; max {max_age_seconds}s)"
+    if age_seconds < -300:
+        return f"Webhook createdAt is too far in the future ({int(abs(age_seconds))}s skew)"
+    return None
+
+
 @router.post("/apify")
 async def apify_webhook(
     request: Request,
     x_apify_webhook_secret: Optional[str] = Header(None)
 ):
     # Verify webhook secret
-    if not WEBHOOK_SECRET or x_apify_webhook_secret != WEBHOOK_SECRET:
+    if not _verify_webhook_secret(x_apify_webhook_secret):
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     try:
@@ -564,15 +636,47 @@ async def apify_webhook(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Unexpected payload format")
 
+    metadata = extract_apify_webhook_metadata(payload)
+    apify_run_id = metadata["run_id"] or str(uuid.uuid4())[:8]
+    logger.info(f"[INGEST] Webhook received for run_id={apify_run_id}")
+
+    stale_error = _stale_webhook_error(metadata)
+    if stale_error:
+        try:
+            insert_webhook_log(payload, processing_status="ignored_stale", error_message=stale_error)
+        except Exception as e:
+            logger.warning(f"[WEBHOOK_LOG] stale insert failed (non-fatal): {e}")
+        raise HTTPException(status_code=401, detail="Stale webhook payload")
+
+    try:
+        recent_replay = _find_recent_webhook_replay(metadata["run_id"])
+    except Exception as e:
+        recent_replay = None
+        logger.warning(f"[INGEST_AUTH] replay lookup failed for run_id={apify_run_id}: {e}")
+
+    if recent_replay:
+        replay_message = (
+            f"Replay ignored for run_id={apify_run_id}; prior status="
+            f"{recent_replay.get('processing_status') or 'unknown'} at "
+            f"{recent_replay.get('received_at') or 'unknown'}"
+        )
+        logger.warning("[INGEST_AUTH] %s", replay_message)
+        try:
+            insert_webhook_log(payload, processing_status="ignored_replay", error_message=replay_message)
+        except Exception as e:
+            logger.warning(f"[WEBHOOK_LOG] replay insert failed (non-fatal): {e}")
+        return {
+            "status": "ok",
+            "run_id": apify_run_id,
+            "replay_ignored": True,
+            "message": "Duplicate webhook ignored",
+        }
+
     webhook_log_id = None
     try:
         webhook_log_id = insert_webhook_log(payload)
     except Exception as e:
         logger.warning(f"[WEBHOOK_LOG] insert failed (non-fatal): {e}")
-
-    metadata = extract_apify_webhook_metadata(payload)
-    apify_run_id = metadata["run_id"] or str(uuid.uuid4())[:8]
-    logger.info(f"[INGEST] Webhook received for run_id={apify_run_id}")
 
     try:
         if supabase_client is not None:
@@ -597,10 +701,7 @@ async def apify_webhook(
         # back to resolving the run details directly from Apify before giving up.
         resource = payload.get("resource", {}) if isinstance(payload.get("resource"), dict) else {}
         dataset_id = (
-            resource.get("defaultDatasetId")
-            or payload.get("defaultDatasetId")
-            or payload.get("datasetId")
-            or payload.get("defaultDatasetId")
+            metadata.get("dataset_id")
             or ""
         )
 

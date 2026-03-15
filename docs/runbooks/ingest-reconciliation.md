@@ -25,6 +25,13 @@ The current ingest path already records the four surfaces needed for reconciliat
 - Saved ingest rows carry `run_id` in `public.opportunities` from `supabase/migrations/20260312_event_identity.sql`
 - Per-listing save and delivery outcomes land in `public.ingest_delivery_log` from `supabase/migrations/20260315_ingest_delivery_log.sql`
 
+Webhook replay guardrails:
+- Recent duplicate webhook deliveries for the same `run_id` are ignored for `APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS` seconds. Default: 3600.
+- Only recent `processed` and `pending` runs are suppressed; `degraded` or `error` runs can still be replayed immediately for recovery.
+- Suppressed deliveries show up in `webhook_log.processing_status` as `ignored_replay`.
+- If you truly need to force a replay of a recently processed run, wait for the replay window to expire or temporarily lower `APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS` during the recovery window.
+- `APIFY_WEBHOOK_MAX_AGE_SECONDS` is available for stricter freshness enforcement, but defaults to `0` because delayed webhook delivery has not yet been tightly characterized in production.
+
 ## Operator Plan
 
 1. Run the run-level compare for the March 15 recovery window.
@@ -50,6 +57,7 @@ python3 scripts/reconcile_apify_ingest_runs.py \
 
 - `missing_webhook`: Apify says the run succeeded, but `webhook_log` has no matching `run_id`. Replay the webhook or rerun the Apify run from the same dataset.
 - `webhook_degraded` or `webhook_error`: inspect `webhook_log.error_message` first, then review `db_save` status counts in `ingest_delivery_log` before replaying.
+- `ignored_replay`: a duplicate delivery was suppressed inside the replay window. This is expected for rapid resubmits and is not, by itself, an ingest failure.
 - `missing_delivery_log` or `missing_db_save_ledger`: the webhook landed, but the save ledger is missing. Check Railway app logs for the run before rerunning.
 - `db_save_failures`: inspect `db_save` statuses for `supabase_error`, `direct_pg_error`, `direct_pg_unavailable`, or `duplicate_unresolved`.
 - `no_db_landing`: Apify produced items, but neither `opportunities` nor `db_save` shows a successful landing. Treat this as a replay candidate.

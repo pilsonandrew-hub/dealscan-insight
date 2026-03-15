@@ -45,6 +45,14 @@ Behavior:
 - `processing_status` starts as `pending` and is finalized to `processed` or `error`.
 - This provides payload inspection, run-level observability, and anomaly review without any new routing layer.
 
+Replay hardening:
+- `/api/ingest/apify` now uses constant-time shared-secret comparison.
+- Recent duplicate deliveries are suppressed by `run_id` using the existing `webhook_log`.
+- Default replay window is `APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS=3600`.
+- Only recent `processed`, `pending`, or already `ignored_replay` deliveries are suppressed. `degraded` and `error` runs remain replayable for recovery.
+- Duplicate deliveries are recorded in `webhook_log` with `processing_status='ignored_replay'`.
+- Optional freshness enforcement is available via `APIFY_WEBHOOK_MAX_AGE_SECONDS`. Default is `0` (disabled) to avoid breaking delayed-but-legitimate Apify deliveries before the live envelope is confirmed.
+
 ## Decision
 
 OpenClaw ingress is not needed — Railway + Supabase provides full observability.
