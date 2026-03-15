@@ -27,12 +27,49 @@ router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
 try:
+    from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
+except ImportError:
+    AlertThresholds = None  # type: ignore[assignment]
+
+    def evaluate_alert_gate(*args, **kwargs):  # type: ignore[no-redef]
+        return {
+            "eligible": False,
+            "alert_type": None,
+            "blocking_reasons": ["alert_gate_import_failed"],
+            "summary": "type=blocked | import_failed",
+            "signals": {},
+        }
+
+try:
     from backend.ingest.condition import compute_condition_grade as _compute_condition_grade
 except ImportError:
     def _compute_condition_grade(**kwargs):  # type: ignore[misc]
         return None
 
 alerts_this_run: dict = {}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value in {None, ""}:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        logger.warning("[ALERT_GATE] Invalid %s=%r; using %s", name, raw_value, default)
+        return default
+
+
+def _alert_thresholds() -> Optional["AlertThresholds"]:
+    if AlertThresholds is None:
+        return None
+    return AlertThresholds(
+        min_score=_env_float("HOT_DEAL_MIN_SCORE", 80.0),
+        platinum_min_roi_day=_env_float("PLATINUM_MIN_ROI_DAY", 75.0),
+        min_bid_headroom=_env_float("ALERT_MIN_BID_HEADROOM", 0.0),
+        min_trust_score=_env_float("ALERT_MIN_TRUST_SCORE", 0.25),
+        min_confidence=_env_float("ALERT_MIN_CONFIDENCE", 55.0),
+    )
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -625,8 +662,26 @@ async def apify_webhook(
             )
 
             processed += 1
-            if not is_dup and (vehicle["dos_score"] >= 80 or _is_platinum_alert_candidate(vehicle)):
-                hot_deals.append(vehicle)
+
+            if not is_dup:
+                alert_gate = _alert_gate_for_vehicle(vehicle)
+                if alert_gate.get("eligible"):
+                    logger.info(
+                        "[ALERT_GATE] eligible | %s | %s",
+                        alert_gate.get("summary"),
+                        vehicle.get("title", "?")[:80],
+                    )
+                    hot_deals.append(vehicle)
+                elif (
+                    vehicle["dos_score"] >= _env_float("HOT_DEAL_MIN_SCORE", 80.0)
+                    or score_result.get("investment_grade") in {"Gold", "Platinum"}
+                ):
+                    logger.info(
+                        "[ALERT_GATE] blocked | %s | reasons=%s | %s",
+                        alert_gate.get("summary"),
+                        ",".join(alert_gate.get("blocking_reasons") or ["unknown"]),
+                        vehicle.get("title", "?")[:80],
+                    )
 
         # Fire Telegram alerts for hot deals
         if hot_deals:
@@ -755,13 +810,10 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
         return None
 
 
-def _is_platinum_alert_candidate(vehicle: dict) -> bool:
-    score_breakdown = vehicle.get("score_breakdown", {})
-    return (
-        score_breakdown.get("investment_grade") == "Platinum"
-        and float(score_breakdown.get("roi_per_day") or 0) > 0
-        and float(score_breakdown.get("bid_headroom") or 0) > 0
-    )
+def _alert_gate_for_vehicle(vehicle: dict) -> dict:
+    gate = evaluate_alert_gate(vehicle, thresholds=_alert_thresholds())
+    vehicle["alert_gate"] = gate
+    return gate
 
 
 def extract_year(title: str) -> Optional[int]:
@@ -1228,7 +1280,24 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         investment_grade = score_breakdown.get("investment_grade") or "Watch"
         roi_per_day = float(score_breakdown.get("roi_per_day") or 0)
         headroom = float(score_breakdown.get("bid_headroom") or 0)
-        is_platinum = _is_platinum_alert_candidate(deal)
+        alert_gate = deal.get("alert_gate")
+        if not isinstance(alert_gate, dict):
+            alert_gate = _alert_gate_for_vehicle(deal)
+        if not alert_gate.get("eligible"):
+            logger.info(
+                "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
+                alert_gate.get("summary"),
+                ",".join(alert_gate.get("blocking_reasons") or ["unknown"]),
+                deal.get("title", "?")[:80],
+            )
+            return None
+        is_platinum = alert_gate.get("alert_type") == "platinum"
+        gate_signals = alert_gate.get("signals", {})
+        pricing_maturity = gate_signals.get("pricing_maturity") or score_breakdown.get("pricing_maturity") or "unknown"
+        pricing_source = gate_signals.get("pricing_source") or score_breakdown.get("pricing_source") or "unknown"
+        trust_score = gate_signals.get("current_bid_trust_score")
+        confidence = gate_signals.get("confidence")
+        expected_close_source = gate_signals.get("expected_close_source") or score_breakdown.get("expected_close_source") or "unknown"
         reply_markup = {
             "inline_keyboard": [[
                 {"text": "🔥 BUY", "callback_data": f"buy_{callback_id}"},
@@ -1244,6 +1313,8 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"Grade: *{investment_grade}* | Score: *{deal['dos_score']}*\n"
                 f"ROI/Day: ${roi_per_day:,.0f} | Headroom: ${headroom:,.0f}\n"
                 f"Bid: ${deal.get('current_bid', 0):,.0f} | Max Bid: ${score_breakdown.get('max_bid', 0):,.0f}\n"
+                f"Pricing: {pricing_maturity} via {pricing_source} | Trust: {trust_score if trust_score is not None else 'n/a'} | Conf: {confidence if confidence is not None else 'n/a'}\n"
+                f"Expected Close: {expected_close_source}\n"
                 f"State: {deal.get('state', '?')}\n"
                 f"[View Listing]({deal.get('listing_url', '')})"
             )
@@ -1253,6 +1324,8 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
                 f"Grade: *{investment_grade}* | Score: *{deal['dos_score']}*\n"
                 f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
+                f"Pricing: {pricing_maturity} via {pricing_source} | Trust: {trust_score if trust_score is not None else 'n/a'} | Conf: {confidence if confidence is not None else 'n/a'}\n"
+                f"Expected Close: {expected_close_source}\n"
                 f"State: {deal.get('state', '?')}\n"
                 f"Gross: ${score_breakdown.get('gross_margin', 0):,.0f}\n"
                 f"[View Listing]({deal.get('listing_url', '')})"
