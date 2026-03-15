@@ -23,6 +23,10 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
+import psycopg2
+from psycopg2 import extras as psycopg2_extras
+from psycopg2 import sql as psycopg2_sql
+
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
@@ -127,6 +131,38 @@ try:
         logger.warning("Supabase client NOT initialized — missing env vars.")
 except Exception as _supa_err:
     logger.warning(f"Supabase client init failed (non-fatal): {_supa_err}")
+
+
+def _derive_supabase_direct_db_url() -> Optional[str]:
+    candidates = (
+        os.getenv("SUPABASE_DB_URL"),
+        os.getenv("SUPABASE_DATABASE_URL"),
+        os.getenv("SUPABASE_DIRECT_DB_URL"),
+    )
+    for candidate in candidates:
+        if candidate:
+            return candidate
+
+    db_password = os.getenv("SUPABASE_DB_PASSWORD")
+    if not db_password:
+        return None
+
+    project_ref = os.getenv("SUPABASE_PROJECT_ID") or os.getenv("VITE_SUPABASE_PROJECT_ID")
+    if not project_ref and _supabase_url:
+        match = re.search(r"https://([a-z0-9]+)\.supabase\.co", _supabase_url)
+        if match:
+            project_ref = match.group(1)
+
+    if not project_ref:
+        return None
+
+    return (
+        f"postgresql://postgres:{db_password}"
+        f"@db.{project_ref}.supabase.co:5432/postgres?sslmode=require"
+    )
+
+
+_direct_supabase_db_url = _derive_supabase_direct_db_url()
 
 # State classification
 LOW_RUST_STATES = {
@@ -1469,36 +1505,112 @@ async def send_telegram_alerts(hot_deals: list) -> None:
         await send_telegram_alert(deal)
 
 
-async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
-    """Save scored vehicle to Supabase. Min DOS 50 to save."""
-    if supabase_client is None:
+def _prepare_direct_pg_value(value):
+    if isinstance(value, (dict, list)):
+        return psycopg2_extras.Json(value)
+    return value
+
+
+def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
+    if supabase_client is not None:
+        try:
+            lookup = (
+                supabase_client.table("opportunities")
+                .select("id")
+                .eq("listing_url", listing_url)
+                .limit(1)
+                .execute()
+            )
+            if lookup.data:
+                return lookup.data[0].get("id")
+        except Exception as lookup_err:
+            logger.warning("[INGEST] Supabase lookup fallback failed: %s", lookup_err)
+
+    if not _direct_supabase_db_url:
         return None
 
+    try:
+        with psycopg2.connect(_direct_supabase_db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select id
+                    from public.opportunities
+                    where listing_url = %s or listing_id = %s
+                    limit 1
+                    """,
+                    (listing_url, listing_id),
+                )
+                row = cur.fetchone()
+                return str(row[0]) if row and row[0] else None
+    except Exception as lookup_err:
+        logger.warning("[INGEST] Direct PG lookup fallback failed: %s", lookup_err)
+        return None
+
+
+def _save_opportunity_direct_pg(row: dict) -> Optional[str]:
+    if not _direct_supabase_db_url:
+        logger.warning(
+            "[INGEST] Direct PG fallback unavailable; set SUPABASE_DB_URL or SUPABASE_DB_PASSWORD."
+        )
+        return None
+
+    columns = list(row.keys())
+    values = [_prepare_direct_pg_value(row[column]) for column in columns]
+    insert_sql = psycopg2_sql.SQL(
+        "INSERT INTO public.opportunities ({fields}) VALUES ({values}) RETURNING id"
+    ).format(
+        fields=psycopg2_sql.SQL(", ").join(psycopg2_sql.Identifier(column) for column in columns),
+        values=psycopg2_sql.SQL(", ").join(psycopg2_sql.Placeholder() for _ in columns),
+    )
+
+    try:
+        with psycopg2.connect(_direct_supabase_db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(insert_sql, values)
+                inserted = cur.fetchone()
+                return str(inserted[0]) if inserted and inserted[0] else None
+    except psycopg2.errors.UniqueViolation:
+        return _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
+    except Exception as pg_err:
+        logger.error(
+            "[INGEST] Direct PG save FAILED for '%s': %s",
+            (row.get("title") or "unknown")[:80],
+            pg_err,
+        )
+        return None
+
+
+async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
+    """Save scored vehicle to Supabase. Min DOS 50 to save."""
     score = vehicle.get("dos_score", 0)
     if score < 50:
         return None
 
     row = build_opportunity_row(vehicle)
 
-    try:
-        result = supabase_client.table("opportunities").insert(row).execute()
-        if result.data:
-            return result.data[0].get("id")
+    if supabase_client is not None:
+        try:
+            result = supabase_client.table("opportunities").insert(row).execute()
+            if result.data:
+                return result.data[0].get("id")
 
-        lookup = (
-            supabase_client.table("opportunities")
-            .select("id")
-            .eq("listing_url", row["listing_url"])
-            .limit(1)
-            .execute()
-        )
-        if lookup.data:
-            return lookup.data[0].get("id")
-        return None
-    except Exception as e:
-        title = vehicle.get("title", "unknown")[:80]
-        logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
-        return None
+            existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
+            if existing_id:
+                return existing_id
+        except Exception as e:
+            title = vehicle.get("title", "unknown")[:80]
+            logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
+            if "PGRST204" not in str(e):
+                return None
+            logger.warning(
+                "[INGEST] Falling back to direct Postgres insert for '%s' after PostgREST schema error.",
+                title,
+            )
+    else:
+        logger.warning("[INGEST] Supabase client unavailable; using direct Postgres fallback if configured.")
+
+    return _save_opportunity_direct_pg(row)
 
 
 def build_opportunity_row(vehicle: dict) -> dict:
