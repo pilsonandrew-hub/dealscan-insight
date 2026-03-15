@@ -1,0 +1,39 @@
+name: Ingest Health Pager
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+concurrency:
+  group: ingest-health-pager
+  cancel-in-progress: false
+
+jobs:
+  ingest-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      INGEST_HEALTH_NOTIFY_ENABLED: ${{ vars.INGEST_HEALTH_NOTIFY_ENABLED || 'false' }}
+      INGEST_HEALTH_NOTIFY_DRY_RUN: ${{ vars.INGEST_HEALTH_NOTIFY_DRY_RUN || 'true' }}
+      INGEST_HEALTH_CONTEXT: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ingest health pager
+        run: |
+          scripts/page_recent_ingest_health.sh \
+            --actors ds-govdeals ds-publicsurplus

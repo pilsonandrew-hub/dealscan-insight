@@ -101,3 +101,16 @@ python3 scripts/check_recent_ingest_runs.py --env-file .env.live --actors ds-gov
 ```
 
 This exits non-zero when a recent succeeded Apify run is missing a webhook, marked degraded/error, missing the save ledger, or showing save failures. The wrapper defaults to a 12-hour lookback so delayed webhooks/replays do not create noisy false alarms. Wire it into whatever existing job runner already pages on non-zero exit.
+
+Pager wrapper for tonight:
+
+```bash
+scripts/page_recent_ingest_health.sh --env-file .env.live --actors ds-govdeals ds-publicsurplus
+```
+
+Notes:
+
+- Uses `scripts/check_recent_ingest_runs.py` as the health signal and preserves its exit code.
+- Prints the failing check output to stderr and can send a Telegram page with the same summary when `INGEST_HEALTH_NOTIFY_ENABLED=true`.
+- Defaults to `INGEST_HEALTH_NOTIFY_DRY_RUN=true`, so the alert body is rendered locally but not sent until you explicitly flip the env to `false`.
+- The repo now includes a scheduled GitHub Actions runner for this wrapper. If you want Telegram paging from GitHub tonight, set repo variable `INGEST_HEALTH_NOTIFY_ENABLED=true`, set `INGEST_HEALTH_NOTIFY_DRY_RUN=false`, and provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATABASE_URL`, and `APIFY_TOKEN` as repo secrets.
