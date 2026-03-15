@@ -78,6 +78,10 @@ interface OpportunityRow {
   pricing_source?: string;
   pricing_maturity?: Opportunity['pricing_maturity'];
   pricing_updated_at?: string;
+  expected_close_bid?: number;
+  current_bid_trust_score?: number;
+  expected_close_source?: string;
+  auction_stage_hours_remaining?: number;
   manheim_mmr_mid?: number;
   manheim_mmr_low?: number;
   manheim_mmr_high?: number;
@@ -228,6 +232,10 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     pricing_source: typeof row.pricing_source === 'string' ? row.pricing_source : undefined,
     pricing_maturity: typeof row.pricing_maturity === 'string' ? row.pricing_maturity : undefined,
     pricing_updated_at: typeof row.pricing_updated_at === 'string' ? row.pricing_updated_at : undefined,
+    expected_close_bid: row.expected_close_bid ?? undefined,
+    current_bid_trust_score: row.current_bid_trust_score ?? undefined,
+    expected_close_source: typeof row.expected_close_source === 'string' ? row.expected_close_source : undefined,
+    auction_stage_hours_remaining: row.auction_stage_hours_remaining ?? undefined,
     manheim_mmr_mid: row.manheim_mmr_mid ?? undefined,
     manheim_mmr_low: row.manheim_mmr_low ?? undefined,
     manheim_mmr_high: row.manheim_mmr_high ?? undefined,

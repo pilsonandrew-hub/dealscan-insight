@@ -131,6 +131,10 @@ export interface Opportunity {
   pricing_source?: string;
   pricing_maturity?: "live_market" | "market_comp" | "proxy" | "unknown";
   pricing_updated_at?: string;
+  expected_close_bid?: number;
+  current_bid_trust_score?: number;
+  expected_close_source?: string;
+  auction_stage_hours_remaining?: number;
   manheim_mmr_mid?: number;
   manheim_mmr_low?: number;
   manheim_mmr_high?: number;

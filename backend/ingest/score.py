@@ -5,7 +5,7 @@ DOS = (Margin Score × 0.35) + (Velocity Score × 0.25) +
 """
 import functools
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 try:
@@ -447,6 +447,89 @@ def _recon_reserve(mileage: float = None, is_police_or_fleet: bool = False) -> f
     return reserve
 
 
+def _parse_auction_end(auction_end: Optional[str]) -> Optional[datetime]:
+    if not auction_end:
+        return None
+    raw_value = str(auction_end).strip()
+    if not raw_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _auction_stage_hours_remaining(auction_end: Optional[str]) -> Optional[float]:
+    parsed = _parse_auction_end(auction_end)
+    if parsed is None:
+        return None
+    hours_remaining = (parsed - datetime.now(timezone.utc)).total_seconds() / 3600.0
+    return round(max(hours_remaining, 0.0), 2)
+
+
+def resolve_pricing_maturity(
+    *,
+    manheim_source_status: Optional[str],
+    manheim_mmr_mid: Optional[float],
+    pricing_source: Optional[str],
+    retail_comp_price_estimate: Optional[float],
+    retail_comp_count: Optional[int],
+    retail_comp_confidence: Optional[float],
+    mmr_lookup_basis: Optional[str],
+) -> str:
+    if manheim_source_status == "live" and (manheim_mmr_mid or 0) > 0:
+        return "live_market"
+
+    market_comp_sources = {"retail_market_cache", "dealer_sales_history"}
+    if pricing_source in market_comp_sources:
+        return "market_comp"
+    if (retail_comp_price_estimate or 0) > 0 and int(retail_comp_count or 0) > 0:
+        return "market_comp"
+    if (retail_comp_confidence or 0) > 0:
+        return "market_comp"
+
+    if pricing_source == "mmr_proxy":
+        return "proxy"
+    if manheim_source_status in {"fallback", "unavailable"}:
+        return "proxy"
+    if mmr_lookup_basis and mmr_lookup_basis != "unknown":
+        return "proxy"
+
+    return "unknown"
+
+
+def _current_bid_trust_score(
+    auction_stage_hours_remaining: Optional[float],
+    pricing_maturity: str,
+) -> Optional[float]:
+    if auction_stage_hours_remaining is None:
+        return None
+
+    hours_remaining = max(float(auction_stage_hours_remaining), 0.0)
+    if hours_remaining > 72:
+        base_score = 0.15
+    elif hours_remaining > 24:
+        base_score = 0.25
+    elif hours_remaining > 6:
+        base_score = 0.4
+    elif hours_remaining > 1:
+        base_score = 0.6
+    else:
+        base_score = 0.8
+
+    maturity_adjustment = {
+        "live_market": 0.05,
+        "market_comp": 0.0,
+        "proxy": -0.05,
+        "unknown": -0.1,
+    }.get(pricing_maturity, -0.1)
+
+    return round(max(0.05, min(0.9, base_score + maturity_adjustment)), 2)
+
+
 def score_deal(
     bid: float,
     mmr_ca: float,
@@ -532,6 +615,20 @@ def score_deal(
         manheim_range_width_pct=manheim_range_width_pct,
     )
     investment_grade = _investment_grade(retail_ctm_pct, estimated_days_to_sale, segment_tier)
+    pricing_maturity = resolve_pricing_maturity(
+        manheim_source_status=manheim_source_status,
+        manheim_mmr_mid=manheim_mmr_mid,
+        pricing_source=selected_pricing_source,
+        retail_comp_price_estimate=retail_comp_price_estimate,
+        retail_comp_count=retail_comp_count,
+        retail_comp_confidence=retail_comp_confidence,
+        mmr_lookup_basis=mmr_lookup_basis,
+    )
+    auction_stage_hours_remaining = _auction_stage_hours_remaining(auction_end)
+    current_bid_trust_score = _current_bid_trust_score(
+        auction_stage_hours_remaining=auction_stage_hours_remaining,
+        pricing_maturity=pricing_maturity,
+    )
 
     legacy_dos_score = (
         m_score * 0.35
@@ -587,7 +684,12 @@ def score_deal(
         "retail_comp_count": int(retail_comp_count or 0),
         "retail_comp_confidence": round(float(retail_comp_confidence), 3) if retail_comp_confidence is not None else None,
         "pricing_source": selected_pricing_source,
+        "pricing_maturity": pricing_maturity,
         "pricing_updated_at": pricing_updated_at,
+        "expected_close_bid": None,
+        "expected_close_source": None,
+        "current_bid_trust_score": current_bid_trust_score,
+        "auction_stage_hours_remaining": auction_stage_hours_remaining,
         "manheim_mmr_mid": round(float(manheim_mmr_mid), 2) if manheim_mmr_mid is not None else None,
         "manheim_mmr_low": round(float(manheim_mmr_low), 2) if manheim_mmr_low is not None else None,
         "manheim_mmr_high": round(float(manheim_mmr_high), 2) if manheim_mmr_high is not None else None,
