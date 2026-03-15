@@ -561,24 +561,10 @@ async def apify_webhook(
                     .execute()
                 )
                 if existing.data:
-                    logger.info(f"[IDEMPOTENCY] run_id={apify_run_id} already processed; skipping batch")
-                    response = {
-                        "status": "ok",
-                        "run_id": apify_run_id,
-                        "processed": 0,
-                        "skipped": 0,
-                        "hot_deals": 0,
-                        "message": "Duplicate run_id skipped",
-                    }
-                    try:
-                        update_webhook_log(
-                            webhook_log_id,
-                            "processed",
-                            item_count=metadata["item_count"],
-                        )
-                    except Exception as e:
-                        logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
-                    return response
+                    logger.warning(
+                        "[IDEMPOTENCY] run_id=%s has existing rows; replaying batch to avoid partial-run data loss",
+                        apify_run_id,
+                    )
             except Exception as e:
                 logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
 
@@ -657,6 +643,9 @@ async def apify_webhook(
             return response
 
         processed = 0
+        evaluated = 0
+        saved_count = 0
+        failed_save_count = 0
         skipped = 0
         hot_deals = []
         dataset_item_count = len(items)
@@ -691,6 +680,7 @@ async def apify_webhook(
             vehicle["dos_score"] = score_result["dos_score"]
             vehicle["score_breakdown"] = score_result
             vehicle["ingested_at"] = datetime.utcnow().isoformat()
+            evaluated += 1
 
             # $1500 wholesale margin floor — capital protection
             if score_result.get("wholesale_margin", 0) < 1500:
@@ -738,10 +728,19 @@ async def apify_webhook(
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
-            # Only alert and sync Notion on canonical records
-            if not is_dup and vehicle["dos_score"] >= 65:
-                await sync_to_notion(vehicle)
-                notion_sync_count += 1
+            save_succeeded = save_status in {"saved_supabase", "saved_direct_pg", "duplicate_existing"}
+            is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved"} or is_dup
+            if save_succeeded:
+                processed += 1
+                saved_count += 1
+            else:
+                failed_save_count += 1
+
+            # Only alert and sync Notion on newly saved canonical records
+            if save_status in {"saved_supabase", "saved_direct_pg"} and not is_dup and vehicle["dos_score"] >= 65:
+                notion_synced = await sync_to_notion(vehicle)
+                if notion_synced:
+                    notion_sync_count += 1
 
             logger.info(
                 f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
@@ -752,9 +751,7 @@ async def apify_webhook(
                 + f" | save={save_status}"
             )
 
-            processed += 1
-
-            if not is_dup:
+            if not is_existing_listing and save_status in {"saved_supabase", "saved_direct_pg"}:
                 alert_gate = _alert_gate_for_vehicle(vehicle)
                 if alert_gate.get("eligible"):
                     logger.info(
@@ -779,11 +776,13 @@ async def apify_webhook(
             await send_telegram_alerts(hot_deals)
 
         logger.info(
-            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | processed=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
+            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | saved=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
             apify_run_id,
             dataset_id,
             dataset_item_count,
-            processed,
+            evaluated,
+            saved_count,
+            failed_save_count,
             skipped,
             duplicate_count,
             notion_sync_count,
@@ -792,11 +791,15 @@ async def apify_webhook(
             skip_reasons,
         )
 
+        response_status = "degraded" if failed_save_count else "ok"
         response = {
-            "status": "ok",
+            "status": response_status,
             "run_id": apify_run_id,
             "dataset_id": dataset_id,
+            "evaluated": evaluated,
             "processed": processed,
+            "saved": saved_count,
+            "failed_save": failed_save_count,
             "skipped": skipped,
             "duplicates": duplicate_count,
             "notion_sync": notion_sync_count,
@@ -811,7 +814,15 @@ async def apify_webhook(
             ],
         }
         try:
-            update_webhook_log(webhook_log_id, "processed", item_count=dataset_item_count)
+            update_webhook_log(
+                webhook_log_id,
+                "processed" if failed_save_count == 0 else "degraded",
+                item_count=dataset_item_count,
+                error_message=(
+                    None if failed_save_count == 0
+                    else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
+                ),
+            )
         except Exception as e:
             logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
         return response
@@ -1584,7 +1595,7 @@ async def send_telegram_alerts(hot_deals: list) -> None:
 
 
 def _prepare_direct_pg_value(value):
-    if isinstance(value, (dict, list)):
+    if isinstance(value, dict):
         return psycopg2_extras.Json(value)
     return value
 
@@ -1596,15 +1607,26 @@ def _increment_reason_counter(counter: dict, reason: str) -> None:
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
     if supabase_client is not None:
         try:
-            lookup = (
-                supabase_client.table("opportunities")
-                .select("id")
-                .eq("listing_url", listing_url)
-                .limit(1)
-                .execute()
-            )
-            if lookup.data:
-                return lookup.data[0].get("id")
+            if listing_url:
+                lookup = (
+                    supabase_client.table("opportunities")
+                    .select("id")
+                    .eq("listing_url", listing_url)
+                    .limit(1)
+                    .execute()
+                )
+                if lookup.data:
+                    return lookup.data[0].get("id")
+            if listing_id:
+                lookup = (
+                    supabase_client.table("opportunities")
+                    .select("id")
+                    .eq("listing_id", listing_id)
+                    .limit(1)
+                    .execute()
+                )
+                if lookup.data:
+                    return lookup.data[0].get("id")
         except Exception as lookup_err:
             logger.warning("[INGEST] Supabase lookup fallback failed: %s", lookup_err)
 
