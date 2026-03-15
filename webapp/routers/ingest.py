@@ -786,6 +786,41 @@ async def apify_webhook(
         raise
 
 
+def _normalize_auction_end_time(raw_value) -> Optional[str]:
+    if raw_value in {None, ""}:
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value.isoformat()
+
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    iso_candidate = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(iso_candidate).isoformat()
+    except ValueError:
+        pass
+
+    lower_text = text.lower()
+    total_delta = timedelta(0)
+    matched = False
+    for pattern, unit in (
+        (r"(\d+)\s*day", "days"),
+        (r"(\d+)\s*hour", "hours"),
+        (r"(\d+)\s*min", "minutes"),
+    ):
+        match = re.search(pattern, lower_text)
+        if match:
+            matched = True
+            total_delta += timedelta(**{unit: int(match.group(1))})
+
+    if matched:
+        return (datetime.utcnow() + total_delta).isoformat()
+
+    return None
+
+
 def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
     """Normalize raw Apify scraper output to DealerScope vehicle format.
 
@@ -819,7 +854,7 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
         mileage = item.get("mileage") or item.get("meterCount")
 
         # End time: parseforge uses auctionEndUtc
-        auction_end = (
+        auction_end = _normalize_auction_end_time(
             item.get("auctionEndUtc") or
             item.get("auction_end_time") or
             item.get("auction_end_date") or
