@@ -28,11 +28,26 @@ You can override the sources explicitly if the trusted set changes.
 
 ## Usage
 
+Preferred operator step:
+
+```bash
+DATABASE_URL='postgresql://...sslmode=require' \
+python3 scripts/run_live_production_verification.py \
+  --lookback-hours 24 \
+  --probe-outcome-write
+```
+
 Basic recent-window verification:
 
 ```bash
 DATABASE_URL='postgresql://...sslmode=require' \
 python3 scripts/verify_small_set_live_pipe.py --lookback-hours 24
+```
+
+If the DSN is stored in an env file:
+
+```bash
+python3 scripts/verify_small_set_live_pipe.py --env-file .env.live --lookback-hours 24
 ```
 
 Explicit trusted sources:
@@ -71,4 +86,6 @@ python3 scripts/verify_small_set_live_pipe.py \
 ## Operator Notes
 
 - Run `scripts/verify_live_opportunities_schema.py` first if you need to confirm the canonical schema contract.
-- Use this script after a live ingest run to answer operational questions about landing rate, pricing maturity quality, economics coverage, and outcome-field writability on the trusted source subset.
+- Use this script after a live ingest run to answer operational questions about landing rate, pricing maturity quality, economics coverage, synthetic/proxy dependence, weak retail evidence coverage, and outcome-field writability on the trusted source subset.
+- The script now prints truth warnings when the recent window is dominated by proxy or unknown pricing, when usable retail evidence is sparse, or when projected economics rely heavily on synthetic expected-close/acquisition-basis behavior.
+- If the current shell cannot reach live Postgres, verification is still manual. Supply the DSN via `DATABASE_URL`, `--dsn`, or `--env-file`, then rerun.

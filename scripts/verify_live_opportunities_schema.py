@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
 
 import psycopg2
+
+from live_verification_support import get_database_url
 
 
 @dataclass(frozen=True)
@@ -123,17 +124,6 @@ TYPE_ALIASES = {
 def iter_required_columns() -> Iterable[RequiredColumn]:
     return REQUIRED_COLUMNS
 
-
-def get_database_url(explicit_dsn: Optional[str]) -> Optional[str]:
-    if explicit_dsn:
-        return explicit_dsn
-    return (
-        os.getenv("DATABASE_URL")
-        or os.getenv("SUPABASE_DB_URL")
-        or os.getenv("SUPABASE_DATABASE_URL")
-    )
-
-
 def normalize_type(data_type: str, udt_name: str) -> str:
     if data_type == "ARRAY":
         return "array"
@@ -233,6 +223,10 @@ def main() -> int:
     )
     parser.add_argument("--dsn", help="Postgres connection string. Defaults to DATABASE_URL/SUPABASE_DB_URL.")
     parser.add_argument(
+        "--env-file",
+        help="Optional env file to read DATABASE_URL from when it is not exported in the shell.",
+    )
+    parser.add_argument(
         "--print-required",
         action="store_true",
         help="Print the required canonical columns without connecting to a database.",
@@ -243,7 +237,7 @@ def main() -> int:
         print_required_columns()
         return 0
 
-    dsn = get_database_url(args.dsn)
+    dsn = get_database_url(args.dsn, env_file=args.env_file)
     if not dsn:
         print("DATABASE_URL (or --dsn) is required for live verification.", file=sys.stderr)
         print_required_columns()

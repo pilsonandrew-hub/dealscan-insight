@@ -4,26 +4,19 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from typing import Iterable, Optional
 
 import psycopg2
 import psycopg2.extras
 
+from live_verification_support import get_database_url
+
 
 DEFAULT_TRUSTED_SOURCES = ("govdeals", "publicsurplus")
 OUTCOME_PROBE_NOTES = "[probe] live verification write check"
-
-
-def get_database_url(explicit_dsn: Optional[str]) -> Optional[str]:
-    if explicit_dsn:
-        return explicit_dsn
-    return (
-        os.getenv("DATABASE_URL")
-        or os.getenv("SUPABASE_DB_URL")
-        or os.getenv("SUPABASE_DATABASE_URL")
-    )
+RETAIL_EVIDENCE_MIN_COUNT = 2
+RETAIL_EVIDENCE_MIN_CONFIDENCE = 0.60
 
 
 def normalize_sources(raw_sources: Iterable[str]) -> list[str]:
@@ -63,6 +56,28 @@ def fetch_summary(connection, sources: list[str], lookback_hours: int) -> dict:
                 where expected_close_bid is not null
                   and expected_close_bid > 0
               )::int as expected_close_present_rows,
+              count(*) filter (
+                where retail_comp_price_estimate is not null
+                  and retail_comp_price_estimate > 0
+                  and coalesce(retail_comp_count, 0) >= %s
+                  and coalesce(retail_comp_confidence, 0) >= %s
+              )::int as usable_retail_evidence_rows,
+              count(*) filter (
+                where retail_comp_price_estimate is not null
+                  and retail_comp_price_estimate > 0
+                  and (
+                    coalesce(retail_comp_count, 0) < %s
+                    or coalesce(retail_comp_confidence, 0) < %s
+                  )
+              )::int as weak_retail_evidence_rows,
+              count(*) filter (
+                where pricing_maturity = 'proxy'
+                  and acquisition_basis_source in ('expected_close', 'blend_current_bid_expected_close')
+              )::int as proxy_basis_rows,
+              count(*) filter (
+                where pricing_maturity in ('proxy', 'unknown')
+                  or pricing_maturity is null
+              )::int as immature_pricing_rows,
               count(*) filter (where current_bid_trust_score is not null)::int as trust_score_present_rows,
               count(*) filter (
                 where current_bid_trust_score is not null
@@ -95,7 +110,14 @@ def fetch_summary(connection, sources: list[str], lookback_hours: int) -> dict:
             where processed_at >= now() - (%s * interval '1 hour')
               and lower(source) = any(%s)
             """,
-            (lookback_hours, sources),
+            (
+                RETAIL_EVIDENCE_MIN_COUNT,
+                RETAIL_EVIDENCE_MIN_CONFIDENCE,
+                RETAIL_EVIDENCE_MIN_COUNT,
+                RETAIL_EVIDENCE_MIN_CONFIDENCE,
+                lookback_hours,
+                sources,
+            ),
         )
         row = cursor.fetchone()
         return dict(row or {})
@@ -143,12 +165,16 @@ def fetch_recent_samples(
               processed_at,
               pricing_maturity,
               pricing_source,
+              retail_comp_count,
+              retail_comp_confidence,
               current_bid,
               current_bid_trust_score,
               expected_close_bid,
               expected_close_source,
               acquisition_price_basis,
+              acquisition_basis_source,
               projected_total_cost,
+              mmr_lookup_basis,
               investment_grade,
               bid_headroom,
               roi_per_day,
@@ -246,9 +272,19 @@ def print_summary(summary: dict) -> None:
         f"trust_score={summary.get('trust_score_present_rows', 0)} ({pct(int(summary.get('trust_score_present_rows') or 0), total)})"
     )
     print(
+        "- Retail evidence coverage: "
+        f"usable={summary.get('usable_retail_evidence_rows', 0)} ({pct(int(summary.get('usable_retail_evidence_rows') or 0), total)}), "
+        f"weak={summary.get('weak_retail_evidence_rows', 0)} ({pct(int(summary.get('weak_retail_evidence_rows') or 0), total)})"
+    )
+    print(
         "- Economics coverage: "
         f"projected_economics_present={summary.get('projected_economics_present_rows', 0)} ({pct(int(summary.get('projected_economics_present_rows') or 0), total)}), "
         f"missing_key_fields={summary.get('missing_key_field_rows', 0)} ({pct(int(summary.get('missing_key_field_rows') or 0), total)})"
+    )
+    print(
+        "- Synthetic dependence: "
+        f"immature_pricing={summary.get('immature_pricing_rows', 0)} ({pct(int(summary.get('immature_pricing_rows') or 0), total)}), "
+        f"proxy_basis_rows={summary.get('proxy_basis_rows', 0)} ({pct(int(summary.get('proxy_basis_rows') or 0), total)})"
     )
     print(
         "- Trust threshold coverage: "
@@ -263,6 +299,45 @@ def print_summary(summary: dict) -> None:
         "- Time window observed: "
         f"{summary.get('oldest_processed_at') or 'n/a'} -> {summary.get('newest_processed_at') or 'n/a'}"
     )
+
+
+def print_truth_warnings(summary: dict) -> None:
+    total = int(summary.get("landed_rows") or 0)
+    if total <= 0:
+        return
+
+    warnings: list[str] = []
+    immature_pricing_rows = int(summary.get("immature_pricing_rows") or 0)
+    usable_retail_rows = int(summary.get("usable_retail_evidence_rows") or 0)
+    weak_retail_rows = int(summary.get("weak_retail_evidence_rows") or 0)
+    proxy_basis_rows = int(summary.get("proxy_basis_rows") or 0)
+    trust_score_rows = int(summary.get("trust_score_gte_025_rows") or 0)
+
+    if immature_pricing_rows / total >= 0.50:
+        warnings.append(
+            f"high immature pricing prevalence: {immature_pricing_rows}/{total} rows are proxy or unknown priced"
+        )
+    if usable_retail_rows / total < 0.25:
+        warnings.append(
+            f"weak retail evidence coverage: only {usable_retail_rows}/{total} rows meet the retail evidence threshold"
+        )
+    if weak_retail_rows > 0:
+        warnings.append(
+            f"partial retail evidence present on {weak_retail_rows}/{total} rows; do not treat those rows as mature retail pricing"
+        )
+    if proxy_basis_rows / total >= 0.25:
+        warnings.append(
+            f"projected economics depend on synthetic close/basis logic for {proxy_basis_rows}/{total} proxy-priced rows"
+        )
+    if trust_score_rows / total < 0.50:
+        warnings.append(
+            f"current bid trust is weak across the window: only {trust_score_rows}/{total} rows meet the 0.25 trust threshold"
+        )
+
+    if warnings:
+        print("\nTruth warnings")
+        for warning in warnings:
+            print(f"- {warning}")
 
 
 def print_source_breakdown(rows: list[dict]) -> None:
@@ -290,8 +365,13 @@ def print_recent_samples(rows: list[dict]) -> None:
         print(
             "- "
             f"{row.get('processed_at')} | {row.get('source')} | {row.get('pricing_maturity') or 'unknown'} | "
+            f"{row.get('pricing_source') or 'unknown'} | "
             f"trust={row.get('current_bid_trust_score') if row.get('current_bid_trust_score') is not None else 'n/a'} | "
-            f"basis={row.get('acquisition_price_basis') if row.get('acquisition_price_basis') is not None else 'n/a'} | "
+            f"retail_count={row.get('retail_comp_count') if row.get('retail_comp_count') is not None else 'n/a'} | "
+            f"retail_conf={row.get('retail_comp_confidence') if row.get('retail_comp_confidence') is not None else 'n/a'} | "
+            f"basis={row.get('acquisition_price_basis') if row.get('acquisition_price_basis') is not None else 'n/a'} ({row.get('acquisition_basis_source') or 'n/a'}) | "
+            f"expected_close={row.get('expected_close_bid') if row.get('expected_close_bid') is not None else 'n/a'} ({row.get('expected_close_source') or 'n/a'}) | "
+            f"lookup={row.get('mmr_lookup_basis') or 'n/a'} | "
             f"projected_total={row.get('projected_total_cost') if row.get('projected_total_cost') is not None else 'n/a'} | "
             f"grade={row.get('investment_grade') or 'n/a'} | headroom={row.get('bid_headroom') if row.get('bid_headroom') is not None else 'n/a'} | "
             f"outcome_recorded_at={row.get('outcome_recorded_at') or 'n/a'} | {title}"
@@ -303,6 +383,10 @@ def main() -> int:
         description="Verify the live pipe on a small trusted source set using the canonical opportunities table."
     )
     parser.add_argument("--dsn", help="Postgres connection string. Defaults to DATABASE_URL/SUPABASE_DB_URL.")
+    parser.add_argument(
+        "--env-file",
+        help="Optional env file to read DATABASE_URL from when it is not exported in the shell.",
+    )
     parser.add_argument(
         "--sources",
         nargs="+",
@@ -332,7 +416,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    dsn = get_database_url(args.dsn)
+    dsn = get_database_url(args.dsn, env_file=args.env_file)
     if not dsn:
         print("DATABASE_URL (or --dsn) is required for live pipe verification.", file=sys.stderr)
         return 2
@@ -355,6 +439,7 @@ def main() -> int:
             + f" | lookback_hours={args.lookback_hours}"
         )
         print_summary(summary)
+        print_truth_warnings(summary)
         print_source_breakdown(fetch_source_breakdown(connection, sources=sources, lookback_hours=args.lookback_hours))
         print_recent_samples(
             fetch_recent_samples(

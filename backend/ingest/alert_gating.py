@@ -80,6 +80,11 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
         "bid_headroom": _pick_numeric(record.get("bid_headroom"), breakdown.get("bid_headroom")) or 0.0,
         "pricing_maturity": pricing_maturity,
         "pricing_source": pricing_source,
+        "retail_comp_count": _pick_numeric(record.get("retail_comp_count"), breakdown.get("retail_comp_count")),
+        "retail_comp_confidence": _pick_numeric(
+            record.get("retail_comp_confidence"),
+            breakdown.get("retail_comp_confidence"),
+        ),
         "current_bid_trust_score": _pick_numeric(
             record.get("current_bid_trust_score"),
             breakdown.get("current_bid_trust_score"),
@@ -89,12 +94,20 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
             record.get("acquisition_price_basis"),
             breakdown.get("acquisition_price_basis"),
         ),
+        "acquisition_basis_source": _pick_text(
+            record.get("acquisition_basis_source"),
+            breakdown.get("acquisition_basis_source"),
+        ) or "unknown",
         "projected_total_cost": _pick_numeric(
             record.get("projected_total_cost"),
             breakdown.get("projected_total_cost"),
             record.get("total_cost"),
             breakdown.get("total_cost"),
         ),
+        "mmr_lookup_basis": _pick_text(
+            record.get("mmr_lookup_basis"),
+            breakdown.get("mmr_lookup_basis"),
+        ) or "unknown",
         "max_bid": _pick_numeric(record.get("max_bid"), breakdown.get("max_bid")),
         "expected_close_bid": _pick_numeric(
             record.get("expected_close_bid"),

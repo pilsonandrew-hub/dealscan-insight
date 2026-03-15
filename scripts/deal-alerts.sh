@@ -96,8 +96,9 @@ except Exception:
 deals = supabase_get(
     "opportunities?select=id,title,year,make,model,state,current_bid,dos_score,listing_url,image_url,"
     "investment_grade,roi_per_day,bid_headroom,max_bid,processed_at,pricing_maturity,pricing_source,"
-    "current_bid_trust_score,mmr_confidence_proxy,acquisition_price_basis,projected_total_cost,"
-    "expected_close_bid,expected_close_source,gross_margin"
+    "current_bid_trust_score,mmr_confidence_proxy,acquisition_price_basis,acquisition_basis_source,"
+    "projected_total_cost,expected_close_bid,expected_close_source,gross_margin,mmr_lookup_basis,"
+    "retail_comp_count,retail_comp_confidence"
     f"&or=(dos_score.gte.{HOT_DEAL_MIN_SCORE},investment_grade.eq.Gold,investment_grade.eq.Platinum)"
     f"&order=dos_score.desc&limit={max(ALERT_LIMIT * 3, 20)}"
 )
@@ -159,6 +160,21 @@ for deal in new_alerts:
     pricing_maturity = signals.get("pricing_maturity", deal.get("pricing_maturity", "unknown"))
     pricing_source = signals.get("pricing_source", deal.get("pricing_source", "unknown"))
     expected_close_source = signals.get("expected_close_source", deal.get("expected_close_source", "unknown"))
+    acquisition_basis_source = signals.get("acquisition_basis_source", deal.get("acquisition_basis_source", "unknown"))
+    mmr_lookup_basis = signals.get("mmr_lookup_basis", deal.get("mmr_lookup_basis", "unknown"))
+    retail_comp_count = signals.get("retail_comp_count", deal.get("retail_comp_count"))
+    retail_comp_confidence = signals.get("retail_comp_confidence", deal.get("retail_comp_confidence"))
+    truth_note = ""
+    if pricing_maturity == "proxy":
+        truth_note = (
+            "⚠️ Proxy-priced: expected close and basis are synthetic."
+            f" Lookup basis: {mmr_lookup_basis}"
+        )
+    elif retail_comp_count not in (None, ""):
+        truth_note = (
+            f"🧾 Retail evidence: count={int(float(retail_comp_count))}"
+            f", conf={retail_comp_confidence if retail_comp_confidence is not None else 'n/a'}"
+        )
 
     if alert_type == "platinum":
         roi_day = float(deal.get("roi_per_day") or 0)
@@ -176,7 +192,9 @@ for deal in new_alerts:
             f"🧭 Pricing: <b>{pricing_maturity}</b> via {pricing_source}\n"
             f"🔐 Trust/Conf: <b>{trust_score if trust_score is not None else 'n/a'}</b> / <b>{confidence if confidence is not None else 'n/a'}</b>\n"
             f"🧮 Expected close: <b>{expected_close_source}</b>\n"
+            f"📐 Basis: <b>{acquisition_basis_source}</b>\n"
             f"📍 {state}\n"
+            f"{truth_note}\n"
             f"\n<a href=\"{url}\">View on auction site →</a>"
         )
     else:
@@ -190,6 +208,8 @@ for deal in new_alerts:
             f"🧭 Pricing: <b>{pricing_maturity}</b> via {pricing_source}\n"
             f"🔐 Trust/Conf: <b>{trust_score if trust_score is not None else 'n/a'}</b> / <b>{confidence if confidence is not None else 'n/a'}</b>\n"
             f"🧮 Expected close: <b>{expected_close_source}</b>\n"
+            f"📐 Basis: <b>{acquisition_basis_source}</b>\n"
+            f"{truth_note}\n"
             f"\n<a href=\"{url}\">View on auction site →</a>"
         )
 

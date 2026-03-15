@@ -30,12 +30,31 @@ It does not fake verification. It connects to Postgres, reads `information_schem
 
 ## Usage
 
+Preferred operator step:
+
+```bash
+DATABASE_URL='postgresql://...sslmode=require' \
+python3 scripts/run_live_production_verification.py --lookback-hours 24
+```
+
+If the DSN is stored in an env file instead of the shell:
+
+```bash
+python3 scripts/run_live_production_verification.py --env-file .env.live --lookback-hours 24
+```
+
 1. Get the live Postgres connection string for the Supabase project.
    Use the pooled or direct connection string from Supabase project settings.
 2. Run:
 
 ```bash
 DATABASE_URL='postgresql://...sslmode=require' python3 scripts/verify_live_opportunities_schema.py
+```
+
+Or with an env file:
+
+```bash
+python3 scripts/verify_live_opportunities_schema.py --env-file .env.live
 ```
 
 If you only want the required column list without connecting:
@@ -59,3 +78,5 @@ python3 scripts/verify_live_opportunities_schema.py --dsn 'postgresql://...sslmo
 ## Operator Note
 
 This script is intentionally strict about the canonical `opportunities` path. It does not validate `market_prices` or `dealer_sales` as launch foundations, because they are not treated as canonical live truth in the current backend.
+
+If you cannot reach the live database from the current shell, the manual boundary is simple: obtain the live Postgres DSN, then rerun the wrapper or this script with `DATABASE_URL`, `--dsn`, or `--env-file`. Verification is not considered complete until one of those live runs succeeds.
