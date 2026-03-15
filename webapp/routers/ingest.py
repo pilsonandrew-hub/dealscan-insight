@@ -546,8 +546,39 @@ async def apify_webhook(
             except Exception as e:
                 logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
 
-        # Extract and validate dataset ID
-        dataset_id = payload.get("resource", {}).get("defaultDatasetId", "")
+        # Extract and validate dataset ID. Some Apify webhook payloads omit
+        # resource.defaultDatasetId even though the run itself has it, so fall
+        # back to resolving the run details directly from Apify before giving up.
+        resource = payload.get("resource", {}) if isinstance(payload.get("resource"), dict) else {}
+        dataset_id = (
+            resource.get("defaultDatasetId")
+            or payload.get("defaultDatasetId")
+            or payload.get("datasetId")
+            or payload.get("defaultDatasetId")
+            or ""
+        )
+
+        if not dataset_id and apify_run_id and os.getenv("APIFY_TOKEN", ""):
+            import httpx
+            apify_token = os.getenv("APIFY_TOKEN", "")
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    run_resp = await client.get(
+                        f"https://api.apify.com/v2/actor-runs/{apify_run_id}",
+                        headers={"Authorization": f"Bearer {apify_token}"},
+                    )
+                    run_resp.raise_for_status()
+                    run_data = run_resp.json().get("data", {})
+                    dataset_id = run_data.get("defaultDatasetId", "") or ""
+                    if dataset_id:
+                        logger.info(
+                            f"[INGEST] Resolved missing dataset_id via actor run lookup for run_id={apify_run_id}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"[INGEST] Unable to resolve dataset_id from actor run {apify_run_id}: {e}"
+                )
+
         if not dataset_id:
             response = {"status": "ok", "message": "No dataset to process"}
             try:
