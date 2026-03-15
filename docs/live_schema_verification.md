@@ -2,6 +2,8 @@
 
 This is the operator check for the March 2026 launch-safe `public.opportunities` path.
 
+For live-pipe verification on a small trusted source set, use `docs/live_small_set_verification.md`.
+
 It verifies the columns the current backend actually expects across:
 
 - ingest writes in `webapp/routers/ingest.py`
