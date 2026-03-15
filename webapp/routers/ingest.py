@@ -753,6 +753,16 @@ async def apify_webhook(
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
+            _record_delivery_log(
+                run_id=vehicle.get("run_id") or apify_run_id,
+                listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                listing_url=vehicle.get("listing_url"),
+                opportunity_id=saved_opportunity_id,
+                channel="db_save",
+                status=save_status,
+                error_message=None if save_status not in {"supabase_error", "direct_pg_error", "duplicate_unresolved", "direct_pg_unavailable"} else save_status,
+            )
+
             inserted_success = save_status in {"saved_supabase", "saved_direct_pg"}
             existing_success = save_status == "duplicate_existing"
             save_succeeded = inserted_success or existing_success
@@ -970,6 +980,7 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
         source = item.get("source_site") or item.get("source") or "govdeals"
 
         normalized = {
+            "listing_id": _compute_listing_id(source, listing_url),
             "title": title,
             "title_status": item.get("title_status") or item.get("titleStatus") or "",
             "current_bid": current_bid,
@@ -1342,6 +1353,11 @@ async def sync_to_notion(vehicle: dict) -> bool:
         return False
 
     listing_url = vehicle.get("listing_url") or ""
+    run_id = vehicle.get("run_id") or "unknown"
+    listing_id = vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", listing_url)
+    existing_delivery = _delivery_log_lookup(run_id, listing_id, "notion_sync")
+    if existing_delivery and existing_delivery.get("status") == "sent":
+        return True
 
     score = vehicle.get("dos_score", 0)
     breakdown = vehicle.get("score_breakdown", {})
@@ -1433,7 +1449,17 @@ async def sync_to_notion(vehicle: dict) -> bool:
                 if query_resp.status_code == 200:
                     existing_results = query_resp.json().get("results") or []
                     if existing_results:
+                        page_id = existing_results[0].get("id")
                         logger.info("[NOTION] Existing page found for listing_url=%s; skipping create", listing_url)
+                        _record_delivery_log(
+                            run_id=run_id,
+                            listing_id=listing_id,
+                            listing_url=listing_url,
+                            opportunity_id=vehicle.get("opportunity_id"),
+                            channel="notion_sync",
+                            status="sent",
+                            external_id=page_id,
+                        )
                         return True
                 else:
                     logger.warning(f"[NOTION] Query failed: {query_resp.status_code} {query_resp.text[:200]}")
@@ -1444,16 +1470,51 @@ async def sync_to_notion(vehicle: dict) -> bool:
                 json={"parent": {"database_id": notion_db_id}, "properties": props},
             )
             if resp.status_code == 200:
+                page_id = resp.json().get("id")
+                _record_delivery_log(
+                    run_id=run_id,
+                    listing_id=listing_id,
+                    listing_url=listing_url,
+                    opportunity_id=vehicle.get("opportunity_id"),
+                    channel="notion_sync",
+                    status="sent",
+                    external_id=page_id,
+                )
                 return True
             logger.warning(f"[NOTION] Failed to sync: {resp.status_code} {resp.text[:200]}")
+            _record_delivery_log(
+                run_id=run_id,
+                listing_id=listing_id,
+                listing_url=listing_url,
+                opportunity_id=vehicle.get("opportunity_id"),
+                channel="notion_sync",
+                status="failed",
+                error_message=f"http_{resp.status_code}",
+            )
             return False
     except Exception as e:
         logger.error(f"[NOTION] Sync error (non-fatal): {e}")
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=vehicle.get("opportunity_id"),
+            channel="notion_sync",
+            status="failed",
+            error_message=str(e),
+        )
         return False
 
 
 async def send_telegram_alert(deal: dict) -> Optional[str]:
     """Send a single Telegram alert, log the receipt, and return the Telegram message_id."""
+    run_id = deal.get("run_id") or "unknown"
+    listing_url = deal.get("listing_url") or ""
+    listing_id = deal.get("listing_id") or _compute_listing_id(deal.get("source_site") or "", listing_url)
+    existing_delivery = _delivery_log_lookup(run_id, listing_id, "telegram_alert")
+    if existing_delivery and existing_delivery.get("status") == "sent":
+        return existing_delivery.get("external_id")
+
     # Kill switch
     if os.getenv("ALERTS_ENABLED", "false").lower() != "true":
         logger.info("[ALERTS DISABLED] skipping alert")
@@ -1483,7 +1544,6 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             logger.warning(f"[SUPPRESSION CHECK] failed: {e}")
 
     # Per-run alert cap (max 5)
-    run_id = deal.get("run_id", "unknown")
     if alerts_this_run.get(run_id, 0) >= 5:
         logger.info(f"[ALERT CAP] max alerts reached for run {run_id}")
         return None
@@ -1581,15 +1641,42 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             payload = resp.json()
     except Exception as e:
         logger.error(f"[TELEGRAM] Alert failed (non-fatal): {e}")
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="failed",
+            error_message=str(e),
+        )
         return None
 
     message_id = payload.get("result", {}).get("message_id")
     if message_id is None:
         logger.warning(f"[TELEGRAM] Missing message_id in response for run_id={deal.get('run_id')}")
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="failed",
+            error_message="missing_message_id",
+        )
         return None
 
     message_id_str = str(message_id)
     deal["message_id"] = message_id_str
+    _record_delivery_log(
+        run_id=run_id,
+        listing_id=listing_id,
+        listing_url=listing_url,
+        opportunity_id=deal.get("opportunity_id"),
+        channel="telegram_alert",
+        status="sent",
+        external_id=message_id_str,
+    )
     await insert_alert_log(deal, message_id_str)
 
     # Also send to Slack #general (non-blocking — never fail the Telegram receipt on Slack error)
@@ -1663,6 +1750,70 @@ def _prepare_direct_pg_value(value):
 
 def _increment_reason_counter(counter: dict, reason: str) -> None:
     counter[reason] = counter.get(reason, 0) + 1
+
+
+def _delivery_log_lookup(run_id: str, listing_id: str, channel: str) -> Optional[dict]:
+    if supabase_client is None or not run_id or not listing_id or not channel:
+        return None
+    try:
+        result = (
+            supabase_client.table("ingest_delivery_log")
+            .select("id,status,attempt_count,external_id")
+            .eq("run_id", run_id)
+            .eq("listing_id", listing_id)
+            .eq("channel", channel)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0]
+    except Exception as e:
+        logger.warning("[DELIVERY_LOG] lookup failed for %s/%s/%s: %s", run_id, listing_id, channel, e)
+    return None
+
+
+def _record_delivery_log(
+    *,
+    run_id: str,
+    listing_id: str,
+    channel: str,
+    status: str,
+    listing_url: Optional[str] = None,
+    opportunity_id: Optional[str] = None,
+    external_id: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    if supabase_client is None or not run_id or not listing_id or not channel:
+        return
+
+    existing = _delivery_log_lookup(run_id, listing_id, channel)
+    now_iso = datetime.utcnow().isoformat()
+    row = {
+        "run_id": run_id,
+        "listing_id": listing_id,
+        "listing_url": listing_url,
+        "opportunity_id": opportunity_id,
+        "channel": channel,
+        "status": status,
+        "external_id": external_id,
+        "error_message": error_message,
+        "updated_at": now_iso,
+    }
+    try:
+        if existing and existing.get("id"):
+            row["attempt_count"] = int(existing.get("attempt_count") or 0) + 1
+            (
+                supabase_client.table("ingest_delivery_log")
+                .update(row)
+                .eq("id", existing["id"])
+                .execute()
+            )
+        else:
+            row["attempt_count"] = 1
+            row["created_at"] = now_iso
+            supabase_client.table("ingest_delivery_log").insert(row).execute()
+    except Exception as e:
+        logger.warning("[DELIVERY_LOG] record failed for %s/%s/%s: %s", run_id, listing_id, channel, e)
 
 
 def _compute_listing_id(source: str, listing_url: str) -> str:
