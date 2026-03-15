@@ -1026,14 +1026,20 @@ def _fallback_score(vehicle: dict) -> dict:
     current_bid_trust_score = None
     pricing_maturity = "proxy"
     try:
-        from backend.ingest.score import _auction_stage_hours_remaining, _current_bid_trust_score
+        from backend.ingest.score import (
+            _auction_stage_hours_remaining,
+            _current_bid_trust_score,
+            _round_price_basis,
+        )
 
         auction_stage_hours_remaining = _auction_stage_hours_remaining(vehicle.get("auction_end_time"))
         current_bid_trust_score = _current_bid_trust_score(
             auction_stage_hours_remaining=auction_stage_hours_remaining,
             pricing_maturity=pricing_maturity,
         )
+        acquisition_price_basis = _round_price_basis(vehicle.get("current_bid") or 0)
     except Exception:
+        acquisition_price_basis = vehicle.get("current_bid") or 0
         pass
     return {
         "dos_score": min(100, round(score, 1)),
@@ -1053,10 +1059,13 @@ def _fallback_score(vehicle: dict) -> dict:
         "pricing_source": "mmr_proxy",
         "pricing_maturity": pricing_maturity,
         "pricing_updated_at": None,
-        "expected_close_bid": None,
-        "expected_close_source": None,
+        "expected_close_bid": acquisition_price_basis,
+        "expected_close_source": "fallback_current_bid_only",
         "current_bid_trust_score": current_bid_trust_score,
         "auction_stage_hours_remaining": auction_stage_hours_remaining,
+        "acquisition_price_basis": acquisition_price_basis,
+        "acquisition_basis_source": "current_bid_fallback",
+        "projected_total_cost": acquisition_price_basis,
         "manheim_mmr_mid": None,
         "manheim_mmr_low": None,
         "manheim_mmr_high": None,
@@ -1390,7 +1399,13 @@ def build_opportunity_row(vehicle: dict) -> dict:
         buyer_premium_pct = float(buyer_premium_pct)
         if buyer_premium_pct > 1:
             buyer_premium_pct /= 100.0
-    buyer_premium = round(current_bid * buyer_premium_pct, 2)
+    projected_buyer_premium = score_result.get("buyer_premium_amount")
+    if projected_buyer_premium is None:
+        projected_buyer_premium = score_result.get("premium")
+    if projected_buyer_premium is not None:
+        buyer_premium = round(float(projected_buyer_premium), 2)
+    else:
+        buyer_premium = round(current_bid * buyer_premium_pct, 2)
     doc_fee = float(score_result.get("doc_fee", 75) or 75)
     auction_fees = round(doc_fee, 2)
     condition_grade = _compute_condition_grade(
@@ -1421,6 +1436,9 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "auction_fees": auction_fees,
         "recon_reserve": score_result.get("recon_reserve"),
         "total_cost": score_result.get("total_cost"),
+        "projected_total_cost": score_result.get("projected_total_cost", score_result.get("total_cost")),
+        "acquisition_price_basis": score_result.get("acquisition_price_basis"),
+        "acquisition_basis_source": score_result.get("acquisition_basis_source"),
         "gross_margin": score_result.get("gross_margin", score_result.get("margin")),
         "retail_asking_price_estimate": score_result.get("retail_asking_price_estimate"),
         "retail_comp_price_estimate": score_result.get("retail_comp_price_estimate"),

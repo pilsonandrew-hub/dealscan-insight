@@ -120,8 +120,11 @@ export interface Opportunity {
   profit_margin: number;
   source_site: string;
   current_bid: number;
+  acquisition_price_basis?: number;
+  acquisition_basis_source?: "current_bid" | "expected_close" | "blend_current_bid_expected_close" | "current_bid_fallback";
   buyer_premium?: number;
   recon_reserve?: number;
+  projected_total_cost?: number;
   vin?: string;
   make: string;
   model: string;

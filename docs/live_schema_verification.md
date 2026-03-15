@@ -22,6 +22,7 @@ It verifies the columns the current backend actually expects across:
 - `20260314_proxy_scoring_upgrade.sql`
 - `20260314_launch_alignment.sql`
 - `20260315_expected_close_groundwork.sql`
+- `20260315_price_basis_resolver.sql`
 
 It does not fake verification. It connects to Postgres, reads `information_schema.columns`, and reports missing or mismatched columns.
 

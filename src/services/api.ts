@@ -50,8 +50,11 @@ interface OpportunityRow {
   estimated_sale_price?: number;
   total_cost?: number;
   acquisition_cost?: number;
+  projected_total_cost?: number;
   current_bid?: number;
   buy_now_price?: number;
+  acquisition_price_basis?: number;
+  acquisition_basis_source?: string;
   gross_margin?: number;
   potential_profit?: number;
   profit?: number;
@@ -140,7 +143,7 @@ function getRowMMR(row: OpportunityRow): number {
 }
 
 function getRowTotalCost(row: OpportunityRow): number {
-  return row.total_cost ?? row.acquisition_cost ?? row.current_bid ?? row.buy_now_price ?? 0;
+  return row.projected_total_cost ?? row.total_cost ?? row.acquisition_cost ?? row.current_bid ?? row.buy_now_price ?? 0;
 }
 
 function normalizeROI(value: number): number {
@@ -206,6 +209,9 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     current_bid: currentBid,
     expected_price: getRowMMR(row),
     acquisition_cost: totalCost,
+    projected_total_cost: row.projected_total_cost ?? undefined,
+    acquisition_price_basis: row.acquisition_price_basis ?? undefined,
+    acquisition_basis_source: typeof row.acquisition_basis_source === 'string' ? row.acquisition_basis_source : undefined,
     profit: getRowProfit(row),
     roi: getRowROI(row),
     confidence: row.confidence_score,
