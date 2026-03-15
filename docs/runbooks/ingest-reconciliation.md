@@ -54,6 +54,13 @@ python3 scripts/reconcile_apify_ingest_runs.py \
 - `db_save_failures`: inspect `db_save` statuses for `supabase_error`, `direct_pg_error`, `direct_pg_unavailable`, or `duplicate_unresolved`.
 - `no_db_landing`: Apify produced items, but neither `opportunities` nor `db_save` shows a successful landing. Treat this as a replay candidate.
 
+Current save fallback behavior:
+
+- `saved_supabase`: Supabase insert succeeded directly.
+- `saved_direct_pg`: Supabase insert failed or returned no row, and the direct Postgres fallback inserted successfully.
+- `duplicate_existing`: a unique conflict was resolved by looking up the existing `opportunities.id`; this does not fall through to direct Postgres.
+- `supabase_error`: legacy pre-fix status, or an unexpected regression if it appears on newly processed runs. Verify the app version before replaying.
+
 4. Deep-dive any single run id with direct SQL.
 
 ```sql

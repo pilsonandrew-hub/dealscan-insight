@@ -1964,11 +1964,8 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                     return existing_id
                 vehicle["_save_status"] = "duplicate_unresolved"
                 return None
-            if "PGRST204" not in error_text:
-                vehicle["_save_status"] = "supabase_error"
-                return None
             logger.warning(
-                "[INGEST] Falling back to direct Postgres insert for '%s' after PostgREST schema error.",
+                "[INGEST] Falling back to direct Postgres insert for '%s' after Supabase write failure.",
                 title,
             )
     else:
