@@ -455,6 +455,24 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
         return {"is_duplicate": False, "canonical_record_id": None}
 
 
+def _parse_datetime_utc(raw_value) -> Optional[datetime]:
+    if raw_value in {None, ""}:
+        return None
+    if isinstance(raw_value, datetime):
+        dt = raw_value
+    else:
+        text = str(raw_value).strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def extract_apify_webhook_metadata(payload: dict) -> dict:
     resource = payload.get("resource", {}) if isinstance(payload, dict) else {}
     item_count = None
@@ -481,6 +499,9 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         "actor_id": resource.get("actId") or resource.get("actorId") or payload.get("actor_id"),
         "run_id": resource.get("id") or payload.get("run_id"),
         "item_count": item_count,
+        "created_at": _parse_datetime_utc(
+            payload.get("createdAt") or resource.get("createdAt") or resource.get("startedAt")
+        ),
     }
 
 
@@ -662,7 +683,11 @@ async def apify_webhook(
         )
 
         for item in items:
-            vehicle = normalize_apify_vehicle(item, apify_run_id)
+            vehicle = normalize_apify_vehicle(
+                item,
+                apify_run_id,
+                default_time_anchor=metadata.get("created_at"),
+            )
             if vehicle is None:
                 skipped += 1
                 _increment_reason_counter(skip_reasons, "normalize_rejected")
@@ -728,16 +753,19 @@ async def apify_webhook(
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
-            save_succeeded = save_status in {"saved_supabase", "saved_direct_pg", "duplicate_existing"}
+            inserted_success = save_status in {"saved_supabase", "saved_direct_pg"}
+            existing_success = save_status == "duplicate_existing"
+            save_succeeded = inserted_success or existing_success
             is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved"} or is_dup
             if save_succeeded:
                 processed += 1
-                saved_count += 1
+                if inserted_success:
+                    saved_count += 1
             else:
                 failed_save_count += 1
 
-            # Only alert and sync Notion on newly saved canonical records
-            if save_status in {"saved_supabase", "saved_direct_pg"} and not is_dup and vehicle["dos_score"] >= 65:
+            # Replay-safe side effects for canonical records; downstream sinks dedupe independently.
+            if save_succeeded and not is_dup and vehicle["dos_score"] >= 65:
                 notion_synced = await sync_to_notion(vehicle)
                 if notion_synced:
                     notion_sync_count += 1
@@ -776,12 +804,13 @@ async def apify_webhook(
             await send_telegram_alerts(hot_deals)
 
         logger.info(
-            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | saved=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
+            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | inserted=%s | existing=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
             apify_run_id,
             dataset_id,
             dataset_item_count,
             evaluated,
             saved_count,
+            save_outcomes.get("duplicate_existing", 0),
             failed_save_count,
             skipped,
             duplicate_count,
@@ -798,6 +827,8 @@ async def apify_webhook(
             "dataset_id": dataset_id,
             "evaluated": evaluated,
             "processed": processed,
+            "inserted": saved_count,
+            "existing": save_outcomes.get("duplicate_existing", 0),
             "saved": saved_count,
             "failed_save": failed_save_count,
             "skipped": skipped,
@@ -840,21 +871,20 @@ async def apify_webhook(
         raise
 
 
-def _normalize_auction_end_time(raw_value) -> Optional[str]:
+def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] = None) -> Optional[str]:
     if raw_value in {None, ""}:
         return None
     if isinstance(raw_value, datetime):
-        return raw_value.isoformat()
+        dt = _parse_datetime_utc(raw_value)
+        return dt.isoformat() if dt else None
 
     text = str(raw_value).strip()
     if not text:
         return None
 
-    iso_candidate = text.replace("Z", "+00:00")
-    try:
-        return datetime.fromisoformat(iso_candidate).isoformat()
-    except ValueError:
-        pass
+    parsed_absolute = _parse_datetime_utc(text)
+    if parsed_absolute:
+        return parsed_absolute.isoformat()
 
     lower_text = text.lower()
     total_delta = timedelta(0)
@@ -870,12 +900,15 @@ def _normalize_auction_end_time(raw_value) -> Optional[str]:
             total_delta += timedelta(**{unit: int(match.group(1))})
 
     if matched:
-        return (datetime.utcnow() + total_delta).isoformat()
+        anchor = reference_dt or _parse_datetime_utc(datetime.utcnow())
+        if anchor is None:
+            return None
+        return (anchor + total_delta).astimezone(timezone.utc).isoformat()
 
     return None
 
 
-def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
+def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Optional[datetime] = None) -> Optional[dict]:
     """Normalize raw Apify scraper output to DealerScope vehicle format.
 
     Handles two formats:
@@ -908,11 +941,16 @@ def normalize_apify_vehicle(item: dict, run_id: str) -> Optional[dict]:
         mileage = item.get("mileage") or item.get("meterCount")
 
         # End time: parseforge uses auctionEndUtc
+        time_anchor = (
+            _parse_datetime_utc(item.get("scraped_at") or item.get("scrapedAt") or item.get("createdAt"))
+            or default_time_anchor
+        )
         auction_end = _normalize_auction_end_time(
             item.get("auctionEndUtc") or
             item.get("auction_end_time") or
             item.get("auction_end_date") or
-            item.get("auction_end")
+            item.get("auction_end"),
+            reference_dt=time_anchor,
         )
 
         # URL: parseforge uses url, ours uses listing_url
@@ -1303,6 +1341,8 @@ async def sync_to_notion(vehicle: dict) -> bool:
     if not notion_token or not notion_db_id:
         return False
 
+    listing_url = vehicle.get("listing_url") or ""
+
     score = vehicle.get("dos_score", 0)
     breakdown = vehicle.get("score_breakdown", {})
 
@@ -1372,14 +1412,35 @@ async def sync_to_notion(vehicle: dict) -> bool:
 
     try:
         import httpx
+        headers = {
+            "Authorization": f"Bearer {notion_token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        }
         async with httpx.AsyncClient(timeout=10.0) as client:
+            if listing_url:
+                query_resp = await client.post(
+                    f"https://api.notion.com/v1/databases/{notion_db_id}/query",
+                    headers=headers,
+                    json={
+                        "filter": {
+                            "property": "Listing URL",
+                            "url": {"equals": listing_url},
+                        },
+                        "page_size": 1,
+                    },
+                )
+                if query_resp.status_code == 200:
+                    existing_results = query_resp.json().get("results") or []
+                    if existing_results:
+                        logger.info("[NOTION] Existing page found for listing_url=%s; skipping create", listing_url)
+                        return True
+                else:
+                    logger.warning(f"[NOTION] Query failed: {query_resp.status_code} {query_resp.text[:200]}")
+
             resp = await client.post(
                 "https://api.notion.com/v1/pages",
-                headers={
-                    "Authorization": f"Bearer {notion_token}",
-                    "Notion-Version": "2022-06-28",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json={"parent": {"database_id": notion_db_id}, "properties": props},
             )
             if resp.status_code == 200:
@@ -1604,6 +1665,12 @@ def _increment_reason_counter(counter: dict, reason: str) -> None:
     counter[reason] = counter.get(reason, 0) + 1
 
 
+def _compute_listing_id(source: str, listing_url: str) -> str:
+    normalized_source = (source or "unknown").strip().lower()
+    normalized_url = (listing_url or "").strip()
+    return hashlib.sha256(f"{normalized_source}|{normalized_url}".encode()).hexdigest()[:40]
+
+
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
     if supabase_client is not None:
         try:
@@ -1676,7 +1743,9 @@ def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
                 return (str(inserted[0]) if inserted and inserted[0] else None), "saved_direct_pg"
     except psycopg2.errors.UniqueViolation:
         existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
-        return existing_id, "duplicate_existing"
+        if existing_id:
+            return existing_id, "duplicate_existing"
+        return None, "duplicate_unresolved"
     except Exception as pg_err:
         logger.error(
             "[INGEST] Direct PG save FAILED for '%s': %s",
@@ -1773,7 +1842,7 @@ def build_opportunity_row(vehicle: dict) -> dict:
     pricing_source = score_result.get("pricing_source")
     pricing_maturity = score_result.get("pricing_maturity") or "unknown"
     return {
-        "listing_id": vehicle.get("listing_url", "")[-80:],  # truncated unique ID
+        "listing_id": _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
         "listing_url": vehicle.get("listing_url", ""),
         "source": vehicle.get("source_site"),
         "title": vehicle.get("title"),
