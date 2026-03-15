@@ -100,6 +100,9 @@ REQUIRED_COLUMNS: tuple[RequiredColumn, ...] = (
     RequiredColumn("current_bid_trust_score", "double precision", "20260315_expected_close_groundwork.sql"),
     RequiredColumn("expected_close_source", "text", "20260315_expected_close_groundwork.sql"),
     RequiredColumn("auction_stage_hours_remaining", "double precision", "20260315_expected_close_groundwork.sql"),
+    RequiredColumn("acquisition_price_basis", "double precision", "20260315_price_basis_resolver.sql"),
+    RequiredColumn("acquisition_basis_source", "text", "20260315_price_basis_resolver.sql"),
+    RequiredColumn("projected_total_cost", "double precision", "20260315_price_basis_resolver.sql"),
 )
 
 

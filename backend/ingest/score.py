@@ -156,13 +156,14 @@ ESTIMATED_DAYS_TO_SALE_BY_TIER = {
     3: 50,
     4: 70,
 }
-SCORE_VERSION = "manheim_ready_v3"
+SCORE_VERSION = "manheim_ready_v4"
 INVESTMENT_GRADE_PROXY_SCORES = {
     "Platinum": 100.0,
     "Gold": 82.0,
     "Silver": 64.0,
     "Bronze": 25.0,
 }
+PRICE_BASIS_INCREMENT = 50.0
 
 
 def _is_hd_commercial_truck(
@@ -530,6 +531,154 @@ def _current_bid_trust_score(
     return round(max(0.05, min(0.9, base_score + maturity_adjustment)), 2)
 
 
+def _round_price_basis(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    normalized_value = max(float(value), 0.0)
+    if normalized_value <= 0:
+        return 0.0
+    return round(round(normalized_value / PRICE_BASIS_INCREMENT) * PRICE_BASIS_INCREMENT, 2)
+
+
+def _expected_close_floor_pct(
+    auction_stage_hours_remaining: Optional[float],
+    pricing_maturity: str,
+    confidence_proxy: float,
+) -> float:
+    if auction_stage_hours_remaining is None:
+        base_floor_pct = 0.9
+    else:
+        hours_remaining = max(float(auction_stage_hours_remaining), 0.0)
+        if hours_remaining > 72:
+            base_floor_pct = 0.7
+        elif hours_remaining > 24:
+            base_floor_pct = 0.78
+        elif hours_remaining > 6:
+            base_floor_pct = 0.86
+        elif hours_remaining > 1:
+            base_floor_pct = 0.93
+        else:
+            base_floor_pct = 0.98
+
+    maturity_adjustment = {
+        "live_market": 0.03,
+        "market_comp": 0.0,
+        "proxy": -0.03,
+        "unknown": -0.06,
+    }.get(pricing_maturity, -0.06)
+
+    normalized_confidence = max(0.0, min(float(confidence_proxy or 0.0), 100.0))
+    if normalized_confidence >= 80.0:
+        confidence_adjustment = 0.02
+    elif normalized_confidence >= 65.0:
+        confidence_adjustment = 0.01
+    elif normalized_confidence <= 45.0:
+        confidence_adjustment = -0.02
+    else:
+        confidence_adjustment = 0.0
+
+    return max(0.6, min(0.99, base_floor_pct + maturity_adjustment + confidence_adjustment))
+
+
+def resolve_expected_close_bid(
+    *,
+    current_bid: float,
+    max_bid: Optional[float],
+    current_bid_trust_score: Optional[float],
+    auction_stage_hours_remaining: Optional[float],
+    pricing_maturity: str,
+    confidence_proxy: float,
+) -> dict:
+    normalized_current_bid = max(float(current_bid or 0.0), 0.0)
+    if normalized_current_bid <= 0:
+        return {
+            "expected_close_bid": None,
+            "expected_close_source": None,
+        }
+
+    conservative_anchor = max(float(max_bid or 0.0), 0.0)
+    if conservative_anchor <= 0:
+        rounded_current_bid = _round_price_basis(normalized_current_bid)
+        return {
+            "expected_close_bid": rounded_current_bid,
+            "expected_close_source": "current_bid_no_ceiling_anchor",
+        }
+
+    floor_pct = _expected_close_floor_pct(
+        auction_stage_hours_remaining=auction_stage_hours_remaining,
+        pricing_maturity=pricing_maturity,
+        confidence_proxy=confidence_proxy,
+    )
+    expected_close_floor = conservative_anchor * floor_pct
+
+    if expected_close_floor <= normalized_current_bid:
+        return {
+            "expected_close_bid": _round_price_basis(normalized_current_bid),
+            "expected_close_source": "current_bid_at_or_above_conservative_floor",
+        }
+
+    trust_score = current_bid_trust_score
+    if trust_score is None:
+        trust_score = 0.5
+    trust_score = max(0.0, min(float(trust_score), 1.0))
+
+    expected_close_bid = normalized_current_bid + (
+        (expected_close_floor - normalized_current_bid) * (1.0 - trust_score)
+    )
+    expected_close_bid = max(normalized_current_bid, min(expected_close_bid, expected_close_floor))
+
+    return {
+        "expected_close_bid": _round_price_basis(expected_close_bid),
+        "expected_close_source": f"blend_current_bid_with_{pricing_maturity}_max_bid_floor",
+    }
+
+
+def resolve_acquisition_price_basis(
+    *,
+    current_bid: float,
+    expected_close_bid: Optional[float],
+    current_bid_trust_score: Optional[float],
+) -> dict:
+    normalized_current_bid = max(float(current_bid or 0.0), 0.0)
+    normalized_expected_close = max(float(expected_close_bid or 0.0), 0.0)
+
+    if normalized_expected_close <= normalized_current_bid or normalized_expected_close <= 0:
+        resolved_basis = _round_price_basis(normalized_current_bid)
+        return {
+            "acquisition_price_basis": resolved_basis,
+            "acquisition_basis_source": "current_bid",
+        }
+
+    if current_bid_trust_score is None:
+        blended_basis = (normalized_current_bid + normalized_expected_close) / 2.0
+        return {
+            "acquisition_price_basis": _round_price_basis(blended_basis),
+            "acquisition_basis_source": "blend_current_bid_expected_close",
+        }
+
+    trust_score = max(0.0, min(float(current_bid_trust_score), 1.0))
+    if trust_score <= 0.3:
+        return {
+            "acquisition_price_basis": _round_price_basis(normalized_expected_close),
+            "acquisition_basis_source": "expected_close",
+        }
+
+    if trust_score >= 0.75:
+        return {
+            "acquisition_price_basis": _round_price_basis(normalized_current_bid),
+            "acquisition_basis_source": "current_bid",
+        }
+
+    blended_basis = (
+        normalized_current_bid * trust_score
+        + normalized_expected_close * (1.0 - trust_score)
+    )
+    return {
+        "acquisition_price_basis": _round_price_basis(blended_basis),
+        "acquisition_basis_source": "blend_current_bid_expected_close",
+    }
+
+
 def score_deal(
     bid: float,
     mmr_ca: float,
@@ -573,13 +722,13 @@ def score_deal(
 
     site_fees = fees_cfg.get(source_site, {"buyers_premium_pct": 10.0, "doc_fee": 50})
     buyer_premium_pct = site_fees.get("buyers_premium_pct", 10.0) / 100.0
-    premium = bid * buyer_premium_pct
+    raw_bid = max(float(bid or 0.0), 0.0)
+    raw_premium = raw_bid * buyer_premium_pct
     doc_fee = site_fees.get("doc_fee", 50)
     transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg)
     recon_reserve = _recon_reserve(mileage=mileage, is_police_or_fleet=is_police_or_fleet)
-    total_cost = bid + premium + doc_fee + transport + recon_reserve
+    raw_total_cost = raw_bid + raw_premium + doc_fee + transport + recon_reserve
     selected_mmr = float(manheim_mmr_mid) if manheim_mmr_mid is not None and float(manheim_mmr_mid) > 0 else float(mmr_ca or 0)
-    wholesale_margin = selected_mmr - total_cost
     retail_comp_result = {
         "retail_comp_price_estimate": retail_comp_price_estimate,
         "retail_comp_low": retail_comp_low,
@@ -596,25 +745,12 @@ def score_deal(
         else selected_mmr * RETAIL_PROXY_MULTIPLIER
     )
     selected_pricing_source = (pricing_source or "retail_comps") if use_retail_comps else "mmr_proxy"
-    gross_margin = retail_asking_price_estimate - total_cost
-
-    m_score = _margin_score(bid, selected_mmr, total_cost)
-    v_score = _velocity_score(bid, year)
-    seg_score = _segment_score(model, make)
-    mod_score = _model_score(model)
-    src_score = _source_score(source_site)
-    wholesale_ctm_pct = (total_cost / selected_mmr * 100.0) if selected_mmr > 0 else 100.0
-    retail_ctm_pct = (total_cost / retail_asking_price_estimate * 100.0) if retail_asking_price_estimate > 0 else 100.0
-    segment_tier = _segment_tier(model, make)
-    estimated_days_to_sale = _estimated_days_to_sale(segment_tier)
-    roi_per_day = gross_margin / estimated_days_to_sale if estimated_days_to_sale > 0 else 0.0
     confidence_proxy = _resolve_confidence_proxy(
         mmr_confidence_proxy=mmr_confidence_proxy,
         manheim_confidence=manheim_confidence,
         manheim_source_status=manheim_source_status,
         manheim_range_width_pct=manheim_range_width_pct,
     )
-    investment_grade = _investment_grade(retail_ctm_pct, estimated_days_to_sale, segment_tier)
     pricing_maturity = resolve_pricing_maturity(
         manheim_source_status=manheim_source_status,
         manheim_mmr_mid=manheim_mmr_mid,
@@ -629,6 +765,68 @@ def score_deal(
         auction_stage_hours_remaining=auction_stage_hours_remaining,
         pricing_maturity=pricing_maturity,
     )
+    segment_tier = _segment_tier(model, make)
+    estimated_days_to_sale = _estimated_days_to_sale(segment_tier)
+    provisional_retail_ctm_pct = (
+        (raw_total_cost / retail_asking_price_estimate * 100.0)
+        if retail_asking_price_estimate > 0
+        else 100.0
+    )
+    provisional_investment_grade = _investment_grade(
+        provisional_retail_ctm_pct,
+        estimated_days_to_sale,
+        segment_tier,
+    )
+    ceiling_metrics = compute_bid_ceiling(
+        current_bid=raw_bid,
+        mmr_ca=selected_mmr,
+        total_cost=raw_total_cost,
+        segment_tier=segment_tier,
+        investment_grade=provisional_investment_grade,
+        buyer_premium_pct=buyer_premium_pct,
+        doc_fee=doc_fee,
+        transport=transport,
+        recon_reserve=recon_reserve,
+        manheim_range_width_pct=manheim_range_width_pct,
+        manheim_source_status=manheim_source_status,
+    )
+    expected_close_result = resolve_expected_close_bid(
+        current_bid=raw_bid,
+        max_bid=ceiling_metrics.get("max_bid"),
+        current_bid_trust_score=current_bid_trust_score,
+        auction_stage_hours_remaining=auction_stage_hours_remaining,
+        pricing_maturity=pricing_maturity,
+        confidence_proxy=confidence_proxy,
+    )
+    basis_result = resolve_acquisition_price_basis(
+        current_bid=raw_bid,
+        expected_close_bid=expected_close_result.get("expected_close_bid"),
+        current_bid_trust_score=current_bid_trust_score,
+    )
+    acquisition_price_basis = max(float(basis_result.get("acquisition_price_basis") or raw_bid), 0.0)
+    projected_buyer_premium = acquisition_price_basis * buyer_premium_pct
+    projected_total_cost = (
+        acquisition_price_basis
+        + projected_buyer_premium
+        + doc_fee
+        + transport
+        + recon_reserve
+    )
+    wholesale_margin = selected_mmr - projected_total_cost
+    gross_margin = retail_asking_price_estimate - projected_total_cost
+    m_score = _margin_score(acquisition_price_basis, selected_mmr, projected_total_cost)
+    v_score = _velocity_score(acquisition_price_basis, year)
+    seg_score = _segment_score(model, make)
+    mod_score = _model_score(model)
+    src_score = _source_score(source_site)
+    wholesale_ctm_pct = (projected_total_cost / selected_mmr * 100.0) if selected_mmr > 0 else 100.0
+    retail_ctm_pct = (
+        (projected_total_cost / retail_asking_price_estimate * 100.0)
+        if retail_asking_price_estimate > 0
+        else 100.0
+    )
+    roi_per_day = gross_margin / estimated_days_to_sale if estimated_days_to_sale > 0 else 0.0
+    investment_grade = _investment_grade(retail_ctm_pct, estimated_days_to_sale, segment_tier)
 
     legacy_dos_score = (
         m_score * 0.35
@@ -646,28 +844,18 @@ def score_deal(
         source_score=src_score,
         auction_end=auction_end,
     )
-    ceiling_metrics = compute_bid_ceiling(
-        current_bid=bid,
-        mmr_ca=selected_mmr,
-        total_cost=total_cost,
-        segment_tier=segment_tier,
-        investment_grade=investment_grade,
-        buyer_premium_pct=buyer_premium_pct,
-        doc_fee=doc_fee,
-        transport=transport,
-        recon_reserve=recon_reserve,
-        manheim_range_width_pct=manheim_range_width_pct,
-        manheim_source_status=manheim_source_status,
-    )
 
     return {
-        "premium": round(premium, 2),
-        "buyer_premium_amount": round(premium, 2),
+        "premium": round(projected_buyer_premium, 2),
+        "buyer_premium_amount": round(projected_buyer_premium, 2),
         "buyer_premium_pct": round(buyer_premium_pct, 4),
         "doc_fee": doc_fee,
         "transport": round(transport, 2),
         "recon_reserve": round(recon_reserve, 2),
-        "total_cost": round(total_cost, 2),
+        "total_cost": round(projected_total_cost, 2),
+        "projected_total_cost": round(projected_total_cost, 2),
+        "acquisition_price_basis": round(acquisition_price_basis, 2),
+        "acquisition_basis_source": basis_result.get("acquisition_basis_source"),
         "margin": round(gross_margin, 2),
         "gross_margin": round(gross_margin, 2),
         "wholesale_margin": round(wholesale_margin, 2),
@@ -686,8 +874,8 @@ def score_deal(
         "pricing_source": selected_pricing_source,
         "pricing_maturity": pricing_maturity,
         "pricing_updated_at": pricing_updated_at,
-        "expected_close_bid": None,
-        "expected_close_source": None,
+        "expected_close_bid": expected_close_result.get("expected_close_bid"),
+        "expected_close_source": expected_close_result.get("expected_close_source"),
         "current_bid_trust_score": current_bid_trust_score,
         "auction_stage_hours_remaining": auction_stage_hours_remaining,
         "manheim_mmr_mid": round(float(manheim_mmr_mid), 2) if manheim_mmr_mid is not None else None,
