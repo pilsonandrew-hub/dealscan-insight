@@ -1,0 +1,160 @@
+import asyncio
+import os
+import sys
+import types
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+os.environ.setdefault("ENVIRONMENT", "development")
+
+
+class _StubRouter:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def _decorator(self, *args, **kwargs):
+        def wrap(func):
+            return func
+
+        return wrap
+
+    get = post = put = patch = delete = api_route = _decorator
+
+
+class _StubHTTPException(Exception):
+    def __init__(self, status_code=None, detail=None):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+fastapi_stub = types.ModuleType("fastapi")
+fastapi_stub.APIRouter = _StubRouter
+fastapi_stub.Request = object
+fastapi_stub.HTTPException = _StubHTTPException
+fastapi_stub.Header = lambda default=None, **kwargs: default
+sys.modules.setdefault("fastapi", fastapi_stub)
+
+from webapp.routers import ingest
+
+
+class _Request:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
+
+
+class _Query:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def eq(self, *_args, **_kwargs):
+        return self
+
+    def gte(self, *_args, **_kwargs):
+        return self
+
+    def order(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        return types.SimpleNamespace(data=self.rows)
+
+
+class _Supabase:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def table(self, name):
+        if name != "webhook_log":
+            raise AssertionError(f"unexpected table: {name}")
+        return _Query(self.rows)
+
+
+class WebhookSecurityTests(unittest.TestCase):
+    def test_find_recent_webhook_replay_ignores_degraded_rows(self):
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [
+            {"processing_status": "degraded", "received_at": now},
+            {"processing_status": "error", "received_at": now},
+        ]
+        with patch.object(ingest, "supabase_client", _Supabase(rows)), patch.dict(
+            os.environ,
+            {"APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS": "3600"},
+            clear=False,
+        ):
+            replay = ingest._find_recent_webhook_replay("run-123")
+
+        self.assertIsNone(replay)
+
+    def test_apify_webhook_ignores_recent_processed_replay(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-123", "defaultDatasetId": "dataset-123"},
+        }
+        insert_calls = []
+
+        def fake_insert(_payload, **kwargs):
+            insert_calls.append(kwargs)
+            return "log-1"
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest,
+            "_find_recent_webhook_replay",
+            lambda run_id: {
+                "processing_status": "processed",
+                "received_at": "2026-03-15T18:00:00+00:00",
+                "run_id": run_id,
+            },
+        ), patch.object(ingest, "insert_webhook_log", fake_insert):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertTrue(response["replay_ignored"])
+        self.assertEqual(response["run_id"], "run-123")
+        self.assertEqual(insert_calls[0]["processing_status"], "ignored_replay")
+        self.assertIn("Replay ignored for run_id=run-123", insert_calls[0]["error_message"])
+
+    def test_apify_webhook_rejects_stale_payload_when_max_age_enabled(self):
+        payload = {
+            "createdAt": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+            "resource": {"id": "run-999", "defaultDatasetId": "dataset-999"},
+        }
+        insert_calls = []
+
+        def fake_insert(_payload, **kwargs):
+            insert_calls.append(kwargs)
+            return "log-2"
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "insert_webhook_log", fake_insert
+        ), patch.dict(
+            os.environ,
+            {"APIFY_WEBHOOK_MAX_AGE_SECONDS": "60"},
+            clear=False,
+        ):
+            with self.assertRaises(Exception) as exc:
+                asyncio.run(
+                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                )
+
+        self.assertEqual(getattr(exc.exception, "status_code", None), 401)
+        self.assertEqual(getattr(exc.exception, "detail", None), "Stale webhook payload")
+        self.assertEqual(insert_calls[0]["processing_status"], "ignored_stale")
+
+
+if __name__ == "__main__":
+    unittest.main()
