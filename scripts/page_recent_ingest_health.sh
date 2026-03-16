@@ -180,6 +180,8 @@ if body.get("ok") is not True:
 message_id = ((body.get("result") or {}).get("message_id"))
 if message_id in {None, ""}:
     raise RuntimeError("telegram send failed: missing message_id in Telegram response")
+
+print(f"Telegram alert acknowledged: ok=true message_id={message_id}")
 PY
 
 exit "${status}"
