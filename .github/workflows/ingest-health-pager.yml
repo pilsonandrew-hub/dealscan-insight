@@ -2,6 +2,23 @@ name: Ingest Health Pager
 
 on:
   workflow_dispatch:
+    inputs:
+      notify_enabled:
+        description: 'Enable pager notification path for this run'
+        required: false
+        default: 'true'
+      notify_dry_run:
+        description: 'Use dry-run mode for this run'
+        required: false
+        default: 'true'
+      force_notify:
+        description: 'Force a controlled pager proof even if health is green'
+        required: false
+        default: 'true'
+      actors:
+        description: 'Space-delimited actor list for the health check'
+        required: false
+        default: 'ds-govdeals ds-publicsurplus'
   schedule:
     - cron: '*/15 * * * *'
 
@@ -18,9 +35,11 @@ jobs:
       APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      INGEST_HEALTH_NOTIFY_ENABLED: ${{ vars.INGEST_HEALTH_NOTIFY_ENABLED || 'false' }}
-      INGEST_HEALTH_NOTIFY_DRY_RUN: ${{ vars.INGEST_HEALTH_NOTIFY_DRY_RUN || 'true' }}
+      INGEST_HEALTH_NOTIFY_ENABLED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.notify_enabled || vars.INGEST_HEALTH_NOTIFY_ENABLED || 'false' }}
+      INGEST_HEALTH_NOTIFY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.notify_dry_run || vars.INGEST_HEALTH_NOTIFY_DRY_RUN || 'true' }}
+      INGEST_HEALTH_FORCE_NOTIFY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_notify || 'false' }}
       INGEST_HEALTH_CONTEXT: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      INGEST_HEALTH_ACTORS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.actors || 'ds-govdeals ds-publicsurplus' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,5 +54,6 @@ jobs:
 
       - name: Run ingest health pager
         run: |
+          # shellcheck disable=SC2086
           scripts/page_recent_ingest_health.sh \
-            --actors ds-govdeals ds-publicsurplus
+            --actors ${INGEST_HEALTH_ACTORS}

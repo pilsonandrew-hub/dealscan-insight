@@ -63,16 +63,23 @@ PY
   )
 fi
 
+FORCE_NOTIFY="${INGEST_HEALTH_FORCE_NOTIFY:-false}"
+
 set +e
 "${CHECK_CMD[@]}" "$@" >"${TMP_OUTPUT}" 2>&1
 status=$?
 set -e
 
-if [[ "${status}" -eq 0 ]]; then
+if [[ "${status}" -eq 0 && "${FORCE_NOTIFY}" != "true" ]]; then
   cat "${TMP_OUTPUT}"
   exit 0
 fi
-cat "${TMP_OUTPUT}" >&2
+
+if [[ "${status}" -ne 0 ]]; then
+  cat "${TMP_OUTPUT}" >&2
+else
+  cat "${TMP_OUTPUT}"
+fi
 
 if [[ "${INGEST_HEALTH_NOTIFY_ENABLED:-false}" != "true" ]]; then
   exit "${status}"
@@ -87,6 +94,7 @@ MESSAGE="$(
   INGEST_HEALTH_OUTPUT_PATH="${TMP_OUTPUT}" \
   INGEST_HEALTH_EXIT_CODE="${status}" \
   INGEST_HEALTH_CONTEXT="${INGEST_HEALTH_CONTEXT:-}" \
+  INGEST_HEALTH_FORCE_NOTIFY="${FORCE_NOTIFY}" \
   python3 <<'PY'
 from __future__ import annotations
 
@@ -98,6 +106,7 @@ from pathlib import Path
 output_path = Path(os.environ["INGEST_HEALTH_OUTPUT_PATH"])
 exit_code = os.environ["INGEST_HEALTH_EXIT_CODE"]
 context = os.environ.get("INGEST_HEALTH_CONTEXT", "").strip()
+force_notify = os.environ.get("INGEST_HEALTH_FORCE_NOTIFY", "false") == "true"
 
 try:
     output = output_path.read_text(encoding="utf-8").strip()
@@ -110,17 +119,23 @@ if len(lines) > 20:
     excerpt.append(f"... ({len(lines) - 20} more lines omitted)")
 
 message_lines = [
-    "DealerScope ingest health check failed",
+    "DealerScope ingest pager proof" if force_notify else "DealerScope ingest health check failed",
     f"exit_code={exit_code}",
     f"host={platform.node() or 'unknown'}",
     f"utc={datetime.now(timezone.utc).isoformat(timespec='seconds')}",
 ]
+if force_notify:
+    message_lines.append("proof_mode=forced")
 if context:
     message_lines.append(f"context={context}")
 if excerpt:
     message_lines.append("")
     message_lines.append("check output:")
     message_lines.extend(excerpt)
+elif force_notify:
+    message_lines.append("")
+    message_lines.append("check output:")
+    message_lines.append("health check returned no output; forced pager proof path executed")
 
 message = "\n".join(message_lines)
 print(message[:3500])
