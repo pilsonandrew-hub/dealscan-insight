@@ -7,9 +7,19 @@ This runbook covers safe rotation of the shared Apify webhook secret used by `PO
 Current behavior:
 - DealerScope accepts `APIFY_WEBHOOK_SECRET` as the active secret.
 - DealerScope also accepts `APIFY_WEBHOOK_SECRET_PREVIOUS` as a temporary fallback during rotation.
-- If a request is accepted with `APIFY_WEBHOOK_SECRET_PREVIOUS`, the backend emits a warning log so stale webhook config is visible.
+- Startup and preflight report safe fingerprints for the active and previous secret posture.
+- If a request is accepted with `APIFY_WEBHOOK_SECRET_PREVIOUS`, the backend emits a warning log with safe fingerprints so stale webhook config is visible.
 
 This is a repo-side safety mechanism only. Do not store or rotate the real secret in source control.
+
+Proof artifact path:
+- `runtime-artifacts/webhook-secret-proof.json`
+
+Proof tooling:
+- Capture/update artifact: `python scripts/capture_webhook_secret_proof.py ...`
+- Verify artifact against current runtime env: `python scripts/run_ingest_rollout_preflight.py ...`
+
+No raw secret goes into the artifact. Only posture, truncated fingerprints, payload hash, deploy SHA, endpoint, timestamps, and HTTP results.
 
 ## Preconditions
 
@@ -43,18 +53,64 @@ Check:
 - Railway/backend logs for successful `/api/ingest/apify` traffic.
 - `webhook_log` rows continuing to land and process normally.
 - Warning logs mentioning `APIFY_WEBHOOK_SECRET_PREVIOUS`.
+- The proof artifact shows the current active fingerprint and previous-secret posture you intended to deploy.
 
 Interpretation:
 - No warnings: all observed webhook traffic is already on the new secret.
 - Warnings still present: at least one webhook is still using the old secret.
 
-4. Remove overlap.
+4. Capture the proof artifact. Do not improvise this.
+
+Use a real recent webhook payload captured outside source control. Do not fabricate one.
+
+Required inputs:
+- `APIFY_WEBHOOK_SECRET` in env
+- `APIFY_WEBHOOK_SECRET_RETIRED` in env for the stale-secret `401` check
+- optional `APIFY_WEBHOOK_SECRET_PREVIOUS` in env if overlap is still active
+- deployed ingest endpoint
+- JSON payload file for one real recent webhook body
+
+Example:
+
+```bash
+python scripts/capture_webhook_secret_proof.py \
+  --endpoint https://<deploy-host>/api/ingest/apify \
+  --payload-file /secure/path/recent-apify-webhook.json \
+  --artifact-path runtime-artifacts/webhook-secret-proof.json \
+  --require-live-checks
+```
+
+What the artifact must record:
+- `retired_secret_rejected`: retired secret returns `401`
+- `current_secret_accepted`: current secret returns `200`
+- `replay_suppressed`: second current-secret submit returns `200` with `replay_ignored=true`
+- `previous_secret_absent`: only after overlap is supposed to be over
+
+If any check fails, stop. Fix the deploy or env drift first.
+
+5. Remove overlap.
 
 After observed traffic is consistently on the new secret:
 - unset `APIFY_WEBHOOK_SECRET_PREVIOUS`
 - redeploy/restart the backend
+- rerun the proof capture with `--expect-previous-absent`
 
 This returns the system to a single accepted webhook secret.
+
+6. Run preflight against the artifact.
+
+```bash
+python scripts/run_ingest_rollout_preflight.py \
+  --webhook-proof-artifact runtime-artifacts/webhook-secret-proof.json \
+  --expect-previous-secret-absent
+```
+
+Preflight now prints:
+- active secret state and safe fingerprint
+- previous secret state and safe fingerprint
+- artifact path, deploy SHA, and recorded proof statuses
+
+Preflight fails if the artifact is missing or if its secret posture does not match the current runtime env.
 
 ## Rollback
 
@@ -71,6 +127,7 @@ Do not swap the values back and forth in source-controlled files. Handle the rol
 ## Guardrails
 
 - Never commit the real webhook secret into `apify/deployment.json`, docs, scripts, or notes.
+- Never commit `runtime-artifacts/webhook-secret-proof.json`. It is local runtime evidence.
 - `APIFY_WEBHOOK_SECRET_PREVIOUS` is temporary by design; leaving it set expands the trust window unnecessarily.
 - Treat placeholder or reused fallback secrets as misconfiguration. A short `APIFY_WEBHOOK_SECRET_PREVIOUS` is tolerated only for a brief overlap with a retiring legacy secret and should still be removed promptly.
 - If you suspect the secret was exposed publicly, rotate both the backend env and every Apify webhook header on the same day.

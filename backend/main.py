@@ -17,6 +17,12 @@ from fastapi import FastAPI, Depends, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
+from backend.ingest.webhook_secret_posture import (
+    build_webhook_secret_posture,
+    looks_like_placeholder_secret,
+    render_webhook_secret_posture_lines,
+)
+
 # Middleware — import with fallbacks
 try:
     from webapp.middleware.request_id import RequestIDMiddleware
@@ -74,24 +80,6 @@ PIPELINE_SECRET = os.getenv("PIPELINE_SECRET")
 PIPELINE_BASIC_AUTH_USERNAME = os.getenv("PIPELINE_BASIC_AUTH_USERNAME", "")
 PIPELINE_BASIC_AUTH_PASSWORD = os.getenv("PIPELINE_BASIC_AUTH_PASSWORD", "")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
-_PLACEHOLDER_SECRET_VALUES = {
-    "changeme",
-    "change_me",
-    "default",
-    "dev-secret-change-in-prod",
-    "replace-me",
-    "replace_with_real_secret",
-    "your_webhook_secret_here",
-}
-
-
-def _looks_like_placeholder_secret(value: str) -> bool:
-    normalized = value.strip().lower().replace("-", "_")
-    if not normalized:
-        return False
-    if normalized in _PLACEHOLDER_SECRET_VALUES:
-        return True
-    return normalized.startswith("your_") and normalized.endswith("_here")
 
 
 def _has_apify_api_token() -> bool:
@@ -101,8 +89,12 @@ def _has_apify_api_token() -> bool:
 def _log_webhook_secret_config_health() -> None:
     active_secret = (os.getenv("APIFY_WEBHOOK_SECRET") or "").strip()
     previous_secret = (os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS") or "").strip()
+    posture = build_webhook_secret_posture(active_secret, previous_secret)
 
-    if active_secret and _looks_like_placeholder_secret(active_secret):
+    for line in render_webhook_secret_posture_lines(posture):
+        logger.info("[INGEST_AUTH] %s", line)
+
+    if active_secret and looks_like_placeholder_secret(active_secret):
         logger.critical(
             "APIFY_WEBHOOK_SECRET is set to a placeholder-like value. "
             "Set a real random secret before relying on webhook auth."
@@ -119,7 +111,7 @@ def _log_webhook_secret_config_health() -> None:
                 "APIFY_WEBHOOK_SECRET_PREVIOUS matches APIFY_WEBHOOK_SECRET. "
                 "Remove the duplicate fallback value."
             )
-        elif _looks_like_placeholder_secret(previous_secret):
+        elif looks_like_placeholder_secret(previous_secret):
             logger.critical(
                 "APIFY_WEBHOOK_SECRET_PREVIOUS is set to a placeholder-like value. "
                 "Remove it or replace it with the actual retiring secret during rotation."

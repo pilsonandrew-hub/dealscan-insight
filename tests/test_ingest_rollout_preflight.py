@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -107,6 +108,72 @@ class IngestRolloutPreflightTests(unittest.TestCase):
             errors,
         )
         self.assertIn("public.ingest_delivery_log: ok", notes)
+
+    def test_validate_webhook_proof_artifact_requires_matching_runtime_posture(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_path = Path(tmpdir) / "webhook-secret-proof.json"
+            artifact_path.write_text(
+                json.dumps(
+                    {
+                        "deploy_sha": "abc123def456",
+                        "generated_at": "2026-03-16T12:00:00+00:00",
+                        "posture": {
+                            "active": {"state": "configured", "fingerprint": "sha256:active123456"},
+                            "previous": {"state": "absent", "fingerprint": None},
+                        },
+                        "checks": {"previous_secret_absent": {"status": "passed"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runtime_env = {
+                "APIFY_WEBHOOK_SECRET": "current-secret-value-1234567890",
+                "APIFY_WEBHOOK_SECRET_PREVIOUS": "",
+            }
+            with patch.object(preflight, "resolve_deploy_sha", return_value="abc123def456"):
+                errors, notes, artifact = preflight.validate_webhook_proof_artifact(
+                    runtime_env,
+                    artifact_path,
+                    expect_previous_secret_absent=True,
+                )
+
+        self.assertIsNotNone(artifact)
+        self.assertIn(
+            "webhook secret proof artifact active fingerprint does not match current runtime posture",
+            errors,
+        )
+        self.assertIn(f"artifact: {artifact_path}", notes)
+
+    def test_validate_webhook_proof_artifact_accepts_matching_previous_absent_proof(self):
+        runtime_env = {
+            "APIFY_WEBHOOK_SECRET": "current-secret-value-1234567890",
+            "APIFY_WEBHOOK_SECRET_PREVIOUS": "",
+        }
+        posture = preflight.summarize_webhook_secret_posture(runtime_env)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_path = Path(tmpdir) / "webhook-secret-proof.json"
+            artifact_path.write_text(
+                json.dumps(
+                    {
+                        "deploy_sha": "abc123def456",
+                        "generated_at": "2026-03-16T12:00:00+00:00",
+                        "posture": posture,
+                        "checks": {"previous_secret_absent": {"status": "passed"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(preflight, "resolve_deploy_sha", return_value="abc123def456"):
+                errors, notes, artifact = preflight.validate_webhook_proof_artifact(
+                    runtime_env,
+                    artifact_path,
+                    expect_previous_secret_absent=True,
+                )
+
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(artifact)
+        self.assertIn("previous_secret_absent: passed", notes)
 
 
 if __name__ == "__main__":

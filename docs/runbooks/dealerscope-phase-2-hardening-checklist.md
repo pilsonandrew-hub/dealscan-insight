@@ -53,23 +53,23 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 - [ ] Add or update the repo-owned proof flow for active secret posture.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: startup or preflight output shows active-secret fingerprint and previous-secret posture.
+  - Exit criteria: `runtime-artifacts/webhook-secret-proof.json` exists, `scripts/run_ingest_rollout_preflight.py` prints the active-secret fingerprint and previous-secret posture, and the artifact posture matches the current runtime env.
 - [ ] Red-team the retired secret after deploy.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: retired secret returns `401`.
+  - Exit criteria: `runtime-artifacts/webhook-secret-proof.json` records `retired_secret_rejected=passed` with timestamp, payload hash, safe fingerprint, and `401`.
 - [ ] Red-team the current secret with replay semantics.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: current secret is accepted and duplicate replay is recorded as `ignored_replay`.
+  - Exit criteria: `runtime-artifacts/webhook-secret-proof.json` records `current_secret_accepted=passed` and `replay_suppressed=passed`; the replay response is `ignored_replay` / `replay_ignored=true`.
 - [ ] Remove `APIFY_WEBHOOK_SECRET_PREVIOUS` after overlap is over.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: env state and post-deploy logs show no fallback secret configured.
+  - Exit criteria: post-overlap proof run uses `--expect-previous-secret-absent` and records `previous_secret_absent=passed`; startup logs and preflight both show previous secret state `absent`.
 - [ ] Record exact timestamps, deploy SHA, and operator decision.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: closeout ledger contains precise timestamps and the live commit SHA.
+  - Exit criteria: the proof artifact contains exact timestamps and deploy SHA, and the closeout ledger links that artifact plus the startup-log evidence.
 
 ### P0.2 Audit Surfaces Durable
 

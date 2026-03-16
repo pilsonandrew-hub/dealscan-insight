@@ -166,6 +166,23 @@ class WebhookSecurityTests(unittest.TestCase):
         ):
             self.assertFalse(ingest._verify_webhook_secret("oldsecretvalue1234567890"))
 
+    def test_apify_webhook_rejects_invalid_secret_with_401(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-401", "defaultDatasetId": "dataset-401"},
+        }
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ):
+            with self.assertRaises(Exception) as exc:
+                asyncio.run(
+                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="wrongsecret")
+                )
+
+        self.assertEqual(getattr(exc.exception, "status_code", None), 401)
+        self.assertEqual(getattr(exc.exception, "detail", None), "Invalid webhook secret")
+
     def test_find_recent_webhook_replay_ignores_degraded_rows(self):
         now = datetime.now(timezone.utc).isoformat()
         rows = [
