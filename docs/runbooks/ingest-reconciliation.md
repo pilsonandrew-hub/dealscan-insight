@@ -57,12 +57,19 @@ python3 scripts/reconcile_apify_ingest_runs.py \
 
 3. Triage runs by issue type.
 
-- `missing_webhook`: Apify says the run succeeded, but `webhook_log` has no matching `run_id`. Replay the webhook or rerun the Apify run from the same dataset.
+- `missing_webhook`: Apify says the run succeeded, but `webhook_log` has no matching `run_id`. If `ingest_delivery_log` and `opportunities` are also empty for that `run_id`, treat it as a pre-app miss first, not a downstream ingest bug. Check Apify webhook delivery history for the configured webhook id, confirm the live webhook secret still matches `APIFY_WEBHOOK_SECRET` or `APIFY_WEBHOOK_SECRET_PREVIOUS`, confirm the live app is serving `/api/ingest/apify`, then replay the webhook or rerun from the same dataset.
 - `webhook_degraded` or `webhook_error`: inspect `webhook_log.error_message` first, then review `db_save` status counts in `ingest_delivery_log` before replaying.
 - `ignored_replay`: a duplicate delivery was suppressed inside the replay window. This is expected for rapid resubmits and is not, by itself, an ingest failure.
 - `missing_delivery_log` or `missing_db_save_ledger`: the webhook landed, but the save ledger is missing. Check Railway app logs for the run before rerunning.
 - `db_save_failures`: inspect `db_save` statuses for `supabase_error`, `direct_pg_error`, `direct_pg_unavailable`, or `duplicate_unresolved`. `saved_supabase_duplicate` and `saved_direct_pg_duplicate` are successful race recoveries, not failure states.
 - `no_db_landing`: Apify produced items, but neither `opportunities` nor `db_save` shows a successful landing. Treat this as a replay candidate.
+
+For a single suspect run with zero DB evidence, do these checks in order before repeated replays:
+
+1. Confirm Apify marks the run `SUCCEEDED` and note the exact `run_id`, actor, dataset id, and finish time.
+2. Inspect Apify webhook delivery attempts for the actor webhook id from `apify/deployment.json`. If Apify never attempted delivery, this is an Apify-side scheduling/webhook issue, not an app-side ingest failure.
+3. If Apify attempted delivery, inspect the live app logs around that timestamp for `/api/ingest/apify` responses. A `401` with no `webhook_log` row usually means secret mismatch or stale-payload rejection before normal ingest logging.
+4. Only after that, replay the exact webhook payload shape from a recent success or rerun from the same dataset.
 
 Current save fallback behavior:
 
@@ -134,5 +141,7 @@ Notes:
 
 - Uses `scripts/check_recent_ingest_runs.py` as the health signal and preserves its exit code.
 - Prints the failing check output to stderr and can send a Telegram page with the same summary when `INGEST_HEALTH_NOTIFY_ENABLED=true`.
+- If you pass `--env-file .env.live`, the wrapper now loads the pager gating vars and Telegram credentials from that file for the wrapper itself, not just the underlying health check.
 - Defaults to `INGEST_HEALTH_NOTIFY_DRY_RUN=true`, so the alert body is rendered locally but not sent until you explicitly flip the env to `false`.
+- Treat a page as delivered only when Telegram returns `ok=true` and a `message_id`; the wrapper now fails loudly if Telegram rejects the request or returns an unacknowledged response body.
 - The repo now includes a scheduled GitHub Actions runner for this wrapper. If you want Telegram paging from GitHub tonight, set repo variable `INGEST_HEALTH_NOTIFY_ENABLED=true`, set `INGEST_HEALTH_NOTIFY_DRY_RUN=false`, and provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATABASE_URL`, and `APIFY_TOKEN` as repo secrets.

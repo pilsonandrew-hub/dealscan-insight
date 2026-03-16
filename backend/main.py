@@ -94,6 +94,10 @@ def _looks_like_placeholder_secret(value: str) -> bool:
     return normalized.startswith("your_") and normalized.endswith("_here")
 
 
+def _has_apify_api_token() -> bool:
+    return bool((os.getenv("APIFY_TOKEN") or os.getenv("APIFY_API_TOKEN") or "").strip())
+
+
 def _log_webhook_secret_config_health() -> None:
     active_secret = (os.getenv("APIFY_WEBHOOK_SECRET") or "").strip()
     previous_secret = (os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS") or "").strip()
@@ -152,13 +156,16 @@ async def lifespan(app: FastAPI):
         "SUPABASE_SERVICE_ROLE_KEY",
         "TELEGRAM_BOT_TOKEN",
         "APIFY_WEBHOOK_SECRET",
-        "APIFY_TOKEN",
     ]
     for var in required_vars:
         if not os.getenv(var):
             logger.critical(f"STARTUP FATAL: {var} is not set. Refusing to start.")
             if os.getenv("ENVIRONMENT") == "production":
                 sys.exit(1)
+    if not _has_apify_api_token():
+        logger.critical("STARTUP FATAL: APIFY_TOKEN or APIFY_API_TOKEN is not set. Refusing to start.")
+        if os.getenv("ENVIRONMENT") == "production":
+            sys.exit(1)
     _log_webhook_secret_config_health()
     if SECRET_KEY == "dev-secret-change-in-prod" and os.getenv("ENVIRONMENT", "production").lower() == "production":
         logger.critical(

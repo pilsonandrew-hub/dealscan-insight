@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import os
 import sys
 import types
@@ -83,6 +84,47 @@ class _Supabase:
 
 
 class WebhookSecurityTests(unittest.TestCase):
+    def test_apify_api_token_helper_accepts_legacy_alias(self):
+        with patch.dict(
+            os.environ,
+            {"APIFY_TOKEN": "", "APIFY_API_TOKEN": "alias-token-123"},
+            clear=False,
+        ):
+            self.assertEqual(ingest._apify_api_token(), "alias-token-123")
+
+    def test_derive_supabase_direct_db_url_urlencodes_password(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_DB_PASSWORD": "p@ss:w/or d",
+                "SUPABASE_PROJECT_ID": "projectref123",
+            },
+            clear=False,
+        ):
+            derived = ingest._derive_supabase_direct_db_url()
+
+        self.assertEqual(
+            derived,
+            "postgresql://postgres:p%40ss%3Aw%2For%20d@db.projectref123.supabase.co:5432/postgres?sslmode=require",
+        )
+
+    def test_supabase_url_has_no_hardcoded_fallback(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "",
+                "VITE_SUPABASE_URL": "",
+                "SUPABASE_SERVICE_ROLE_KEY": "",
+                "SUPABASE_ANON_KEY": "",
+                "VITE_SUPABASE_ANON_KEY": "",
+                "ENVIRONMENT": "development",
+            },
+            clear=False,
+        ):
+            reloaded = importlib.reload(ingest)
+            self.assertIsNone(reloaded._supabase_url)
+        importlib.reload(ingest)
+
     def test_verify_webhook_secret_accepts_current_and_previous_secret(self):
         with patch.object(ingest, "WEBHOOK_SECRET", "newsecretvalue1234567890"), patch.object(
             ingest, "WEBHOOK_SECRET_PREVIOUS", "oldsecretvalue1234567890"

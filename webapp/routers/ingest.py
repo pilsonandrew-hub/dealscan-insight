@@ -23,6 +23,7 @@ import os
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import psycopg2
 from psycopg2 import extras as psycopg2_extras
@@ -99,8 +100,7 @@ TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 _supabase_url = (
     os.getenv("SUPABASE_URL")
     or os.getenv("VITE_SUPABASE_URL")
-    or "https://lbnxzvqppccajllsqaaw.supabase.co"
-)
+) or None
 _supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 _supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
 _environment = os.getenv("ENVIRONMENT", "production")
@@ -146,6 +146,10 @@ except Exception as _supa_err:
     logger.warning(f"Supabase client init failed (non-fatal): {_supa_err}")
 
 
+def _apify_api_token() -> str:
+    return (os.getenv("APIFY_TOKEN") or os.getenv("APIFY_API_TOKEN") or "").strip()
+
+
 def _derive_supabase_direct_db_url() -> Optional[str]:
     candidates = (
         os.getenv("SUPABASE_DB_URL"),
@@ -170,7 +174,7 @@ def _derive_supabase_direct_db_url() -> Optional[str]:
         return None
 
     return (
-        f"postgresql://postgres:{db_password}"
+        f"postgresql://postgres:{quote(db_password, safe='')}"
         f"@db.{project_ref}.supabase.co:5432/postgres?sslmode=require"
     )
 
@@ -733,9 +737,9 @@ async def apify_webhook(
             or ""
         )
 
-        if not dataset_id and apify_run_id and os.getenv("APIFY_TOKEN", ""):
+        apify_token = _apify_api_token()
+        if not dataset_id and apify_run_id and apify_token:
             import httpx
-            apify_token = os.getenv("APIFY_TOKEN", "")
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     run_resp = await client.get(
@@ -773,7 +777,7 @@ async def apify_webhook(
 
         # Fetch dataset items from Apify API using Authorization header (not query param)
         import httpx
-        apify_token = os.getenv("APIFY_TOKEN", "")
+        apify_token = _apify_api_token()
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(

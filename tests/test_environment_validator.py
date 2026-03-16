@@ -43,6 +43,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "ENVIRONMENT": "production",
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -62,6 +63,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "ENVIRONMENT": "production",
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -85,6 +87,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "ENVIRONMENT": "production",
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
         }
@@ -101,6 +104,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "ENVIRONMENT": "production",
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
         }
@@ -117,6 +121,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "ENVIRONMENT": "production",
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -132,6 +137,23 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
         )
         self.assertIn(
             "TELEGRAM_CHAT_ID is required when ingest pager notifications are enabled",
+            result["errors"],
+        )
+
+    def test_production_requires_explicit_supabase_url_for_ingest_logging(self):
+        env = {
+            "ENVIRONMENT": "production",
+            "SECRET_KEY": "x" * 32,
+            "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
+            "APIFY_TOKEN": "a" * 32,
+            "APIFY_WEBHOOK_SECRET": "n" * 32,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = EnvironmentValidator().validate_all()
+
+        self.assertIn(
+            "SUPABASE_URL or VITE_SUPABASE_URL is required for ingest logging and delivery state",
             result["errors"],
         )
 
