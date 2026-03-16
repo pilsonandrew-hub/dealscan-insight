@@ -29,6 +29,14 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
   - Evidence / artifact:
   - Owner:
   - Exit criteria: forced audit-write failure either lands through fallback or fails loudly and pages.
+- [ ] P0 artifact: GitHub runner live DB truth captured.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: one GitHub Actions health/pager run reaches the intended live database successfully and records the working DB-path decision.
+- [ ] P0 artifact: live ingress trust boundary captured.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: deploy config evidence records the real trusted proxy CIDRs or explicit no-trust posture for `/api/ingest/apify`.
 - [ ] P1 artifact: actor inventory committed.
   - Evidence / artifact:
   - Owner:
@@ -127,10 +135,43 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
   - Evidence / artifact: [tests/test_rate_limit_ingest_boundary.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/tests/test_rate_limit_ingest_boundary.py) covers Redis init failure, Redis check failure, and the asymmetric behavior where ingest fails closed and generic routes still fail open.
   - Owner: Backend
   - Exit criteria: Redis outage does not silently erase the ingest route’s abuse boundary.
-- Live-only follow-up:
-  - Evidence / artifact: deploy env must set `RATE_LIMIT_TRUST_PROXY_HEADERS=true` and `RATE_LIMIT_TRUSTED_PROXY_CIDRS` to the real ingress proxy CIDRs before forwarded headers are trusted in production. Any CDN/WAF/IP allowlist proof remains outside the repo.
-  - Owner: Platform/Ops
-  - Exit criteria: deploy config evidence shows the trusted proxy CIDRs and any edge restriction match reality.
+### P0.5 GitHub Runner Live DB Truth
+
+- [ ] Identify the working live database connection path for the GitHub health/pager runner.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: one exact connection strategy is selected and documented (pooler, direct host, or alternative retrieval path) instead of trial-and-error secrets.
+- [ ] Update GitHub Actions secrets/config to use that path.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: repo secret/config state matches the documented working path.
+- [ ] Run the real health/pager workflow successfully against the live database.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: one workflow run reaches the live DB and emits health output without the current DB connection error.
+- [ ] Record the final control-plane DB decision in the ledger/checklist.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: operator can point to the run URL and the exact DB-path decision without guessing.
+
+### P0.6 Live Ingress Trust Boundary
+
+- [ ] Inspect live deploy config for proxy-trust settings.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: live values for `RATE_LIMIT_TRUST_PROXY_HEADERS` and `RATE_LIMIT_TRUSTED_PROXY_CIDRS` are known.
+- [ ] Verify the trusted proxy CIDRs or explicit no-trust posture match the real ingress path.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: deploy config matches the actual proxy/CDN/WAF chain, or proxy headers are intentionally distrusted.
+- [ ] Record whether edge allowlists or WAF rules exist outside the app.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: runbook states clearly whether the ingress boundary relies on app-only controls or external edge restrictions too.
+- [ ] Capture one live proof artifact for the ingress boundary decision.
+  - Evidence / artifact:
+  - Owner:
+  - Exit criteria: operator can show the exact live boundary posture instead of inferring it from repo defaults.
 
 ## P1
 
