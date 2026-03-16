@@ -60,6 +60,7 @@ class CaptureWebhookSecretProofTests(unittest.TestCase):
                     expect_previous_absent=True,
                     retired_secret_env="APIFY_WEBHOOK_SECRET_RETIRED",
                     current_secret_env="APIFY_WEBHOOK_SECRET",
+                    timeout_seconds=120,
                 )
 
         artifact_text = json.dumps(artifact, sort_keys=True)
@@ -71,6 +72,53 @@ class CaptureWebhookSecretProofTests(unittest.TestCase):
         self.assertEqual(artifact["request_context"]["payload"]["run_id"], "run-123")
         self.assertNotIn(runtime_env["APIFY_WEBHOOK_SECRET"], artifact_text)
         self.assertNotIn(runtime_env["APIFY_WEBHOOK_SECRET_RETIRED"], artifact_text)
+
+    def test_build_artifact_treats_replay_ignored_as_current_acceptance_when_previous_secret_is_absent(self):
+        payload = {
+            "createdAt": "2026-03-16T12:00:00+00:00",
+            "resource": {"id": "run-456", "defaultDatasetId": "dataset-456"},
+        }
+        runtime_env = {
+            "APIFY_WEBHOOK_SECRET": "current-secret-value-1234567890",
+            "APIFY_WEBHOOK_SECRET_PREVIOUS": "",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload_path = Path(tmpdir) / "payload.json"
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            side_effects = [
+                {
+                    "observed_at": "2026-03-16T12:02:00+00:00",
+                    "http_status": 200,
+                    "response_body_excerpt": '{"status":"ok","replay_ignored":true}',
+                    "response_json": {"status": "ok", "replay_ignored": True},
+                },
+                {
+                    "observed_at": "2026-03-16T12:02:02+00:00",
+                    "http_status": 200,
+                    "response_body_excerpt": '{"status":"ok","replay_ignored":true}',
+                    "response_json": {"status": "ok", "replay_ignored": True},
+                },
+            ]
+            with patch.object(proof, "post_webhook", side_effect=side_effects), patch.object(
+                proof, "resolve_deploy_sha", return_value="abc123def456"
+            ):
+                artifact, failed = proof.build_artifact(
+                    runtime_env,
+                    endpoint="https://example.test/api/ingest/apify",
+                    payload_path=str(payload_path),
+                    expect_previous_absent=False,
+                    retired_secret_env="APIFY_WEBHOOK_SECRET_RETIRED",
+                    current_secret_env="APIFY_WEBHOOK_SECRET",
+                    timeout_seconds=120,
+                )
+
+        self.assertFalse(failed)
+        self.assertEqual(artifact["checks"]["current_secret_accepted"]["status"], "passed")
+        self.assertEqual(
+            artifact["checks"]["current_secret_accepted"]["reason"],
+            "replay_ignored_implies_prior_current_secret_acceptance",
+        )
 
     def test_build_artifact_flags_previous_secret_present_when_absence_is_expected(self):
         runtime_env = {
@@ -85,6 +133,7 @@ class CaptureWebhookSecretProofTests(unittest.TestCase):
                 expect_previous_absent=True,
                 retired_secret_env="APIFY_WEBHOOK_SECRET_RETIRED",
                 current_secret_env="APIFY_WEBHOOK_SECRET",
+                timeout_seconds=120,
             )
 
         self.assertTrue(failed)
