@@ -15,7 +15,7 @@ Fixes applied (2026-03-11):
 - Dataset ID format validated before fetch
 """
 from fastapi import APIRouter, Request, HTTPException, Header
-from typing import Optional
+from typing import Any, Optional
 import hmac
 import hashlib
 import re
@@ -645,6 +645,50 @@ def _stale_webhook_error(metadata: dict) -> Optional[str]:
     return None
 
 
+def _raw_item_identity(item: Any, run_id: str, item_index: int) -> tuple[str, Optional[str]]:
+    if not isinstance(item, dict):
+        fallback_id = hashlib.sha256(f"{run_id}|raw|{item_index}".encode()).hexdigest()[:40]
+        return fallback_id, None
+
+    source = (item.get("source_site") or item.get("source") or "unknown").strip().lower()
+    listing_url = (item.get("listing_url") or item.get("url") or "").strip() or None
+    raw_listing_id = (
+        item.get("listing_id")
+        or item.get("assetId")
+        or item.get("id")
+        or item.get("url")
+        or item.get("listing_url")
+        or item.get("vin")
+    )
+    if raw_listing_id:
+        listing_id = hashlib.sha256(f"{source}|{raw_listing_id}".encode()).hexdigest()[:40]
+        return listing_id, listing_url
+
+    title = (item.get("title") or "").strip()
+    fallback_id = hashlib.sha256(f"{run_id}|{source}|{listing_url or title}|{item_index}".encode()).hexdigest()[:40]
+    return fallback_id, listing_url
+
+
+def _record_pre_save_skip(
+    *,
+    item: Any,
+    run_id: str,
+    item_index: int,
+    status: str,
+    error_message: Optional[str],
+) -> None:
+    listing_id, listing_url = _raw_item_identity(item, run_id, item_index)
+    _record_delivery_log(
+        run_id=run_id,
+        listing_id=listing_id,
+        listing_url=listing_url,
+        opportunity_id=None,
+        channel="db_save",
+        status=status,
+        error_message=error_message,
+    )
+
+
 @router.post("/apify")
 async def apify_webhook(
     request: Request,
@@ -818,7 +862,7 @@ async def apify_webhook(
             dataset_item_count,
         )
 
-        for item in items:
+        for item_index, item in enumerate(items):
             vehicle = normalize_apify_vehicle(
                 item,
                 apify_run_id,
@@ -827,6 +871,13 @@ async def apify_webhook(
             if vehicle is None:
                 skipped += 1
                 _increment_reason_counter(skip_reasons, "normalize_rejected")
+                _record_pre_save_skip(
+                    item=item,
+                    run_id=apify_run_id,
+                    item_index=item_index,
+                    status="skipped_norm",
+                    error_message="normalize_rejected",
+                )
                 continue
 
             gate_result = passes_basic_gates(vehicle)
@@ -834,6 +885,15 @@ async def apify_webhook(
                 logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
                 skipped += 1
                 _increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_gate",
+                    error_message=gate_result["reason"],
+                )
                 continue
 
             # Score using real DOS formula
@@ -851,12 +911,30 @@ async def apify_webhook(
                 )
                 skipped += 1
                 _increment_reason_counter(skip_reasons, "margin_below_floor")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_margin",
+                    error_message="margin_below_floor",
+                )
                 continue
 
             if score_result.get("investment_grade") == "Bronze":
                 logger.info(f"[CEILING] bronze reject: {vehicle.get('title','?')[:60]}")
                 skipped += 1
                 _increment_reason_counter(skip_reasons, "bronze_reject")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_bronze",
+                    error_message="bronze_reject",
+                )
                 continue
 
             if not score_result.get("ceiling_pass", True):
@@ -868,6 +946,15 @@ async def apify_webhook(
                 _increment_reason_counter(
                     skip_reasons,
                     f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
+                )
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_ceiling",
+                    error_message=score_result.get("ceiling_reason") or "ceiling_reject",
                 )
                 continue
 
@@ -1014,7 +1101,9 @@ async def apify_webhook(
                 "processed" if failed_save_count == 0 else "degraded",
                 item_count=dataset_item_count,
                 error_message=(
-                    None if failed_save_count == 0
+                    None
+                    if failed_save_count == 0
+                    and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
                     else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
                 ),
             )

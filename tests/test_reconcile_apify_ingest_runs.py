@@ -128,6 +128,19 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         self.assertIn("missing_webhook", reports[0]["issues"])
         self.assertIn("pre_app_webhook_miss", reports[0]["likely_cause"])
 
+    def test_classify_run_allows_all_items_skipped_before_save_when_ledger_accounts_for_them(self):
+        issues = reconcile.classify_run(
+            run_id="run-skip-only",
+            apify_run={"run_id": "run-skip-only", "status": "SUCCEEDED", "item_count": 3},
+            webhook={"latest_status": "processed"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"skipped_gate": 2, "skipped_margin": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
 
 if __name__ == "__main__":
     unittest.main()

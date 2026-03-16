@@ -83,6 +83,33 @@ class _Supabase:
         return _Query(self.rows)
 
 
+class _HTTPXResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _HTTPXAsyncClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, *args, **kwargs):
+        if "/datasets/" not in url:
+            raise AssertionError(f"unexpected url: {url}")
+        return _HTTPXResponse([{"url": "https://example.com/vehicle/1"}])
+
+
 class WebhookSecurityTests(unittest.TestCase):
     def test_apify_api_token_helper_accepts_legacy_alias(self):
         with patch.dict(
@@ -214,6 +241,43 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(getattr(exc.exception, "status_code", None), 401)
         self.assertEqual(getattr(exc.exception, "detail", None), "Stale webhook payload")
         self.assertEqual(insert_calls[0]["processing_status"], "ignored_stale")
+
+    def test_apify_webhook_records_pre_save_skip_ledger_for_normalize_rejection(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-skip-1", "defaultDatasetId": "dataset-skip-1"},
+        }
+        delivery_calls = []
+        webhook_updates = []
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", None), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-skip-1"
+        ), patch.object(
+            ingest,
+            "update_webhook_log",
+            lambda *args, **kwargs: webhook_updates.append((args, kwargs)),
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["skipped"], 1)
+        self.assertEqual(len(delivery_calls), 1)
+        self.assertEqual(delivery_calls[0]["run_id"], "run-skip-1")
+        self.assertEqual(delivery_calls[0]["channel"], "db_save")
+        self.assertEqual(delivery_calls[0]["status"], "skipped_norm")
+        self.assertEqual(delivery_calls[0]["error_message"], "normalize_rejected")
+        self.assertIn("skip_reasons={'normalize_rejected': 1}", webhook_updates[-1][1]["error_message"])
 
 
 if __name__ == "__main__":
