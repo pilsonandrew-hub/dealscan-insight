@@ -73,6 +73,51 @@ class _Query:
         return types.SimpleNamespace(data=self.rows)
 
 
+class _FailingExecute:
+    def __init__(self, error_text):
+        self.error_text = error_text
+
+    def execute(self):
+        raise RuntimeError(self.error_text)
+
+
+class _FailingWebhookLogInsertTable:
+    def __init__(self, error_text):
+        self.error_text = error_text
+
+    def insert(self, _payload):
+        return _FailingExecute(self.error_text)
+
+
+class _FailingWebhookLogInsertSupabase:
+    def __init__(self, error_text):
+        self.error_text = error_text
+
+    def table(self, name):
+        if name != "webhook_log":
+            raise AssertionError(f"unexpected table: {name}")
+        return _FailingWebhookLogInsertTable(self.error_text)
+
+
+class _FailingReplayQuery(_Query):
+    def __init__(self, error_text):
+        super().__init__(rows=[])
+        self.error_text = error_text
+
+    def execute(self):
+        raise RuntimeError(self.error_text)
+
+
+class _FailingReplaySupabase:
+    def __init__(self, error_text):
+        self.error_text = error_text
+
+    def table(self, name):
+        if name != "webhook_log":
+            raise AssertionError(f"unexpected table: {name}")
+        return _FailingReplayQuery(self.error_text)
+
+
 class _Supabase:
     def __init__(self, rows):
         self.rows = rows
@@ -214,7 +259,7 @@ class WebhookSecurityTests(unittest.TestCase):
         ), patch.object(
             ingest,
             "_find_recent_webhook_replay",
-            lambda run_id: {
+            lambda run_id, **_kwargs: {
                 "processing_status": "processed",
                 "received_at": "2026-03-15T18:00:00+00:00",
                 "run_id": run_id,
@@ -259,6 +304,139 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(getattr(exc.exception, "detail", None), "Stale webhook payload")
         self.assertEqual(insert_calls[0]["processing_status"], "ignored_stale")
 
+    def test_insert_webhook_log_falls_back_to_direct_pg_and_marks_audit_state(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-direct-log", "defaultDatasetId": "dataset-direct-log"},
+        }
+        inserted_rows = []
+        audit_state = {"fallbacks": []}
+
+        def fake_insert_direct_pg(row):
+            inserted_rows.append(row)
+            return "direct-log-1"
+
+        with patch.object(
+            ingest,
+            "supabase_client",
+            _FailingWebhookLogInsertSupabase("supabase webhook_log insert failed"),
+        ), patch.object(ingest, "_direct_supabase_db_url", "postgresql://example"), patch.object(
+            ingest,
+            "_insert_webhook_log_direct_pg",
+            fake_insert_direct_pg,
+        ):
+            webhook_log_id = ingest.insert_webhook_log(
+                payload,
+                require_durable=True,
+                audit_state=audit_state,
+            )
+
+        self.assertEqual(webhook_log_id, "direct-log-1")
+        self.assertEqual(audit_state["fallbacks"], ["webhook_log_insert_direct_pg"])
+        self.assertIn(
+            "audit_fallbacks=webhook_log_insert_direct_pg",
+            inserted_rows[0]["error_message"],
+        )
+
+    def test_apify_webhook_marks_audit_fallback_when_critical_rows_use_direct_pg(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-audit-fallback", "defaultDatasetId": "dataset-audit-fallback"},
+        }
+        webhook_inserts = []
+        webhook_updates = []
+        delivery_rows = []
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", None), patch.object(
+            ingest, "_direct_supabase_db_url", "postgresql://example"
+        ), patch.object(
+            ingest,
+            "_find_recent_webhook_replay_direct_pg",
+            lambda *_args, **_kwargs: [],
+        ), patch.object(
+            ingest,
+            "_insert_webhook_log_direct_pg",
+            lambda row: webhook_inserts.append(row) or "log-direct-1",
+        ), patch.object(
+            ingest,
+            "_update_webhook_log_direct_pg",
+            lambda webhook_log_id, update_row: webhook_updates.append((webhook_log_id, update_row)),
+        ), patch.object(
+            ingest,
+            "_upsert_delivery_log_direct_pg",
+            lambda row: delivery_rows.append(row),
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: None
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["audit_status"], "fallback")
+        self.assertIn("webhook_log_insert_direct_pg", response["audit_fallbacks"])
+        self.assertIn("webhook_replay_lookup_direct_pg", response["audit_fallbacks"])
+        self.assertIn("ingest_delivery_log_direct_pg", response["audit_fallbacks"])
+        self.assertIn("webhook_log_update_direct_pg", response["audit_fallbacks"])
+        self.assertEqual(delivery_rows[0]["status"], "skipped_norm")
+        self.assertIn(
+            "audit_fallbacks=ingest_delivery_log_direct_pg",
+            delivery_rows[0]["error_message"],
+        )
+        self.assertIn("audit_fallbacks=", webhook_updates[-1][1]["error_message"])
+
+    def test_apify_webhook_fails_loudly_when_db_save_audit_write_cannot_land(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-audit-503", "defaultDatasetId": "dataset-audit-503"},
+        }
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", None), patch.object(
+            ingest, "_direct_supabase_db_url", None
+        ), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-audit-503"
+        ), patch.object(
+            ingest, "update_webhook_log", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: None
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            with self.assertRaises(Exception) as exc:
+                asyncio.run(
+                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                )
+
+        self.assertEqual(getattr(exc.exception, "status_code", None), 503)
+        self.assertEqual(getattr(exc.exception, "detail", None), "Critical ingest audit write failed")
+
+    def test_apify_webhook_fails_loudly_when_replay_lookup_cannot_land_durably(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-replay-lookup-503", "defaultDatasetId": "dataset-replay-lookup-503"},
+        }
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(
+            ingest,
+            "supabase_client",
+            _FailingReplaySupabase("supabase replay lookup failed"),
+        ), patch.object(ingest, "_direct_supabase_db_url", None):
+            with self.assertRaises(Exception) as exc:
+                asyncio.run(
+                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                )
+
+        self.assertEqual(getattr(exc.exception, "status_code", None), 503)
+        self.assertEqual(getattr(exc.exception, "detail", None), "Critical ingest audit write failed")
+
     def test_apify_webhook_records_pre_save_skip_ledger_for_normalize_rejection(self):
         payload = {
             "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -271,6 +449,8 @@ class WebhookSecurityTests(unittest.TestCase):
         with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
             ingest, "WEBHOOK_SECRET_PREVIOUS", ""
         ), patch.object(ingest, "supabase_client", None), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
             ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-skip-1"
         ), patch.object(
             ingest,

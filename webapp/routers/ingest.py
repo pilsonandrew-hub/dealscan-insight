@@ -55,6 +55,11 @@ except ImportError:
         return None
 
 alerts_this_run: dict = {}
+AUDIT_FALLBACK_MARKER = "audit_fallbacks="
+
+
+class CriticalAuditWriteError(RuntimeError):
+    pass
 
 
 def _env_float(name: str, default: float) -> float:
@@ -537,10 +542,9 @@ def insert_webhook_log(
     *,
     processing_status: str = "pending",
     error_message: Optional[str] = None,
+    require_durable: bool = False,
+    audit_state: Optional[dict[str, Any]] = None,
 ) -> Optional[str]:
-    if supabase_client is None:
-        return None
-
     metadata = extract_apify_webhook_metadata(payload)
     row = {
         "source": metadata["source"],
@@ -551,10 +555,39 @@ def insert_webhook_log(
         "processing_status": processing_status,
         "error_message": error_message,
     }
-    result = supabase_client.table("webhook_log").insert(row).execute()
-    if result.data:
-        return result.data[0].get("id")
-    return None
+    primary_error: Optional[Exception] = None
+    if supabase_client is not None:
+        try:
+            result = supabase_client.table("webhook_log").insert(row).execute()
+            if result.data:
+                return result.data[0].get("id")
+        except Exception as exc:
+            primary_error = exc
+
+    try:
+        fallback_label = "webhook_log_insert_direct_pg"
+        fallback_row = dict(row)
+        fallback_row["error_message"] = _merge_audit_error_message(
+            fallback_row.get("error_message"),
+            [fallback_label],
+        )
+        inserted_id = _insert_webhook_log_direct_pg(fallback_row)
+        _record_audit_fallback(audit_state, fallback_label)
+        return inserted_id
+    except Exception as fallback_error:
+        if require_durable:
+            raise CriticalAuditWriteError(
+                _format_audit_failure(
+                    surface="webhook_log",
+                    operation="insert",
+                    primary_error=primary_error,
+                    fallback_error=fallback_error,
+                )
+            ) from fallback_error
+        if primary_error is not None:
+            logger.warning("[WEBHOOK_LOG] insert failed: %s", primary_error)
+        logger.warning("[WEBHOOK_LOG] direct PG fallback failed: %s", fallback_error)
+        return None
 
 
 def update_webhook_log(
@@ -563,8 +596,12 @@ def update_webhook_log(
     *,
     error_message: Optional[str] = None,
     item_count: Optional[int] = None,
+    require_durable: bool = False,
+    audit_state: Optional[dict[str, Any]] = None,
 ) -> None:
-    if supabase_client is None or not webhook_log_id:
+    if not webhook_log_id:
+        if require_durable:
+            raise CriticalAuditWriteError("critical webhook_log update missing row id")
         return
 
     update_row = {
@@ -574,7 +611,37 @@ def update_webhook_log(
     if item_count is not None:
         update_row["item_count"] = item_count
 
-    supabase_client.table("webhook_log").update(update_row).eq("id", webhook_log_id).execute()
+    primary_error: Optional[Exception] = None
+    if supabase_client is not None:
+        try:
+            supabase_client.table("webhook_log").update(update_row).eq("id", webhook_log_id).execute()
+            return
+        except Exception as exc:
+            primary_error = exc
+
+    try:
+        fallback_label = "webhook_log_update_direct_pg"
+        fallback_row = dict(update_row)
+        fallback_row["error_message"] = _merge_audit_error_message(
+            fallback_row.get("error_message"),
+            [fallback_label],
+        )
+        _update_webhook_log_direct_pg(webhook_log_id, fallback_row)
+        _record_audit_fallback(audit_state, fallback_label)
+        return
+    except Exception as fallback_error:
+        if require_durable:
+            raise CriticalAuditWriteError(
+                _format_audit_failure(
+                    surface="webhook_log",
+                    operation="update",
+                    primary_error=primary_error,
+                    fallback_error=fallback_error,
+                )
+            ) from fallback_error
+        if primary_error is not None:
+            logger.warning("[WEBHOOK_LOG] update failed: %s", primary_error)
+        logger.warning("[WEBHOOK_LOG] direct PG update fallback failed: %s", fallback_error)
 
 
 def _configured_webhook_secret_entries() -> tuple[tuple[str, str], ...]:
@@ -614,22 +681,56 @@ def _webhook_max_age_seconds() -> int:
     return max(_env_int("APIFY_WEBHOOK_MAX_AGE_SECONDS", 0), 0)
 
 
-def _find_recent_webhook_replay(run_id: Optional[str]) -> Optional[dict]:
+def _find_recent_webhook_replay(
+    run_id: Optional[str],
+    *,
+    strict: bool = False,
+    audit_state: Optional[dict[str, Any]] = None,
+) -> Optional[dict]:
     replay_window_seconds = _webhook_replay_window_seconds()
-    if supabase_client is None or not run_id or replay_window_seconds <= 0:
+    if not run_id or replay_window_seconds <= 0:
         return None
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=replay_window_seconds)
-    result = (
-        supabase_client.table("webhook_log")
-        .select("id, received_at, processing_status, error_message")
-        .eq("run_id", run_id)
-        .gte("received_at", cutoff.isoformat())
-        .order("received_at", desc=True)
-        .limit(5)
-        .execute()
-    )
-    for row in result.data or []:
+    primary_error: Optional[Exception] = None
+    if supabase_client is not None:
+        try:
+            result = (
+                supabase_client.table("webhook_log")
+                .select("id, received_at, processing_status, error_message")
+                .eq("run_id", run_id)
+                .gte("received_at", cutoff.isoformat())
+                .order("received_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+            rows = result.data or []
+            return _select_recent_replay_row(rows)
+        except Exception as exc:
+            primary_error = exc
+
+    try:
+        rows = _find_recent_webhook_replay_direct_pg(run_id, cutoff)
+        _record_audit_fallback(audit_state, "webhook_replay_lookup_direct_pg")
+        return _select_recent_replay_row(rows)
+    except Exception as fallback_error:
+        if strict:
+            raise CriticalAuditWriteError(
+                _format_audit_failure(
+                    surface="webhook_log",
+                    operation="replay_lookup",
+                    primary_error=primary_error,
+                    fallback_error=fallback_error,
+                )
+            ) from fallback_error
+        if primary_error is not None:
+            logger.warning("[INGEST_AUTH] replay lookup failed for run_id=%s: %s", run_id, primary_error)
+        logger.warning("[INGEST_AUTH] direct PG replay lookup fallback failed for run_id=%s: %s", run_id, fallback_error)
+        return None
+
+
+def _select_recent_replay_row(rows: list[dict]) -> Optional[dict]:
+    for row in rows:
         status = str(row.get("processing_status") or "").lower()
         if status in {"processed", "pending", "ignored_replay"}:
             return row
@@ -682,6 +783,7 @@ def _record_pre_save_skip(
     item_index: int,
     status: str,
     error_message: Optional[str],
+    audit_state: Optional[dict[str, Any]] = None,
 ) -> None:
     listing_id, listing_url = _raw_item_identity(item, run_id, item_index)
     _record_delivery_log(
@@ -692,6 +794,8 @@ def _record_pre_save_skip(
         channel="db_save",
         status=status,
         error_message=error_message,
+        require_durable=True,
+        audit_state=audit_state,
     )
 
 
@@ -723,47 +827,57 @@ async def apify_webhook(
 
     metadata = extract_apify_webhook_metadata(payload)
     apify_run_id = metadata["run_id"] or str(uuid.uuid4())[:8]
+    audit_state: dict[str, Any] = {"fallbacks": []}
+    webhook_log_id = None
     logger.info(f"[INGEST] Webhook received for run_id={apify_run_id}")
 
-    stale_error = _stale_webhook_error(metadata)
-    if stale_error:
-        try:
-            insert_webhook_log(payload, processing_status="ignored_stale", error_message=stale_error)
-        except Exception as e:
-            logger.warning(f"[WEBHOOK_LOG] stale insert failed (non-fatal): {e}")
-        raise HTTPException(status_code=401, detail="Stale webhook payload")
-
     try:
-        recent_replay = _find_recent_webhook_replay(metadata["run_id"])
-    except Exception as e:
-        recent_replay = None
-        logger.warning(f"[INGEST_AUTH] replay lookup failed for run_id={apify_run_id}: {e}")
+        stale_error = _stale_webhook_error(metadata)
+        if stale_error:
+            insert_webhook_log(
+                payload,
+                processing_status="ignored_stale",
+                error_message=stale_error,
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            raise HTTPException(status_code=401, detail="Stale webhook payload")
 
-    if recent_replay:
-        replay_message = (
-            f"Replay ignored for run_id={apify_run_id}; prior status="
-            f"{recent_replay.get('processing_status') or 'unknown'} at "
-            f"{recent_replay.get('received_at') or 'unknown'}"
+        recent_replay = _find_recent_webhook_replay(
+            metadata["run_id"],
+            strict=True,
+            audit_state=audit_state,
         )
-        logger.warning("[INGEST_AUTH] %s", replay_message)
-        try:
-            insert_webhook_log(payload, processing_status="ignored_replay", error_message=replay_message)
-        except Exception as e:
-            logger.warning(f"[WEBHOOK_LOG] replay insert failed (non-fatal): {e}")
-        return {
-            "status": "ok",
-            "run_id": apify_run_id,
-            "replay_ignored": True,
-            "message": "Duplicate webhook ignored",
-        }
 
-    webhook_log_id = None
-    try:
-        webhook_log_id = insert_webhook_log(payload)
-    except Exception as e:
-        logger.warning(f"[WEBHOOK_LOG] insert failed (non-fatal): {e}")
+        if recent_replay:
+            replay_message = (
+                f"Replay ignored for run_id={apify_run_id}; prior status="
+                f"{recent_replay.get('processing_status') or 'unknown'} at "
+                f"{recent_replay.get('received_at') or 'unknown'}"
+            )
+            logger.warning("[INGEST_AUTH] %s", replay_message)
+            insert_webhook_log(
+                payload,
+                processing_status="ignored_replay",
+                error_message=replay_message,
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            response = {
+                "status": "ok",
+                "run_id": apify_run_id,
+                "replay_ignored": True,
+                "message": "Duplicate webhook ignored",
+            }
+            _attach_audit_state(response, audit_state)
+            return response
 
-    try:
+        webhook_log_id = insert_webhook_log(
+            payload,
+            require_durable=True,
+            audit_state=audit_state,
+        )
+
         if supabase_client is not None:
             try:
                 existing = (
@@ -813,14 +927,15 @@ async def apify_webhook(
 
         if not dataset_id:
             response = {"status": "ok", "message": "No dataset to process"}
-            try:
-                update_webhook_log(
-                    webhook_log_id,
-                    "processed",
-                    item_count=metadata["item_count"],
-                )
-            except Exception as e:
-                logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+            update_webhook_log(
+                webhook_log_id,
+                "processed",
+                item_count=metadata["item_count"],
+                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            _attach_audit_state(response, audit_state)
             return response
 
         # Validate dataset ID format (alphanumeric, no path traversal)
@@ -846,10 +961,15 @@ async def apify_webhook(
 
         if not isinstance(items, list):
             response = {"status": "ok", "message": "No items in dataset"}
-            try:
-                update_webhook_log(webhook_log_id, "processed", item_count=metadata["item_count"])
-            except Exception as e:
-                logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+            update_webhook_log(
+                webhook_log_id,
+                "processed",
+                item_count=metadata["item_count"],
+                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            _attach_audit_state(response, audit_state)
             return response
 
         processed = 0
@@ -886,6 +1006,7 @@ async def apify_webhook(
                     item_index=item_index,
                     status="skipped_norm",
                     error_message="normalize_rejected",
+                    audit_state=audit_state,
                 )
                 continue
 
@@ -902,6 +1023,8 @@ async def apify_webhook(
                     channel="db_save",
                     status="skipped_gate",
                     error_message=gate_result["reason"],
+                    require_durable=True,
+                    audit_state=audit_state,
                 )
                 continue
 
@@ -928,6 +1051,8 @@ async def apify_webhook(
                     channel="db_save",
                     status="skipped_margin",
                     error_message="margin_below_floor",
+                    require_durable=True,
+                    audit_state=audit_state,
                 )
                 continue
 
@@ -943,6 +1068,8 @@ async def apify_webhook(
                     channel="db_save",
                     status="skipped_bronze",
                     error_message="bronze_reject",
+                    require_durable=True,
+                    audit_state=audit_state,
                 )
                 continue
 
@@ -964,6 +1091,8 @@ async def apify_webhook(
                     channel="db_save",
                     status="skipped_ceiling",
                     error_message=score_result.get("ceiling_reason") or "ceiling_reject",
+                    require_durable=True,
+                    audit_state=audit_state,
                 )
                 continue
 
@@ -1002,6 +1131,8 @@ async def apify_webhook(
                 channel="db_save",
                 status=save_status,
                 error_message=None if save_status not in {"supabase_error", "direct_pg_error", "duplicate_unresolved", "direct_pg_unavailable"} else save_status,
+                require_durable=True,
+                audit_state=audit_state,
             )
 
             inserted_success = save_status in {
@@ -1104,32 +1235,54 @@ async def apify_webhook(
                 for v in hot_deals
             ],
         }
-        try:
-            update_webhook_log(
-                webhook_log_id,
-                "processed" if failed_save_count == 0 else "degraded",
-                item_count=dataset_item_count,
-                error_message=(
+        update_webhook_log(
+            webhook_log_id,
+            "processed" if failed_save_count == 0 else "degraded",
+            item_count=dataset_item_count,
+            error_message=_merge_audit_error_message(
+                (
                     None
                     if failed_save_count == 0
                     and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
                     else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
                 ),
-            )
-        except Exception as e:
-            logger.warning(f"[WEBHOOK_LOG] update failed (non-fatal): {e}")
+                _audit_fallbacks(audit_state),
+            ),
+            require_durable=True,
+            audit_state=audit_state,
+        )
+        _attach_audit_state(response, audit_state)
         return response
+    except CriticalAuditWriteError as e:
+        logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, e)
+        raise HTTPException(status_code=503, detail="Critical ingest audit write failed") from e
     except HTTPException as e:
-        try:
-            update_webhook_log(webhook_log_id, "error", error_message=str(e.detail))
-        except Exception as update_error:
-            logger.warning(f"[WEBHOOK_LOG] error update failed (non-fatal): {update_error}")
+        if webhook_log_id:
+            try:
+                update_webhook_log(
+                    webhook_log_id,
+                    "error",
+                    error_message=_merge_audit_error_message(str(e.detail), _audit_fallbacks(audit_state)),
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+            except CriticalAuditWriteError as audit_error:
+                logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, audit_error)
+                raise HTTPException(status_code=503, detail="Critical ingest audit write failed") from audit_error
         raise
     except Exception as e:
-        try:
-            update_webhook_log(webhook_log_id, "error", error_message=str(e))
-        except Exception as update_error:
-            logger.warning(f"[WEBHOOK_LOG] error update failed (non-fatal): {update_error}")
+        if webhook_log_id:
+            try:
+                update_webhook_log(
+                    webhook_log_id,
+                    "error",
+                    error_message=_merge_audit_error_message(str(e), _audit_fallbacks(audit_state)),
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+            except CriticalAuditWriteError as audit_error:
+                logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, audit_error)
+                raise HTTPException(status_code=503, detail="Critical ingest audit write failed") from audit_error
         raise
 
 
@@ -2004,6 +2157,134 @@ def _increment_reason_counter(counter: dict, reason: str) -> None:
     counter[reason] = counter.get(reason, 0) + 1
 
 
+def _audit_fallbacks(audit_state: Optional[dict[str, Any]]) -> list[str]:
+    fallbacks = (audit_state or {}).get("fallbacks") or []
+    deduped: list[str] = []
+    for fallback in fallbacks:
+        if fallback and fallback not in deduped:
+            deduped.append(str(fallback))
+    return deduped
+
+
+def _record_audit_fallback(audit_state: Optional[dict[str, Any]], fallback_label: str) -> None:
+    if audit_state is None:
+        return
+    fallbacks = audit_state.setdefault("fallbacks", [])
+    if fallback_label not in fallbacks:
+        fallbacks.append(fallback_label)
+
+
+def _merge_audit_error_message(
+    error_message: Optional[str],
+    fallback_labels: list[str],
+) -> Optional[str]:
+    labels = [label for label in fallback_labels if label]
+    if not labels:
+        return error_message
+    marker = f"{AUDIT_FALLBACK_MARKER}{','.join(labels)}"
+    if not error_message:
+        return marker
+    if marker in error_message:
+        return error_message
+    return f"{error_message}; {marker}"
+
+
+def _attach_audit_state(response: dict[str, Any], audit_state: Optional[dict[str, Any]]) -> None:
+    fallbacks = _audit_fallbacks(audit_state)
+    response["audit_status"] = "fallback" if fallbacks else "ok"
+    if fallbacks:
+        response["audit_fallbacks"] = fallbacks
+
+
+def _format_audit_failure(
+    *,
+    surface: str,
+    operation: str,
+    primary_error: Optional[BaseException],
+    fallback_error: BaseException,
+) -> str:
+    if primary_error is not None:
+        return (
+            f"critical {surface} {operation} failed via Supabase and direct PG fallback: "
+            f"supabase={primary_error}; direct_pg={fallback_error}"
+        )
+    return f"critical {surface} {operation} failed via direct PG fallback: direct_pg={fallback_error}"
+
+
+def _insert_webhook_log_direct_pg(row: dict) -> Optional[str]:
+    if not _direct_supabase_db_url:
+        raise RuntimeError("direct PG audit fallback unavailable")
+
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into public.webhook_log
+                  (source, actor_id, run_id, item_count, raw_payload, processing_status, error_message)
+                values (%s, %s, %s, %s, %s, %s, %s)
+                returning id
+                """,
+                (
+                    row.get("source"),
+                    row.get("actor_id"),
+                    row.get("run_id"),
+                    row.get("item_count"),
+                    psycopg2_extras.Json(row.get("raw_payload")),
+                    row.get("processing_status"),
+                    row.get("error_message"),
+                ),
+            )
+            inserted = cur.fetchone()
+            return str(inserted[0]) if inserted and inserted[0] else None
+
+
+def _update_webhook_log_direct_pg(webhook_log_id: str, update_row: dict) -> None:
+    if not _direct_supabase_db_url:
+        raise RuntimeError("direct PG audit fallback unavailable")
+
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update public.webhook_log
+                set processing_status = %s,
+                    error_message = %s,
+                    item_count = coalesce(%s, item_count)
+                where id = %s
+                returning id
+                """,
+                (
+                    update_row.get("processing_status"),
+                    update_row.get("error_message"),
+                    update_row.get("item_count"),
+                    webhook_log_id,
+                ),
+            )
+            updated = cur.fetchone()
+            if not updated:
+                raise RuntimeError(f"webhook_log row {webhook_log_id} not found for update")
+
+
+def _find_recent_webhook_replay_direct_pg(run_id: str, cutoff: datetime) -> list[dict]:
+    if not _direct_supabase_db_url:
+        raise RuntimeError("direct PG replay lookup fallback unavailable")
+
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor(cursor_factory=psycopg2_extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                select id, received_at, processing_status, error_message
+                from public.webhook_log
+                where run_id = %s
+                  and received_at >= %s
+                order by received_at desc
+                limit 5
+                """,
+                (run_id, cutoff),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
 def _delivery_log_lookup(run_id: str, listing_id: str, channel: str) -> Optional[dict]:
     if supabase_client is None or not run_id or not listing_id or not channel:
         return None
@@ -2034,11 +2315,15 @@ def _record_delivery_log(
     opportunity_id: Optional[str] = None,
     external_id: Optional[str] = None,
     error_message: Optional[str] = None,
-) -> None:
-    if supabase_client is None or not run_id or not listing_id or not channel:
-        return
-
-    existing = _delivery_log_lookup(run_id, listing_id, channel)
+    require_durable: bool = False,
+    audit_state: Optional[dict[str, Any]] = None,
+) -> bool:
+    if not run_id or not listing_id or not channel:
+        if require_durable:
+            raise CriticalAuditWriteError(
+                "critical ingest_delivery_log write missing run_id, listing_id, or channel"
+            )
+        return False
     now_iso = datetime.utcnow().isoformat()
     row = {
         "run_id": run_id,
@@ -2051,27 +2336,105 @@ def _record_delivery_log(
         "error_message": error_message,
         "updated_at": now_iso,
     }
+    primary_error: Optional[Exception] = None
     try:
-        if existing and existing.get("id"):
-            row["attempt_count"] = int(existing.get("attempt_count") or 0) + 1
-            (
-                supabase_client.table("ingest_delivery_log")
-                .update(row)
-                .eq("id", existing["id"])
-                .execute()
+        if supabase_client is not None:
+            existing = _delivery_log_lookup(run_id, listing_id, channel)
+            if existing and existing.get("id"):
+                row["attempt_count"] = int(existing.get("attempt_count") or 0) + 1
+                (
+                    supabase_client.table("ingest_delivery_log")
+                    .update(row)
+                    .eq("id", existing["id"])
+                    .execute()
+                )
+            else:
+                row["attempt_count"] = 1
+                row["created_at"] = now_iso
+                supabase_client.table("ingest_delivery_log").insert(row).execute()
+            return False
+    except Exception as exc:
+        primary_error = exc
+
+    try:
+        fallback_label = "ingest_delivery_log_direct_pg"
+        fallback_row = dict(row)
+        fallback_row["error_message"] = _merge_audit_error_message(
+            fallback_row.get("error_message"),
+            [fallback_label],
+        )
+        _upsert_delivery_log_direct_pg(fallback_row)
+        _record_audit_fallback(audit_state, fallback_label)
+        return True
+    except Exception as fallback_error:
+        if require_durable:
+            raise CriticalAuditWriteError(
+                _format_audit_failure(
+                    surface="ingest_delivery_log",
+                    operation="upsert",
+                    primary_error=primary_error,
+                    fallback_error=fallback_error,
+                )
+            ) from fallback_error
+        if primary_error is not None:
+            logger.warning(
+                "[DELIVERY_LOG] record failed for %s/%s/%s: %s",
+                run_id,
+                listing_id,
+                channel,
+                primary_error,
             )
-        else:
-            row["attempt_count"] = 1
-            row["created_at"] = now_iso
-            supabase_client.table("ingest_delivery_log").insert(row).execute()
-    except Exception as e:
-        logger.warning("[DELIVERY_LOG] record failed for %s/%s/%s: %s", run_id, listing_id, channel, e)
+        logger.warning(
+            "[DELIVERY_LOG] direct PG fallback failed for %s/%s/%s: %s",
+            run_id,
+            listing_id,
+            channel,
+            fallback_error,
+        )
+        return False
 
 
 def _compute_listing_id(source: str, listing_url: str) -> str:
     normalized_source = (source or "unknown").strip().lower()
     normalized_url = (listing_url or "").strip()
     return hashlib.sha256(f"{normalized_source}|{normalized_url}".encode()).hexdigest()[:40]
+
+
+def _upsert_delivery_log_direct_pg(row: dict) -> None:
+    if not _direct_supabase_db_url:
+        raise RuntimeError("direct PG audit fallback unavailable")
+
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into public.ingest_delivery_log
+                  (run_id, listing_id, listing_url, opportunity_id, channel, status, external_id,
+                   error_message, attempt_count, created_at, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
+                on conflict (run_id, listing_id, channel)
+                do update set
+                  listing_url = excluded.listing_url,
+                  opportunity_id = excluded.opportunity_id,
+                  status = excluded.status,
+                  external_id = excluded.external_id,
+                  error_message = excluded.error_message,
+                  updated_at = excluded.updated_at,
+                  attempt_count = public.ingest_delivery_log.attempt_count + 1
+                """,
+                (
+                    row.get("run_id"),
+                    row.get("listing_id"),
+                    row.get("listing_url"),
+                    row.get("opportunity_id"),
+                    row.get("channel"),
+                    row.get("status"),
+                    row.get("external_id"),
+                    row.get("error_message"),
+                    row.get("created_at") or row.get("updated_at"),
+                    row.get("updated_at"),
+                ),
+            )
 
 
 def _apply_canonical_update(canonical_update: Optional[dict]) -> bool:

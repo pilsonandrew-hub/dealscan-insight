@@ -48,6 +48,7 @@ DB_SAVE_FAILURE_STATUSES = {
     "direct_pg_unavailable",
     "duplicate_unresolved",
 }
+AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 _CURL_SSL_FALLBACK_NOTIFIED = False
 
 
@@ -521,6 +522,7 @@ def classify_run(
     accounted_rows = inserted_rows + existing_rows + skipped_rows + failed_rows
     opportunity_rows = int((opportunities or {}).get("opportunity_rows") or 0)
     latest_webhook_status = str((webhook or {}).get("latest_status") or "unknown").lower()
+    latest_webhook_error = str((webhook or {}).get("latest_error") or "")
     has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or existing_rows > 0
     has_accounted_non_save_outcome = (
         inserted_rows == 0
@@ -534,8 +536,12 @@ def classify_run(
         if webhook or opportunities or delivery:
             has_clean_webhook = not webhook or latest_webhook_status in WEBHOOK_SUCCESS_STATUSES
             if has_clean_webhook and has_successful_db_landing and failed_rows == 0:
+                if AUDIT_FALLBACK_MARKER in latest_webhook_error:
+                    issues.append("audit_backfilled")
                 return issues
             issues.append("db_only_run")
+            if AUDIT_FALLBACK_MARKER in latest_webhook_error:
+                issues.append("audit_backfilled")
         return issues
 
     apify_status = str(apify_run.get("status") or "unknown").upper()
@@ -550,6 +556,8 @@ def classify_run(
                 last_seen = parse_datetime(webhook.get("last_received_at")) or apify_run.get("finished_at") or apify_run.get("started_at")
                 if last_seen and (now_utc - last_seen) > timedelta(minutes=pending_grace_minutes):
                     issues.append("webhook_pending_stale")
+            if AUDIT_FALLBACK_MARKER in latest_webhook_error:
+                issues.append("audit_backfilled")
 
             webhook_item_count = _first_int(webhook.get("max_item_count"))
             if item_count > 0 and webhook_item_count is not None and webhook_item_count != item_count:
@@ -592,6 +600,12 @@ def infer_likely_cause(
 
     if "webhook_degraded" in issues:
         return "app_received_webhook_but_save_path_degraded: inspect db_save statuses and fallback behavior before replaying."
+
+    if "audit_backfilled" in issues:
+        return (
+            "critical_audit_backfilled_via_direct_pg: webhook or db_save evidence landed through the "
+            "direct Postgres fallback. Inspect Supabase/API health before the next replay or deploy."
+        )
 
     if "missing_delivery_log" in issues or "missing_db_save_ledger" in issues:
         return "app_started_but_observability_or_save_ledger_missing: inspect Railway logs for the run before replaying."
