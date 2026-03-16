@@ -111,22 +111,26 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 
 ### P0.4 Ingest Abuse Boundary
 
-- [ ] Review current `/api/ingest/apify` protection posture.
-  - Evidence / artifact:
-  - Owner:
+- [x] Review current `/api/ingest/apify` protection posture.
+  - Evidence / artifact: posture and pre-fix gaps documented in [docs/runbooks/dealerscope-phase-2-hardening-roadmap.md](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/docs/runbooks/dealerscope-phase-2-hardening-roadmap.md); auth/replay path remains in [webapp/routers/ingest.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/ingest.py).
+  - Owner: Backend
   - Exit criteria: current auth, replay, and rate-limit behavior documented.
-- [ ] Add route-specific rate limiting or edge restriction for `/api/ingest/apify`.
-  - Evidence / artifact:
-  - Owner:
+- [x] Add route-specific rate limiting or edge restriction for `/api/ingest/apify`.
+  - Evidence / artifact: [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py) now gives `/api/ingest/apify` its own `rate_limit_ingest_requests` / `rate_limit_ingest_window_seconds` profile and fail-closed behavior when the limiter backend is unavailable.
+  - Owner: Backend
   - Exit criteria: ingest route has stricter protection than generic API traffic.
-- [ ] Fix forwarded-IP parsing and verify behavior under proxy headers.
-  - Evidence / artifact:
-  - Owner:
+- [x] Fix forwarded-IP parsing and verify behavior under proxy headers.
+  - Evidence / artifact: [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py) now ignores proxy headers unless the direct peer is inside `rate_limit_trusted_proxy_cidrs`, and resolves `X-Forwarded-For` to the leftmost untrusted hop. Test coverage is in [tests/test_rate_limit_ingest_boundary.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/tests/test_rate_limit_ingest_boundary.py).
+  - Owner: Backend
   - Exit criteria: spoofed `X-Forwarded-For` chain cannot bypass the intended client-IP logic.
-- [ ] Test Redis-down behavior for rate limiting.
-  - Evidence / artifact:
-  - Owner:
+- [x] Test Redis-down behavior for rate limiting.
+  - Evidence / artifact: [tests/test_rate_limit_ingest_boundary.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/tests/test_rate_limit_ingest_boundary.py) covers Redis init failure, Redis check failure, and the asymmetric behavior where ingest fails closed and generic routes still fail open.
+  - Owner: Backend
   - Exit criteria: Redis outage does not silently erase the ingest route’s abuse boundary.
+- Live-only follow-up:
+  - Evidence / artifact: deploy env must set `RATE_LIMIT_TRUST_PROXY_HEADERS=true` and `RATE_LIMIT_TRUSTED_PROXY_CIDRS` to the real ingress proxy CIDRs before forwarded headers are trusted in production. Any CDN/WAF/IP allowlist proof remains outside the repo.
+  - Owner: Platform/Ops
+  - Exit criteria: deploy config evidence shows the trusted proxy CIDRs and any edge restriction match reality.
 
 ## P1
 

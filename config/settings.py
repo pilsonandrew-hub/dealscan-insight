@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Rate limiting
     rate_limit_requests: int = 100
     rate_limit_window_seconds: int = 60
+    rate_limit_ingest_requests: int = 10
+    rate_limit_ingest_window_seconds: int = 60
+    rate_limit_trust_proxy_headers: bool = False
+    rate_limit_trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
 
     # File upload
     max_upload_size: int = 50 * 1024 * 1024

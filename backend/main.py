@@ -17,6 +17,7 @@ from fastapi import FastAPI, Depends, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
+from config.settings import settings
 from backend.ingest.webhook_secret_posture import (
     build_webhook_secret_posture,
     looks_like_placeholder_secret,
@@ -127,6 +128,18 @@ def _log_webhook_secret_config_health() -> None:
                 "Keep it only for the brief webhook rotation overlap window."
             )
 
+
+def _log_ingest_rate_limit_posture() -> None:
+    logger.info(
+        "[INGEST_RATE_LIMIT] route=/api/ingest/apify limit=%s window_seconds=%s trust_proxy_headers=%s trusted_proxy_cidrs=%s generic_limit=%s generic_window_seconds=%s",
+        settings.rate_limit_ingest_requests,
+        settings.rate_limit_ingest_window_seconds,
+        settings.rate_limit_trust_proxy_headers,
+        settings.rate_limit_trusted_proxy_cidrs,
+        settings.rate_limit_requests,
+        settings.rate_limit_window_seconds,
+    )
+
 # ---------------------------------------------------------------------------
 # Pipeline state (in-memory; production should use Redis/DB)
 # ---------------------------------------------------------------------------
@@ -159,6 +172,7 @@ async def lifespan(app: FastAPI):
         if os.getenv("ENVIRONMENT") == "production":
             sys.exit(1)
     _log_webhook_secret_config_health()
+    _log_ingest_rate_limit_posture()
     if SECRET_KEY == "dev-secret-change-in-prod" and os.getenv("ENVIRONMENT", "production").lower() == "production":
         logger.critical(
             "SECRET_KEY is not set; using development fallback in production. "
