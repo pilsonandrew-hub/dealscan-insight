@@ -10,6 +10,59 @@ CHECK_CMD=(python3 "${SCRIPT_DIR}/check_recent_ingest_runs.py")
 TMP_OUTPUT="$(mktemp)"
 trap 'rm -f "${TMP_OUTPUT}"' EXIT
 
+ENV_FILE=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    --env-file)
+      if (( i + 1 < ${#args[@]} )); then
+        ENV_FILE="${args[i + 1]}"
+      fi
+      ;;
+    --env-file=*)
+      ENV_FILE="${args[i]#--env-file=}"
+      ;;
+  esac
+done
+
+if [[ -n "${ENV_FILE}" && -f "${ENV_FILE}" ]]; then
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    if [[ -z "${!key+x}" ]]; then
+      export "${key}=${value}"
+    fi
+  done < <(
+    python3 - "${ENV_FILE}" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+target_keys = {
+    "INGEST_HEALTH_NOTIFY_ENABLED",
+    "INGEST_HEALTH_NOTIFY_DRY_RUN",
+    "INGEST_HEALTH_CONTEXT",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+}
+
+path = Path(sys.argv[1])
+for raw_line in path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    key = key.strip()
+    if key not in target_keys:
+        continue
+    value = value.strip().strip("'").strip('"')
+    sys.stdout.write(key)
+    sys.stdout.write("\0")
+    sys.stdout.write(value)
+    sys.stdout.write("\0")
+PY
+  )
+fi
+
 set +e
 "${CHECK_CMD[@]}" "$@" >"${TMP_OUTPUT}" 2>&1
 status=$?
@@ -102,7 +155,16 @@ req = request.Request(
     method="POST",
 )
 with request.urlopen(req, timeout=15) as response:
-    response.read()
+    body = json.loads(response.read().decode("utf-8"))
+
+if body.get("ok") is not True:
+    raise RuntimeError(
+        f"telegram send failed: {body.get('description') or 'missing ok=true response'}"
+    )
+
+message_id = ((body.get("result") or {}).get("message_id"))
+if message_id in {None, ""}:
+    raise RuntimeError("telegram send failed: missing message_id in Telegram response")
 PY
 
 exit "${status}"

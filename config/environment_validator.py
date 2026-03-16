@@ -154,6 +154,17 @@ class EnvironmentValidator:
 
     def validate_ingest_config(self):
         """Validate ingest/runtime configuration required for live Apify processing."""
+        supabase_url = os.getenv("SUPABASE_URL", "") or os.getenv("VITE_SUPABASE_URL", "")
+        if not supabase_url:
+            if self.environment in ("production", "staging"):
+                self.errors.append(
+                    "SUPABASE_URL or VITE_SUPABASE_URL is required for ingest logging and delivery state"
+                )
+            else:
+                self.warnings.append(
+                    "SUPABASE_URL or VITE_SUPABASE_URL should be set before testing ingest logging"
+                )
+
         supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
         if not supabase_service_role_key:
             if self.environment in ("production", "staging"):

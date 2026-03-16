@@ -78,6 +78,56 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, ["db_only_run"])
 
+    def test_build_reports_ignores_delivery_only_runs_without_attribution(self):
+        reports = reconcile.build_reports(
+            apify_runs=[],
+            webhook_rows={},
+            opportunity_rows={},
+            delivery_rows={
+                "run-delivery-only": {
+                    "channels": {"db_save": {"statuses": {"direct_pg_error": 1}}}
+                }
+            },
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(reports, [])
+
+    def test_infer_likely_cause_flags_pre_app_webhook_miss(self):
+        likely_cause = reconcile.infer_likely_cause(
+            apify_run={"run_id": "run-789", "status": "SUCCEEDED"},
+            webhook=None,
+            opportunities=None,
+            delivery=None,
+            issues=["missing_webhook", "missing_delivery_log", "missing_db_save_ledger", "no_db_landing"],
+        )
+
+        self.assertIn("pre_app_webhook_miss", likely_cause)
+        self.assertIn("/api/ingest/apify", likely_cause)
+
+    def test_build_reports_carries_likely_cause_for_missing_webhook(self):
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "run-999",
+                    "actor_name": "ds-publicsurplus",
+                    "status": "SUCCEEDED",
+                    "dataset_id": "dataset-999",
+                    "item_count": 4,
+                    "started_at": datetime(2026, 3, 16, 12, 0, tzinfo=timezone.utc),
+                    "finished_at": datetime(2026, 3, 16, 12, 5, tzinfo=timezone.utc),
+                }
+            ],
+            webhook_rows={},
+            opportunity_rows={},
+            delivery_rows={},
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(len(reports), 1)
+        self.assertIn("missing_webhook", reports[0]["issues"])
+        self.assertIn("pre_app_webhook_miss", reports[0]["likely_cause"])
+
 
 if __name__ == "__main__":
     unittest.main()

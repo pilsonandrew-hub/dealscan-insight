@@ -549,6 +549,35 @@ def classify_run(
     return issues
 
 
+def infer_likely_cause(
+    apify_run: Optional[dict[str, Any]],
+    webhook: Optional[dict[str, Any]],
+    opportunities: Optional[dict[str, Any]],
+    delivery: Optional[dict[str, Any]],
+    issues: list[str],
+) -> Optional[str]:
+    if "missing_webhook" in issues and webhook is None and opportunities is None and delivery is None:
+        return (
+            "pre_app_webhook_miss: Apify reports a successful run but DealerScope has no webhook, "
+            "delivery, or opportunity evidence. Check Apify webhook delivery history, live webhook "
+            "secret alignment, and the live /api/ingest/apify route before replaying."
+        )
+
+    if "webhook_error" in issues:
+        return "app_received_webhook_but_ingest_failed: inspect webhook_log.error_message and app logs for the run."
+
+    if "webhook_degraded" in issues:
+        return "app_received_webhook_but_save_path_degraded: inspect db_save statuses and fallback behavior before replaying."
+
+    if "missing_delivery_log" in issues or "missing_db_save_ledger" in issues:
+        return "app_started_but_observability_or_save_ledger_missing: inspect Railway logs for the run before replaying."
+
+    if "no_db_landing" in issues:
+        return "dataset_fetched_but_nothing_landed: inspect save statuses and gating outcomes before replaying."
+
+    return None
+
+
 def build_reports(
     apify_runs: list[dict[str, Any]],
     webhook_rows: dict[str, dict[str, Any]],
@@ -558,7 +587,10 @@ def build_reports(
 ) -> list[dict[str, Any]]:
     now_utc = datetime.now(timezone.utc)
     apify_by_run = {run["run_id"]: run for run in apify_runs if run.get("run_id")}
-    run_ids = set(apify_by_run) | set(webhook_rows) | set(opportunity_rows) | set(delivery_rows)
+    attributable_run_ids = set(apify_by_run) | set(webhook_rows) | set(opportunity_rows)
+    run_ids = attributable_run_ids | {
+        run_id for run_id in delivery_rows if run_id in attributable_run_ids
+    }
     reports: list[dict[str, Any]] = []
     for run_id in sorted(run_ids):
         apify_run = apify_by_run.get(run_id)
@@ -582,6 +614,13 @@ def build_reports(
                 "opportunities": opportunities,
                 "delivery": delivery,
                 "issues": issues,
+                "likely_cause": infer_likely_cause(
+                    apify_run=apify_run,
+                    webhook=webhook,
+                    opportunities=opportunities,
+                    delivery=delivery,
+                    issues=issues,
+                ),
             }
         )
     reports.sort(
@@ -665,6 +704,8 @@ def print_reports(reports: list[dict[str, Any]], summary_only: bool) -> None:
         if webhook.get("latest_error"):
             print(f"  webhook_error={str(webhook['latest_error'])[:200]}")
         print("  issues=" + (", ".join(issues) if issues else "none"))
+        if report.get("likely_cause"):
+            print(f"  likely_cause={report['likely_cause']}")
 
 
 def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
