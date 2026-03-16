@@ -25,6 +25,8 @@ Required P0 exit artifacts:
 - A live current-secret replay proof showing `ignored_replay` with no duplicate landing.
 - A pager mode decision record backed by evidence from the actual overnight runner.
 - A durable audit-surface test result showing how `webhook_log` and `ingest_delivery_log` behave during write failures.
+- A GitHub-runner database truth proof showing the control-plane health runner can reach the intended live database path with the exact deployed secret shape.
+- A live ingress trust proof showing the deploy is using the intended trusted-proxy / edge boundary settings, not just repo defaults.
 
 Required P1 exit artifacts:
 
@@ -75,10 +77,28 @@ Required P1 exit artifacts:
   - If Redis init or Redis limit checks fail for `/api/ingest/apify`, the middleware now returns `503 Ingest rate limit unavailable`. Generic routes still fail open. That is deliberate and documented, because only ingest is treated as a hard boundary in this change set.
   - Invalid webhook-secret attempts are now logged as ingest auth failures, and ingest rate-limit hits/backing failures are logged as first-class security events.
 - Exact deliverable: add route-specific protection for `/api/ingest/apify` with a safe fallback when Redis is unavailable, correct forwarded-IP parsing, and edge or ingress restrictions where available. Log auth failures and rate-limit hits as first-class ingest security events.
-- Proof of done: tests showing Redis-down behavior, spoofed header handling, and replay-flood resistance on `/api/ingest/apify`; live config evidence that `rate_limit_trust_proxy_headers` and `rate_limit_trusted_proxy_cidrs` are set correctly in deploy env; live edge or ingress allowlist proof if one exists outside the app.
+- Proof of done: tests showing Redis-down behavior, spoofed header handling, and replay-flood resistance on `/api/ingest/apify`; repo-backed config surface exists for trusted proxy settings.
 - Dependencies: [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py), edge config, deploy access.
 - Risk if skipped: noise, replay floods, or header spoofing can degrade the ingest boundary and bury the real signal during an incident.
 - Owner suggestion: Platform/Ops with Backend implementation.
+
+### P0.5 Make The GitHub Control-Plane Runner Tell The Truth About Live Health
+
+- Why it matters: P0.3 proved that the actual GitHub Actions runner can send a real Telegram page, but it also exposed that the runner's `DATABASE_URL` path is not telling the truth about live ingest health yet. The current runner can page while still failing the health check itself with `Tenant or user not found`, which means the control plane is only half-proven.
+- Exact deliverable: make the GitHub-based health/pager runner use a known-good live database connection path and record the exact repo secret shape or retrieval method that works from Actions. The runner must complete the health check against the intended live database, not merely fire the Telegram send path.
+- Proof of done: one GitHub Actions run from [/.github/workflows/ingest-health-pager.yml](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/.github/workflows/ingest-health-pager.yml) where the wrapper reaches the live database successfully, produces non-error health output from the real runner, and, when forced, still records Telegram acknowledgment. The run URL and the exact DB-path decision must be captured in the checklist/ledger.
+- Dependencies: GitHub repo secrets, correct Supabase connection shape for Actions, [scripts/page_recent_ingest_health.sh](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/scripts/page_recent_ingest_health.sh), [scripts/check_recent_ingest_runs.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/scripts/check_recent_ingest_runs.py).
+- Risk if skipped: the overnight control plane can still lie — paging may work while the underlying health check is pointed at a broken or unusable database path.
+- Owner suggestion: Ops/Platform.
+
+### P0.6 Prove The Live Ingress Trust Boundary, Not Just The Repo Defaults
+
+- Why it matters: P0.4 hardened the application code, but code defaults are not the same thing as the live ingress boundary. If the deploy does not set the right trusted proxy CIDRs, or if the real edge/CDN/WAF path differs from what the app assumes, the forwarded-IP logic can still be wrong in production.
+- Exact deliverable: verify the real deploy-time trust chain for `/api/ingest/apify` and record the exact `RATE_LIMIT_TRUST_PROXY_HEADERS` / `RATE_LIMIT_TRUSTED_PROXY_CIDRS` values or the explicit decision to distrust proxy headers entirely. If there is an external edge allowlist or WAF rule, capture that too.
+- Proof of done: deploy/config evidence shows the live trusted proxy settings, one live-style request path proves the app sees the expected client/proxy chain, and the runbook/checklist record whether the ingress boundary depends on app-only controls or additional edge restrictions.
+- Dependencies: deploy env access, ingress/edge visibility, [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py), platform knowledge of the real proxy path.
+- Risk if skipped: the repo will look hardened while production still trusts the wrong hop or overtrusts headers from an unverified proxy chain.
+- Owner suggestion: Platform/Ops.
 
 ## P1: Expand From Incident Repair To Operable System
 
@@ -173,8 +193,8 @@ These are not “nice to have” observations. They are the nearby holes most li
 
 - Audit logging remains a live watchpoint. The hardened route now fails loudly if critical audit evidence cannot land and marks backfilled audit rows with `audit_fallbacks=...`, but operators still need to watch for `audit_backfilled` in reconciliation output from [webapp/routers/ingest.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/ingest.py) and [scripts/reconcile_apify_ingest_runs.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/scripts/reconcile_apify_ingest_runs.py).
 - Actor coverage is too narrow by default. The preflight defaults to `ds-govdeals` and `ds-publicsurplus` in [scripts/run_ingest_rollout_preflight.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/scripts/run_ingest_rollout_preflight.py), while the deployment manifest contains more actors in [apify/deployment.json](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/apify/deployment.json).
-- Pager proof is incomplete. The workflow exists in [/.github/workflows/ingest-health-pager.yml](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/.github/workflows/ingest-health-pager.yml), but the closeout says live paging was not intentionally proven. That is an operational gap, not a paperwork gap.
-- The rate limiter is now asymmetric by design. `/api/ingest/apify` fails closed with `503` if Redis init or limit checks fail, while generic routes still fail open in [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py). That keeps the ingest boundary intact, but deploy-time proxy trust settings still need live verification.
+- Pager proof is no longer theoretical; the real GitHub runner produced a live Telegram acknowledgment during P0.3. The remaining critical caveat is now narrower: the runner's database path still needs to tell the truth about live health, which is promoted to P0.5.
+- The rate limiter is now asymmetric by design. `/api/ingest/apify` fails closed with `503` if Redis init or limit checks fail, while generic routes still fail open in [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py). The remaining critical caveat is live deploy proxy trust, which is promoted to P0.6.
 - User-facing auth still has too much privilege underneath it. [webapp/routers/rover.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/rover.py) and [webapp/routers/outcomes.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/outcomes.py) rely on app logic to constrain broad Supabase access.
 - Pricing evidence can drift without tripping ingest health. [backend/ingest/manheim_market.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/backend/ingest/manheim_market.py) can run fallback-only, and [backend/ingest/retail_comps.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/backend/ingest/retail_comps.py) caches locally. The system can look operational while price quality quietly decays.
 
