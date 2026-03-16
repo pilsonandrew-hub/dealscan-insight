@@ -34,6 +34,8 @@ Webhook replay guardrails:
 
 ## Operator Plan
 
+Before using this runbook tonight, run the rollout preflight in `docs/runbooks/ingest-tonight-rollout.md`. It catches the env, schema, and pager readiness gaps that can make reconciliation or paging misleading.
+
 1. Run the run-level compare for the March 15 recovery window.
 
 ```bash
