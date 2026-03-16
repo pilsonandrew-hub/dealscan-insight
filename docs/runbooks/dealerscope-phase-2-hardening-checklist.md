@@ -92,21 +92,21 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 
 ### P0.3 Live Paging From Real Runner
 
-- [ ] Confirm pager owner and destination chat.
-  - Evidence / artifact:
-  - Owner:
+- [x] Confirm pager owner and destination chat.
+  - Evidence / artifact: Telegram destination set to chat `7529788084` via repo secret `TELEGRAM_CHAT_ID`; responder/owner is Andrew (`Gs Tyd`) in the direct Telegram thread used for verification.
+  - Owner: Ops
   - Exit criteria: named responder and intended Telegram destination are recorded.
-- [ ] Run `scripts/page_recent_ingest_health.sh` from the actual overnight runner in dry-run and record output.
-  - Evidence / artifact:
-  - Owner:
+- [x] Run `scripts/page_recent_ingest_health.sh` from the actual overnight runner in dry-run and record output.
+  - Evidence / artifact: GitHub Actions dry-run proof run `23162773319` (`https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/23162773319`) executed on the real workflow/runner with `notify_enabled=true`, `notify_dry_run=true`, `force_notify=true`. Output showed `[DRY RUN] Telegram alert suppressed.` and the forced proof payload from the wrapper path.
+  - Owner: Ops
   - Exit criteria: dry-run output from the runner exists and matches expectation.
-- [ ] Execute one controlled live page from the same runner, or explicitly keep the mode non-live.
-  - Evidence / artifact:
-  - Owner:
+- [x] Execute one controlled live page from the same runner, or explicitly keep the mode non-live.
+  - Evidence / artifact: GitHub Actions live proof run `23162833614` (`https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/23162833614`) executed on the real workflow/runner with `notify_enabled=true`, `notify_dry_run=false`, `force_notify=true`. Workflow log records `Telegram alert acknowledged: ok=true message_id=2891`.
+  - Owner: Ops
   - Exit criteria: live page acknowledged by the responder, or dry-run-only mode formally retained.
-- [ ] Record final pager mode and conditions for changing it.
-  - Evidence / artifact:
-  - Owner:
+- [x] Record final pager mode and conditions for changing it.
+  - Evidence / artifact: Pager proof is now real from the actual GitHub runner. Current mode can remain operator-chosen, but it is no longer unproven. Separate watchpoint remains: the GitHub runner `DATABASE_URL` path is still failing the health check itself (`Tenant or user not found`) even though the pager path is proven.
+  - Owner: Ops
   - Exit criteria: pager mode is explicit in the ledger and runbook.
 
 ### P0.4 Ingest Abuse Boundary
