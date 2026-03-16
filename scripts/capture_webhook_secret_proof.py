@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+import socket
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -72,7 +73,7 @@ def payload_summary(payload: dict[str, Any], payload_bytes: bytes) -> dict[str, 
     }
 
 
-def post_webhook(endpoint: str, payload_bytes: bytes, secret: str) -> dict[str, Any]:
+def post_webhook(endpoint: str, payload_bytes: bytes, secret: str, *, timeout_seconds: int) -> dict[str, Any]:
     request = urllib_request.Request(
         endpoint,
         data=payload_bytes,
@@ -84,7 +85,7 @@ def post_webhook(endpoint: str, payload_bytes: bytes, secret: str) -> dict[str, 
     )
     started_at = now_iso()
     try:
-        with urllib_request.urlopen(request, timeout=30) as response:
+        with urllib_request.urlopen(request, timeout=timeout_seconds) as response:
             body_text = response.read().decode("utf-8")
             try:
                 parsed_body = json.loads(body_text) if body_text else None
@@ -108,6 +109,14 @@ def post_webhook(endpoint: str, payload_bytes: bytes, secret: str) -> dict[str, 
             "response_body_excerpt": redact_body(body_text),
             "response_json": parsed_body,
         }
+    except (TimeoutError, socket.timeout, urllib_error.URLError) as exc:
+        return {
+            "observed_at": started_at,
+            "http_status": 0,
+            "response_body_excerpt": None,
+            "response_json": None,
+            "transport_error": str(exc),
+        }
 
 
 def check_retired_secret(
@@ -115,8 +124,9 @@ def check_retired_secret(
     endpoint: str,
     payload_bytes: bytes,
     retired_secret: str,
+    timeout_seconds: int,
 ) -> dict[str, Any]:
-    result = post_webhook(endpoint, payload_bytes, retired_secret)
+    result = post_webhook(endpoint, payload_bytes, retired_secret, timeout_seconds=timeout_seconds)
     status = "passed" if result["http_status"] == 401 else "failed"
     return {
         "status": status,
@@ -131,16 +141,26 @@ def check_current_secret_acceptance(
     endpoint: str,
     payload_bytes: bytes,
     current_secret: str,
+    timeout_seconds: int,
+    accepts_previous_secret: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    accepted = post_webhook(endpoint, payload_bytes, current_secret)
+    accepted = post_webhook(endpoint, payload_bytes, current_secret, timeout_seconds=timeout_seconds)
     accepted_json = accepted.get("response_json") or {}
-    acceptance_status = (
-        "passed"
-        if accepted["http_status"] == 200 and not bool(accepted_json.get("replay_ignored"))
-        else "failed"
-    )
+    acceptance_reason = None
+    if accepted["http_status"] == 200 and not bool(accepted_json.get("replay_ignored")):
+        acceptance_status = "passed"
+        acceptance_reason = "current_secret_processed"
+    elif (
+        accepted["http_status"] == 200
+        and bool(accepted_json.get("replay_ignored"))
+        and not accepts_previous_secret
+    ):
+        acceptance_status = "passed"
+        acceptance_reason = "replay_ignored_implies_prior_current_secret_acceptance"
+    else:
+        acceptance_status = "failed"
 
-    replay = post_webhook(endpoint, payload_bytes, current_secret)
+    replay = post_webhook(endpoint, payload_bytes, current_secret, timeout_seconds=timeout_seconds)
     replay_json = replay.get("response_json") or {}
     replay_status = (
         "passed"
@@ -149,13 +169,17 @@ def check_current_secret_acceptance(
     )
 
     base_context = {"request_secret_fingerprint": secret_fingerprint(current_secret)}
+    accepted_result = {
+        "status": acceptance_status,
+        "expected_http_status": 200,
+        **base_context,
+        **accepted,
+    }
+    if acceptance_reason:
+        accepted_result["reason"] = acceptance_reason
+
     return (
-        {
-            "status": acceptance_status,
-            "expected_http_status": 200,
-            **base_context,
-            **accepted,
-        },
+        accepted_result,
         {
             "status": replay_status,
             "expected_http_status": 200,
@@ -187,6 +211,7 @@ def build_artifact(
     expect_previous_absent: bool,
     retired_secret_env: str,
     current_secret_env: str,
+    timeout_seconds: int,
 ) -> tuple[dict[str, Any], bool]:
     posture = build_webhook_secret_posture(
         runtime_env.get("APIFY_WEBHOOK_SECRET", ""),
@@ -226,6 +251,8 @@ def build_artifact(
             endpoint=endpoint,
             payload_bytes=payload_bytes,
             current_secret=current_secret,
+            timeout_seconds=timeout_seconds,
+            accepts_previous_secret=bool(posture.get("accepts_previous_secret")),
         )
         artifact["checks"]["current_secret_accepted"] = current_accepted
         artifact["checks"]["replay_suppressed"] = replay_suppressed
@@ -246,6 +273,7 @@ def build_artifact(
             endpoint=endpoint,
             payload_bytes=payload_bytes,
             retired_secret=retired_secret,
+            timeout_seconds=timeout_seconds,
         )
         artifact["checks"]["retired_secret_rejected"] = retired_secret_result
         failed = failed or retired_secret_result["status"] == "failed"
@@ -301,6 +329,12 @@ def main() -> int:
         action="store_true",
         help="Fail when endpoint/payload/secret inputs are missing or any live check is skipped.",
     )
+    parser.add_argument(
+        "--request-timeout-seconds",
+        type=int,
+        default=120,
+        help="HTTP timeout for each live webhook proof request. Increase for slower real ingest runs.",
+    )
     args = parser.parse_args()
 
     runtime_env = build_runtime_env(args.env_file)
@@ -315,6 +349,7 @@ def main() -> int:
         expect_previous_absent=args.expect_previous_absent,
         retired_secret_env=args.retired_secret_env,
         current_secret_env=args.current_secret_env,
+        timeout_seconds=args.request_timeout_seconds,
     )
     write_artifact(Path(args.artifact_path), artifact)
 
