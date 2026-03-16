@@ -752,6 +752,15 @@ def _stale_webhook_error(metadata: dict) -> Optional[str]:
     return None
 
 
+def _request_client_ip_for_security_log(request: Request) -> str:
+    try:
+        from webapp.middleware.rate_limit import extract_client_ip
+
+        return extract_client_ip(request)
+    except Exception:
+        return getattr(getattr(request, "client", None), "host", None) or "unknown"
+
+
 def _raw_item_identity(item: Any, run_id: str, item_index: int) -> tuple[str, Optional[str]]:
     if not isinstance(item, dict):
         fallback_id = hashlib.sha256(f"{run_id}|raw|{item_index}".encode()).hexdigest()[:40]
@@ -807,6 +816,10 @@ async def apify_webhook(
     # Verify webhook secret
     matched_secret_label = _match_webhook_secret(x_apify_webhook_secret)
     if matched_secret_label is None:
+        logger.warning(
+            "[INGEST_AUTH] rejected_invalid_secret | client_ip=%s | path=/api/ingest/apify",
+            _request_client_ip_for_security_log(request),
+        )
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
     if matched_secret_label == "previous":
         posture = _webhook_secret_posture()
