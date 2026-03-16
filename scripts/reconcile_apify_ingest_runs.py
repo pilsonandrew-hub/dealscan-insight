@@ -34,6 +34,14 @@ WEBHOOK_BAD_STATUSES = {"degraded", "error"}
 WEBHOOK_SUCCESS_STATUSES = {"processed", "ignored_replay"}
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
 DB_SAVE_EXISTING_STATUSES = {"duplicate_existing"}
+DB_SAVE_SKIPPED_STATUSES = {
+    "below_save_threshold",
+    "skipped_bronze",
+    "skipped_ceiling",
+    "skipped_gate",
+    "skipped_margin",
+    "skipped_norm",
+}
 DB_SAVE_FAILURE_STATUSES = {
     "supabase_error",
     "direct_pg_error",
@@ -504,13 +512,23 @@ def classify_run(
     pending_grace_minutes: int,
 ) -> list[str]:
     issues: list[str] = []
-    db_save_statuses = ((delivery or {}).get("channels") or {}).get("db_save", {}).get("statuses") or {}
+    db_save_channel = ((delivery or {}).get("channels") or {}).get("db_save", {}) or {}
+    db_save_statuses = db_save_channel.get("statuses") or {}
     inserted_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_INSERT_STATUSES)
     existing_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_EXISTING_STATUSES)
+    skipped_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_SKIPPED_STATUSES)
     failed_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_FAILURE_STATUSES)
+    accounted_rows = inserted_rows + existing_rows + skipped_rows + failed_rows
     opportunity_rows = int((opportunities or {}).get("opportunity_rows") or 0)
     latest_webhook_status = str((webhook or {}).get("latest_status") or "unknown").lower()
     has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or existing_rows > 0
+    has_accounted_non_save_outcome = (
+        inserted_rows == 0
+        and existing_rows == 0
+        and failed_rows == 0
+        and skipped_rows > 0
+        and accounted_rows >= (_first_int((apify_run or {}).get("item_count")) or 0)
+    )
 
     if apify_run is None:
         if webhook or opportunities or delivery:
@@ -543,7 +561,13 @@ def classify_run(
             issues.append("db_save_failures")
         if item_count > 0 and not db_save_statuses:
             issues.append("missing_db_save_ledger")
-        if item_count > 0 and opportunity_rows == 0 and inserted_rows == 0 and existing_rows == 0:
+        if (
+            item_count > 0
+            and opportunity_rows == 0
+            and inserted_rows == 0
+            and existing_rows == 0
+            and not has_accounted_non_save_outcome
+        ):
             issues.append("no_db_landing")
 
     return issues
