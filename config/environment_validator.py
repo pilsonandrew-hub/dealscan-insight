@@ -32,6 +32,7 @@ class EnvironmentValidator:
         """Run comprehensive environment validation"""
         self.validate_security_settings()
         self.validate_database_config()
+        self.validate_ingest_config()
         self.validate_redis_config()
         self.validate_file_paths()
         self.validate_api_keys()
@@ -154,6 +155,72 @@ class EnvironmentValidator:
                 self.warnings.append("Database pool size > 50 may cause resource issues")
         except ValueError:
             self.errors.append("DATABASE_POOL_SIZE must be a valid integer")
+
+    def validate_ingest_config(self):
+        """Validate ingest/runtime configuration required for live Apify processing."""
+        supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        if not supabase_service_role_key:
+            if self.environment in ("production", "staging"):
+                self.errors.append(
+                    "SUPABASE_SERVICE_ROLE_KEY is required for privileged ingest operations"
+                )
+            else:
+                self.warnings.append(
+                    "SUPABASE_SERVICE_ROLE_KEY should be set before testing privileged ingest operations"
+                )
+        elif self._looks_like_placeholder_secret(supabase_service_role_key):
+            if self.environment in ("production", "staging"):
+                self.errors.append(
+                    "SUPABASE_SERVICE_ROLE_KEY is set to a placeholder-like value"
+                )
+            else:
+                self.warnings.append(
+                    "SUPABASE_SERVICE_ROLE_KEY is set to a placeholder-like value"
+                )
+
+        apify_token = os.getenv("APIFY_TOKEN", "") or os.getenv("APIFY_API_TOKEN", "")
+        if not apify_token:
+            if self.environment in ("production", "staging"):
+                self.errors.append("APIFY_TOKEN or APIFY_API_TOKEN is required for Apify ingest")
+            else:
+                self.warnings.append(
+                    "APIFY_TOKEN or APIFY_API_TOKEN should be set before testing Apify ingest"
+                )
+        elif self._looks_like_placeholder_secret(apify_token):
+            if self.environment in ("production", "staging"):
+                self.errors.append("APIFY token is set to a placeholder-like value")
+            else:
+                self.warnings.append("APIFY token is set to a placeholder-like value")
+
+        notify_enabled = os.getenv("INGEST_HEALTH_NOTIFY_ENABLED", "").strip().lower() == "true"
+        notify_dry_run = os.getenv("INGEST_HEALTH_NOTIFY_DRY_RUN", "").strip().lower()
+        if notify_enabled:
+            if notify_dry_run != "false":
+                self.warnings.append(
+                    "INGEST_HEALTH_NOTIFY_DRY_RUN is not false; ingest pager alerts are still dry-run only"
+                )
+            if not os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
+                if notify_dry_run == "false":
+                    self.errors.append(
+                        "TELEGRAM_BOT_TOKEN is required when ingest pager notifications are enabled"
+                    )
+                else:
+                    self.warnings.append(
+                        "TELEGRAM_BOT_TOKEN is missing; ingest pager cannot send live notifications"
+                    )
+            if not os.getenv("TELEGRAM_CHAT_ID", "").strip():
+                if notify_dry_run == "false":
+                    self.errors.append(
+                        "TELEGRAM_CHAT_ID is required when ingest pager notifications are enabled"
+                    )
+                else:
+                    self.warnings.append(
+                        "TELEGRAM_CHAT_ID is missing; ingest pager cannot send live notifications"
+                    )
+        elif self.environment in ("production", "staging"):
+            self.warnings.append(
+                "INGEST_HEALTH_NOTIFY_ENABLED is not true; ingest pager notifications are disabled"
+            )
 
     def validate_redis_config(self):
         """Validate Redis configuration"""
