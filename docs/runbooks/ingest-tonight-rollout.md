@@ -26,6 +26,7 @@ What it checks:
 3. If it fails on recent ingest health, move to `docs/runbooks/ingest-reconciliation.md` immediately and triage the failing runs before enabling live paging.
 4. If it passes, decide whether tonight’s pager should stay dry-run or send live Telegram alerts.
 5. Keep `docs/runbooks/ingest-reconciliation.md` open during the rollout window.
+6. After Step 5 baseline validation is green, execute `docs/runbooks/ingest-closeout-steps-6-10.md` in order. Do not remove `APIFY_WEBHOOK_SECRET_PREVIOUS` or enable live paging ad hoc.
 
 ## Pager Decision
 

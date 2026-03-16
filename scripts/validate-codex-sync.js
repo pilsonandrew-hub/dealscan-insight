@@ -2,11 +2,11 @@
 
 /**
  * Codex Sync Validation Script
- * Validates that the correct production-ready version is available for Codex analysis
+ * Validates that the correct production-ready version is available for Codex analysis.
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 class CodexSyncValidator {
   constructor() {
@@ -283,11 +283,15 @@ class CodexSyncValidator {
   }
 }
 
-// Run validation if called directly
-if (require.main === module) {
+// Run validation if called directly.
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isDirectRun) {
   const validator = new CodexSyncValidator();
   const isReady = validator.run();
   process.exit(isReady ? 0 : 1);
 }
 
-module.exports = CodexSyncValidator;
+export default CodexSyncValidator;

@@ -90,7 +90,7 @@ def _alert_thresholds() -> Optional["AlertThresholds"]:
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
 WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7529788084")
+TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
