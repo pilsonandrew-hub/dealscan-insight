@@ -76,19 +76,19 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 - [ ] Identify every ingest path that can continue after audit-write failure.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: list includes `webhook_log` insert/update and `ingest_delivery_log` writes.
+  - Exit criteria: list includes replay lookup, `webhook_log` insert/update, and every critical `db_save` write to `ingest_delivery_log`.
 - [ ] Implement fallback or fail-loud behavior for each path.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: no best-effort audit write remains on the critical ingest path.
+  - Exit criteria: no best-effort continuation remains on the critical ingest audit path; legal outcomes are durable direct-Postgres fallback with explicit `audit_status=fallback` or `503 Critical ingest audit write failed`.
 - [ ] Add automated tests that force audit-write failure.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: test proves rows still land or request fails loudly.
+  - Exit criteria: tests prove rows still land durably or the request fails loudly; replay lookup failure is covered too.
 - [ ] Update reconciliation docs to describe the hardened audit behavior.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: operator docs no longer assume silent warning behavior.
+  - Exit criteria: operator docs describe `audit_backfilled`, `audit_status`, and the `503` failure mode.
 
 ### P0.3 Live Paging From Real Runner
 

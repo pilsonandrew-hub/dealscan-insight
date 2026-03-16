@@ -141,6 +141,22 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_flags_audit_backfilled_when_webhook_error_marks_fallback(self):
+        issues = reconcile.classify_run(
+            run_id="run-audit-fallback",
+            apify_run={"run_id": "run-audit-fallback", "status": "SUCCEEDED", "item_count": 1},
+            webhook={
+                "latest_status": "processed",
+                "latest_error": "save_outcomes={'saved_direct_pg': 1}; audit_fallbacks=webhook_log_insert_direct_pg,ingest_delivery_log_direct_pg",
+            },
+            opportunities={"opportunity_rows": 1},
+            delivery={"channels": {"db_save": {"statuses": {"saved_direct_pg": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, ["audit_backfilled"])
+
 
 if __name__ == "__main__":
     unittest.main()

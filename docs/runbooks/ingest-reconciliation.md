@@ -25,6 +25,13 @@ The current ingest path already records the four surfaces needed for reconciliat
 - Saved ingest rows carry `run_id` in `public.opportunities` from `supabase/migrations/20260312_event_identity.sql`
 - Per-listing save and delivery outcomes land in `public.ingest_delivery_log` from `supabase/migrations/20260315_ingest_delivery_log.sql`
 
+Critical audit durability now works like this:
+
+- `webhook_log` insert, `webhook_log` final status update, replay lookup, and every `db_save` delivery row are no longer best-effort.
+- The app tries Supabase first, then falls back to direct Postgres for those audit surfaces.
+- If both paths fail, `/api/ingest/apify` exits with `503 Critical ingest audit write failed`. Do not treat that as a harmless retry.
+- When the fallback path is used, the webhook response includes `audit_status=fallback`, `audit_fallbacks=[...]`, and the durable `webhook_log.error_message` carries `audit_fallbacks=...` so reconciliation can surface `audit_backfilled`.
+
 Webhook replay guardrails:
 - Recent duplicate webhook deliveries for the same `run_id` are ignored for `APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS` seconds. Default: 3600.
 - Only recent `processed` and `pending` runs are suppressed; `degraded` or `error` runs can still be replayed immediately for recovery.
@@ -59,6 +66,7 @@ python3 scripts/reconcile_apify_ingest_runs.py \
 
 - `missing_webhook`: Apify says the run succeeded, but `webhook_log` has no matching `run_id`. If `ingest_delivery_log` and `opportunities` are also empty for that `run_id`, treat it as a pre-app miss first, not a downstream ingest bug. Check Apify webhook delivery history for the configured webhook id, confirm the live webhook secret still matches `APIFY_WEBHOOK_SECRET` or `APIFY_WEBHOOK_SECRET_PREVIOUS`, confirm the live app is serving `/api/ingest/apify`, then replay the webhook or rerun from the same dataset.
 - `webhook_degraded` or `webhook_error`: inspect `webhook_log.error_message` first, then review `db_save` status counts in `ingest_delivery_log` before replaying.
+- `audit_backfilled`: the critical audit row landed via direct Postgres fallback. Evidence exists, but Supabase audit writes or replay lookup degraded. Inspect app logs and DB/API health before the next replay or deploy.
 - `ignored_replay`: a duplicate delivery was suppressed inside the replay window. This is expected for rapid resubmits and is not, by itself, an ingest failure.
 - `missing_delivery_log` or `missing_db_save_ledger`: the webhook landed, but the save ledger is missing. Check Railway app logs for the run before rerunning.
 - `db_save_failures`: inspect `db_save` statuses for `supabase_error`, `direct_pg_error`, `direct_pg_unavailable`, or `duplicate_unresolved`. `saved_supabase_duplicate` and `saved_direct_pg_duplicate` are successful race recoveries, not failure states.
@@ -79,6 +87,12 @@ Current save fallback behavior:
 - `saved_direct_pg_duplicate`: the direct Postgres fallback hit the canonical unique index, recovered the winning canonical row, and re-saved the loser as a duplicate.
 - `duplicate_existing`: a unique conflict was resolved by looking up the existing `opportunities.id`; this does not fall through to direct Postgres.
 - `supabase_error`: legacy pre-fix status, or an unexpected regression if it appears on newly processed runs. Verify the app version before replaying.
+
+Current audit fallback behavior:
+
+- `audit_status=ok`: all critical audit surfaces stayed on the primary path.
+- `audit_status=fallback`: at least one critical audit surface landed via direct Postgres fallback.
+- `503 Critical ingest audit write failed`: neither Supabase nor direct Postgres could land the required audit evidence. Do not wave this through.
 
 4. Deep-dive any single run id with direct SQL.
 

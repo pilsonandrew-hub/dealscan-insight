@@ -46,9 +46,9 @@ Required P1 exit artifacts:
 
 ### P0.2 Make Audit Surfaces Durable, Not Best-Effort
 
-- Why it matters: reconciliation only works if `webhook_log` and `ingest_delivery_log` are trustworthy. Right now the ingest route logs several failures to those surfaces as warnings and keeps moving. That recreates the same class of blind spot the red-team audit just exposed.
-- Exact deliverable: change audit writes so they either land through a hardened fallback path or fail the run loudly. Cover `insert_webhook_log`, `update_webhook_log`, and `_record_delivery_log`. Emit explicit degraded/error state when audit rows are missing or backfilled.
-- Proof of done: automated tests that force Supabase audit-write failures and prove one of two outcomes only: audit rows still land through fallback, or the run exits loudly and pages. No silent continuation.
+- Why it matters: reconciliation only works if `webhook_log` and the `db_save` rows in `ingest_delivery_log` are trustworthy. The old route logged several failures to those surfaces as warnings and kept moving. That recreated the same blind spot the red-team audit just exposed.
+- Exact deliverable: critical audit paths must use durable direct-Postgres fallback or fail the request loudly. Cover `insert_webhook_log`, `update_webhook_log`, replay lookup, and every `db_save` delivery ledger write. When fallback is used, surface it explicitly in the response and durable audit row.
+- Proof of done: automated tests that force Supabase audit-write failures and prove one of two outcomes only: audit rows still land through direct-Postgres fallback with explicit `audit_status=fallback`, or the request exits with `503 Critical ingest audit write failed`. No silent continuation.
 - Dependencies: direct PG fallback decisions, schema stability for `webhook_log` and `ingest_delivery_log`, test harness for [webapp/routers/ingest.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/ingest.py).
 - Risk if skipped: the next ingest outage will again produce missing evidence, and operators will waste time arguing about whether the app, Apify, or the database dropped the run.
 - Owner suggestion: Backend.
@@ -162,7 +162,7 @@ Required P1 exit artifacts:
 
 These are not “nice to have” observations. They are the nearby holes most likely to reopen the same class of problems.
 
-- Audit logging is still too soft. The ingest route warns and continues when `webhook_log` insert/update or delivery-log writes fail in [webapp/routers/ingest.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/ingest.py). That directly undercuts reconciliation confidence.
+- Audit logging remains a live watchpoint. The hardened route now fails loudly if critical audit evidence cannot land and marks backfilled audit rows with `audit_fallbacks=...`, but operators still need to watch for `audit_backfilled` in reconciliation output from [webapp/routers/ingest.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/routers/ingest.py) and [scripts/reconcile_apify_ingest_runs.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/scripts/reconcile_apify_ingest_runs.py).
 - Actor coverage is too narrow by default. The preflight defaults to `ds-govdeals` and `ds-publicsurplus` in [scripts/run_ingest_rollout_preflight.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/scripts/run_ingest_rollout_preflight.py), while the deployment manifest contains more actors in [apify/deployment.json](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/apify/deployment.json).
 - Pager proof is incomplete. The workflow exists in [/.github/workflows/ingest-health-pager.yml](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/.github/workflows/ingest-health-pager.yml), but the closeout says live paging was not intentionally proven. That is an operational gap, not a paperwork gap.
 - The rate limiter fails open. If Redis cannot be reached, [webapp/middleware/rate_limit.py](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/webapp/middleware/rate_limit.py) simply allows traffic through. That is acceptable for a brochure site. It is not acceptable for a webhook boundary.
