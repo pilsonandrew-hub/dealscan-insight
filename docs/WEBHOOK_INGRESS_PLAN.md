@@ -47,11 +47,20 @@ Behavior:
 
 Replay hardening:
 - `/api/ingest/apify` now uses constant-time shared-secret comparison.
+- Secret rotation can overlap safely by setting both `APIFY_WEBHOOK_SECRET` and `APIFY_WEBHOOK_SECRET_PREVIOUS` on the backend for a brief cutover window.
+- Requests accepted via `APIFY_WEBHOOK_SECRET_PREVIOUS` generate a warning log so stale Apify webhook headers are visible before cleanup.
 - Recent duplicate deliveries are suppressed by `run_id` using the existing `webhook_log`.
 - Default replay window is `APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS=3600`.
 - Only recent `processed`, `pending`, or already `ignored_replay` deliveries are suppressed. `degraded` and `error` runs remain replayable for recovery.
 - Duplicate deliveries are recorded in `webhook_log` with `processing_status='ignored_replay'`.
 - Optional freshness enforcement is available via `APIFY_WEBHOOK_MAX_AGE_SECONDS`. Default is `0` (disabled) to avoid breaking delayed-but-legitimate Apify deliveries before the live envelope is confirmed.
+
+Secret rotation procedure:
+- Stage backend config first: `APIFY_WEBHOOK_SECRET=<new>` and `APIFY_WEBHOOK_SECRET_PREVIOUS=<old>`.
+- Restart/redeploy the backend so the new env is active before touching Apify.
+- Update Apify webhook headers to the new secret.
+- Confirm normal processing continues and watch logs for any `APIFY_WEBHOOK_SECRET_PREVIOUS` acceptance warnings.
+- Remove `APIFY_WEBHOOK_SECRET_PREVIOUS` once the old value is no longer observed.
 
 ## Decision
 

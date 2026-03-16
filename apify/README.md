@@ -54,7 +54,7 @@ Scrapes vehicle listings from [PublicSurplus.com](https://www.publicsurplus.com)
    - Event: `ACTOR.RUN.SUCCEEDED`
    - URL: `https://your-dealerscope-domain.com/api/ingest/apify`
    - HTTP method: `POST`
-   - Add header: `X-Apify-Webhook-Secret: <your APIFY_WEBHOOK_SECRET>`
+   - Add header: `X-Apify-Webhook-Secret: <your current APIFY_WEBHOOK_SECRET>`
 
 5. **Schedule runs** in Apify Console → Schedules:
    - Recommended: every 2–4 hours for active auction monitoring
@@ -82,9 +82,21 @@ Hot deals (score ≥ 80) flagged in response
 | Variable | Description |
 |----------|-------------|
 | `APIFY_API_TOKEN` | Your Apify API token (from Apify Console → Settings → Integrations) |
-| `APIFY_WEBHOOK_SECRET` | Shared secret for webhook verification (set same value in Apify webhook config) |
+| `APIFY_WEBHOOK_SECRET` | Active shared secret for webhook verification; use a high-entropy random value |
+| `APIFY_WEBHOOK_SECRET_PREVIOUS` | Optional fallback secret accepted only during rotation overlap; remove after cutover |
 
 Set these in your `.env` file or deployment environment (Cloud Run, Railway, etc.).
+
+## Safe Rotation
+
+DealerScope ingest accepts both `APIFY_WEBHOOK_SECRET` and `APIFY_WEBHOOK_SECRET_PREVIOUS` during a short overlap window so you can rotate without dropping legitimate webhook deliveries.
+
+1. Deploy backend config with `APIFY_WEBHOOK_SECRET=<new>` and `APIFY_WEBHOOK_SECRET_PREVIOUS=<old>`.
+2. Update every Apify webhook header to use the new secret.
+3. Watch backend logs for warnings about `APIFY_WEBHOOK_SECRET_PREVIOUS` usage. If they continue, some webhook is still using the retired value.
+4. After deliveries are consistently arriving with the new secret, remove `APIFY_WEBHOOK_SECRET_PREVIOUS` and redeploy.
+
+Operational rule: never commit the real webhook secret into repo files such as `apify/deployment.json`.
 
 ## Rust State Filter
 

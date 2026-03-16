@@ -135,6 +135,11 @@ This document outlines the standardized procedure for responding to security and
 - [ ] **Forensics:** Engage forensic specialist if needed
 - [ ] **Customer Notification:** Prepare customer communication plan
 
+### Webhook Secret Compromise
+- [ ] Treat the current Apify webhook secret as burned.
+- [ ] Follow the rotation procedure in `docs/runbooks/webhook-secret-rotation.md`.
+- [ ] Do not commit the replacement secret to repo files, notes, or deployment manifests.
+
 ## 5. Communication Templates
 
 ### Internal Alert Template (Slack)

@@ -83,6 +83,20 @@ class _Supabase:
 
 
 class WebhookSecurityTests(unittest.TestCase):
+    def test_verify_webhook_secret_accepts_current_and_previous_secret(self):
+        with patch.object(ingest, "WEBHOOK_SECRET", "newsecretvalue1234567890"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", "oldsecretvalue1234567890"
+        ):
+            self.assertTrue(ingest._verify_webhook_secret("newsecretvalue1234567890"))
+            self.assertTrue(ingest._verify_webhook_secret("oldsecretvalue1234567890"))
+            self.assertFalse(ingest._verify_webhook_secret("wrongsecret"))
+
+    def test_verify_webhook_secret_requires_current_secret_to_be_set(self):
+        with patch.object(ingest, "WEBHOOK_SECRET", ""), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", "oldsecretvalue1234567890"
+        ):
+            self.assertFalse(ingest._verify_webhook_secret("oldsecretvalue1234567890"))
+
     def test_find_recent_webhook_replay_ignores_degraded_rows(self):
         now = datetime.now(timezone.utc).isoformat()
         rows = [
@@ -110,6 +124,8 @@ class WebhookSecurityTests(unittest.TestCase):
             return "log-1"
 
         with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(
             ingest,
             "_find_recent_webhook_replay",
             lambda run_id: {
@@ -140,6 +156,8 @@ class WebhookSecurityTests(unittest.TestCase):
             return "log-2"
 
         with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(
             ingest, "insert_webhook_log", fake_insert
         ), patch.dict(
             os.environ,

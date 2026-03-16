@@ -87,7 +87,8 @@ def _alert_thresholds() -> Optional["AlertThresholds"]:
         min_confidence=_env_float("ALERT_MIN_CONFIDENCE", 55.0),
     )
 
-WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "")
+WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
+WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7529788084")
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
@@ -570,8 +571,29 @@ def update_webhook_log(
     supabase_client.table("webhook_log").update(update_row).eq("id", webhook_log_id).execute()
 
 
+def _configured_webhook_secret_entries() -> tuple[tuple[str, str], ...]:
+    active_secret = WEBHOOK_SECRET.strip()
+    if not active_secret:
+        return ()
+
+    entries: list[tuple[str, str]] = [("current", active_secret)]
+    previous_secret = WEBHOOK_SECRET_PREVIOUS.strip()
+    if previous_secret and previous_secret != active_secret:
+        entries.append(("previous", previous_secret))
+    return tuple(entries)
+
+
+def _match_webhook_secret(presented_secret: Optional[str]) -> Optional[str]:
+    presented = presented_secret or ""
+    matched_label: Optional[str] = None
+    for label, configured_secret in _configured_webhook_secret_entries():
+        if hmac.compare_digest(presented, configured_secret):
+            matched_label = matched_label or label
+    return matched_label
+
+
 def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
-    return bool(WEBHOOK_SECRET) and hmac.compare_digest(presented_secret or "", WEBHOOK_SECRET)
+    return _match_webhook_secret(presented_secret) is not None
 
 
 def _webhook_replay_window_seconds() -> int:
@@ -625,8 +647,14 @@ async def apify_webhook(
     x_apify_webhook_secret: Optional[str] = Header(None)
 ):
     # Verify webhook secret
-    if not _verify_webhook_secret(x_apify_webhook_secret):
+    matched_secret_label = _match_webhook_secret(x_apify_webhook_secret)
+    if matched_secret_label is None:
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    if matched_secret_label == "previous":
+        logger.warning(
+            "[INGEST_AUTH] Accepted webhook with APIFY_WEBHOOK_SECRET_PREVIOUS; "
+            "finish rotation and remove the fallback secret."
+        )
 
     try:
         payload = await request.json()
