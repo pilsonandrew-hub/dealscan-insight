@@ -72,5 +72,5 @@ Do not swap the values back and forth in source-controlled files. Handle the rol
 
 - Never commit the real webhook secret into `apify/deployment.json`, docs, scripts, or notes.
 - `APIFY_WEBHOOK_SECRET_PREVIOUS` is temporary by design; leaving it set expands the trust window unnecessarily.
-- Treat placeholder, reused, or short secrets as misconfiguration even if the route still functions.
+- Treat placeholder or reused fallback secrets as misconfiguration. A short `APIFY_WEBHOOK_SECRET_PREVIOUS` is tolerated only for a brief overlap with a retiring legacy secret and should still be removed promptly.
 - If you suspect the secret was exposed publicly, rotate both the backend env and every Apify webhook header on the same day.

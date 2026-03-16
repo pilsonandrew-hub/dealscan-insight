@@ -105,14 +105,10 @@ class EnvironmentValidator:
                         "APIFY_WEBHOOK_SECRET_PREVIOUS is set to a placeholder-like value"
                     )
             elif len(previous_webhook_secret) < 24:
-                if self.environment in ("production", "staging"):
-                    self.errors.append(
-                        "APIFY_WEBHOOK_SECRET_PREVIOUS should be at least 24 characters long"
-                    )
-                else:
-                    self.warnings.append(
-                        "APIFY_WEBHOOK_SECRET_PREVIOUS should be at least 24 characters long"
-                    )
+                self.warnings.append(
+                    "APIFY_WEBHOOK_SECRET_PREVIOUS is shorter than 24 characters; "
+                    "allow only as a temporary overlap for the retiring secret and remove it promptly"
+                )
             self.warnings.append(
                 "APIFY_WEBHOOK_SECRET_PREVIOUS is configured; remove it after rotation completes"
             )

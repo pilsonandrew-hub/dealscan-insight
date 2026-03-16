@@ -2,6 +2,7 @@ import ssl
 import subprocess
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error as urllib_error
 from unittest.mock import patch
@@ -50,6 +51,32 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertIn("curl is not available", str(context.exception))
         self.assertIn("--runs-json", str(context.exception))
+
+    def test_classify_run_allows_db_only_run_with_clean_success_evidence(self):
+        issues = reconcile.classify_run(
+            run_id="run-123",
+            apify_run=None,
+            webhook={"latest_status": "processed"},
+            opportunities={"opportunity_rows": 2},
+            delivery={"channels": {"db_save": {"statuses": {"saved_supabase": 2}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
+    def test_classify_run_flags_db_only_run_without_success_evidence(self):
+        issues = reconcile.classify_run(
+            run_id="run-456",
+            apify_run=None,
+            webhook={"latest_status": "processed"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"direct_pg_error": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, ["db_only_run"])
 
 
 if __name__ == "__main__":
