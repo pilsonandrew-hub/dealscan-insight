@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import psycopg2
 
@@ -21,11 +23,13 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from config.environment_validator import EnvironmentValidator
+from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from live_verification_support import get_database_url
 
 
 CHECK_RECENT_SCRIPT = REPO_ROOT / "scripts" / "check_recent_ingest_runs.py"
 DEPLOYMENT_MANIFEST = REPO_ROOT / "apify" / "deployment.json"
+DEFAULT_WEBHOOK_PROOF_ARTIFACT = REPO_ROOT / "runtime-artifacts" / "webhook-secret-proof.json"
 REQUIRED_TABLE_COLUMNS = {
     ("public", "webhook_log"): {
         "actor_id",
@@ -52,6 +56,13 @@ REQUIRED_TABLE_COLUMNS = {
         "step_status",
     },
 }
+DEPLOY_SHA_ENV_KEYS = (
+    "RAILWAY_GIT_COMMIT_SHA",
+    "GITHUB_SHA",
+    "SOURCE_VERSION",
+    "COMMIT_SHA",
+    "DEPLOY_SHA",
+)
 
 
 @contextmanager
@@ -96,6 +107,112 @@ def parse_env_file(path: Path) -> dict[str, str]:
 def validate_environment(runtime_env: dict[str, str]) -> dict[str, object]:
     with patched_environ(runtime_env):
         return EnvironmentValidator().validate_all()
+
+
+def summarize_webhook_secret_posture(runtime_env: dict[str, str]) -> dict[str, Any]:
+    return build_webhook_secret_posture(
+        runtime_env.get("APIFY_WEBHOOK_SECRET", ""),
+        runtime_env.get("APIFY_WEBHOOK_SECRET_PREVIOUS", ""),
+    )
+
+
+def resolve_deploy_sha(runtime_env: dict[str, str]) -> str:
+    for key in DEPLOY_SHA_ENV_KEYS:
+        value = (runtime_env.get(key) or "").strip()
+        if value:
+            return value
+
+    completed = subprocess.run(
+        ["git", "rev-parse", "--short=12", "HEAD"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode == 0:
+        return (completed.stdout or "").strip() or "unknown"
+    return "unknown"
+
+
+def load_webhook_proof_artifact(path: Path) -> dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def validate_webhook_proof_artifact(
+    runtime_env: dict[str, str],
+    artifact_path: Path,
+    *,
+    expect_previous_secret_absent: bool,
+) -> tuple[list[str], list[str], dict[str, Any] | None]:
+    errors: list[str] = []
+    notes: list[str] = []
+    current_posture = summarize_webhook_secret_posture(runtime_env)
+    artifact = load_webhook_proof_artifact(artifact_path)
+
+    if artifact is None:
+        errors.append(
+            f"webhook secret proof artifact missing: {artifact_path}. "
+            f"Capture it with scripts/capture_webhook_secret_proof.py before rollout."
+        )
+        return errors, notes, None
+
+    artifact_posture = artifact.get("posture") or {}
+    artifact_active = artifact_posture.get("active") or {}
+    artifact_previous = artifact_posture.get("previous") or {}
+    artifact_checks = artifact.get("checks") or {}
+    artifact_deploy_sha = str(artifact.get("deploy_sha") or "").strip()
+    current_deploy_sha = resolve_deploy_sha(runtime_env)
+
+    if not artifact_deploy_sha:
+        errors.append("webhook secret proof artifact missing deploy_sha")
+    elif current_deploy_sha != "unknown" and artifact_deploy_sha != current_deploy_sha:
+        errors.append(
+            "webhook secret proof artifact deploy_sha does not match current repo HEAD: "
+            f"{artifact_deploy_sha} != {current_deploy_sha}"
+        )
+
+    if artifact_active.get("fingerprint") != current_posture["active"]["fingerprint"]:
+        errors.append(
+            "webhook secret proof artifact active fingerprint does not match current runtime posture"
+        )
+    if artifact_active.get("state") != current_posture["active"]["state"]:
+        errors.append(
+            "webhook secret proof artifact active posture does not match current runtime posture"
+        )
+    if artifact_previous.get("fingerprint") != current_posture["previous"]["fingerprint"]:
+        errors.append(
+            "webhook secret proof artifact previous fingerprint does not match current runtime posture"
+        )
+    if artifact_previous.get("state") != current_posture["previous"]["state"]:
+        errors.append(
+            "webhook secret proof artifact previous posture does not match current runtime posture"
+        )
+
+    if expect_previous_secret_absent:
+        previous_absent_check = artifact_checks.get("previous_secret_absent") or {}
+        if current_posture["previous"]["state"] != "absent":
+            errors.append("APIFY_WEBHOOK_SECRET_PREVIOUS is still configured; overlap is not over")
+        if previous_absent_check.get("status") != "passed":
+            errors.append(
+                "webhook secret proof artifact does not record previous_secret_absent=passed"
+            )
+    notes.append(f"artifact: {artifact_path}")
+    notes.append(f"artifact generated_at: {artifact.get('generated_at') or 'unknown'}")
+    notes.append(f"artifact deploy_sha: {artifact_deploy_sha or 'unknown'}")
+
+    for check_name in (
+        "retired_secret_rejected",
+        "current_secret_accepted",
+        "replay_suppressed",
+        "previous_secret_absent",
+    ):
+        check = artifact_checks.get(check_name) or {}
+        notes.append(f"{check_name}: {check.get('status') or 'missing'}")
+
+    return errors, notes, artifact
 
 
 def inspect_ingest_schema(dsn: str) -> tuple[list[str], list[str]]:
@@ -202,12 +319,33 @@ def main() -> int:
         action="store_true",
         help="Skip the recent ingest health gate. Use only when Apify is intentionally unreachable.",
     )
+    parser.add_argument(
+        "--webhook-proof-artifact",
+        default=str(DEFAULT_WEBHOOK_PROOF_ARTIFACT),
+        help=(
+            "JSON artifact produced by scripts/capture_webhook_secret_proof.py. "
+            "Preflight fails when the current runtime secret posture is not backed by this artifact."
+        ),
+    )
+    parser.add_argument(
+        "--skip-webhook-proof",
+        action="store_true",
+        help="Skip webhook secret proof validation. Use only when explicitly running posture checks without rollout authority.",
+    )
+    parser.add_argument(
+        "--expect-previous-secret-absent",
+        action="store_true",
+        help="Require APIFY_WEBHOOK_SECRET_PREVIOUS to be absent and proven absent in the artifact.",
+    )
     args = parser.parse_args()
 
     runtime_env = build_runtime_env(args.env_file)
     validation_result = validate_environment(runtime_env)
     errors = list(validation_result["errors"])
     warnings = list(validation_result["warnings"])
+    webhook_posture = summarize_webhook_secret_posture(runtime_env)
+    webhook_proof_notes: list[str] = []
+    webhook_proof_artifact: dict[str, Any] | None = None
 
     errors.extend(validate_actor_manifest(args.actors))
 
@@ -243,6 +381,16 @@ def main() -> int:
         except Exception as exc:
             errors.append(f"failed to run recent ingest health gate: {exc}")
 
+    if args.skip_webhook_proof:
+        warnings.append("webhook secret proof validation skipped")
+    else:
+        proof_errors, webhook_proof_notes, webhook_proof_artifact = validate_webhook_proof_artifact(
+            runtime_env,
+            Path(args.webhook_proof_artifact),
+            expect_previous_secret_absent=args.expect_previous_secret_absent,
+        )
+        errors.extend(proof_errors)
+
     print("Ingest Rollout Preflight")
     print("========================")
     print(f"Environment: {validation_result['environment']}")
@@ -250,6 +398,14 @@ def main() -> int:
 
     print("\nChecks")
     print("- environment validation: ok" if not validation_result["errors"] else "- environment validation: failed")
+    if args.skip_webhook_proof:
+        print("- webhook secret proof: skipped")
+    elif webhook_proof_artifact is not None and not [
+        e for e in errors if e.startswith("webhook secret proof artifact") or "APIFY_WEBHOOK_SECRET_PREVIOUS is still configured" in e
+    ]:
+        print("- webhook secret proof: ok")
+    else:
+        print("- webhook secret proof: failed")
     if dsn:
         print("- live ingest schema: ok" if not [e for e in errors if "ingest tables" in e or "missing required" in e] else "- live ingest schema: failed")
     else:
@@ -264,6 +420,24 @@ def main() -> int:
     if schema_notes:
         print("\nSchema")
         for note in schema_notes:
+            print(f"- {note}")
+
+    print("\nWebhook Secret Posture")
+    print(
+        "- active: "
+        f"state={webhook_posture['active']['state']} "
+        f"fingerprint={webhook_posture['active']['fingerprint'] or 'missing'} "
+        f"length={webhook_posture['active']['length']}"
+    )
+    print(
+        "- previous: "
+        f"state={webhook_posture['previous']['state']} "
+        f"fingerprint={webhook_posture['previous']['fingerprint'] or 'none'} "
+        f"length={webhook_posture['previous']['length']}"
+    )
+    if webhook_proof_notes:
+        print("\nWebhook Proof Artifact")
+        for note in webhook_proof_notes:
             print(f"- {note}")
 
     if warnings:

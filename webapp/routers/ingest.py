@@ -29,6 +29,8 @@ import psycopg2
 from psycopg2 import extras as psycopg2_extras
 from psycopg2 import sql as psycopg2_sql
 
+from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
+
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
@@ -587,6 +589,10 @@ def _configured_webhook_secret_entries() -> tuple[tuple[str, str], ...]:
     return tuple(entries)
 
 
+def _webhook_secret_posture() -> dict[str, Any]:
+    return build_webhook_secret_posture(WEBHOOK_SECRET, WEBHOOK_SECRET_PREVIOUS)
+
+
 def _match_webhook_secret(presented_secret: Optional[str]) -> Optional[str]:
     presented = presented_secret or ""
     matched_label: Optional[str] = None
@@ -699,9 +705,12 @@ async def apify_webhook(
     if matched_secret_label is None:
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
     if matched_secret_label == "previous":
+        posture = _webhook_secret_posture()
         logger.warning(
             "[INGEST_AUTH] Accepted webhook with APIFY_WEBHOOK_SECRET_PREVIOUS; "
-            "finish rotation and remove the fallback secret."
+            "previous_fp=%s active_fp=%s finish rotation and remove the fallback secret.",
+            posture["previous"]["fingerprint"] or "none",
+            posture["active"]["fingerprint"] or "missing",
         )
 
     try:
