@@ -59,13 +59,15 @@ python3 scripts/reconcile_apify_ingest_runs.py \
 - `webhook_degraded` or `webhook_error`: inspect `webhook_log.error_message` first, then review `db_save` status counts in `ingest_delivery_log` before replaying.
 - `ignored_replay`: a duplicate delivery was suppressed inside the replay window. This is expected for rapid resubmits and is not, by itself, an ingest failure.
 - `missing_delivery_log` or `missing_db_save_ledger`: the webhook landed, but the save ledger is missing. Check Railway app logs for the run before rerunning.
-- `db_save_failures`: inspect `db_save` statuses for `supabase_error`, `direct_pg_error`, `direct_pg_unavailable`, or `duplicate_unresolved`.
+- `db_save_failures`: inspect `db_save` statuses for `supabase_error`, `direct_pg_error`, `direct_pg_unavailable`, or `duplicate_unresolved`. `saved_supabase_duplicate` and `saved_direct_pg_duplicate` are successful race recoveries, not failure states.
 - `no_db_landing`: Apify produced items, but neither `opportunities` nor `db_save` shows a successful landing. Treat this as a replay candidate.
 
 Current save fallback behavior:
 
 - `saved_supabase`: Supabase insert succeeded directly.
+- `saved_supabase_duplicate`: the row initially lost the canonical unique race, then was re-saved as a duplicate against the winning canonical row.
 - `saved_direct_pg`: Supabase insert failed or returned no row, and the direct Postgres fallback inserted successfully.
+- `saved_direct_pg_duplicate`: the direct Postgres fallback hit the canonical unique index, recovered the winning canonical row, and re-saved the loser as a duplicate.
 - `duplicate_existing`: a unique conflict was resolved by looking up the existing `opportunities.id`; this does not fall through to direct Postgres.
 - `supabase_error`: legacy pre-fix status, or an unexpected regression if it appears on newly processed runs. Verify the app version before replaying.
 

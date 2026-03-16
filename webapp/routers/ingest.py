@@ -857,6 +857,15 @@ async def apify_webhook(
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
+            if vehicle.get("is_duplicate") and not is_dup:
+                is_dup = True
+                duplicate_count += 1
+                logger.info(
+                    "[DEDUP] canonical conflict recovered for %s: %s",
+                    vehicle.get("canonical_record_id"),
+                    vehicle.get("title", "?")[:50],
+                )
+
             _record_delivery_log(
                 run_id=vehicle.get("run_id") or apify_run_id,
                 listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -867,7 +876,12 @@ async def apify_webhook(
                 error_message=None if save_status not in {"supabase_error", "direct_pg_error", "duplicate_unresolved", "direct_pg_unavailable"} else save_status,
             )
 
-            inserted_success = save_status in {"saved_supabase", "saved_direct_pg"}
+            inserted_success = save_status in {
+                "saved_supabase",
+                "saved_supabase_duplicate",
+                "saved_direct_pg",
+                "saved_direct_pg_duplicate",
+            }
             existing_success = save_status == "duplicate_existing"
             save_succeeded = inserted_success or existing_success
             is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved"} or is_dup
@@ -1949,6 +1963,94 @@ def _apply_canonical_update(canonical_update: Optional[dict]) -> bool:
         return False
 
 
+def _lookup_existing_canonical_opportunity(canonical_id: Optional[str]) -> Optional[dict]:
+    if not canonical_id:
+        return None
+
+    if supabase_client is not None:
+        try:
+            lookup = (
+                supabase_client.table("opportunities")
+                .select("id, all_sources")
+                .eq("canonical_id", canonical_id)
+                .eq("is_duplicate", False)
+                .limit(1)
+                .execute()
+            )
+            if lookup.data:
+                row = lookup.data[0]
+                return {
+                    "id": row.get("id"),
+                    "all_sources": row.get("all_sources") or [],
+                }
+        except Exception as lookup_err:
+            logger.warning("[DEDUP] Supabase canonical lookup failed: %s", lookup_err)
+
+    if not _direct_supabase_db_url:
+        return None
+
+    try:
+        with psycopg2.connect(_direct_supabase_db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select id, all_sources
+                    from public.opportunities
+                    where canonical_id = %s and is_duplicate = false
+                    limit 1
+                    """,
+                    (canonical_id,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    return {
+                        "id": str(row[0]),
+                        "all_sources": list(row[1] or []),
+                    }
+    except Exception as lookup_err:
+        logger.warning("[DEDUP] Direct PG canonical lookup failed: %s", lookup_err)
+    return None
+
+
+def _build_duplicate_recovery_payload(row: dict, canonical_row: dict) -> tuple[dict, Optional[dict]]:
+    duplicate_row = dict(row)
+    duplicate_row["is_duplicate"] = True
+    duplicate_row["canonical_record_id"] = canonical_row["id"]
+    duplicate_row["all_sources"] = []
+    duplicate_row["duplicate_count"] = 0
+
+    existing_sources = canonical_row.get("all_sources") or []
+    new_source = duplicate_row.get("source")
+    canonical_update = None
+    if new_source and new_source not in existing_sources:
+        updated_sources = existing_sources + [new_source]
+        canonical_update = {
+            "id": canonical_row["id"],
+            "all_sources": updated_sources,
+            "duplicate_count": len(updated_sources) - 1,
+        }
+    return duplicate_row, canonical_update
+
+
+def _finalize_duplicate_recovery(vehicle: dict, canonical_row: dict, canonical_update: Optional[dict]) -> None:
+    vehicle["is_duplicate"] = True
+    vehicle["canonical_record_id"] = canonical_row["id"]
+    if canonical_update and _apply_canonical_update(canonical_update):
+        logger.info("[DEDUP] canonical source update applied for %s", canonical_row["id"])
+
+
+def _is_canonical_unique_conflict(error_text: str) -> bool:
+    normalized = (error_text or "").lower()
+    return (
+        "idx_opportunities_canonical_unique" in normalized
+        or (
+            "duplicate key value" in normalized
+            and "canonical_id" in normalized
+            and "is_duplicate" in normalized
+        )
+    )
+
+
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
     if supabase_client is not None:
         try:
@@ -1997,13 +2099,7 @@ def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Option
         return None
 
 
-def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
-    if not _direct_supabase_db_url:
-        logger.warning(
-            "[INGEST] Direct PG fallback unavailable; set SUPABASE_DB_URL or SUPABASE_DB_PASSWORD."
-        )
-        return None, "direct_pg_unavailable"
-
+def _insert_opportunity_direct_pg(row: dict) -> Optional[str]:
     columns = list(row.keys())
     values = [_prepare_direct_pg_value(row[column]) for column in columns]
     insert_sql = psycopg2_sql.SQL(
@@ -2013,13 +2109,39 @@ def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
         values=psycopg2_sql.SQL(", ").join(psycopg2_sql.Placeholder() for _ in columns),
     )
 
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(insert_sql, values)
+            inserted = cur.fetchone()
+            return str(inserted[0]) if inserted and inserted[0] else None
+
+
+def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
+    if not _direct_supabase_db_url:
+        logger.warning(
+            "[INGEST] Direct PG fallback unavailable; set SUPABASE_DB_URL or SUPABASE_DB_PASSWORD."
+        )
+        return None, "direct_pg_unavailable"
+
     try:
-        with psycopg2.connect(_direct_supabase_db_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(insert_sql, values)
-                inserted = cur.fetchone()
-                return (str(inserted[0]) if inserted and inserted[0] else None), "saved_direct_pg"
-    except psycopg2.errors.UniqueViolation:
+        return _insert_opportunity_direct_pg(row), "saved_direct_pg"
+    except psycopg2.errors.UniqueViolation as pg_err:
+        error_text = getattr(pg_err, "pgerror", None) or str(pg_err)
+        if _is_canonical_unique_conflict(error_text):
+            canonical_row = _lookup_existing_canonical_opportunity(row.get("canonical_id"))
+            if canonical_row:
+                duplicate_row, canonical_update = _build_duplicate_recovery_payload(row, canonical_row)
+                try:
+                    duplicate_id = _insert_opportunity_direct_pg(duplicate_row)
+                    if canonical_update:
+                        _apply_canonical_update(canonical_update)
+                    return duplicate_id, "saved_direct_pg_duplicate"
+                except Exception as recovery_err:
+                    logger.warning(
+                        "[DEDUP] Direct PG duplicate recovery failed for canonical_id=%s: %s",
+                        row.get("canonical_id"),
+                        recovery_err,
+                    )
         existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
         if existing_id:
             return existing_id, "duplicate_existing"
@@ -2058,6 +2180,22 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
             error_text = str(e)
             if "23505" in error_text or "duplicate key value" in error_text:
+                if _is_canonical_unique_conflict(error_text):
+                    canonical_row = _lookup_existing_canonical_opportunity(row.get("canonical_id"))
+                    if canonical_row:
+                        duplicate_row, canonical_update = _build_duplicate_recovery_payload(row, canonical_row)
+                        try:
+                            retry = supabase_client.table("opportunities").insert(duplicate_row).execute()
+                            if retry.data:
+                                _finalize_duplicate_recovery(vehicle, canonical_row, canonical_update)
+                                vehicle["_save_status"] = "saved_supabase_duplicate"
+                                return retry.data[0].get("id")
+                        except Exception as retry_err:
+                            logger.warning(
+                                "[DEDUP] Supabase duplicate recovery failed for '%s': %s",
+                                title,
+                                retry_err,
+                            )
                 existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
                 if existing_id:
                     logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
@@ -2073,6 +2211,11 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
         logger.warning("[INGEST] Supabase client unavailable; using direct Postgres fallback if configured.")
 
     saved_id, save_status = _save_opportunity_direct_pg(row)
+    if save_status == "saved_direct_pg_duplicate":
+        canonical_row = _lookup_existing_canonical_opportunity(row.get("canonical_id"))
+        if canonical_row:
+            vehicle["is_duplicate"] = True
+            vehicle["canonical_record_id"] = canonical_row["id"]
     vehicle["_save_status"] = save_status
     return saved_id
 
