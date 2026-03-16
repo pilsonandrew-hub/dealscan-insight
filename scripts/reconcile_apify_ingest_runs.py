@@ -31,6 +31,7 @@ APIFY_TOKEN_KEYS = ("APIFY_TOKEN", "APIFY_API_TOKEN")
 APIFY_BASE_URL = "https://api.apify.com/v2"
 APIFY_SUCCESS_STATUSES = {"SUCCEEDED"}
 WEBHOOK_BAD_STATUSES = {"degraded", "error"}
+WEBHOOK_SUCCESS_STATUSES = {"processed", "ignored_replay"}
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
 DB_SAVE_EXISTING_STATUSES = {"duplicate_existing"}
 DB_SAVE_FAILURE_STATUSES = {
@@ -508,9 +509,14 @@ def classify_run(
     existing_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_EXISTING_STATUSES)
     failed_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_FAILURE_STATUSES)
     opportunity_rows = int((opportunities or {}).get("opportunity_rows") or 0)
+    latest_webhook_status = str((webhook or {}).get("latest_status") or "unknown").lower()
+    has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or existing_rows > 0
 
     if apify_run is None:
         if webhook or opportunities or delivery:
+            has_clean_webhook = not webhook or latest_webhook_status in WEBHOOK_SUCCESS_STATUSES
+            if has_clean_webhook and has_successful_db_landing and failed_rows == 0:
+                return issues
             issues.append("db_only_run")
         return issues
 
@@ -520,10 +526,9 @@ def classify_run(
         if webhook is None:
             issues.append("missing_webhook")
         else:
-            latest_status = str(webhook.get("latest_status") or "unknown").lower()
-            if latest_status in WEBHOOK_BAD_STATUSES:
-                issues.append(f"webhook_{latest_status}")
-            elif latest_status == "pending":
+            if latest_webhook_status in WEBHOOK_BAD_STATUSES:
+                issues.append(f"webhook_{latest_webhook_status}")
+            elif latest_webhook_status == "pending":
                 last_seen = parse_datetime(webhook.get("last_received_at")) or apify_run.get("finished_at") or apify_run.get("started_at")
                 if last_seen and (now_utc - last_seen) > timedelta(minutes=pending_grace_minutes):
                     issues.append("webhook_pending_stale")

@@ -122,6 +122,8 @@ python3 scripts/check_recent_ingest_runs.py --env-file .env.live --actors ds-gov
 
 This exits non-zero when a recent succeeded Apify run is missing a webhook, marked degraded/error, missing the save ledger, or showing save failures. The wrapper defaults to a 12-hour lookback so delayed webhooks/replays do not create noisy false alarms. Wire it into whatever existing job runner already pages on non-zero exit.
 
+Database-only rows with a clean processed or ignored-replay webhook plus successful `db_save`/`opportunities` evidence are treated as historical replay artifacts rather than pager-worthy failures when the current Apify fetch no longer includes that run id.
+
 Pager wrapper for tonight:
 
 ```bash

@@ -57,6 +57,29 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
         )
         self.assertTrue(result["valid"])
 
+    def test_rotation_overlap_allows_short_previous_secret_with_warning(self):
+        env = {
+            "ENVIRONMENT": "production",
+            "SECRET_KEY": "x" * 32,
+            "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
+            "APIFY_TOKEN": "a" * 32,
+            "APIFY_WEBHOOK_SECRET": "n" * 32,
+            "APIFY_WEBHOOK_SECRET_PREVIOUS": "old-short-secret",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = EnvironmentValidator().validate_all()
+
+        self.assertNotIn(
+            "APIFY_WEBHOOK_SECRET_PREVIOUS should be at least 24 characters long",
+            result["errors"],
+        )
+        self.assertIn(
+            "APIFY_WEBHOOK_SECRET_PREVIOUS is shorter than 24 characters; allow only as a temporary overlap for the retiring secret and remove it promptly",
+            result["warnings"],
+        )
+        self.assertTrue(result["valid"])
+
     def test_production_requires_supabase_service_role_key_for_ingest(self):
         env = {
             "ENVIRONMENT": "production",
