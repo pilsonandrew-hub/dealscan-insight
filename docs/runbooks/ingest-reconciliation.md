@@ -111,6 +111,7 @@ Notes:
 - For the March 15 incident, scope to `--actors ds-govdeals ds-publicsurplus` to avoid unrelated Apify runs polluting the report
 - Reads Postgres DSN from `DATABASE_URL` or `--env-file`
 - Reads Apify token from `APIFY_TOKEN` or `APIFY_API_TOKEN`
+- If Python hits `CERTIFICATE_VERIFY_FAILED` against Apify, the script now retries the same HTTPS request via `curl` using the host system trust store and still keeps TLS verification on
 - Supports `--runs-json <path>` if the shell cannot reach Apify and you need to compare against an exported runs list
 
 Fail-fast check for existing schedulers/pagers:

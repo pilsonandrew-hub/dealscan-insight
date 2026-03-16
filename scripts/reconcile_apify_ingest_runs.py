@@ -6,6 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import ssl
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -36,6 +39,7 @@ DB_SAVE_FAILURE_STATUSES = {
     "direct_pg_unavailable",
     "duplicate_unresolved",
 }
+_CURL_SSL_FALLBACK_NOTIFIED = False
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -134,12 +138,95 @@ def load_actor_registry(actor_filters: list[str]) -> dict[str, str]:
     return selected
 
 
-def apify_get_json(path: str, token: str, query: Optional[dict[str, Any]] = None) -> Any:
+def _build_apify_url(path: str, query: Optional[dict[str, Any]] = None) -> str:
     url = f"{APIFY_BASE_URL}{path}"
     if query:
         encoded = urllib_parse.urlencode({k: v for k, v in query.items() if v is not None})
         if encoded:
             url = f"{url}?{encoded}"
+    return url
+
+
+def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    collected: list[BaseException] = []
+    while pending:
+        current = pending.pop()
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        collected.append(current)
+        for next_exc in (getattr(current, "reason", None), current.__cause__, current.__context__):
+            if isinstance(next_exc, BaseException):
+                pending.append(next_exc)
+    return collected
+
+
+def _is_ssl_verification_error(exc: BaseException) -> bool:
+    for current in _iter_exception_chain(exc):
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        if isinstance(current, ssl.SSLError):
+            message = str(current).lower()
+            if "certificate verify failed" in message or "certificate_verify_failed" in message:
+                return True
+    message = str(exc).lower()
+    return "certificate verify failed" in message or "certificate_verify_failed" in message
+
+
+def _notify_curl_ssl_fallback() -> None:
+    global _CURL_SSL_FALLBACK_NOTIFIED
+    if _CURL_SSL_FALLBACK_NOTIFIED:
+        return
+    _CURL_SSL_FALLBACK_NOTIFIED = True
+    print(
+        "Apify fetch note: Python SSL verification failed; retrying via curl with the system trust store.",
+        file=sys.stderr,
+    )
+
+
+def _apify_get_json_via_curl(url: str, token: str, path: str) -> Any:
+    curl_path = shutil.which("curl")
+    if not curl_path:
+        raise RuntimeError(
+            f"curl is not available for Apify SSL fallback on {path}; use --runs-json for an offline compare."
+        )
+
+    completed = subprocess.run(
+        [
+            curl_path,
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            "30",
+            "-H",
+            f"Authorization: Bearer {token}",
+            "-H",
+            "Accept: application/json",
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(
+            f"curl exit {completed.returncode} while fetching {path}: {stderr[:300] or 'no error output'}"
+        )
+
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Apify curl fallback returned invalid JSON for {path}") from exc
+
+
+def apify_get_json(path: str, token: str, query: Optional[dict[str, Any]] = None) -> Any:
+    url = _build_apify_url(path, query)
     request = urllib_request.Request(
         url,
         headers={
@@ -153,7 +240,15 @@ def apify_get_json(path: str, token: str, query: Optional[dict[str, Any]] = None
     except urllib_error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Apify API error for {path}: HTTP {exc.code} {body[:300]}") from exc
+    except ssl.SSLError as exc:
+        if _is_ssl_verification_error(exc):
+            _notify_curl_ssl_fallback()
+            return _apify_get_json_via_curl(url, token, path)
+        raise RuntimeError(f"Apify API unreachable for {path}: {exc}") from exc
     except urllib_error.URLError as exc:
+        if _is_ssl_verification_error(exc):
+            _notify_curl_ssl_fallback()
+            return _apify_get_json_via_curl(url, token, path)
         raise RuntimeError(f"Apify API unreachable for {path}: {exc}") from exc
 
     try:
