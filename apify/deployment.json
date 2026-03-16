@@ -46,7 +46,6 @@
       "webhookId": "SINNRTPxfC8F5szXq"
     }
   },
-  "webhookSecret": "sbEC0dNgb7Ohg3rDV",
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
   "deployedAt": "2026-03-14T11:10:00.000Z"
 }

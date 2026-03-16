@@ -74,6 +74,62 @@ PIPELINE_SECRET = os.getenv("PIPELINE_SECRET")
 PIPELINE_BASIC_AUTH_USERNAME = os.getenv("PIPELINE_BASIC_AUTH_USERNAME", "")
 PIPELINE_BASIC_AUTH_PASSWORD = os.getenv("PIPELINE_BASIC_AUTH_PASSWORD", "")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
+_PLACEHOLDER_SECRET_VALUES = {
+    "changeme",
+    "change_me",
+    "default",
+    "dev-secret-change-in-prod",
+    "replace-me",
+    "replace_with_real_secret",
+    "your_webhook_secret_here",
+}
+
+
+def _looks_like_placeholder_secret(value: str) -> bool:
+    normalized = value.strip().lower().replace("-", "_")
+    if not normalized:
+        return False
+    if normalized in _PLACEHOLDER_SECRET_VALUES:
+        return True
+    return normalized.startswith("your_") and normalized.endswith("_here")
+
+
+def _log_webhook_secret_config_health() -> None:
+    active_secret = (os.getenv("APIFY_WEBHOOK_SECRET") or "").strip()
+    previous_secret = (os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS") or "").strip()
+
+    if active_secret and _looks_like_placeholder_secret(active_secret):
+        logger.critical(
+            "APIFY_WEBHOOK_SECRET is set to a placeholder-like value. "
+            "Set a real random secret before relying on webhook auth."
+        )
+    elif active_secret and len(active_secret) < 24:
+        logger.warning(
+            "APIFY_WEBHOOK_SECRET is shorter than 24 characters. "
+            "Rotate to a higher-entropy value."
+        )
+
+    if previous_secret:
+        if previous_secret == active_secret:
+            logger.warning(
+                "APIFY_WEBHOOK_SECRET_PREVIOUS matches APIFY_WEBHOOK_SECRET. "
+                "Remove the duplicate fallback value."
+            )
+        elif _looks_like_placeholder_secret(previous_secret):
+            logger.critical(
+                "APIFY_WEBHOOK_SECRET_PREVIOUS is set to a placeholder-like value. "
+                "Remove it or replace it with the actual retiring secret during rotation."
+            )
+        elif len(previous_secret) < 24:
+            logger.warning(
+                "APIFY_WEBHOOK_SECRET_PREVIOUS is shorter than 24 characters. "
+                "Finish rotation and remove the fallback secret promptly."
+            )
+        else:
+            logger.warning(
+                "APIFY_WEBHOOK_SECRET_PREVIOUS is configured. "
+                "Keep it only for the brief webhook rotation overlap window."
+            )
 
 # ---------------------------------------------------------------------------
 # Pipeline state (in-memory; production should use Redis/DB)
@@ -103,6 +159,7 @@ async def lifespan(app: FastAPI):
             logger.critical(f"STARTUP FATAL: {var} is not set. Refusing to start.")
             if os.getenv("ENVIRONMENT") == "production":
                 sys.exit(1)
+    _log_webhook_secret_config_health()
     if SECRET_KEY == "dev-secret-change-in-prod" and os.getenv("ENVIRONMENT", "production").lower() == "production":
         logger.critical(
             "SECRET_KEY is not set; using development fallback in production. "
