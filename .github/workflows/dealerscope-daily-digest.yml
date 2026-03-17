@@ -1,0 +1,64 @@
+name: DealerScope Daily Digest
+
+on:
+  schedule:
+    - cron: '0 16 * * *'   # 9am PT daily
+  workflow_dispatch:
+
+jobs:
+  daily-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send daily digest
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: "7529788084"
+        run: |
+          python3 << 'PYEOF'
+          import json, urllib.request, ssl, datetime, sys, os
+
+          SUPABASE_URL = "https://lbnxzvqppccajllsqaaw.supabase.co"
+          SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+          BOT_TOKEN = os.environ["BOT_TOKEN"]
+          CHAT_ID = os.environ["CHAT_ID"]
+
+          ctx = ssl.create_default_context()
+
+          def supabase_get(path):
+              req = urllib.request.Request(
+                  f"{SUPABASE_URL}/rest/v1/{path}",
+                  headers={"Authorization": f"Bearer {SERVICE_KEY}", "apikey": SERVICE_KEY}
+              )
+              with urllib.request.urlopen(req, context=ctx) as r:
+                  return json.loads(r.read())
+
+          def send_telegram(text):
+              payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}).encode()
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                  data=payload, headers={"Content-Type": "application/json"}, method="POST"
+              )
+              with urllib.request.urlopen(req, context=ctx) as r:
+                  return json.loads(r.read())
+
+          cutoff = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).isoformat()
+          deals = supabase_get(
+              f"opportunities?select=title,state,current_bid,dos_score,listing_url"
+              f"&dos_score=gte.65&processed_at=gte.{cutoff}&order=dos_score.desc&limit=5"
+          )
+
+          if not deals:
+              send_telegram("📊 <b>DealerScope Daily Digest</b>\n\nNo deals scored ≥65 in the last 24 hours.")
+              sys.exit(0)
+
+          lines = ["📊 <b>DealerScope Daily Digest</b>\n<i>Top deals (last 24h)</i>\n"]
+          for i, d in enumerate(deals, 1):
+              lines.append(f"{i}. <b>{d.get('title','?')}</b>")
+              lines.append(f"   DOS {d.get('dos_score')} | ${d.get('current_bid',0):,.0f} | {d.get('state','?')}")
+          send_telegram("\n".join(lines))
+          print(f"Sent digest with {len(deals)} deals")
+          PYEOF
