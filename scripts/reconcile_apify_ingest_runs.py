@@ -32,6 +32,8 @@ APIFY_BASE_URL = "https://api.apify.com/v2"
 APIFY_SUCCESS_STATUSES = {"SUCCEEDED"}
 WEBHOOK_BAD_STATUSES = {"degraded", "error"}
 WEBHOOK_SUCCESS_STATUSES = {"processed", "ignored_replay"}
+SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
 DB_SAVE_EXISTING_STATUSES = {"duplicate_existing"}
 DB_SAVE_SKIPPED_STATUSES = {
@@ -49,6 +51,7 @@ DB_SAVE_FAILURE_STATUSES = {
     "duplicate_unresolved",
 }
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
+POSTGREST_PAGE_SIZE = 1000
 _CURL_SSL_FALLBACK_NOTIFIED = False
 
 
@@ -155,6 +158,21 @@ def _build_apify_url(path: str, query: Optional[dict[str, Any]] = None) -> str:
         if encoded:
             url = f"{url}?{encoded}"
     return url
+
+
+def _normalize_supabase_rest_url(supabase_url: str) -> str:
+    base = supabase_url.rstrip("/")
+    if base.endswith("/rest/v1"):
+        return base
+    return f"{base}/rest/v1"
+
+
+def _resolve_rest_config(env_file: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    supabase_url = _get_env_value(None, SUPABASE_URL_KEYS, env_file)
+    service_role_key = _get_env_value(None, SUPABASE_SERVICE_ROLE_KEY_KEYS, env_file)
+    if not supabase_url or not service_role_key:
+        return None, None, None
+    return _normalize_supabase_rest_url(supabase_url), service_role_key, "env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY"
 
 
 def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
@@ -296,6 +314,73 @@ def _first_int(*candidates: Any) -> Optional[int]:
     return None
 
 
+def _build_postgrest_url(base_url: str, table: str, query: list[tuple[str, str]]) -> str:
+    encoded = urllib_parse.urlencode(query, doseq=True)
+    if encoded:
+        return f"{base_url}/{table}?{encoded}"
+    return f"{base_url}/{table}"
+
+
+def _postgrest_get_json(
+    base_url: str,
+    service_role_key: str,
+    table: str,
+    query: list[tuple[str, str]],
+    offset: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    url = _build_postgrest_url(base_url, table, query)
+    request = urllib_request.Request(
+        url,
+        headers={
+            "apikey": service_role_key,
+            "Authorization": f"Bearer {service_role_key}",
+            "Accept": "application/json",
+            "Range-Unit": "items",
+            "Range": f"{offset}-{offset + limit - 1}",
+        },
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=30) as response:
+            payload = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase REST API error for {table}: HTTP {exc.code} {body[:300]}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"Supabase REST API unreachable for {table}: {exc}") from exc
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Supabase REST API returned invalid JSON for {table}") from exc
+    if not isinstance(data, list):
+        raise RuntimeError(f"Supabase REST API returned a non-list payload for {table}")
+    return [row for row in data if isinstance(row, dict)]
+
+
+def _fetch_postgrest_rows(
+    base_url: str,
+    service_role_key: str,
+    table: str,
+    query: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = _postgrest_get_json(
+            base_url=base_url,
+            service_role_key=service_role_key,
+            table=table,
+            query=query,
+            offset=offset,
+            limit=POSTGREST_PAGE_SIZE,
+        )
+        rows.extend(page)
+        if len(page) < POSTGREST_PAGE_SIZE:
+            return rows
+        offset += POSTGREST_PAGE_SIZE
+
+
 def fetch_dataset_item_count(dataset_id: str, token: str, cache: dict[str, Optional[int]]) -> Optional[int]:
     if dataset_id in cache:
         return cache[dataset_id]
@@ -428,6 +513,68 @@ def fetch_webhook_rows(
         return {row["run_id"]: dict(row) for row in cursor.fetchall()}
 
 
+def fetch_webhook_rows_via_rest(
+    base_url: str,
+    service_role_key: str,
+    start: datetime,
+    end: datetime,
+    actor_ids: Optional[list[str]] = None,
+) -> dict[str, dict[str, Any]]:
+    rows = _fetch_postgrest_rows(
+        base_url=base_url,
+        service_role_key=service_role_key,
+        table="webhook_log",
+        query=[
+            ("select", "id,run_id,received_at,item_count,processing_status,error_message,actor_id"),
+            ("run_id", "not.is.null"),
+            ("received_at", f"gte.{start.isoformat()}"),
+            ("received_at", f"lte.{end.isoformat()}"),
+            ("order", "received_at.asc,id.asc"),
+        ],
+    )
+    actor_id_filter = set(actor_ids or [])
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        run_id = row.get("run_id")
+        if not run_id:
+            continue
+        actor_id = str(row.get("actor_id") or "")
+        if actor_id_filter and actor_id not in actor_id_filter:
+            continue
+        received_at = parse_datetime(row.get("received_at"))
+        max_item_count = _first_int(row.get("item_count"))
+        entry = grouped.setdefault(
+            str(run_id),
+            {
+                "run_id": str(run_id),
+                "webhook_entries": 0,
+                "first_received_at": None,
+                "last_received_at": None,
+                "max_item_count": None,
+                "latest_status": None,
+                "latest_error": None,
+            },
+        )
+        entry["webhook_entries"] += 1
+        if received_at:
+            first_received_at = parse_datetime(entry.get("first_received_at"))
+            last_received_at = parse_datetime(entry.get("last_received_at"))
+            if first_received_at is None or received_at < first_received_at:
+                entry["first_received_at"] = received_at
+            if last_received_at is None or received_at >= last_received_at:
+                entry["last_received_at"] = received_at
+                entry["latest_status"] = row.get("processing_status")
+                entry["latest_error"] = row.get("error_message")
+        elif entry["latest_status"] is None:
+            entry["latest_status"] = row.get("processing_status")
+            entry["latest_error"] = row.get("error_message")
+        if max_item_count is not None:
+            prior_max = _first_int(entry.get("max_item_count"))
+            if prior_max is None or max_item_count > prior_max:
+                entry["max_item_count"] = max_item_count
+    return grouped
+
+
 def fetch_opportunity_rows(
     connection,
     start: datetime,
@@ -455,6 +602,61 @@ def fetch_opportunity_rows(
         sql += " group by run_id"
         cursor.execute(sql, params)
         return {row["run_id"]: dict(row) for row in cursor.fetchall()}
+
+
+def fetch_opportunity_rows_via_rest(
+    base_url: str,
+    service_role_key: str,
+    start: datetime,
+    end: datetime,
+    sources: Optional[list[str]] = None,
+) -> dict[str, dict[str, Any]]:
+    rows = _fetch_postgrest_rows(
+        base_url=base_url,
+        service_role_key=service_role_key,
+        table="opportunities",
+        query=[
+            ("select", "run_id,processed_at,step_status,is_duplicate,source"),
+            ("run_id", "not.is.null"),
+            ("processed_at", f"gte.{start.isoformat()}"),
+            ("processed_at", f"lte.{end.isoformat()}"),
+            ("order", "processed_at.asc"),
+        ],
+    )
+    source_filter = set(sources or [])
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        run_id = row.get("run_id")
+        if not run_id:
+            continue
+        source = str(row.get("source") or "")
+        if source_filter and source not in source_filter:
+            continue
+        processed_at = parse_datetime(row.get("processed_at"))
+        entry = grouped.setdefault(
+            str(run_id),
+            {
+                "run_id": str(run_id),
+                "opportunity_rows": 0,
+                "first_processed_at": None,
+                "last_processed_at": None,
+                "complete_rows": 0,
+                "duplicate_rows": 0,
+            },
+        )
+        entry["opportunity_rows"] += 1
+        if str(row.get("step_status") or "") == "complete":
+            entry["complete_rows"] += 1
+        if bool(row.get("is_duplicate")):
+            entry["duplicate_rows"] += 1
+        if processed_at:
+            first_processed_at = parse_datetime(entry.get("first_processed_at"))
+            last_processed_at = parse_datetime(entry.get("last_processed_at"))
+            if first_processed_at is None or processed_at < first_processed_at:
+                entry["first_processed_at"] = processed_at
+            if last_processed_at is None or processed_at > last_processed_at:
+                entry["last_processed_at"] = processed_at
+    return grouped
 
 
 def derive_source_names(actors: dict[str, str]) -> list[str]:
@@ -501,6 +703,46 @@ def fetch_delivery_rows(connection, start: datetime, end: datetime) -> dict[str,
             if last_updated_at and (prior_last is None or last_updated_at > prior_last):
                 run_entry["last_updated_at"] = last_updated_at
         return grouped
+
+
+def fetch_delivery_rows_via_rest(
+    base_url: str,
+    service_role_key: str,
+    start: datetime,
+    end: datetime,
+) -> dict[str, dict[str, Any]]:
+    rows = _fetch_postgrest_rows(
+        base_url=base_url,
+        service_role_key=service_role_key,
+        table="ingest_delivery_log",
+        query=[
+            ("select", "run_id,channel,status,attempt_count,created_at,updated_at"),
+            ("run_id", "not.is.null"),
+            ("created_at", f"gte.{start.isoformat()}"),
+            ("created_at", f"lte.{end.isoformat()}"),
+            ("order", "created_at.asc"),
+        ],
+    )
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        run_id = row.get("run_id")
+        if not run_id:
+            continue
+        run_entry = grouped.setdefault(str(run_id), {"channels": {}, "last_updated_at": None})
+        channel_name = str(row.get("channel") or "unknown")
+        status = str(row.get("status") or "unknown")
+        channel_entry = run_entry["channels"].setdefault(
+            channel_name,
+            {"statuses": {}, "total_rows": 0, "total_attempts": 0},
+        )
+        channel_entry["statuses"][status] = int(channel_entry["statuses"].get(status) or 0) + 1
+        channel_entry["total_rows"] += 1
+        channel_entry["total_attempts"] += _first_int(row.get("attempt_count")) or 0
+        last_updated_at = parse_datetime(row.get("updated_at"))
+        prior_last = run_entry.get("last_updated_at")
+        if last_updated_at and (prior_last is None or last_updated_at > prior_last):
+            run_entry["last_updated_at"] = last_updated_at
+    return grouped
 
 
 def classify_run(
@@ -757,6 +999,68 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def load_reconciliation_rows(
+    dsn: Optional[str],
+    dsn_source: Optional[str],
+    rest_base_url: Optional[str],
+    service_role_key: Optional[str],
+    rest_source: Optional[str],
+    start: datetime,
+    end: datetime,
+    actor_ids: list[str],
+    source_names: list[str],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]], str]:
+    if dsn:
+        print(f"db_path={dsn_source or 'unknown'}")
+        connection = None
+        try:
+            connection = connect(dsn)
+            webhook_rows = fetch_webhook_rows(connection, start=start, end=end, actor_ids=actor_ids)
+            opportunity_rows = fetch_opportunity_rows(connection, start=start, end=end, sources=source_names)
+            delivery_rows = fetch_delivery_rows(connection, start=start, end=end)
+            return webhook_rows, opportunity_rows, delivery_rows, f"postgres:{dsn_source or 'unknown'}"
+        except Exception as exc:
+            if connection is not None and not connection.closed:
+                connection.close()
+            if not rest_base_url or not service_role_key:
+                raise RuntimeError(f"Unable to query live database: {exc}") from exc
+            print(
+                f"Postgres path unavailable ({exc}); falling back to Supabase REST API.",
+                file=sys.stderr,
+            )
+        finally:
+            if connection is not None and not connection.closed:
+                connection.close()
+
+    if not rest_base_url or not service_role_key:
+        raise RuntimeError(
+            "No live database path available. Provide a direct Postgres DSN or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY."
+        )
+
+    print(f"db_path={rest_source or 'rest.unknown'}")
+    webhook_rows = fetch_webhook_rows_via_rest(
+        base_url=rest_base_url,
+        service_role_key=service_role_key,
+        start=start,
+        end=end,
+        actor_ids=actor_ids,
+    )
+    opportunity_rows = fetch_opportunity_rows_via_rest(
+        base_url=rest_base_url,
+        service_role_key=service_role_key,
+        start=start,
+        end=end,
+        sources=source_names,
+    )
+    delivery_rows = fetch_delivery_rows_via_rest(
+        base_url=rest_base_url,
+        service_role_key=service_role_key,
+        start=start,
+        end=end,
+    )
+    return webhook_rows, opportunity_rows, delivery_rows, f"rest:{rest_source or 'unknown'}"
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare recent Apify runs to webhook_log, opportunities, and ingest_delivery_log."
@@ -838,13 +1142,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     dsn, dsn_source = resolve_database_url(args.dsn, env_file=args.env_file)
-    if not dsn:
+    rest_base_url, service_role_key, rest_source = _resolve_rest_config(args.env_file)
+    if not dsn and (not rest_base_url or not service_role_key):
         print(
-            "A live Postgres DSN is required for reconciliation. Provide Supabase direct DB vars, DATABASE_URL, or --dsn.",
+            "A live database path is required for reconciliation. Provide a direct Postgres DSN, or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for REST fallback.",
             file=sys.stderr,
         )
         return 2
-    print(f"db_path={dsn_source or 'unknown'}")
 
     actors = load_actor_registry(args.actors)
     apify_runs: list[dict[str, Any]]
@@ -867,26 +1171,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"Unable to fetch Apify runs: {exc}", file=sys.stderr)
             return 2
 
-    try:
-        connection = connect(dsn)
-    except Exception as exc:
-        print(f"Unable to connect to live database: {exc}", file=sys.stderr)
-        return 2
-
     actor_ids = list(actors.values())
     source_names = derive_source_names(actors)
 
     try:
-        webhook_rows = fetch_webhook_rows(connection, start=start, end=end, actor_ids=actor_ids)
-        opportunity_rows = fetch_opportunity_rows(connection, start=start, end=end, sources=source_names)
-        delivery_rows = fetch_delivery_rows(connection, start=start, end=end)
+        webhook_rows, opportunity_rows, delivery_rows, _data_path = load_reconciliation_rows(
+            dsn=dsn,
+            dsn_source=dsn_source,
+            rest_base_url=rest_base_url,
+            service_role_key=service_role_key,
+            rest_source=rest_source,
+            start=start,
+            end=end,
+            actor_ids=actor_ids,
+            source_names=source_names,
+        )
     except Exception as exc:
-        connection.close()
         print(f"Unable to query reconciliation tables: {exc}", file=sys.stderr)
         return 2
-    finally:
-        if not connection.closed:
-            connection.close()
 
     reports = build_reports(
         apify_runs=apify_runs,

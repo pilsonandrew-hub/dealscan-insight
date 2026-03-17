@@ -1,6 +1,7 @@
 import ssl
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,6 +157,127 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         )
 
         self.assertEqual(issues, ["audit_backfilled"])
+
+    def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
+        with patch.object(
+            reconcile,
+            "_fetch_postgrest_rows",
+            return_value=[
+                {
+                    "id": "1",
+                    "run_id": "run-1",
+                    "received_at": "2026-03-17T01:00:00+00:00",
+                    "item_count": 2,
+                    "processing_status": "pending",
+                    "error_message": "",
+                    "actor_id": "actor-1",
+                },
+                {
+                    "id": "2",
+                    "run_id": "run-1",
+                    "received_at": "2026-03-17T01:05:00+00:00",
+                    "item_count": 3,
+                    "processing_status": "processed",
+                    "error_message": "ok",
+                    "actor_id": "actor-1",
+                },
+                {
+                    "id": "3",
+                    "run_id": "run-2",
+                    "received_at": "2026-03-17T01:10:00+00:00",
+                    "item_count": 1,
+                    "processing_status": "error",
+                    "error_message": "boom",
+                    "actor_id": "actor-2",
+                },
+            ],
+        ):
+            rows = reconcile.fetch_webhook_rows_via_rest(
+                base_url="https://example.supabase.co/rest/v1",
+                service_role_key="service-key",
+                start=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc),
+                end=datetime(2026, 3, 17, 2, 0, tzinfo=timezone.utc),
+                actor_ids=["actor-1"],
+            )
+
+        self.assertEqual(sorted(rows), ["run-1"])
+        self.assertEqual(rows["run-1"]["webhook_entries"], 2)
+        self.assertEqual(rows["run-1"]["max_item_count"], 3)
+        self.assertEqual(rows["run-1"]["latest_status"], "processed")
+        self.assertEqual(rows["run-1"]["latest_error"], "ok")
+
+    def test_load_reconciliation_rows_falls_back_to_rest_when_postgres_fails(self):
+        with patch.object(reconcile, "connect", side_effect=RuntimeError("Tenant or user not found")), patch.object(
+            reconcile,
+            "fetch_webhook_rows_via_rest",
+            return_value={"run-1": {"webhook_entries": 1}},
+        ) as webhook_mock, patch.object(
+            reconcile,
+            "fetch_opportunity_rows_via_rest",
+            return_value={"run-1": {"opportunity_rows": 1}},
+        ) as opportunities_mock, patch.object(
+            reconcile,
+            "fetch_delivery_rows_via_rest",
+            return_value={"run-1": {"channels": {}}},
+        ) as delivery_mock:
+            webhook_rows, opportunity_rows, delivery_rows, path = reconcile.load_reconciliation_rows(
+                dsn="postgresql://example",
+                dsn_source="env.SUPABASE_DB_URL",
+                rest_base_url="https://example.supabase.co/rest/v1",
+                service_role_key="service-key",
+                rest_source="env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY",
+                start=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc),
+                end=datetime(2026, 3, 17, 2, 0, tzinfo=timezone.utc),
+                actor_ids=["actor-1"],
+                source_names=["govdeals"],
+            )
+
+        self.assertEqual(webhook_rows, {"run-1": {"webhook_entries": 1}})
+        self.assertEqual(opportunity_rows, {"run-1": {"opportunity_rows": 1}})
+        self.assertEqual(delivery_rows, {"run-1": {"channels": {}}})
+        self.assertEqual(path, "rest:env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY")
+        webhook_mock.assert_called_once()
+        opportunities_mock.assert_called_once()
+        delivery_mock.assert_called_once()
+
+    def test_main_uses_rest_fallback_when_dsn_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_path = Path(tmpdir) / "runs.json"
+            runs_path.write_text(
+                '[{"id":"run-1","actId":"actor-1","status":"SUCCEEDED","createdAt":"2026-03-17T00:00:00Z","finishedAt":"2026-03-17T00:05:00Z","defaultDatasetId":"dataset-1","stats":{"itemCount":1}}]',
+                encoding="utf-8",
+            )
+            with patch.object(reconcile, "load_actor_registry", return_value={"ds-govdeals": "actor-1"}), patch.object(
+                reconcile,
+                "load_reconciliation_rows",
+                return_value=(
+                    {"run-1": {"latest_status": "processed", "webhook_entries": 1, "last_received_at": "2026-03-17T00:05:00+00:00"}},
+                    {"run-1": {"opportunity_rows": 1, "complete_rows": 1, "duplicate_rows": 0, "last_processed_at": "2026-03-17T00:06:00+00:00"}},
+                    {"run-1": {"channels": {"db_save": {"statuses": {"saved_supabase": 1}, "total_rows": 1, "total_attempts": 1}}}},
+                    "rest:env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY",
+                ),
+            ), patch.object(
+                reconcile,
+                "resolve_database_url",
+                return_value=(None, None),
+            ), patch.dict(
+                reconcile.os.environ,
+                {
+                    "SUPABASE_URL": "https://example.supabase.co",
+                    "SUPABASE_SERVICE_ROLE_KEY": "service-key",
+                },
+                clear=False,
+            ):
+                exit_code = reconcile.main(
+                    [
+                        "--runs-json",
+                        str(runs_path),
+                        "--actors",
+                        "ds-govdeals",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
 
 
 if __name__ == "__main__":
