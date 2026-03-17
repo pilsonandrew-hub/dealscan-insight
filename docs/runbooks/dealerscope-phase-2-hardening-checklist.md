@@ -156,21 +156,21 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 
 ### P0.6 Live Ingress Trust Boundary
 
-- [ ] Inspect live deploy config for proxy-trust settings.
-  - Evidence / artifact:
-  - Owner:
+- [x] Inspect live deploy config for proxy-trust settings.
+  - Evidence / artifact: Railway env inspected. No `RATE_LIMIT_TRUST_PROXY_HEADERS` or `RATE_LIMIT_TRUSTED_PROXY_CIDRS` overrides are set. Current live values are the repo defaults: `rate_limit_trust_proxy_headers=false`, `rate_limit_trusted_proxy_cidrs=127.0.0.1/32,::1/128`.
+  - Owner: Ops
   - Exit criteria: live values for `RATE_LIMIT_TRUST_PROXY_HEADERS` and `RATE_LIMIT_TRUSTED_PROXY_CIDRS` are known.
-- [ ] Verify the trusted proxy CIDRs or explicit no-trust posture match the real ingress path.
-  - Evidence / artifact:
-  - Owner:
+- [x] Verify the trusted proxy CIDRs or explicit no-trust posture match the real ingress path.
+  - Evidence / artifact: Railway acts as a TLS-terminating edge (`server: railway-edge`, `x-railway-edge: railway/us-west2`). App container sees an internal Railway peer IP, not the real client IP. With `trust_proxy_headers=false` (current default), the app ignores `X-Forwarded-For` entirely, which is the safe posture for Railway's architecture. Spoofed `X-Forwarded-For` headers cannot bypass rate-limit logic.
+  - Owner: Ops
   - Exit criteria: deploy config matches the actual proxy/CDN/WAF chain, or proxy headers are intentionally distrusted.
-- [ ] Record whether edge allowlists or WAF rules exist outside the app.
-  - Evidence / artifact:
-  - Owner:
+- [x] Record whether edge allowlists or WAF rules exist outside the app.
+  - Evidence / artifact: No external WAF or IP allowlist is deployed. Ingest route boundary relies on webhook shared secret + Railway TLS termination + app-level fail-closed rate limiter. Artifact: `runtime-artifacts/p0.6-ingress-trust-boundary.json`.
+  - Owner: Ops
   - Exit criteria: runbook states clearly whether the ingress boundary relies on app-only controls or external edge restrictions too.
-- [ ] Capture one live proof artifact for the ingress boundary decision.
-  - Evidence / artifact:
-  - Owner:
+- [x] Capture one live proof artifact for the ingress boundary decision.
+  - Evidence / artifact: `runtime-artifacts/p0.6-ingress-trust-boundary.json` — records live ingress architecture, proxy trust posture, invalid-secret rejection proof, XFF spoofing behavior, and upgrade path if Railway publishes stable internal CIDRs.
+  - Owner: Ops
   - Exit criteria: operator can show the exact live boundary posture instead of inferring it from repo defaults.
 
 ## P1
