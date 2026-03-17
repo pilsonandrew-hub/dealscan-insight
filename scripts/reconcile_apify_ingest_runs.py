@@ -21,7 +21,7 @@ from urllib import request as urllib_request
 import psycopg2
 import psycopg2.extras
 
-from live_verification_support import get_database_url
+from live_verification_support import resolve_database_url
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -761,10 +761,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare recent Apify runs to webhook_log, opportunities, and ingest_delivery_log."
     )
-    parser.add_argument("--dsn", help="Postgres connection string. Defaults to DATABASE_URL/SUPABASE_DB_URL.")
+    parser.add_argument(
+        "--dsn",
+        help=(
+            "Postgres connection string. Defaults to Supabase direct DB vars "
+            "(or a derived direct DSN) before DATABASE_URL."
+        ),
+    )
     parser.add_argument(
         "--env-file",
-        help="Optional env file to read DATABASE_URL and APIFY_TOKEN from when not exported in the shell.",
+        help="Optional env file to read DB connection vars and APIFY_TOKEN from when not exported in the shell.",
     )
     parser.add_argument("--apify-token", help="Apify API token. Defaults to APIFY_TOKEN/APIFY_API_TOKEN.")
     parser.add_argument(
@@ -831,10 +837,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("Window start must be before window end.", file=sys.stderr)
         return 2
 
-    dsn = get_database_url(args.dsn, env_file=args.env_file)
+    dsn, dsn_source = resolve_database_url(args.dsn, env_file=args.env_file)
     if not dsn:
-        print("DATABASE_URL (or --dsn) is required for reconciliation.", file=sys.stderr)
+        print(
+            "A live Postgres DSN is required for reconciliation. Provide Supabase direct DB vars, DATABASE_URL, or --dsn.",
+            file=sys.stderr,
+        )
         return 2
+    print(f"db_path={dsn_source or 'unknown'}")
 
     actors = load_actor_registry(args.actors)
     apify_runs: list[dict[str, Any]]
