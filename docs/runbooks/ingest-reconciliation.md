@@ -130,10 +130,11 @@ Notes:
 
 - Uses actor ids from `apify/deployment.json`
 - For the March 15 incident, scope to `--actors ds-govdeals ds-publicsurplus` to avoid unrelated Apify runs polluting the report
-- Reads Postgres DSN from `DATABASE_URL` or `--env-file`
+- Resolves the live Postgres DSN in this order: `SUPABASE_DB_URL` / `SUPABASE_DATABASE_URL` / `SUPABASE_DIRECT_DB_URL`, then a derived direct Supabase DSN from `SUPABASE_DB_PASSWORD` + `SUPABASE_PROJECT_ID` (or `SUPABASE_URL`), then `DATABASE_URL`
 - Reads Apify token from `APIFY_TOKEN` or `APIFY_API_TOKEN`
 - If Python hits `CERTIFICATE_VERIFY_FAILED` against Apify, the script now retries the same HTTPS request via `curl` using the host system trust store and still keeps TLS verification on
 - Supports `--runs-json <path>` if the shell cannot reach Apify and you need to compare against an exported runs list
+- The text output now prints `db_path=...` before the DB connect attempt so the control-plane logs show which connection strategy was used
 
 Fail-fast check for existing schedulers/pagers:
 
@@ -158,4 +159,4 @@ Notes:
 - If you pass `--env-file .env.live`, the wrapper now loads the pager gating vars and Telegram credentials from that file for the wrapper itself, not just the underlying health check.
 - Defaults to `INGEST_HEALTH_NOTIFY_DRY_RUN=true`, so the alert body is rendered locally but not sent until you explicitly flip the env to `false`.
 - Treat a page as delivered only when Telegram returns `ok=true` and a `message_id`; the wrapper now fails loudly if Telegram rejects the request or returns an unacknowledged response body.
-- The repo now includes a scheduled GitHub Actions runner for this wrapper. If you want Telegram paging from GitHub tonight, set repo variable `INGEST_HEALTH_NOTIFY_ENABLED=true`, set `INGEST_HEALTH_NOTIFY_DRY_RUN=false`, and provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATABASE_URL`, and `APIFY_TOKEN` as repo secrets.
+- The repo now includes a scheduled GitHub Actions runner for this wrapper. For real DB truth from GitHub, do not rely on a stale `DATABASE_URL` secret. Set repo variable `INGEST_HEALTH_NOTIFY_ENABLED=true`, set `INGEST_HEALTH_NOTIFY_DRY_RUN=false`, and provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `APIFY_TOKEN`, plus either `SUPABASE_DB_URL` or `SUPABASE_DB_PASSWORD` with `SUPABASE_PROJECT_ID`. The workflow no longer exports `DATABASE_URL`.

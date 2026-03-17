@@ -31,8 +31,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+      SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID || 'lgpugcflvrqhslfnsjfh' }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       INGEST_HEALTH_NOTIFY_ENABLED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.notify_enabled || vars.INGEST_HEALTH_NOTIFY_ENABLED || 'false' }}

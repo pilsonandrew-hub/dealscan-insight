@@ -138,13 +138,13 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 ### P0.5 GitHub Runner Live DB Truth
 
 - [ ] Identify the working live database connection path for the GitHub health/pager runner.
-  - Evidence / artifact:
-  - Owner:
-  - Exit criteria: one exact connection strategy is selected and documented (pooler, direct host, or alternative retrieval path) instead of trial-and-error secrets.
+  - Evidence / artifact: Repo-backed choice is direct Supabase Postgres from Actions, not the stale `DATABASE_URL` secret. `/.github/workflows/ingest-health-pager.yml` now exports `SUPABASE_DB_URL` / `SUPABASE_DATABASE_URL` / `SUPABASE_DIRECT_DB_URL` or derives the DSN from `SUPABASE_DB_PASSWORD` plus `SUPABASE_PROJECT_ID`, and the health output prints `db_path=...` so the run log shows which path was used.
+  - Owner: Ops / Platform
+  - Exit criteria: one exact connection strategy is selected and documented instead of trial-and-error secrets.
 - [ ] Update GitHub Actions secrets/config to use that path.
   - Evidence / artifact:
   - Owner:
-  - Exit criteria: repo secret/config state matches the documented working path.
+  - Exit criteria: GitHub repo secrets provide `SUPABASE_DB_URL` or `SUPABASE_DB_PASSWORD` and the workflow no longer depends on `DATABASE_URL`.
 - [ ] Run the real health/pager workflow successfully against the live database.
   - Evidence / artifact:
   - Owner:
