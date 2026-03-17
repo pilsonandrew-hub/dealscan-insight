@@ -1,0 +1,68 @@
+name: DealerScope Scraper Watchdog
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'   # every 4 hours
+  workflow_dispatch:
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Apify scraper health
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: "7529788084"
+        run: |
+          python3 << 'PYEOF'
+          import json, urllib.request, ssl, datetime, sys, os
+
+          APIFY_TOKEN = os.environ["APIFY_TOKEN"]
+          BOT_TOKEN = os.environ["BOT_TOKEN"]
+          CHAT_ID = os.environ["CHAT_ID"]
+          ACTOR_IDS = ["CuKaIAcWyFS0EPrAz", "9xxQLlRsROnSgA42i"]  # govdeals, publicsurplus
+
+          ctx = ssl.create_default_context()
+          now = datetime.datetime.utcnow()
+          cutoff = now - datetime.timedelta(hours=4)
+          stalled = []
+
+          for actor_id in ACTOR_IDS:
+              req = urllib.request.Request(
+                  f"https://api.apify.com/v2/acts/{actor_id}/runs?limit=1&status=SUCCEEDED",
+                  headers={"Authorization": f"Bearer {APIFY_TOKEN}"}
+              )
+              try:
+                  with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                      data = json.loads(r.read())
+                  runs = data.get("data", {}).get("items", [])
+                  if not runs:
+                      stalled.append(f"Actor {actor_id}: no runs found")
+                  else:
+                      finished = runs[0].get("finishedAt", "")
+                      if finished:
+                          run_time = datetime.datetime.fromisoformat(finished.replace("Z", "+00:00")).replace(tzinfo=None)
+                          if run_time < cutoff:
+                              stalled.append(f"Actor {actor_id}: last success {finished}")
+              except Exception as e:
+                  stalled.append(f"Actor {actor_id}: error checking — {e}")
+
+          if stalled:
+              def send_telegram(text):
+                  payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}).encode()
+                  req = urllib.request.Request(
+                      f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                      data=payload, headers={"Content-Type": "application/json"}, method="POST"
+                  )
+                  with urllib.request.urlopen(req, context=ctx) as r:
+                      return json.loads(r.read())
+
+              msg = "⚠️ <b>DealerScope Scraper Alert</b>\n\n" + "\n".join(stalled)
+              send_telegram(msg)
+              print("Stall detected, alert sent")
+              sys.exit(1)
+          else:
+              print("All scrapers healthy")
+          PYEOF
