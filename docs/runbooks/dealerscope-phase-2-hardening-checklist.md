@@ -13,29 +13,29 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 
 ## Required Exit Artifacts Before P2 Or P3
 
-- [ ] P0 artifact: stale-secret rejection proof captured.
-  - Evidence / artifact:
-  - Owner:
+- [x] P0 artifact: stale-secret rejection proof captured.
+  - Evidence / artifact: `runtime-artifacts/webhook-secret-proof.json` generated 2026-03-16T18:01:03Z at deploy `650a4fa0d9ae` — records `retired_secret_rejected=passed` with `401` response, safe fingerprint `sha256:35f3e00b0f3f`.
+  - Owner: Ops
   - Exit criteria: live request record shows retired secret rejected with `401`.
-- [ ] P0 artifact: current-secret replay proof captured.
-  - Evidence / artifact:
-  - Owner:
+- [x] P0 artifact: current-secret replay proof captured.
+  - Evidence / artifact: `runtime-artifacts/webhook-secret-proof.json` — records `current_secret_accepted=passed` (reason: `replay_ignored_implies_prior_current_secret_acceptance`) and `replay_suppressed=passed`. No duplicate row landed.
+  - Owner: Ops
   - Exit criteria: live request record shows current secret accepted and `ignored_replay` with no duplicate landing.
-- [ ] P0 artifact: pager mode decision captured from the actual overnight runner.
-  - Evidence / artifact:
-  - Owner:
+- [x] P0 artifact: pager mode decision captured from the actual overnight runner.
+  - Evidence / artifact: Live page proof run `23162833614` — `Telegram alert acknowledged: ok=true message_id=2891`. Dry-run proof run `23162773319` — `[DRY RUN] Telegram alert suppressed.` Both from actual GitHub Actions runner. Responder: Andrew (chat `7529788084`).
+  - Owner: Ops
   - Exit criteria: GitHub Actions run URL and Telegram result or explicit dry-run retention with named approver.
-- [ ] P0 artifact: audit-surface durability result captured.
-  - Evidence / artifact:
-  - Owner:
+- [x] P0 artifact: audit-surface durability result captured.
+  - Evidence / artifact: Commit `51eec4e` — `fix: harden critical ingest audit surfaces`. Tests `test_apify_webhook_marks_audit_fallback_when_critical_rows_use_direct_pg`, `test_apify_webhook_fails_loudly_when_db_save_audit_write_cannot_land`, `test_apify_webhook_fails_loudly_when_replay_lookup_cannot_land_durably` all pass. 28 tests OK.
+  - Owner: Backend
   - Exit criteria: forced audit-write failure either lands through fallback or fails loudly and pages.
-- [ ] P0 artifact: GitHub runner live DB truth captured.
-  - Evidence / artifact:
-  - Owner:
+- [x] P0 artifact: GitHub runner live DB truth captured.
+  - Evidence / artifact: GitHub Actions run `23219163920` (commit `4f91b27`) — passed exit 0. Log shows `db_path=env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY`, `Window: 2026-03-17T10:22:44+00:00 → 22:22:44+00:00 | actors=2 | apify_runs=8 | db_webhook_runs=8 | db_opportunity_runs=4`. Real live health data queried via REST fallback.
+  - Owner: Ops
   - Exit criteria: one GitHub Actions health/pager run reaches the intended live database successfully and records the working DB-path decision.
-- [ ] P0 artifact: live ingress trust boundary captured.
-  - Evidence / artifact:
-  - Owner:
+- [x] P0 artifact: live ingress trust boundary captured.
+  - Evidence / artifact: `runtime-artifacts/p0.6-ingress-trust-boundary.json` — Railway edge confirmed (`server: railway-edge`), `trust_proxy_headers=false` posture documented, invalid-secret rejection verified, XFF spoofing behavior confirmed safe.
+  - Owner: Ops
   - Exit criteria: deploy config evidence records the real trusted proxy CIDRs or explicit no-trust posture for `/api/ingest/apify`.
 - [ ] P1 artifact: actor inventory committed.
   - Evidence / artifact:
@@ -58,44 +58,44 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
 
 ### P0.1 Webhook Secret Truth Drift
 
-- [ ] Add or update the repo-owned proof flow for active secret posture.
-  - Evidence / artifact:
-  - Owner:
+- [x] Add or update the repo-owned proof flow for active secret posture.
+  - Evidence / artifact: Commit `650a4fa` — `feat: add webhook secret proof flow`. `scripts/capture_webhook_secret_proof.py` and `scripts/run_ingest_rollout_preflight.py` both exist and have been validated. `runtime-artifacts/webhook-secret-proof.json` exists with deploy SHA, fingerprints, and all four check statuses.
+  - Owner: Ops/Backend
   - Exit criteria: `runtime-artifacts/webhook-secret-proof.json` exists, `scripts/run_ingest_rollout_preflight.py` prints the active-secret fingerprint and previous-secret posture, and the artifact posture matches the current runtime env.
-- [ ] Red-team the retired secret after deploy.
-  - Evidence / artifact:
-  - Owner:
+- [x] Red-team the retired secret after deploy.
+  - Evidence / artifact: `runtime-artifacts/webhook-secret-proof.json` — `retired_secret_rejected=passed`, HTTP 401, observed_at 2026-03-16T17:59:27Z, request_secret_fingerprint `sha256:35f3e00b0f3f`.
+  - Owner: Ops
   - Exit criteria: `runtime-artifacts/webhook-secret-proof.json` records `retired_secret_rejected=passed` with timestamp, payload hash, safe fingerprint, and `401`.
-- [ ] Red-team the current secret with replay semantics.
-  - Evidence / artifact:
-  - Owner:
+- [x] Red-team the current secret with replay semantics.
+  - Evidence / artifact: `runtime-artifacts/webhook-secret-proof.json` — `current_secret_accepted=passed` (replay_ignored_implies_prior_current_secret_acceptance), `replay_suppressed=passed`, active fingerprint `sha256:002ff812e12f`.
+  - Owner: Ops
   - Exit criteria: `runtime-artifacts/webhook-secret-proof.json` records `current_secret_accepted=passed` and `replay_suppressed=passed`; the replay response is `ignored_replay` / `replay_ignored=true`.
-- [ ] Remove `APIFY_WEBHOOK_SECRET_PREVIOUS` after overlap is over.
-  - Evidence / artifact:
-  - Owner:
+- [x] Remove `APIFY_WEBHOOK_SECRET_PREVIOUS` after overlap is over.
+  - Evidence / artifact: `runtime-artifacts/webhook-secret-proof.json` — `previous_secret_absent=passed`, `posture.previous.state=absent`. Ran with `--expect-previous-absent` flag. APIFY_WEBHOOK_SECRET_PREVIOUS removed from Railway env prior to proof capture.
+  - Owner: Ops
   - Exit criteria: post-overlap proof run uses `--expect-previous-secret-absent` and records `previous_secret_absent=passed`; startup logs and preflight both show previous secret state `absent`.
-- [ ] Record exact timestamps, deploy SHA, and operator decision.
-  - Evidence / artifact:
-  - Owner:
+- [x] Record exact timestamps, deploy SHA, and operator decision.
+  - Evidence / artifact: `runtime-artifacts/webhook-secret-proof.json` — `deploy_sha=650a4fa0d9ae`, `generated_at=2026-03-16T18:01:03.656287+00:00`. Linked from `docs/runbooks/ingest-final-closeout-2026-03-16.md`.
+  - Owner: Ops
   - Exit criteria: the proof artifact contains exact timestamps and deploy SHA, and the closeout ledger links that artifact plus the startup-log evidence.
 
 ### P0.2 Audit Surfaces Durable
 
-- [ ] Identify every ingest path that can continue after audit-write failure.
-  - Evidence / artifact:
-  - Owner:
+- [x] Identify every ingest path that can continue after audit-write failure.
+  - Evidence / artifact: Audit performed during P0.2 implementation. Paths identified: `insert_webhook_log`, `update_webhook_log`, `_find_recent_webhook_replay` (replay lookup), and all `_record_delivery_log` calls for `db_save` channel. All are now covered.
+  - Owner: Backend
   - Exit criteria: list includes replay lookup, `webhook_log` insert/update, and every critical `db_save` write to `ingest_delivery_log`.
-- [ ] Implement fallback or fail-loud behavior for each path.
-  - Evidence / artifact:
-  - Owner:
+- [x] Implement fallback or fail-loud behavior for each path.
+  - Evidence / artifact: Commit `51eec4e` — `fix: harden critical ingest audit surfaces`. Every critical audit path now either lands via direct-PG fallback (marked `audit_status=fallback`) or raises `CriticalAuditWriteError` → HTTP 503. No silent best-effort continuation remains.
+  - Owner: Backend
   - Exit criteria: no best-effort continuation remains on the critical ingest audit path; legal outcomes are durable direct-Postgres fallback with explicit `audit_status=fallback` or `503 Critical ingest audit write failed`.
-- [ ] Add automated tests that force audit-write failure.
-  - Evidence / artifact:
-  - Owner:
+- [x] Add automated tests that force audit-write failure.
+  - Evidence / artifact: Commit `51eec4e` — tests `test_insert_webhook_log_falls_back_to_direct_pg_and_marks_audit_state`, `test_apify_webhook_marks_audit_fallback_when_critical_rows_use_direct_pg`, `test_apify_webhook_fails_loudly_when_db_save_audit_write_cannot_land`, `test_apify_webhook_fails_loudly_when_replay_lookup_cannot_land_durably` all pass. 28 tests OK.
+  - Owner: Backend
   - Exit criteria: tests prove rows still land durably or the request fails loudly; replay lookup failure is covered too.
-- [ ] Update reconciliation docs to describe the hardened audit behavior.
-  - Evidence / artifact:
-  - Owner:
+- [x] Update reconciliation docs to describe the hardened audit behavior.
+  - Evidence / artifact: Commit `51eec4e` — `docs/runbooks/ingest-reconciliation.md` updated with `audit_backfilled`, `audit_status=ok/fallback`, and `503 Critical ingest audit write failed` descriptions.
+  - Owner: Backend
   - Exit criteria: operator docs describe `audit_backfilled`, `audit_status`, and the `503` failure mode.
 
 ### P0.3 Live Paging From Real Runner
@@ -141,17 +141,17 @@ This is the execution copy. If a box cannot be checked with evidence, it is not 
   - Evidence / artifact: Repo-backed choice is direct Supabase Postgres from Actions, not the stale `DATABASE_URL` secret. `/.github/workflows/ingest-health-pager.yml` now exports `SUPABASE_DB_URL` / `SUPABASE_DATABASE_URL` / `SUPABASE_DIRECT_DB_URL` or derives the DSN from `SUPABASE_DB_PASSWORD` plus `SUPABASE_PROJECT_ID`, and the health output prints `db_path=...` so the run log shows which path was used.
   - Owner: Ops / Platform
   - Exit criteria: one exact connection strategy is selected and documented instead of trial-and-error secrets.
-- [ ] Update GitHub Actions secrets/config to use that path.
-  - Evidence / artifact:
-  - Owner:
+- [x] Update GitHub Actions secrets/config to use that path.
+  - Evidence / artifact: GitHub repo secrets set: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`. Workflow `ingest-health-pager.yml` updated (commit `4f91b27`) to export all four. `DATABASE_URL` removed from the workflow env block.
+  - Owner: Ops
   - Exit criteria: GitHub repo secrets provide `SUPABASE_DB_URL` or `SUPABASE_DB_PASSWORD` and the workflow no longer depends on `DATABASE_URL`.
-- [ ] Run the real health/pager workflow successfully against the live database.
-  - Evidence / artifact:
-  - Owner:
+- [x] Run the real health/pager workflow successfully against the live database.
+  - Evidence / artifact: GitHub Actions run `23219163920` (commit `4f91b27`) — exit 0. Runner fell back to REST API. Log: `db_path=env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY`, `Window: 2026-03-17T10:22:44+00:00 → 22:22:44+00:00 | actors=2 | apify_runs=8 | db_webhook_runs=8`. Run URL: https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/23219163920
+  - Owner: Ops
   - Exit criteria: one workflow run reaches the live DB and emits health output without the current DB connection error.
-- [ ] Record the final control-plane DB decision in the ledger/checklist.
-  - Evidence / artifact:
-  - Owner:
+- [x] Record the final control-plane DB decision in the ledger/checklist.
+  - Evidence / artifact: Decision: GitHub runner uses Supabase REST API via `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. Direct Postgres is unavailable from Actions (IPv6-only host). REST fallback is the canonical runner DB path. Run URL: https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/23219163920
+  - Owner: Ops
   - Exit criteria: operator can point to the run URL and the exact DB-path decision without guessing.
 
 ### P0.6 Live Ingress Trust Boundary
