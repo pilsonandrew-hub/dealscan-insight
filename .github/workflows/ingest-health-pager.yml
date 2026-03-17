@@ -36,7 +36,7 @@ jobs:
       SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
       SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID || 'lgpugcflvrqhslfnsjfh' }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
