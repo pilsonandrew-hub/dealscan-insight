@@ -31,6 +31,7 @@ const PASSENGER_KEYWORDS = [
 ];
 
 const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box truck|stake bed|dump truck|flatbed|refuse|crane truck|utility body|work van|sprinter cargo|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper)\b/i;
+const REQUEST_DELAY_MS = 2500;
 
 await Actor.init();
 
@@ -44,12 +45,28 @@ const {
 const seenListingUrls = new Set();
 const enqueuedListingUrls = new Set();
 const discoveredCategoryUrls = new Set();
+const sampleLocations = [];
 
 let totalFound = 0;
 let totalPassed = 0;
+let lastRequestStartedAt = 0;
 
 function normalizeText(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function recordLocationSample(locationText) {
+    const normalized = normalizeText(locationText);
+    if (!normalized || sampleLocations.includes(normalized) || sampleLocations.length >= 5) return;
+    sampleLocations.push(normalized);
+}
+
+async function throttleRequests() {
+    const waitMs = lastRequestStartedAt ? Math.max(0, REQUEST_DELAY_MS - (Date.now() - lastRequestStartedAt)) : 0;
+    if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    lastRequestStartedAt = Date.now();
 }
 
 function toAbsoluteUrl(href) {
@@ -224,6 +241,7 @@ function extractSearchListings($) {
         const locationText = normalizeText(
             card.find('.itemLocation, .location, [class*="location"], [class*="Location"]').first().text(),
         ) || normalizeText(card.text());
+        recordLocationSample(locationText);
         const endText = normalizeText(
             card.find('.timeLeft, .timeRemaining, [class*="time"], [class*="Time"], [class*="close"], [class*="Close"]').first().text(),
         );
@@ -301,10 +319,12 @@ function buildRecord(detail, partial) {
 
 const crawler = new CheerioCrawler({
     maxRequestsPerCrawl: maxPages * 250,
-    maxConcurrency: 4,
-    requestHandlerTimeoutSecs: 120,
+    maxConcurrency: 1,
+    minConcurrency: 1,
+    requestHandlerTimeoutSecs: 180,
 
     async requestHandler({ $, request, log }) {
+        await throttleRequests();
         const label = request.userData.label || 'LIST';
 
         if (label === 'DETAIL') {
@@ -427,5 +447,6 @@ await crawler.run([{
     },
 }]);
 
+console.log('[GOVPLANET] Sample locations:', sampleLocations);
 console.log(`[GOVPLANET] Found: ${totalFound} | Passed: ${totalPassed}`);
 await Actor.exit();

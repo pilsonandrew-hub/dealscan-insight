@@ -35,6 +35,21 @@ const US_STATES = new Set([
     'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
     'VA','WA','WV','WI','WY','DC',
 ]);
+const STATE_NAMES = new Map([
+    ['ALABAMA', 'AL'], ['ALASKA', 'AK'], ['ARIZONA', 'AZ'], ['ARKANSAS', 'AR'],
+    ['CALIFORNIA', 'CA'], ['COLORADO', 'CO'], ['CONNECTICUT', 'CT'], ['DELAWARE', 'DE'],
+    ['FLORIDA', 'FL'], ['GEORGIA', 'GA'], ['HAWAII', 'HI'], ['IDAHO', 'ID'],
+    ['ILLINOIS', 'IL'], ['INDIANA', 'IN'], ['IOWA', 'IA'], ['KANSAS', 'KS'],
+    ['KENTUCKY', 'KY'], ['LOUISIANA', 'LA'], ['MAINE', 'ME'], ['MARYLAND', 'MD'],
+    ['MASSACHUSETTS', 'MA'], ['MICHIGAN', 'MI'], ['MINNESOTA', 'MN'], ['MISSISSIPPI', 'MS'],
+    ['MISSOURI', 'MO'], ['MONTANA', 'MT'], ['NEBRASKA', 'NE'], ['NEVADA', 'NV'],
+    ['NEW HAMPSHIRE', 'NH'], ['NEW JERSEY', 'NJ'], ['NEW MEXICO', 'NM'], ['NEW YORK', 'NY'],
+    ['NORTH CAROLINA', 'NC'], ['NORTH DAKOTA', 'ND'], ['OHIO', 'OH'], ['OKLAHOMA', 'OK'],
+    ['OREGON', 'OR'], ['PENNSYLVANIA', 'PA'], ['RHODE ISLAND', 'RI'], ['SOUTH CAROLINA', 'SC'],
+    ['SOUTH DAKOTA', 'SD'], ['TENNESSEE', 'TN'], ['TEXAS', 'TX'], ['UTAH', 'UT'],
+    ['VERMONT', 'VT'], ['VIRGINIA', 'VA'], ['WASHINGTON', 'WA'], ['WEST VIRGINIA', 'WV'],
+    ['WISCONSIN', 'WI'], ['WYOMING', 'WY'], ['DISTRICT OF COLUMBIA', 'DC'],
+]);
 const MAKES = [
     'ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc',
     'chrysler','hyundai','kia','subaru','mazda','volkswagen','bmw','mercedes','audi',
@@ -46,12 +61,31 @@ await Actor.init();
 const { maxPages = 5, minBid = 500, maxBid = 35000 } = (await Actor.getInput()) ?? {};
 
 let found = 0, passed = 0;
+const sampleLocations = [];
+
+function recordLocationSample(location = '') {
+    const normalized = location.trim();
+    if (!normalized || sampleLocations.includes(normalized) || sampleLocations.length >= 5) return;
+    sampleLocations.push(normalized);
+}
 
 function parseState(location = '') {
-    const m = location.match(/,\s*([A-Z]{2})\s*$/) ||
-              location.match(/\b([A-Z]{2})\b\s*\d{5}/) ||
-              location.match(/\b([A-Z]{2})\s*$/);
-    return m ? m[1].toUpperCase() : '';
+    const normalized = location.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+
+    const m = normalized.match(/,\s*([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*$/i) ||
+              normalized.match(/\b([A-Z]{2})\b\s*\d{5}(?:-\d{4})?/i) ||
+              normalized.match(/\b([A-Z]{2})\s*$/i);
+    const abbreviation = m ? m[1].toUpperCase() : '';
+    if (US_STATES.has(abbreviation)) return abbreviation;
+
+    const upper = normalized.toUpperCase();
+    for (const [stateName, stateCode] of STATE_NAMES) {
+        const pattern = new RegExp(`(?:,|\\b)\\s*${stateName}(?:\\s+\\d{5}(?:-\\d{4})?)?\\s*$`, 'i');
+        if (pattern.test(upper)) return stateCode;
+    }
+
+    return '';
 }
 
 function parseYear(title = '') {
@@ -101,6 +135,7 @@ const crawler = new CheerioCrawler({
             cards.each((_, el) => {
                 const title = $(el).find('.grid-card-title').text().trim();
                 const location = $(el).find('.grid-card-location').text().trim();
+                recordLocationSample(location);
                 const priceText = $(el).find('.grid-card-price-value').text().replace(/[^0-9.]/g, '');
                 const bid = parseFloat(priceText) || 0;
                 const linkEl = $(el).closest('.grid-card').find('a[href*="/Listing/Details/"]').first();
@@ -117,8 +152,10 @@ const crawler = new CheerioCrawler({
                 if (!year || !make) return;
                 if (!isPassengerVehicle(title)) return;
                 if (bid < minBid || bid > maxBid) return;
-                if (!US_STATES.has(state)) return;
-                if (HIGH_RUST.has(state)) return;
+                if (state) {
+                    if (!US_STATES.has(state)) return;
+                    if (HIGH_RUST.has(state)) return;
+                }
                 const age = 2026 - year;
                 if (age > 12 || age < 0) return;
 
@@ -157,5 +194,6 @@ const crawler = new CheerioCrawler({
 });
 
 await crawler.run(CATEGORY_URLS.map(url => ({ url })));
+console.log('[MUNICIBID] Sample locations:', sampleLocations);
 console.log(`[MUNICIBID] Found: ${found} | Passed: ${passed}`);
 await Actor.exit();

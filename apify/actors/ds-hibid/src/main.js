@@ -44,6 +44,22 @@ const HIGH_RUST_STATES = new Set([
     'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
     'CT', 'NJ', 'MD', 'DE',
 ]);
+const STATE_NAMES = new Map([
+    ['ALABAMA', 'AL'], ['ALASKA', 'AK'], ['ARIZONA', 'AZ'], ['ARKANSAS', 'AR'],
+    ['CALIFORNIA', 'CA'], ['COLORADO', 'CO'], ['CONNECTICUT', 'CT'], ['DELAWARE', 'DE'],
+    ['FLORIDA', 'FL'], ['GEORGIA', 'GA'], ['HAWAII', 'HI'], ['IDAHO', 'ID'],
+    ['ILLINOIS', 'IL'], ['INDIANA', 'IN'], ['IOWA', 'IA'], ['KANSAS', 'KS'],
+    ['KENTUCKY', 'KY'], ['LOUISIANA', 'LA'], ['MAINE', 'ME'], ['MARYLAND', 'MD'],
+    ['MASSACHUSETTS', 'MA'], ['MICHIGAN', 'MI'], ['MINNESOTA', 'MN'], ['MISSISSIPPI', 'MS'],
+    ['MISSOURI', 'MO'], ['MONTANA', 'MT'], ['NEBRASKA', 'NE'], ['NEVADA', 'NV'],
+    ['NEW HAMPSHIRE', 'NH'], ['NEW JERSEY', 'NJ'], ['NEW MEXICO', 'NM'], ['NEW YORK', 'NY'],
+    ['NORTH CAROLINA', 'NC'], ['NORTH DAKOTA', 'ND'], ['OHIO', 'OH'], ['OKLAHOMA', 'OK'],
+    ['OREGON', 'OR'], ['PENNSYLVANIA', 'PA'], ['RHODE ISLAND', 'RI'], ['SOUTH CAROLINA', 'SC'],
+    ['SOUTH DAKOTA', 'SD'], ['TENNESSEE', 'TN'], ['TEXAS', 'TX'], ['UTAH', 'UT'],
+    ['VERMONT', 'VT'], ['VIRGINIA', 'VA'], ['WASHINGTON', 'WA'], ['WEST VIRGINIA', 'WV'],
+    ['WISCONSIN', 'WI'], ['WYOMING', 'WY'], ['DISTRICT OF COLUMBIA', 'DC'],
+]);
+const US_STATES = new Set(STATE_NAMES.values());
 
 const VEHICLE_KEYWORDS = ['car', 'truck', 'suv', 'van', 'pickup', 'sedan', 'coupe', 'wagon', 'vehicle', 'automobile', 'motor', '4wd', 'awd', 'hybrid'];
 const VEHICLE_MAKES = ['ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', 'honda', 'nissan', 'jeep', 'gmc', 'chrysler',
@@ -65,6 +81,7 @@ const targetStateSet = new Set(targetStates.map((state) => state.toUpperCase()))
 const effectiveMaxPages = Math.max(1, Math.min(maxPages, 6));
 const fallbackMaxPages = Math.min(effectiveMaxPages, 3);
 const seenListings = new Set();
+const sampleLocations = [];
 
 let totalFound = 0;
 let totalAfterFilters = 0;
@@ -76,6 +93,12 @@ function normalizeText(value) {
         .replace(/[ \t]+/g, ' ')
         .replace(/\s*\n\s*/g, '\n')
         .trim();
+}
+
+function recordLocationSample(locationText) {
+    const normalized = normalizeText(locationText);
+    if (!normalized || sampleLocations.includes(normalized) || sampleLocations.length >= 5) return;
+    sampleLocations.push(normalized);
 }
 
 function isVehicle(title) {
@@ -124,11 +147,19 @@ function parseState(locationText) {
     const normalized = normalizeText(locationText);
     if (!normalized) return null;
 
-    const match = normalized.match(/,\s*([A-Z]{2})\b/)
-        || normalized.match(/\b([A-Z]{2})\s*\d{5}/)
-        || normalized.match(/\b([A-Z]{2})\b$/);
+    const match = normalized.match(/,\s*([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\b/i)
+        || normalized.match(/\b([A-Z]{2})\s*\d{5}(?:-\d{4})?/i)
+        || normalized.match(/\b([A-Z]{2})\b$/i);
+    const abbreviation = match ? match[1].toUpperCase() : null;
+    if (abbreviation && US_STATES.has(abbreviation)) return abbreviation;
 
-    return match ? match[1].toUpperCase() : null;
+    const upper = normalized.toUpperCase();
+    for (const [stateName, stateCode] of STATE_NAMES) {
+        const pattern = new RegExp(`(?:,|\\b)\\s*${stateName}(?:\\s+\\d{5}(?:-\\d{4})?)?\\s*$`, 'i');
+        if (pattern.test(upper)) return stateCode;
+    }
+
+    return null;
 }
 
 function parseBid(text) {
@@ -287,6 +318,7 @@ function createListingId(item, listingUrl) {
 function buildListing(rawResult, sourceUrl) {
     const title = normalizeText(rawResult.title);
     const location = normalizeText(rawResult.location);
+    recordLocationSample(location);
     const detailsText = [
         title,
         rawResult.description,
@@ -294,7 +326,7 @@ function buildListing(rawResult, sourceUrl) {
         rawResult.location,
         rawResult.endText,
     ].map(normalizeText).filter(Boolean).join(' ');
-    const state = rawResult.state ? normalizeText(rawResult.state).toUpperCase() : parseState(location);
+    const state = parseState(rawResult.state) || parseState(location);
     const bid = parseBid(rawResult.bidText ?? rawResult.currentBid ?? rawResult.current_bid);
     const mileage = rawResult.mileage ?? parseMileage(detailsText);
     const vin = rawResult.vin ?? parseVin(detailsText);
@@ -625,7 +657,8 @@ function normalizeApiItem(item) {
     const sources = getNestedObjects(item);
     const title = normalizeText(pickFirst(sources, ['title', 'name', 'lotTitle', 'lot_title', 'itemTitle', 'item_title', 'description']));
     const location = extractLocation(item);
-    const state = normalizeText(pickFirst(sources, ['state', 'stateCode', 'state_code'])).toUpperCase() || parseState(location);
+    recordLocationSample(location);
+    const state = parseState(pickFirst(sources, ['state', 'stateCode', 'state_code'])) || parseState(location);
     const listingUrl = extractListingUrl(item);
     const description = normalizeText(pickFirst(sources, ['description', 'subtitle', 'summary', 'notes']));
     const bidValue = pickFirst(sources, ['currentBid', 'current_bid', 'highBid', 'high_bid', 'bidAmount', 'currentPrice', 'price']);
@@ -906,6 +939,7 @@ await crawler.run([
     },
 ]);
 
+console.log('[HIBID] Sample locations:', sampleLocations);
 console.log(`[HIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
 
 await Actor.exit();
