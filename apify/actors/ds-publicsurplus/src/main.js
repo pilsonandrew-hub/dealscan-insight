@@ -21,6 +21,13 @@ const BASE_URL = 'https://www.publicsurplus.com';
 // 'all' = nationwide search across all agencies (not just WA)
 const BASE_LIST_URL = `${BASE_URL}/sms/all/browse/cataucs?catid=4&page={PAGE}`;
 
+// Texas General Land Office surplus — mobile site with JS pagination
+const TX_SURPLUS_BASE = 'https://m.publicsurplus.com/sms/state,tx/list/current?orgid=871876';
+const TX_SURPLUS_DETAIL_BASE = 'https://m.publicsurplus.com';
+
+// VIN pattern: 17 alphanumeric chars, no I/O/Q
+const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
+
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
@@ -29,6 +36,7 @@ const {
     minBid = 500,
     maxBid = 35000,
     targetStates = [...TARGET_STATES],
+    maxTXPages = 10,
 } = input;
 
 const targetStateSet = new Set(targetStates.map((state) => state.toUpperCase()));
@@ -143,6 +151,26 @@ function parseVehicleTitle(rawTitle) {
     return { year, make, model };
 }
 
+/**
+ * Parse Texas surplus title format:
+ * "2015 FORD F150 EXT CAB SB 4X4 1FTFX1EF7FKD99057"
+ * Returns { year, make, model, vin }
+ */
+function parseTXSurplusTitle(rawTitle) {
+    const title = normalizeText(rawTitle);
+
+    // Extract VIN (17-char alphanumeric, no I/O/Q) — usually the last token
+    const vinMatch = title.match(VIN_PATTERN);
+    const vin = vinMatch ? vinMatch[1].toUpperCase() : null;
+
+    // Strip VIN from title before parsing year/make/model
+    const titleWithoutVin = vin ? title.replace(vin, '').trim() : title;
+
+    const { year, make, model } = parseVehicleTitle(titleWithoutVin);
+
+    return { year, make, model, vin };
+}
+
 function parseAuctionDate(value) {
     const normalized = normalizeText(value);
     if (!normalized) return null;
@@ -226,19 +254,188 @@ async function pushListing(listing, sourceUrl, log) {
     return true;
 }
 
+/**
+ * Push a Texas State Surplus listing. Bypasses state/rust filters since we
+ * explicitly target TX and the data is pre-parsed.
+ */
+async function pushTXListing(listing, sourceUrl, log) {
+    const title = normalizeText(listing.title);
+    const currentBid = parseMoney(listing.currentBid);
+
+    if (!title) {
+        log.debug(`[TX][SKIP] Missing title on ${sourceUrl}`);
+        return false;
+    }
+    if (!isVehicle(title)) {
+        log.debug(`[TX][SKIP] Not a vehicle: ${title}`);
+        return false;
+    }
+    if (currentBid !== 0 && (currentBid < minBid || currentBid > maxBid)) {
+        log.debug(`[TX][SKIP] Out-of-range bid $${currentBid} - ${title}`);
+        return false;
+    }
+
+    const listingUrl = normalizeText(listing.listingUrl) || sourceUrl;
+    const dedupeKey = listingUrl || `${title}-TX-${currentBid}`;
+    if (seenListings.has(dedupeKey)) {
+        return false;
+    }
+    seenListings.add(dedupeKey);
+
+    const { year, make, model, vin } = parseTXSurplusTitle(title);
+
+    const vehicle = {
+        title,
+        year,
+        make,
+        model,
+        vin: vin || null,
+        current_bid: currentBid,
+        buyer_premium: 0.10,
+        doc_fee: 50,
+        auction_end_time: normalizeText(listing.timeLeft) || null,
+        location: 'Texas',
+        location_state: 'TX',
+        state: 'TX',
+        listing_url: listingUrl,
+        item_number: normalizeText(listing.itemNumber) || null,
+        photo_url: normalizeText(listing.photoUrl) || null,
+        description: null,
+        title_status: parseTitleStatus(title),
+        agency_name: 'Texas General Land Office',
+        auction_source: 'Texas State Surplus',
+        source_site: 'publicsurplus_tx',
+        scraped_at: new Date().toISOString(),
+    };
+
+    totalAfterFilters++;
+    log.info(`[TX][PASS] ${vehicle.title} | $${vehicle.current_bid} | VIN: ${vehicle.vin}`);
+    await Actor.pushData(vehicle);
+    return true;
+}
+
 const crawler = new PlaywrightCrawler({
     launchContext: {
         launchOptions: {
             headless: true,
         },
     },
-    maxRequestsPerCrawl: effectiveMaxPages + 2,
+    maxRequestsPerCrawl: effectiveMaxPages + maxTXPages + 5,
     navigationTimeoutSecs: 60,
-    requestHandlerTimeoutSecs: 90,
+    requestHandlerTimeoutSecs: 120,
     maxConcurrency: 2,
     minConcurrency: 1,
 
     async requestHandler({ page, request, enqueueLinks, log }) {
+        // ── Texas State Surplus (mobile site) ──────────────────────────────────
+        if (request.label === 'TX_LIST') {
+            const currentPage = request.userData?.pageNum ?? 1;
+            log.info(`[TX Surplus] Processing page ${currentPage}: ${request.url}`);
+
+            await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+            await page.waitForTimeout(1500);
+
+            const txListings = await page.evaluate((detailBase) => {
+                const normalizeText = (value) => String(value ?? '')
+                    .replace(/\u00a0/g, ' ')
+                    .replace(/[ \t]+/g, ' ')
+                    .replace(/\s*\n\s*/g, '\n')
+                    .trim();
+
+                const results = [];
+                const seen = new Set();
+
+                // Mobile site uses anchor tags linking to auction/view?auc=
+                const lotLinks = Array.from(document.querySelectorAll('a[href*="auction/view?auc="]'));
+
+                for (const link of lotLinks) {
+                    const href = link.getAttribute('href') || '';
+                    const listingUrl = href.startsWith('http') ? href : `${detailBase}${href}`;
+                    if (seen.has(listingUrl)) continue;
+                    seen.add(listingUrl);
+
+                    // Title is the text content of the link
+                    const title = normalizeText(link.textContent);
+
+                    // Walk up to find the parent row/card container for price + time
+                    const container = link.closest('tr, .lot-row, .auction-row, li, div[class*="lot"], div[class*="item"]') || link.parentElement;
+                    const containerText = container ? normalizeText(container.textContent) : '';
+
+                    // Extract current bid — look for $ pattern
+                    const bidMatch = containerText.match(/\$\s*([\d,]+(?:\.\d+)?)/);
+                    const currentBid = bidMatch ? bidMatch[0] : '0';
+
+                    // Extract time left — "Xd Xh" or "X days" pattern
+                    const timeMatch = containerText.match(/(\d+\s*d[ay]*\s*\d*\s*h(?:r|ours?)?|\d+\s*h(?:rs?|ours?)\s*\d*\s*m(?:in)?|Ended|Closed)/i);
+                    const timeLeft = timeMatch ? timeMatch[0] : '';
+
+                    // Photo
+                    const img = container ? container.querySelector('img') : null;
+                    const photoUrl = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
+
+                    // Item number from URL auc param
+                    const aucMatch = href.match(/auc=(\d+)/);
+                    const itemNumber = aucMatch ? aucMatch[1] : '';
+
+                    if (title) {
+                        results.push({ title, currentBid, timeLeft, listingUrl, photoUrl, itemNumber });
+                    }
+                }
+
+                return results;
+            }, TX_SURPLUS_DETAIL_BASE);
+
+            totalFound += txListings.length;
+            log.info(`[TX Surplus] Found ${txListings.length} listings on page ${currentPage}`);
+
+            for (const listing of txListings) {
+                await pushTXListing(listing, request.url, log);
+            }
+
+            // Pagination: try clicking "Next" link (javascript:srchPage('N'))
+            // or look for a link with text "Next" / ">>"
+            if (txListings.length > 0 && currentPage < maxTXPages) {
+                try {
+                    // Try to find "Next" pagination link
+                    const nextLink = await page.$('a[href*="srchPage"][href*="N"], a:text("Next"), a:text(">>"), a:has-text("Next Page")');
+                    if (nextLink) {
+                        const nextHref = await nextLink.getAttribute('href');
+                        log.info(`[TX Surplus] Found Next link: ${nextHref}`);
+
+                        if (nextHref && nextHref.includes('javascript')) {
+                            // Click JS pagination link and wait for navigation/reload
+                            await Promise.all([
+                                page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}),
+                                nextLink.click(),
+                            ]);
+                            await page.waitForTimeout(2000);
+                            const newUrl = page.url();
+                            log.info(`[TX Surplus] Navigated to: ${newUrl}`);
+                            await enqueueLinks({
+                                urls: [newUrl],
+                                label: 'TX_LIST',
+                                userData: { pageNum: currentPage + 1 },
+                            });
+                        } else if (nextHref) {
+                            const absUrl = nextHref.startsWith('http') ? nextHref : `${TX_SURPLUS_DETAIL_BASE}${nextHref}`;
+                            await enqueueLinks({
+                                urls: [absUrl],
+                                label: 'TX_LIST',
+                                userData: { pageNum: currentPage + 1 },
+                            });
+                        }
+                    } else {
+                        log.info(`[TX Surplus] No Next link found — end of results at page ${currentPage}`);
+                    }
+                } catch (err) {
+                    log.warning(`[TX Surplus] Pagination error on page ${currentPage}: ${err.message}`);
+                }
+            }
+
+            return;
+        }
+
+        // ── Standard PublicSurplus (desktop site) ──────────────────────────────
         const currentPage = request.userData?.pageNum ?? 1;
         log.info(`[PublicSurplus] Processing index page ${currentPage}: ${request.url}`);
 
@@ -321,6 +518,7 @@ const crawler = new PlaywrightCrawler({
 const startUrl = BASE_LIST_URL.replace('{PAGE}', '1');
 await crawler.run([
     { url: startUrl, label: 'LIST', userData: { pageNum: 1 } },
+    { url: TX_SURPLUS_BASE, label: 'TX_LIST', userData: { pageNum: 1 } },
 ]);
 
 console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
