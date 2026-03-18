@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Opportunity } from "@/types/dealerscope";
+import { SniperButton } from "@/components/SniperButton";
 
 interface DealOpportunitiesProps {
   opportunities?: Opportunity[];
@@ -201,10 +202,21 @@ export const DealOpportunities = ({
                 )}
               </div>
 
-              <Button className="w-full" size="sm">
-                <ExternalLink className="mr-2 h-4 w-4" />
-                View Auction
-              </Button>
+              <div className="flex gap-2">
+                <Button className="flex-1" size="sm">
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  View Auction
+                </Button>
+                <SniperButton
+                  opportunity={{
+                    id: deal.id,
+                    year: deal.vehicle?.year,
+                    make: deal.vehicle?.make ?? deal.make,
+                    model: deal.vehicle?.model ?? deal.model,
+                    current_bid: deal.current_bid ?? deal.acquisition_cost,
+                  }}
+                />
+              </div>
             </CardContent>
           </Card>
         ))}
