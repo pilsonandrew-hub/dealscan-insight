@@ -85,5 +85,8 @@
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
-  "deployedAt": "2026-03-14T11:10:00.000Z"
+  "webhookSecret": "rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA",
+  "scheduleInterval": "0 */3 * * *",
+  "deployedAt": "2026-03-14T11:10:00.000Z",
+  "lastAudit": "2026-03-18"
 }
