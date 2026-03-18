@@ -202,13 +202,18 @@ async function searchMaestro(searchText, page, displayRows, facetsFilter = [], s
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
+// Age gate: ingest.py allows max 4 years old for AllSurplus
+// Calculate dynamic minYear to match the gate (current year - 4)
+const currentYear = new Date().getFullYear();
+const defaultMinYear = currentYear - 4;
+
 const {
     maxSearchPages = 5,
     displayRows = 50,
     minBid = 3000,
     maxBid = 35000,
     maxMileage = 50000,
-    minYear = 2022,
+    minYear = defaultMinYear,
     targetStatesOnly = false,
     allowHighRust = false,
     searchTerms = VEHICLE_SEARCHES,
@@ -300,10 +305,23 @@ for (const searchText of searchTerms) {
                     ? new Date(item.assetAuctionEndDateUtc || item.assetAuctionEndDate).toISOString()
                     : null;
                 
+                // Ensure make is populated - fallback to title parsing
+                let make = item.makebrand || null;
+                if (!make && title) {
+                    for (const m of VEHICLE_MAKES) {
+                        if (title.toLowerCase().includes(m)) {
+                            make = m.charAt(0).toUpperCase() + m.slice(1);
+                            if (make === 'Chevy') make = 'Chevrolet';
+                            if (make === 'Vw') make = 'Volkswagen';
+                            break;
+                        }
+                    }
+                }
+
                 const listing = {
                     // Required DealerScope fields (normalize_apify_vehicle compatible)
                     year: year || null,
-                    make: item.makebrand || null,
+                    make: make || null,
                     model: item.model || null,
                     mileage: null, // not available from search list API
                     title_status: 'Unknown', // not in list API
