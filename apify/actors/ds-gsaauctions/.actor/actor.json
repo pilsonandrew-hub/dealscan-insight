@@ -2,5 +2,10 @@
   "actorSpecification": 1,
   "name": "ds-gsaauctions-scraper",
   "title": "DealerScope GSA Auctions Vehicle Scraper",
-  "version": "1.0"
+  "version": "1.0",
+  "defaultRunOptions": {
+    "build": "latest",
+    "timeoutSecs": 600,
+    "memoryMbytes": 2048
+  }
 }

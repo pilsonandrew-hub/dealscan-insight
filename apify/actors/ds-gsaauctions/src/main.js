@@ -210,20 +210,46 @@ async function waitForAngular(page) {
     await page.waitForTimeout(3000);
 }
 
-// Extract all /auctions/preview/{id} hrefs from the current list page.
-async function extractPreviewUrls(page) {
-    return page.evaluate((base) => {
+// Extract each preview link together with the location text from its card on the list page.
+// Returns [{ url, locationText }] for each unique preview link found.
+async function extractCardsWithLocation(page) {
+    return page.evaluate((baseUrl) => {
+        const normalize = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+        const results = [];
+        const seen = new Set();
         const anchors = document.querySelectorAll('a[href*="/auctions/preview/"]');
-        const urls = new Set();
+
         for (const a of anchors) {
             try {
                 const href = a.getAttribute('href');
-                if (href) urls.add(new URL(href, base).toString());
+                if (!href) continue;
+                const url = new URL(href, baseUrl).toString();
+                if (seen.has(url)) continue;
+                seen.add(url);
+
+                // Walk up the DOM to find the card container that includes a "Location" label.
+                let card = a;
+                for (let i = 0; i < 12; i++) {
+                    if (!card.parentElement) break;
+                    card = card.parentElement;
+                    if (['li', 'article', 'section'].includes(card.tagName.toLowerCase())) break;
+                    if (card.tagName.toLowerCase() === 'div' && /location/i.test(card.innerText)) break;
+                }
+
+                const lines = normalize(card.innerText)
+                    .split(/\n+/)
+                    .map(normalize)
+                    .filter(Boolean);
+
+                const locIdx = lines.findIndex((l) => /^location$/i.test(l));
+                const locationText = (locIdx >= 0 && locIdx < lines.length - 1) ? lines[locIdx + 1] : '';
+
+                results.push({ url, locationText });
             } catch {
                 // ignore malformed hrefs
             }
         }
-        return [...urls];
+        return results;
     }, BASE_URL);
 }
 
@@ -342,20 +368,41 @@ const crawler = new PlaywrightCrawler({
             .waitFor({ state: 'visible', timeout: 10000 })
             .catch(() => {});
 
-        const previewUrls = await extractPreviewUrls(page);
-        log.info(`[GSA] Page ${pageNum}: found ${previewUrls.length} preview links`);
+        const cards = await extractCardsWithLocation(page);
+        log.info(`[GSA] Page ${pageNum}: found ${cards.length} cards`);
 
-        if (!previewUrls.length) {
+        if (!cards.length) {
             if (pageNum === 1) {
                 log.warning('[GSA] No preview links on first page — check URL and Angular rendering');
             }
             return;
         }
 
-        await enqueueLinks({
-            urls: previewUrls,
-            label: 'DETAIL',
-        });
+        // Pre-filter by state on the list page to avoid visiting every detail page.
+        const filteredUrls = [];
+        for (const { url, locationText } of cards) {
+            const state = parseState(locationText);
+            if (!state) {
+                // Could not determine state — include to let detail page decide.
+                filteredUrls.push(url);
+                continue;
+            }
+            if (HIGH_RUST_STATES.has(state)) {
+                log.debug(`[GSA] Pre-filter: skipping high-rust state ${state} (${locationText})`);
+                continue;
+            }
+            if (targetStateSet.size > 0 && !targetStateSet.has(state)) {
+                log.debug(`[GSA] Pre-filter: skipping out-of-target state ${state} (${locationText})`);
+                continue;
+            }
+            filteredUrls.push(url);
+        }
+
+        log.info(`[GSA] Page ${pageNum}: ${filteredUrls.length}/${cards.length} cards pass state pre-filter`);
+
+        if (filteredUrls.length) {
+            await enqueueLinks({ urls: filteredUrls, label: 'DETAIL' });
+        }
 
         if (pageNum < maxPages) {
             const nextUrl = `${LIST_BASE}?page=${pageNum + 1}&${LIST_PARAMS}`;
