@@ -51,13 +51,20 @@ def _verify_auth(authorization: Optional[str]) -> str:
 
 
 def _mirror_outcome_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> bool:
+    # Derive margin / ROI from opportunity financials when available
+    asking_price: float | None = opportunity.get("total_cost") or opportunity.get("current_bid")
+    gross_margin: float | None = None
+    roi_pct: float | None = None
+    if asking_price and asking_price > 0:
+        gross_margin = round(payload.sale_price - asking_price, 2)
+        roi_pct = round((gross_margin / asking_price) * 100, 4)
+
     metadata = {
-        "opportunity_id": payload.opportunity_id,
-        "days_to_sale": payload.days_to_sale,
         "notes": payload.notes or "",
     }
 
     insert_payload = {
+        # ── legacy / existing columns ────────────────────────────────────
         "user_id": user_id,
         "vin": opportunity.get("vin"),
         "make": opportunity.get("make") or "Unknown",
@@ -71,6 +78,17 @@ def _mirror_outcome_to_dealer_sales(user_id: str, opportunity: dict, payload: Ou
         "source_type": "outcome_tracking",
         "metadata": metadata,
         "condition_grade": opportunity.get("condition_grade"),
+        # ── new outcome / arbitrage columns ──────────────────────────────
+        "opportunity_id": payload.opportunity_id,
+        "vehicle_id": opportunity.get("vin"),
+        "sold_price": payload.sale_price,
+        "asking_price": asking_price,
+        "dealer_id": user_id,
+        "outcome": "sold",  # recording an outcome always means the vehicle sold
+        "gross_margin": gross_margin,
+        "roi_pct": roi_pct,
+        "days_to_sale": payload.days_to_sale,
+        "source": "outcome_tracking",
     }
 
     try:
