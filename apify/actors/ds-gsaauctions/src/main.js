@@ -2,7 +2,9 @@ import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'gsaauctions';
-const START_URL = 'https://gsaauctions.gov/auctions/auctions-list?category=vehicles';
+const BASE_URL = 'https://www.gsaauctions.gov';
+const LIST_BASE = `${BASE_URL}/auctions/auctions-list`;
+const LIST_PARAMS = 'size=50&status=active&sort=auctionEndDateSoon,DESC&categoryDescription=Vehicles%2C+Trailers%2C+Cycles';
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
@@ -88,7 +90,7 @@ function parseState(value) {
 
 function parseCity(value) {
     const text = normalizeText(value).replace(/^location\s*:?\s*/i, '');
-    const match = text.match(/^([^,]+),\s*[A-Z]{2}\b/);
+    const match = text.match(/^([^,]+),\s*[A-Z]{2}\b/i);
     return match ? normalizeText(match[1]) : null;
 }
 
@@ -123,12 +125,7 @@ function parseVehicleTitle(title) {
         break;
     }
 
-    return {
-        year,
-        make,
-        model,
-        lowerTitle,
-    };
+    return { year, make, model, lowerTitle };
 }
 
 function isPassengerVehicle(title) {
@@ -205,133 +202,84 @@ function applyFilters(listing, log) {
     return true;
 }
 
-async function waitForListings(page, log) {
+// Wait for Angular SPA to finish rendering. The site requires networkidle +
+// an extra fixed delay for the framework to hydrate the DOM.
+async function waitForAngular(page) {
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-
-    const selectors = [
-        'a[href*="/auctions/preview/"]',
-        'a[href*="/auctions/listing/"]',
-        'a[href*="/auctions/item/"]',
-        '[data-testid*="auction"] a[href]',
-    ];
-
-    for (const selector of selectors) {
-        const found = await page.locator(selector).first().waitFor({ state: 'visible', timeout: 6000 })
-            .then(() => true)
-            .catch(() => false);
-        if (found) return;
-    }
-
-    log.warning('[GSA] Listing selector did not become visible before timeout');
+    await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => {});
+    await page.waitForTimeout(3000);
 }
 
-async function extractPageListings(page) {
-    return page.evaluate(() => {
-        const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
-        const toAbsoluteUrl = (href) => {
+// Extract all /auctions/preview/{id} hrefs from the current list page.
+async function extractPreviewUrls(page) {
+    return page.evaluate((base) => {
+        const anchors = document.querySelectorAll('a[href*="/auctions/preview/"]');
+        const urls = new Set();
+        for (const a of anchors) {
             try {
-                return new URL(href, window.location.origin).toString();
+                const href = a.getAttribute('href');
+                if (href) urls.add(new URL(href, base).toString());
             } catch {
-                return '';
+                // ignore malformed hrefs
             }
+        }
+        return [...urls];
+    }, BASE_URL);
+}
+
+// Extract lot metadata from a detail page (/auctions/preview/{id}).
+// The page renders as labeled sections: a label line followed by a value line.
+// Known labels: "Lot Name", "Location", "Closing Date", "Current Bid".
+async function extractDetailData(page) {
+    return page.evaluate(() => {
+        const normalize = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+        // Try structured selectors first.
+        const getText = (...selectors) => {
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                const text = normalize(el?.textContent);
+                if (text) return text;
+            }
+            return '';
         };
 
-        const anchors = Array.from(document.querySelectorAll(
-            'a[href*="/auctions/preview/"], a[href*="/auctions/listing/"], a[href*="/auctions/item/"]',
-        ));
+        // Parse the page as a flat list of lines; find value that follows a label.
+        const lines = normalize(document.body.innerText)
+            .split(/\n+/)
+            .map(normalize)
+            .filter(Boolean);
 
-        const seenUrls = new Set();
-        const records = [];
+        const getValueAfterLabel = (pattern) => {
+            const idx = lines.findIndex((line) => pattern.test(line));
+            return (idx >= 0 && idx < lines.length - 1) ? lines[idx + 1] : '';
+        };
 
-        for (const anchor of anchors) {
-            const href = anchor.getAttribute('href');
-            if (!href) continue;
+        const title = getText('h1', '[class*="lot-title"]', '[class*="lotTitle"]', '[class*="lot-name"]')
+            || getValueAfterLabel(/^lot\s*name$/i)
+            || getText('h2', 'h3');
 
-            const listingUrl = toAbsoluteUrl(href);
-            if (!listingUrl || seenUrls.has(listingUrl)) continue;
-            seenUrls.add(listingUrl);
+        const location = getValueAfterLabel(/^location$/i)
+            || getText('[class*="location"]');
 
-            const card = anchor.closest('article, li, section, [class*="card"], [class*="Card"], [class*="tile"], [class*="Tile"], [data-testid*="auction"], [data-testid*="listing"]')
-                ?? anchor.parentElement;
-            if (!card) continue;
+        const closingDate = getValueAfterLabel(/^closing\s*date$/i)
+            || getText('time', '[class*="closing"]', '[class*="end-date"]');
 
-            const title = normalize(anchor.textContent)
-                || normalize(card.querySelector('h1, h2, h3, h4, [class*="title"], [class*="Title"]')?.textContent);
-            if (!title) continue;
+        const currentBid = getValueAfterLabel(/^current\s*bid$/i)
+            || getText('[class*="current-bid"]', '[class*="currentBid"]');
 
-            const lines = String(card.innerText ?? '')
-                .split(/\n+/)
-                .map((line) => normalize(line))
-                .filter(Boolean);
+        const img = document.querySelector('[class*="lot"] img, [class*="photo"] img, main img');
+        const imageUrl = img?.getAttribute('src') || img?.getAttribute('data-src') || '';
 
-            const bidText = lines.find((line) => /(current bid|high bid)\b/i.test(line))
-                ?? lines.find((line) => /\$\s*[\d,]/.test(line))
-                ?? '';
-            const endText = Array.from(card.querySelectorAll('time'))
-                .map((node) => node.getAttribute('datetime') || node.textContent || '')
-                .map((line) => normalize(line))
-                .find(Boolean)
-                ?? lines.find((line) => /\b(end|ends|closing|close time|auction end)\b/i.test(line))
-                ?? '';
-            const location = lines.find((line) => /\b(location|pickup)\b/i.test(line))
-                ?? lines.find((line) => /,\s*[A-Z]{2}(?:\s+\d{5})?\b/.test(line))
-                ?? lines.find((line) => /\b[A-Z]{2}\s+\d{5}\b/.test(line))
-                ?? '';
-
-            const image = card.querySelector('img');
-            const imageUrl = image?.getAttribute('src')
-                || image?.getAttribute('data-src')
-                || image?.getAttribute('data-original')
-                || image?.getAttribute('srcset')?.split(',')[0]?.trim().split(' ')[0]
-                || '';
-
-            records.push({
-                title,
-                bidText,
-                endText,
-                location,
-                listingUrl,
-                imageUrl: imageUrl ? toAbsoluteUrl(imageUrl) : '',
-            });
-        }
-
-        return records;
+        return { title, location, closingDate, currentBid, imageUrl };
     });
 }
 
-async function getNextControl(page) {
-    const candidates = [
-        page.getByRole('button', { name: /next/i }),
-        page.getByRole('link', { name: /next/i }),
-        page.locator('[aria-label*="next" i]'),
-        page.locator('button:has-text("Next"), a:has-text("Next")'),
-    ];
-
-    for (const candidate of candidates) {
-        const count = await candidate.count().catch(() => 0);
-        if (!count) continue;
-
-        const control = candidate.first();
-        const visible = await control.isVisible().catch(() => false);
-        if (!visible) continue;
-
-        const disabled = await control.evaluate((node) => {
-            const element = /** @type {HTMLElement} */ (node);
-            return element.hasAttribute('disabled')
-                || element.getAttribute('aria-disabled') === 'true'
-                || element.classList.contains('disabled');
-        }).catch(() => false);
-        if (!disabled) return control;
-    }
-
-    return null;
-}
-
 const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 1,
+    // One list page + up to maxPages-1 additional pages + detail pages.
+    maxRequestsPerCrawl: maxPages + 500,
     maxConcurrency: 1,
-    requestHandlerTimeoutSecs: 300,
+    requestHandlerTimeoutSecs: 120,
     launchContext: {
         launchOptions: {
             args: [
@@ -342,70 +290,86 @@ const crawler = new PlaywrightCrawler({
         },
     },
 
-    async requestHandler({ page, log }) {
-        log.info(`[GSA] Loading ${START_URL}`);
-        await waitForListings(page, log);
+    async requestHandler({ page, request, enqueueLinks, log }) {
+        const label = request.label ?? 'LIST';
 
-        let previousSignature = null;
+        if (label === 'DETAIL') {
+            const url = page.url();
+            log.info(`[GSA] Detail page: ${url}`);
 
-        for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
-            const rawListings = await extractPageListings(page);
-            const signature = rawListings.map((listing) => listing.listingUrl).slice(0, 10).join('|');
+            await waitForAngular(page);
 
-            log.info(`[GSA] Page ${pageNumber}: extracted ${rawListings.length} cards`);
+            const data = await extractDetailData(page);
 
-            if (!rawListings.length) {
-                if (pageNumber === 1) {
-                    log.warning('[GSA] No auction cards found on the first hydrated page');
-                }
-                break;
+            if (!data.title) {
+                log.warning(`[GSA] No title extracted from detail page: ${url}`);
+                return;
             }
 
-            if (signature && signature === previousSignature) {
-                log.info('[GSA] Page signature repeated after pagination, stopping');
-                break;
+            totalFound += 1;
+
+            const rawListing = {
+                title: data.title,
+                bidText: data.currentBid,
+                endText: data.closingDate,
+                location: data.location,
+                listingUrl: url,
+                imageUrl: data.imageUrl,
+            };
+
+            const listing = buildListing(rawListing);
+
+            if (!applyFilters(listing, log)) return;
+
+            const dedupeKey = listing.listing_id;
+            if (seenListings.has(dedupeKey)) return;
+            seenListings.add(dedupeKey);
+
+            totalAfterFilters += 1;
+            log.info(`[GSA] Queuing: ${listing.title} | $${listing.current_bid} | ${listing.state}`);
+            await Actor.pushData(listing);
+            return;
+        }
+
+        // LIST page handler
+        const pageNum = request.userData?.pageNum ?? 1;
+        log.info(`[GSA] List page ${pageNum}: ${page.url()}`);
+
+        await waitForAngular(page);
+
+        // Wait up to 10s for at least one preview link to appear.
+        await page.locator('a[href*="/auctions/preview/"]').first()
+            .waitFor({ state: 'visible', timeout: 10000 })
+            .catch(() => {});
+
+        const previewUrls = await extractPreviewUrls(page);
+        log.info(`[GSA] Page ${pageNum}: found ${previewUrls.length} preview links`);
+
+        if (!previewUrls.length) {
+            if (pageNum === 1) {
+                log.warning('[GSA] No preview links on first page — check URL and Angular rendering');
             }
-            previousSignature = signature;
+            return;
+        }
 
-            for (const rawListing of rawListings) {
-                const dedupeKey = rawListing.listingUrl;
-                if (!dedupeKey || seenListings.has(dedupeKey)) continue;
-                seenListings.add(dedupeKey);
+        await enqueueLinks({
+            urls: previewUrls,
+            label: 'DETAIL',
+        });
 
-                totalFound += 1;
-                const listing = buildListing(rawListing);
-
-                if (!applyFilters(listing, log)) continue;
-
-                totalAfterFilters += 1;
-                await Actor.pushData(listing);
-            }
-
-            if (pageNumber >= maxPages) break;
-
-            const nextControl = await getNextControl(page);
-            if (!nextControl) {
-                log.info('[GSA] No enabled next-page control found');
-                break;
-            }
-
-            const firstListingUrl = rawListings[0]?.listingUrl || null;
-            await Promise.all([
-                page.waitForFunction((previousUrl) => {
-                    const nextAnchor = document.querySelector(
-                        'a[href*="/auctions/preview/"], a[href*="/auctions/listing/"], a[href*="/auctions/item/"]',
-                    );
-                    return !previousUrl || !nextAnchor || nextAnchor.href !== previousUrl;
-                }, firstListingUrl, { timeout: 20000 }).catch(() => {}),
-                nextControl.click(),
-            ]);
-
-            await waitForListings(page, log);
+        if (pageNum < maxPages) {
+            const nextUrl = `${LIST_BASE}?page=${pageNum + 1}&${LIST_PARAMS}`;
+            await enqueueLinks({
+                urls: [nextUrl],
+                label: 'LIST',
+                userData: { pageNum: pageNum + 1 },
+            });
         }
     },
 });
 
-await crawler.run([{ url: START_URL }]);
+const startUrl = `${LIST_BASE}?page=1&${LIST_PARAMS}`;
+await crawler.run([{ url: startUrl, label: 'LIST', userData: { pageNum: 1 } }]);
 
 console.log(`[GSA COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
 await Actor.exit();
