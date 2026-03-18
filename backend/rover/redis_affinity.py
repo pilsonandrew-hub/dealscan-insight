@@ -1,14 +1,17 @@
 """
 Redis-backed affinity vector tracking for Rover personalization.
 
-Key patterns:
-  rover:affinity:{user_id}:{dimension}  → float score (HSET field per dimension)
+Key patterns (HSET schema — migrated from flat keys):
+  rover:affinity:{user_id}              → HASH with fields per dimension + _last_decay_ts
   rover:last_event:{user_id}            → unix timestamp (float)
   rover:last_updated:{user_id}          → unix timestamp (float)
   rover:active_users                    → SET of user_ids
 
-Decay: half-life of 72 hours applied on each write.
+Decay: half-life of 72 hours, applied lazily on read/write.
 TTL: 30 days on all per-user keys.
+
+Migration: if old flat keys (rover:affinity:{user_id}:*) exist, they are
+migrated to the new HSET format automatically on first access.
 """
 import os
 import math
@@ -20,6 +23,9 @@ logger = logging.getLogger(__name__)
 DECAY_HALF_LIFE_HOURS = 72
 DECAY_FACTOR = math.exp(-math.log(2) / DECAY_HALF_LIFE_HOURS)  # per hour
 KEY_TTL = 2592000  # 30 days in seconds
+
+# Internal hash field name for tracking last decay timestamp
+_DECAY_TS_FIELD = "_last_decay_ts"
 
 # Affinity dimension weights by event type (multiplicative on base weight)
 _DIMENSION_EVENT_SCALE = {
@@ -46,8 +52,14 @@ def get_redis_client():
         return None
 
 
-def _affinity_key(user_id: str, dimension: str) -> str:
-    return f"rover:affinity:{user_id}:{dimension}"
+def _hash_key(user_id: str) -> str:
+    """HSET key for user affinity (new schema)."""
+    return f"rover:affinity:{user_id}"
+
+
+def _flat_key_prefix(user_id: str) -> str:
+    """Prefix used by the old flat key schema."""
+    return f"rover:affinity:{user_id}:"
 
 
 def _last_event_key(user_id: str) -> str:
@@ -133,15 +145,81 @@ def _extract_dimensions(item_data: dict) -> list[str]:
     return dims
 
 
+# ---------------------------------------------------------------------------
+# Migration helper
+# ---------------------------------------------------------------------------
+
+def migrate_to_hset(redis_client, user_id: str) -> bool:
+    """
+    Migrate old flat keys ``rover:affinity:{user_id}:*`` into the new HSET
+    format (``rover:affinity:{user_id}`` hash).
+
+    Returns True if migration was performed (old keys existed), False otherwise.
+    Called lazily on first access per user — safe to call multiple times.
+    """
+    prefix = _flat_key_prefix(user_id)
+    pattern = f"{prefix}*"
+    hash_key = _hash_key(user_id)
+
+    old_keys: list[str] = []
+    cursor = 0
+    while True:
+        cursor, keys = redis_client.scan(cursor, match=pattern, count=100)
+        old_keys.extend(keys)
+        if cursor == 0:
+            break
+
+    if not old_keys:
+        return False
+
+    logger.info(f"[ROVER] Migrating {len(old_keys)} flat affinity keys to HSET for user {user_id}")
+
+    pipeline = redis_client.pipeline()
+    for key in old_keys:
+        val = redis_client.get(key)
+        if val is not None:
+            dim = key[len(prefix):]
+            try:
+                pipeline.hset(hash_key, dim, float(val))
+            except (TypeError, ValueError):
+                pass
+        pipeline.delete(key)
+
+    pipeline.expire(hash_key, KEY_TTL)
+    pipeline.execute()
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Core affinity functions
+# ---------------------------------------------------------------------------
+
 def apply_decay(redis_client, user_id: str) -> None:
-    """Apply time-based decay to all affinity dimensions for a user."""
-    last_key = _last_event_key(user_id)
-    last_ts = redis_client.get(last_key)
-    if last_ts is None:
+    """
+    Apply time-based decay lazily to the affinity hash for a user.
+
+    Instead of scanning flat keys on every write (old O(n) approach), decay is
+    stored as a timestamp field ``_last_decay_ts`` inside the hash itself and
+    applied on the next read or write — making this O(1) metadata + O(d) for
+    d dimensions only when decay is actually meaningful.
+    """
+    hash_key = _hash_key(user_id)
+
+    # Pull all fields including the internal decay timestamp
+    raw = redis_client.hgetall(hash_key)
+    if not raw:
+        return
+
+    last_decay_ts = raw.get(_DECAY_TS_FIELD)
+    now_ts = time.time()
+
+    if last_decay_ts is None:
+        # First time — just stamp it, no decay to apply yet
+        redis_client.hset(hash_key, _DECAY_TS_FIELD, now_ts)
         return
 
     try:
-        hours_elapsed = (time.time() - float(last_ts)) / 3600.0
+        hours_elapsed = (now_ts - float(last_decay_ts)) / 3600.0
     except (TypeError, ValueError):
         return
 
@@ -152,27 +230,19 @@ def apply_decay(redis_client, user_id: str) -> None:
     if decay >= 0.9999:
         return  # not worth rewriting
 
-    pattern = f"rover:affinity:{user_id}:*"
-    cursor = 0
     pipeline = redis_client.pipeline()
-    found_any = False
+    for field, val in raw.items():
+        if field == _DECAY_TS_FIELD:
+            continue
+        try:
+            new_val = float(val) * decay
+            pipeline.hset(hash_key, field, new_val)
+        except (TypeError, ValueError):
+            pass
 
-    while True:
-        cursor, keys = redis_client.scan(cursor, match=pattern, count=100)
-        for key in keys:
-            val = redis_client.get(key)
-            if val is not None:
-                try:
-                    new_val = float(val) * decay
-                    pipeline.set(key, new_val, ex=KEY_TTL)
-                    found_any = True
-                except (TypeError, ValueError):
-                    pass
-        if cursor == 0:
-            break
-
-    if found_any:
-        pipeline.execute()
+    pipeline.hset(hash_key, _DECAY_TS_FIELD, now_ts)
+    pipeline.expire(hash_key, KEY_TTL)
+    pipeline.execute()
 
 
 def increment_affinity(
@@ -185,7 +255,16 @@ def increment_affinity(
     """
     Apply time-decay then increment affinity dimensions for this event.
     Non-fatal: exceptions are logged and swallowed by the caller.
+
+    Migrates old flat keys to HSET format on first call if they exist.
     """
+    hash_key = _hash_key(user_id)
+
+    # Lazy migration from old flat-key schema
+    # Only attempt if the new hash doesn't already exist
+    if not redis_client.exists(hash_key):
+        migrate_to_hset(redis_client, user_id)
+
     # Apply decay before writing new signal
     apply_decay(redis_client, user_id)
 
@@ -193,14 +272,18 @@ def increment_affinity(
     if not dims:
         return
 
-    pipeline = redis_client.pipeline()
-    for dim in dims:
-        key = _affinity_key(user_id, dim)
-        pipeline.incrbyfloat(key, weight)
-        pipeline.expire(key, KEY_TTL)
-
-    # Update last-event timestamp
     now_ts = time.time()
+    pipeline = redis_client.pipeline()
+
+    for dim in dims:
+        pipeline.hincrbyfloat(hash_key, dim, weight)
+
+    # Stamp decay timestamp if not present (apply_decay may have set it already,
+    # but hsetnx ensures we don't overwrite a freshly-set value)
+    pipeline.hsetnx(hash_key, _DECAY_TS_FIELD, now_ts)
+    pipeline.expire(hash_key, KEY_TTL)
+
+    # Update last-event / last-updated timestamps
     last_key = _last_event_key(user_id)
     last_updated_key = _last_updated_key(user_id)
     pipeline.set(last_key, now_ts, ex=KEY_TTL)
@@ -210,31 +293,31 @@ def increment_affinity(
 
 
 def get_affinity_vector(redis_client, user_id: str) -> dict[str, float]:
-    """Return {dimension: score} dict for the user. Empty dict if no data."""
-    pattern = f"rover:affinity:{user_id}:*"
-    prefix = f"rover:affinity:{user_id}:"
-    last_updated_ts = redis_client.get(_last_updated_key(user_id)) or redis_client.get(_last_event_key(user_id))
-    decay = 1.0
-    if last_updated_ts is not None:
-        try:
-            hours_elapsed = max(0.0, (time.time() - float(last_updated_ts)) / 3600.0)
-            decay = DECAY_FACTOR ** hours_elapsed
-        except (TypeError, ValueError):
-            decay = 1.0
-    result: dict[str, float] = {}
+    """
+    Return ``{dimension: score}`` dict for the user. Empty dict if no data.
 
-    cursor = 0
-    while True:
-        cursor, keys = redis_client.scan(cursor, match=pattern, count=100)
-        for key in keys:
-            val = redis_client.get(key)
-            if val is not None:
-                try:
-                    dim = key[len(prefix):]
-                    result[dim] = float(val) * decay
-                except (TypeError, ValueError):
-                    pass
-        if cursor == 0:
-            break
+    Applies lazy decay on read, migrates old flat keys if needed.
+    """
+    hash_key = _hash_key(user_id)
+
+    # Lazy migration from old flat-key schema
+    if not redis_client.exists(hash_key):
+        migrate_to_hset(redis_client, user_id)
+
+    # Apply decay before returning scores
+    apply_decay(redis_client, user_id)
+
+    raw = redis_client.hgetall(hash_key)
+    if not raw:
+        return {}
+
+    result: dict[str, float] = {}
+    for field, val in raw.items():
+        if field == _DECAY_TS_FIELD:
+            continue
+        try:
+            result[field] = float(val)
+        except (TypeError, ValueError):
+            pass
 
     return result
