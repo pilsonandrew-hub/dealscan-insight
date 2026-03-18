@@ -1,14 +1,13 @@
 {
   "name": "ds-allsurplus-scraper",
   "version": "1.0.0",
-  "description": "DealerScope scraper for AllSurplus vehicle auctions (API-first with web fallback)",
+  "description": "DealerScope AllSurplus scraper via Maestro API (API-first, no Playwright)",
   "type": "module",
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js"
   },
   "dependencies": {
-    "apify": "^3.0.0",
-    "uuid": "^9.0.0"
+    "apify": "^3.0.0"
   }
 }
