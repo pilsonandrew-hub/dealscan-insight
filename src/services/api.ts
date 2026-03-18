@@ -593,6 +593,23 @@ export const api = {
     return { status: 'success', rows_processed: 0 };
   },
 
+  // Analytics summary
+  async getAnalyticsSummary(): Promise<{
+    total_opportunities: number;
+    total_outcomes: number;
+    avg_gross_margin: number | null;
+    avg_roi_pct: number | null;
+    wins_by_source: { source: string; count: number }[];
+    top_makes: { make: string; avg_dos_score: number; count: number }[];
+    alerts_sent_last_30d: number;
+  }> {
+    const res = await fetch(`${API_BASE}/api/analytics/summary`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
+    return res.json();
+  },
+
   // Legacy health check
   async healthCheck() {
     try {
