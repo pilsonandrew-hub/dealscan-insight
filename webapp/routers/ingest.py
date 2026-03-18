@@ -2661,6 +2661,47 @@ def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
         return None, "direct_pg_error"
 
 
+def _normalize_vin(vin: Optional[str]) -> Optional[str]:
+    """Normalize a VIN: strip whitespace and uppercase."""
+    if not vin:
+        return None
+    normalized = vin.strip().upper()
+    return normalized if normalized else None
+
+
+def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str], bool]:
+    """
+    Check if a live opportunity with this VIN already exists in Supabase.
+
+    Returns (existing_id, should_update) where:
+    - existing_id: the ID of the existing record, or None if no duplicate
+    - should_update: True if new score is higher and we should UPDATE instead of skip
+
+    Non-fatal: logs errors and returns (None, False) on failure so insert proceeds.
+    """
+    if supabase_client is None:
+        return None, False
+    try:
+        now_iso = datetime.utcnow().isoformat()
+        result = (
+            supabase_client.table("opportunities")
+            .select("id, lot_url, dos_score")
+            .eq("vin", vin)
+            .gte("auction_end_date", now_iso)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            existing = result.data[0]
+            existing_id = existing.get("id")
+            existing_score = float(existing.get("dos_score") or 0)
+            should_update = new_dos_score > existing_score
+            return existing_id, should_update
+    except Exception as vin_check_err:
+        logger.warning("[DEDUP] VIN duplicate check failed for VIN %s: %s", vin, vin_check_err)
+    return None, False
+
+
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
     """Save scored vehicle to Supabase. Min DOS 50 to save."""
     score = vehicle.get("dos_score", 0)
@@ -2669,6 +2710,46 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
         return None
 
     row = build_opportunity_row(vehicle)
+
+    # Normalize VIN before dedup check and insert
+    raw_vin = row.get("vin")
+    normalized_vin = _normalize_vin(raw_vin)
+    if normalized_vin != raw_vin:
+        row["vin"] = normalized_vin
+
+    # VIN deduplication check — non-fatal, skip or update if duplicate found
+    if normalized_vin:
+        try:
+            existing_id, should_update = _check_vin_duplicate(normalized_vin, float(score))
+            if existing_id:
+                if should_update:
+                    # New score is higher — update the existing record
+                    try:
+                        update_payload = {
+                            "dos_score": row.get("dos_score"),
+                            "current_bid": row.get("current_bid"),
+                            "updated_at": datetime.utcnow().isoformat(),
+                        }
+                        supabase_client.table("opportunities").update(update_payload).eq("id", existing_id).execute()
+                        logger.info(
+                            "[DEDUP] VIN %s updated existing record %s with higher DOS score %.1f",
+                            normalized_vin, existing_id, float(score),
+                        )
+                        vehicle["_save_status"] = "vin_dedup_updated"
+                        return existing_id
+                    except Exception as upd_err:
+                        logger.warning("[DEDUP] VIN update failed for %s: %s", existing_id, upd_err)
+                        vehicle["_save_status"] = "vin_dedup_skipped"
+                        return existing_id
+                else:
+                    logger.warning(
+                        "[DEDUP] Duplicate VIN %s skipped — already exists as %s",
+                        normalized_vin, existing_id,
+                    )
+                    vehicle["_save_status"] = "vin_dedup_skipped"
+                    return existing_id
+        except Exception as dedup_err:
+            logger.warning("[DEDUP] VIN dedup logic error for VIN %s: %s — proceeding with insert", normalized_vin, dedup_err)
 
     if supabase_client is not None:
         try:
