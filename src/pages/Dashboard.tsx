@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
+import { roverAPI } from '@/services/roverAPI';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'analytics' | 'settings';
@@ -478,6 +479,29 @@ const CrosshairTab = () => {
     setSearchParams(next);
   };
 
+  const handleCrosshairAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
+    if (action === 'pass' || action === 'view') return;
+    // Fire Rover save event (non-blocking)
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) return;
+    roverAPI.trackEvent({
+      userId,
+      event: 'save',
+      item: {
+        id: deal.id || '',
+        make: deal.make,
+        model: deal.model,
+        year: deal.year,
+        price: deal.current_bid ?? 0,
+        source: deal.source_site,
+        source_site: deal.source_site,
+        state: deal.state,
+        mileage: deal.mileage,
+      },
+    });
+  };
+
   const inputCls = "w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500";
   const labelCls = "block text-xs text-gray-400 mb-1";
 
@@ -560,6 +584,7 @@ const CrosshairTab = () => {
                   key={deal.id}
                   deal={deal}
                   onSendToSniperScope={handleSendToSniperScope}
+                  onAction={handleCrosshairAction}
                 />
               ))}
             </div>
@@ -670,9 +695,21 @@ const RoverTab = () => {
 };
 
 // ─── TAB 4: Analytics ─────────────────────────────────────────────────────────
+interface AnalyticsSummary {
+  total_opportunities: number;
+  total_outcomes: number;
+  avg_gross_margin: number | null;
+  avg_roi_pct: number | null;
+  wins_by_source: { source: string; count: number }[];
+  top_makes: { make: string; avg_dos_score: number; count: number }[];
+  alerts_sent_last_30d: number;
+}
+
 const AnalyticsTab = () => {
   const [allDeals, setAllDeals] = useState<DashboardOpportunity[]>([]);
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -687,7 +724,114 @@ const AnalyticsTab = () => {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await api.getAnalyticsSummary();
+        setSummary(data);
+      } catch (e) {
+        console.error('[Analytics] summary fetch error:', e);
+      } finally {
+        setSummaryLoading(false);
+      }
+    })();
+  }, []);
+
   if (loading) return <div className="p-6 text-center text-gray-500">Loading analytics...</div>;
+
+  // ── Render summary section ─────────────────────────────────────────────────
+  const SummarySection = () => {
+    if (summaryLoading) return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse">
+            <div className="h-3 w-24 bg-gray-700 rounded mb-3" />
+            <div className="h-7 w-16 bg-gray-700 rounded" />
+          </div>
+        ))}
+      </div>
+    );
+    if (!summary) return null;
+    return (
+      <div className="space-y-4">
+        {/* Top KPI row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            label="Total Opportunities"
+            value={summary.total_opportunities.toLocaleString()}
+            sub="All-time pipeline"
+          />
+          <StatCard
+            label="Recorded Outcomes"
+            value={summary.total_outcomes.toLocaleString()}
+            sub="Closed deals tracked"
+            accent
+          />
+          <StatCard
+            label="Avg Gross Margin"
+            value={summary.avg_gross_margin != null ? fmt$(summary.avg_gross_margin) : '—'}
+            sub="From closed outcomes"
+            accent={summary.avg_gross_margin != null && summary.avg_gross_margin > 0}
+          />
+          <StatCard
+            label="Avg ROI %"
+            value={summary.avg_roi_pct != null ? fmtPct(summary.avg_roi_pct) : '—'}
+            sub="From closed outcomes"
+            accent={summary.avg_roi_pct != null && summary.avg_roi_pct > 0}
+          />
+        </div>
+
+        {/* Second row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Alerts */}
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Alerts Sent (30d)</p>
+            <p className="text-2xl font-bold mt-1 text-emerald-400">{summary.alerts_sent_last_30d.toLocaleString()}</p>
+            <p className="text-xs text-gray-500 mt-0.5">Hot deal notifications</p>
+          </div>
+
+          {/* Wins by source */}
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source</p>
+            {summary.wins_by_source.length === 0 ? (
+              <p className="text-sm text-gray-500">No outcome data yet</p>
+            ) : (
+              <div className="space-y-1.5">
+                {summary.wins_by_source.map(({ source, count }) => (
+                  <div key={source} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-300 truncate">{source}</span>
+                    <span className="text-white font-medium ml-2 shrink-0">{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Top makes */}
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by DOS Score</p>
+            {summary.top_makes.length === 0 ? (
+              <p className="text-sm text-gray-500">No data yet</p>
+            ) : (
+              <div className="space-y-1.5">
+                {summary.top_makes.map(({ make, avg_dos_score, count }) => (
+                  <div key={make} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-300">{make}</span>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${dosColor(avg_dos_score)}`}>
+                        {avg_dos_score}
+                      </span>
+                      <span className="text-gray-500 text-xs">{count}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // DOS distribution
   const dosBuckets = [
@@ -740,6 +884,9 @@ const AnalyticsTab = () => {
         <h2 className="text-xl font-bold text-white">Analytics</h2>
         <p className="text-sm text-gray-400">{allDeals.length} active deals analyzed</p>
       </div>
+
+      {/* ── Real outcome KPIs from dealer_sales / alert_log ── */}
+      <SummarySection />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* DOS Distribution */}
