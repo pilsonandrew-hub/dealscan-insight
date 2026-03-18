@@ -782,6 +782,10 @@ def score_deal(
     manheim_confidence: Optional[float] = None,
     manheim_source_status: Optional[str] = None,
     manheim_updated_at: Optional[str] = None,
+    # Condition enrichment (optional)
+    condition_grade: Optional[str] = None,
+    condition_score: Optional[int] = None,
+    condition_signals: Optional[list] = None,
 ) -> dict:
     """
     Compute full DOS score and deal metrics.
@@ -983,5 +987,9 @@ def score_deal(
         "dos_score": round(weighted_score, 2),
         "score": round(weighted_score, 2),
         "score_version": SCORE_VERSION,
+        # Condition enrichment (from score_condition() in condition.py)
+        "condition_grade": condition_grade,
+        "condition_score": condition_score,
+        "condition_signals": condition_signals or [],
         **ceiling_metrics,
     }
