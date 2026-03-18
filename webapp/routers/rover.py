@@ -16,6 +16,7 @@ from typing import Optional
 import time
 import os
 import logging
+from backend.rover.heuristic_scorer import build_preference_vector, score_item, rank_opportunities
 
 router = APIRouter(prefix="/api/rover", tags=["rover"])
 logger = logging.getLogger(__name__)
@@ -147,6 +148,40 @@ async def get_recommendations(
         raw_rows = opps_resp.data or []
         personalized = False
 
+        # --- Heuristic preference vector (from event history) ---
+        heuristic_prefs: dict[str, float] = {}
+        try:
+            events_resp = supa.table("rover_events")\
+                .select("event_type,item_data,timestamp")\
+                .eq("user_id", user_id)\
+                .order("timestamp", desc=True)\
+                .limit(200)\
+                .execute()
+            rover_events_raw = events_resp.data or []
+            # Normalise: heuristic_scorer expects timestamp_ms key
+            rover_events = [
+                {
+                    "event_type": e.get("event_type", "view"),
+                    "item_data": e.get("item_data") or {},
+                    "timestamp_ms": (
+                        # timestamp col is ISO string; parse to ms if needed
+                        float(e["timestamp_ms"]) if "timestamp_ms" in e
+                        else (
+                            __import__("datetime").datetime.fromisoformat(
+                                e["timestamp"].rstrip("Z")
+                            ).timestamp() * 1000
+                            if e.get("timestamp") else now_ms
+                        )
+                    ),
+                }
+                for e in rover_events_raw
+            ]
+            heuristic_prefs = build_preference_vector(rover_events, now_ms)
+            if heuristic_prefs:
+                personalized = True
+        except Exception as _he:
+            logger.warning(f"[ROVER] Heuristic prefs fetch failed (non-fatal): {_he}")
+
         # --- Affinity re-ranking ---
         affinity: dict[str, float] = {}
         if _redis_client:
@@ -156,11 +191,13 @@ async def get_recommendations(
             except Exception as _ae:
                 logger.warning(f"[ROVER] Affinity fetch failed (non-fatal): {_ae}")
 
-        if affinity:
+        if affinity or heuristic_prefs:
             personalized = True
             max_aff = max(affinity.values()) if affinity else 1.0
 
             def _affinity_boost(row: dict) -> float:
+                if not affinity:
+                    return 0.0
                 from backend.rover.redis_affinity import _extract_dimensions
 
                 dims = _extract_dimensions(row)
@@ -171,9 +208,13 @@ async def get_recommendations(
 
             def _effective_score(row: dict) -> float:
                 dos = _coerce_number(row.get("dos_score", row.get("score")), 0.0)
-                return dos + _affinity_boost(row) * 15.0
+                heuristic_boost = score_item(heuristic_prefs, row) if heuristic_prefs else 0.0
+                return dos + _affinity_boost(row) * 15.0 + heuristic_boost
 
             raw_rows = sorted(raw_rows, key=_effective_score, reverse=True)
+        elif raw_rows:
+            # Cold start: no Redis or heuristic data — rank_opportunities uses DOS score
+            raw_rows = rank_opportunities({}, raw_rows, top_n=len(raw_rows))
 
         items = [_serialize_recommendation(row) for row in raw_rows[:effective_limit]]
 
