@@ -3,15 +3,13 @@
  *
  * Strategy:
  * EquipmentFacts is a Sandhills Cloud platform serving live auction listings for trucks,
- * RVs, and heavy equipment. Key auctioneers: ADESA Mercer (auto auction, NJ), Indiana
- * Auto Auction, and various truck/commercial vehicle auctions.
+ * RVs, and heavy equipment. Key auctioneers: various truck/commercial vehicle auctions.
  *
  * Approach:
  * 1. Load the equipmentsearch page in Playwright, capturing XHR/fetch traffic
  * 2. Intercept the Sandhills API calls (api.sandhills.com or similar)
  * 3. Filter for Trucks/Autos categories
  * 4. Paginate via captured API key/endpoint
- * 5. Flag ADESA Mercer lots as source_type=equipmentfacts_adesa
  *
  * Sandhills Cloud API pattern (observed from AuctionTime sibling platform):
  * - Uses REST endpoints at api.sandhills.com or auction-specific subdomains
@@ -24,10 +22,6 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'equipmentfacts';
 const BASE_URL = 'https://www.equipmentfacts.com';
-
-// ADESA Mercer and Indiana Auto Auction keywords for flagging
-const ADESA_KEYWORDS = ['adesa', 'adesa mercer'];
-const INDIANA_AUTO_KEYWORDS = ['indiana auto auction'];
 
 // Vehicle/truck relevant categories on EquipmentFacts
 const VEHICLE_CATEGORIES = [
@@ -87,12 +81,6 @@ function normalizeState(stateRaw) {
     return STATE_ABBR.get(s) || s;
 }
 
-function isAdesa(sellerName) {
-    if (!sellerName) return false;
-    const lower = sellerName.toLowerCase();
-    return ADESA_KEYWORDS.some(k => lower.includes(k));
-}
-
 function isVehicleRelevant(item) {
     const title = (item.title || item.description || '').toLowerCase();
     const category = (item.category || item.categoryName || '').toLowerCase();
@@ -104,7 +92,6 @@ function isVehicleRelevant(item) {
 
 function normalizeLot(raw, capturedApiUrl) {
     const sellerName = raw.sellerName || raw.companyName || raw.auctioneer || raw.seller || '';
-    const isAdesaLot = isAdesa(sellerName);
 
     const stateRaw = raw.state || raw.locationState || raw.stateAbbr || '';
     const state = normalizeState(stateRaw);
@@ -130,7 +117,7 @@ function normalizeLot(raw, capturedApiUrl) {
         auction_end_time: raw.auctionEndDate || raw.endTime || raw.auctionEnd || raw.closeTime || null,
         listing_url: lotUrl,
         source_site: SOURCE,
-        source_type: isAdesaLot ? 'equipmentfacts_adesa' : 'equipmentfacts',
+        source_type: 'equipmentfacts',
         agency_name: sellerName,
         auctioneer_name: sellerName,
         photo_url: raw.imageUrl || raw.photoUrl || raw.thumbnailUrl || '',
