@@ -97,11 +97,11 @@ export class SecurityHeaders {
   private getCSPHeader(): string {
     const directives = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://lgpugcflvrqhslfnsjfh.supabase.co",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://lbnxzvqppccajllsqaaw.supabase.co",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: https: blob:",
-      "connect-src 'self' https://lgpugcflvrqhslfnsjfh.supabase.co wss://lgpugcflvrqhslfnsjfh.supabase.co",
+      "connect-src 'self' https://lbnxzvqppccajllsqaaw.supabase.co wss://lbnxzvqppccajllsqaaw.supabase.co",
       "frame-src 'none'",
       "object-src 'none'",
       "base-uri 'self'",
@@ -158,8 +158,8 @@ export const securityMiddleware = () => {
 // CORS configuration for secure origins
 export const getCORSConfig = (environment: 'development' | 'production' = 'production') => {
   const allowedOrigins = environment === 'development' 
-    ? ['http://localhost:3000', 'http://localhost:8080', 'https://lgpugcflvrqhslfnsjfh.supabase.co']
-    : ['https://lgpugcflvrqhslfnsjfh.supabase.co'];
+    ? ['http://localhost:3000', 'http://localhost:8080', 'https://lbnxzvqppccajllsqaaw.supabase.co']
+    : ['https://lbnxzvqppccajllsqaaw.supabase.co'];
 
   return {
     origin: allowedOrigins,

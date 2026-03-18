@@ -8,7 +8,7 @@ on:
 env:
   NODE_VERSION: '20'
   SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-  SUPABASE_PROJECT_ID: lgpugcflvrqhslfnsjfh
+  SUPABASE_PROJECT_ID: lbnxzvqppccajllsqaaw
 
 jobs:
   test:

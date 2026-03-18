@@ -41,18 +41,18 @@ class EnvironmentConfig {
   private loadConfiguration(): AppConfig {
     return {
       supabase: {
-        url: 'https://lgpugcflvrqhslfnsjfh.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncHVnY2ZsdnJxaHNsZm5zamZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NjkzODksImV4cCI6MjA3MTI0NTM4OX0.Tadce_MW20ZfG75-EtiAHQPy2VfS0ciH1bekFNlVX0U'
+        url: 'https://lbnxzvqppccajllsqaaw.supabase.co',
+        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI'
       },
       api: {
         baseUrl: process.env.NODE_ENV === 'production' 
-          ? 'https://lgpugcflvrqhslfnsjfh.supabase.co/functions/v1'
+          ? 'https://lbnxzvqppccajllsqaaw.supabase.co/functions/v1'
           : 'http://localhost:8000',
         timeout: 30000
       },
       websocket: {
         url: process.env.NODE_ENV === 'production'
-          ? 'wss://lgpugcflvrqhslfnsjfh.supabase.co/realtime/v1'
+          ? 'wss://lbnxzvqppccajllsqaaw.supabase.co/realtime/v1'
           : 'ws://localhost:8000',
         autoReconnect: true,
         reconnectDelay: 5000

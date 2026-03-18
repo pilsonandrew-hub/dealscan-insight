@@ -55,7 +55,7 @@ export class DeploymentManager {
       connectionLimit: 20
     },
     security: {
-      csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://lgpugcflvrqhslfnsjfh.supabase.co wss://lgpugcflvrqhslfnsjfh.supabase.co;",
+      csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://lbnxzvqppccajllsqaaw.supabase.co wss://lbnxzvqppccajllsqaaw.supabase.co;",
       hsts: true,
       xssProtection: true,
       frameOptions: 'DENY'
@@ -84,7 +84,7 @@ export class DeploymentManager {
     },
     security: {
       ...DeploymentManager.PRODUCTION_CONFIG.security,
-      csp: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://lgpugcflvrqhslfnsjfh.supabase.co wss://lgpugcflvrqhslfnsjfh.supabase.co;",
+      csp: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://lbnxzvqppccajllsqaaw.supabase.co wss://lbnxzvqppccajllsqaaw.supabase.co;",
       hsts: false
     },
     monitoring: {
