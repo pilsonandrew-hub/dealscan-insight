@@ -74,6 +74,14 @@
       "status": "enabled",
       "schedule": "0 */3 * * *",
       "notes": "USGovBid (usgovbid.com) impound/surplus vehicle auctions. WordPress Events Calendar REST API + Maxanet platform (bid.usgovbid.com). Playwright required for AJAX lot loading."
+    },
+    "ds-jjkane": {
+      "id": "lvb7T6VMFfNUQpqlq",
+      "scheduleId": "5eIHHDPO1Wp52hr4X",
+      "webhookId": "vZW5IhQw7uTpXeFG2",
+      "status": "enabled",
+      "schedule": "0 */3 * * *",
+      "notes": "JJ Kane Government Surplus (jjkane.com) — Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
