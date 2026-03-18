@@ -1,75 +1,18 @@
-/**
- * ds-allsurplus — AllSurplus (Ritchie Bros.) Scraper
- *
- * Uses the maestro API (maestro.lqdt1.com/search/list) discovered via network
- * interception. API is a POST endpoint with Solr-based facets filtering.
- *
- * Vehicle category IDs (product_category_external_id):
- *   - t6:  Transportation (parent)
- *   - 94Q: Passenger Vehicles
- *     - 94A: Automobiles/Cars
- *     - 94L: SUV
- *     - 94D: Vans
- *     - 94R: Electric/Hybrid Vehicle
- *     - 94:  Vehicles, Miscellaneous
- *   - 94C: Trucks (all)
- *     - 94B: Pickup Trucks
- *   - 94B: Pickup Trucks (standalone)
- *
- * Authentication: static API keys embedded in AllSurplus JS bundle.
- *   x-api-key: af93060f-337e-428c-87b8-c74b5837d6cd
- *   ocp-apim-subscription-key: cf620d1d8f904b5797507dc5fd1fdb80
- *
- * Note: These keys are public (embedded in the browser app) and used for
- * unauthenticated search. No login required.
- */
-
 import { Actor } from 'apify';
-import { v4 as uuidv4 } from 'uuid';
 
-const SOURCE = 'allsurplus';
-const BASE = 'https://www.allsurplus.com';
-const MAESTRO_API = 'https://maestro.lqdt1.com/search/list';
-const PHOTO_BASE = 'https://assets.allsurplus.com/assets/photos';
+// AllSurplus Maestro API - reverse-engineered from JS bundle
+const MAESTRO_URL = 'https://maestro.lqdt1.com';
+const MAESTRO_API_KEY = 'af93060f-337e-428c-87b8-c74b5837d6cd';
+const MAESTRO_SUBSCRIPTION_KEY = 'cf620d1d8f904b5797507dc5fd1fdb80';
+const BUSINESS_ID = 'AD'; // AllSurplus bizId
+const IMAGE_BASE = 'https://webassets.lqdt1.com/assets';
+const ASSET_URL_BASE = 'https://www.allsurplus.com/asset';
 
-// API keys (embedded in AllSurplus browser bundle - public)
-const API_KEY = 'af93060f-337e-428c-87b8-c74b5837d6cd';
-const SUBSCRIPTION_KEY = 'cf620d1d8f904b5797507dc5fd1fdb80';
-
-// Vehicle categories to target (Passenger Vehicles + Trucks)
-// Using separate facetsFilter requests per category for stability
-const VEHICLE_CATEGORY_FILTERS = [
-    // Passenger Vehicles (Cars, SUVs, Vans, Electric)
-    '{!tag=product_category_external_id}product_category_external_id:"94Q"',
-    // Trucks (Pickup, Box, Service, etc.)
-    '{!tag=product_category_external_id}product_category_external_id:"94C"',
-    // Pickup Trucks specifically (also under 94C but separate for completeness)
-    '{!tag=product_category_external_id}product_category_external_id:"94B"',
-];
-
-// Deduplicated single filter for all vehicle categories using Solr multi-value
-// Note: facetsFilter is an array; the API takes the FIRST filter as the category constraint
-// Use Transportation parent t6 to get all transportation, then filter in JS
-const TRANSPORT_FILTER = '{!tag=product_category_external_id}product_category_external_id:"t6"';
-
-// Sub-categories that are actual driveable vehicles (exclude aircraft, boats, etc.)
-const VEHICLE_CATEGORY_IDS = new Set([
-    '94Q', // Passenger Vehicles
-    '94A', // Automobiles/Cars
-    '94L', // SUV
-    '94D', // Vans
-    '94R', // Electric/Hybrid Vehicle
-    '94',  // Vehicles, Miscellaneous
-    '94O', // Classic/Custom Cars
-    '94C', // Trucks (all)
-    '94B', // Pickup Trucks
-    '64A', // Service & Utility Vehicles
-    '643', // Box Trucks
-    '645', // Dump Trucks
-    '646', // Flatbed Trucks
-    '64G', // Truck Tractors
-    '385', // Specialized Vehicles
-    '94G', // All Terrain Vehicles
+const US_STATES = new Set([
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC'
 ]);
 
 const TARGET_STATES = new Set([
@@ -77,323 +20,342 @@ const TARGET_STATES = new Set([
 ]);
 
 const HIGH_RUST_STATES = new Set([
-    'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA',
-    'ND','SD','NE','KS','WV','ME','NH','VT','MA','RI',
-    'CT','NJ','MD','DE'
+    'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA','ND','SD','NE','KS','WV',
+    'ME','NH','VT','MA','RI','CT','NJ','MD','DE'
 ]);
 
-const VEHICLE_MAKES = ['ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc','chrysler',
-    'hyundai','kia','subaru','mazda','volkswagen','vw','bmw','mercedes','audi','lexus','acura','infiniti',
-    'cadillac','lincoln','buick','pontiac','mitsubishi','volvo','tesla','rivian','lucid','genesis',
-    'land rover','landrover','jaguar','porsche','fiat','alfa romeo','maserati','bentley','rolls royce'];
+// Vehicle-related search terms to cover the category
+const VEHICLE_SEARCHES = [
+    'ford truck pickup',
+    'chevrolet chevy pickup truck',
+    'toyota tacoma tundra',
+    'dodge ram pickup',
+    'honda accord civic',
+    'nissan truck suv',
+    'jeep wrangler cherokee',
+    'gmc sierra canyon',
+    'hyundai kia suv',
+    'subaru outback forester',
+    'sedan SUV van',
+];
+
+// Vehicle category IDs from AllSurplus
+// t6 = Transportation (Segment level 1)
+const VEHICLE_CATEGORY_FACET = '{!tag=product_category_external_id}product_category_external_id:"t6"';
+
+const VEHICLE_MAKES = new Set([
+    'ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc',
+    'chrysler','hyundai','kia','subaru','mazda','volkswagen','vw','bmw','mercedes',
+    'audi','lexus','acura','infiniti','cadillac','lincoln','buick','pontiac',
+    'mitsubishi','volvo','tesla','rivian','lucid','genesis','saturn','oldsmobile',
+    'mercury','hummer','mini','fiat','alfa','maserati','ferrari','lamborghini',
+    'bentley','rolls','jaguar','land rover','range rover','porsche','saab',
+    'suzuki','isuzu','daihatsu','datsun','geo','scion','smart','rivian',
+    'freightliner','kenworth','peterbilt','mack','volvo trucks','international',
+    'pierce','american lafrance','seagrave','rosenbauer',
+]);
+
+const VEHICLE_KEYWORDS = [
+    'car','truck','suv','van','pickup','sedan','coupe','wagon','vehicle',
+    '4wd','awd','4x4','hybrid','electric','ev','crossover','hatchback',
+    'convertible','roadster','cab','crew','extended cab','regular cab',
+];
+
+// Non-vehicle patterns to reject
+const REJECT_PATTERNS = [
+    /\btransformer\b/i, /\bturbine\b/i, /\bgenerator\b/i, /\bexcavator\b/i,
+    /\bbulldozer\b/i, /\bforklift\b/i, /\bcrane\b/i, /\bloader\b/i,
+    /\bcompressor\b/i, /\bpump\b/i, /\bboiler\b/i, /\bchipper\b/i,
+    /\breal estate\b/i, /\bproperty\b/i, /\bhome\b.*\bbedroom/i,
+    /\bboat\b/i, /\bvessel\b/i, /\baircraft\b/i, /\bplane\b/i, /\bhelicopter\b/i,
+    /\btrailer\b/i, /\bdumpster\b/i, /\bscraper\b.*\beach/i,
+    /\btractors?\b(?!.*\bford\b)/i,
+];
+
+// Commercial/fleet patterns
+const COMMERCIAL_PATTERNS = [
+    /\bfire\s*truck\b/i, /\bambulance\b/i, /\bgarbage\b.*\btruck/i,
+    /\bvacuum\s*truck\b/i, /\bbucket\s*truck\b/i, /\bcherry\s*picker\b/i,
+    /\bstreet\s*sweeper\b/i, /\bconcrete\s*mixer\b/i, /\bcement\s*truck\b/i,
+    /\bdump\s*truck\b/i, /\bbox\s*truck\b/i, /\bcargo\s*van\b/i,
+    /\bstep\s*van\b/i, /\bshuttle\s*bus\b/i, /\bschool\s*bus\b/i,
+    /\btransit\s*bus\b/i, /\bcoach\s*bus\b/i,
+    /\bhydro\s*excavation\b/i, /\bvactor\b/i,
+    /\bE-250\b/i, /\bE-350\b/i, /\b2500\b.*\bcargo\b/i, /\b3500\b.*\bcargo\b/i,
+];
+
+function isVehicle(title, categoryDesc) {
+    const lower = title.toLowerCase();
+    const catLower = (categoryDesc || '').toLowerCase();
+    
+    // Auto-qualify on category
+    if (catLower.match(/\b(pickup|sedan|suv|coupe|convertible|hatchback|crossover|passenger car|vehicles?\s*misc|cars?\s*&|automobile)\b/)) {
+        return true;
+    }
+    
+    // Reject non-vehicles
+    for (const pattern of REJECT_PATTERNS) {
+        if (pattern.test(lower)) return false;
+    }
+    
+    // Reject commercial
+    for (const pattern of COMMERCIAL_PATTERNS) {
+        if (pattern.test(lower)) return false;
+    }
+    
+    // Check for year + make pattern (strong signal)
+    const yearMatch = lower.match(/\b(20\d{2}|19[89]\d)\b/);
+    if (yearMatch) {
+        for (const make of VEHICLE_MAKES) {
+            if (lower.includes(make)) return true;
+        }
+    }
+    
+    // Check for vehicle keywords  
+    for (const kw of VEHICLE_KEYWORDS) {
+        if (lower.includes(kw)) return true;
+    }
+    
+    return false;
+}
+
+function parseState(locationState) {
+    if (!locationState) return null;
+    // AllSurplus returns 2-letter US codes or "ZA-NL" format for other countries
+    if (US_STATES.has(locationState)) return locationState;
+    // Try extracting from "XX-YY" format (non-US)
+    return null;
+}
+
+function parseBid(val) {
+    if (!val) return 0;
+    const n = parseFloat(String(val).replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+}
+
+function buildLotUrl(assetId, accountId) {
+    return `${ASSET_URL_BASE}/${assetId}/${accountId}`;
+}
+
+function buildImageUrl(photo) {
+    if (!photo) return null;
+    // photo field is like "31315_5_uuid.jpg?cb=260410070000"
+    const base = photo.split('?')[0];
+    return `${IMAGE_BASE}/${base}`;
+}
+
+function inferTitleStatus(description) {
+    if (!description) return 'Unknown';
+    const lower = description.toLowerCase();
+    if (/\bsalvage\b/.test(lower)) return 'Salvage';
+    if (/\brebuilt\b/.test(lower)) return 'Rebuilt';
+    if (/\bclean\b/.test(lower)) return 'Clean';
+    return 'Unknown';
+}
+
+async function searchMaestro(searchText, page, displayRows, facetsFilter = [], sessionId) {
+    const correlationId = crypto.randomUUID ? crypto.randomUUID() : 
+        Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+    
+    const body = {
+        businessId: BUSINESS_ID,
+        searchText,
+        isQAL: false,
+        page,
+        displayRows,
+        sortField: 'closeDatetime',
+        sortOrder: 'asc',
+        sessionId,
+        requestType: 1,
+        responseStyle: 1,
+        facets: [],
+        facetsFilter,
+        isVehicleSearch: false,
+    };
+    
+    const response = await fetch(`${MAESTRO_URL}/search/list`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip',
+            'Origin': 'https://www.allsurplus.com',
+            'Referer': 'https://www.allsurplus.com/',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'x-api-key': MAESTRO_API_KEY,
+            'x-user-id': '-1',
+            'x-api-correlation-id': correlationId,
+            'Ocp-Apim-Subscription-Key': MAESTRO_SUBSCRIPTION_KEY,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30000),
+    });
+    
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`API error ${response.status}: ${text.slice(0, 200)}`);
+    }
+    
+    return await response.json();
+}
 
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 20,
+    maxSearchPages = 5,
+    displayRows = 50,
     minBid = 3000,
     maxBid = 35000,
     maxMileage = 50000,
     minYear = 2022,
-    targetStates = [...TARGET_STATES],
-    displayRows = 120,
+    targetStatesOnly = false,
+    allowHighRust = false,
+    searchTerms = VEHICLE_SEARCHES,
 } = input;
 
-const targetStateSet = new Set(targetStates.map(s => s.toUpperCase()));
-const allListings = new Map(); // dedup by listing_id
+const sessionId = `ds-allsurplus-${Date.now()}`;
+const seenIds = new Set();
+const allListings = [];
 let totalFound = 0;
-let totalAfterFilters = 0;
+let totalPassed = 0;
 
-const log = {
-    info: (...args) => console.log('[INFO]', ...args),
-    debug: (...args) => {}, // suppress debug in prod
-    error: (...args) => console.error('[ERROR]', ...args),
-    warn: (...args) => console.warn('[WARN]', ...args),
-};
+console.log(`[AllSurplus] Starting maestro API scraper | sessionId=${sessionId}`);
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function isVehicleCategory(assetCategory) {
-    return VEHICLE_CATEGORY_IDS.has(assetCategory);
-}
-
-function parseVehicleTitle(title, makebrand, model, modelYear) {
-    const titleStr = String(title || '');
-    const makeStr = String(makebrand || '');
-    const modelStr = String(model || '');
-    const yearStr = String(modelYear || '');
-
-    // Year
-    const yearMatch = yearStr.match(/\b(20\d{2}|19[89]\d)\b/) ||
-                      titleStr.match(/\b(20\d{2}|19[89]\d)\b/);
-    const year = yearMatch ? parseInt(yearMatch[1]) : null;
-
-    // Make — prefer the API field, fall back to title parse
-    let make = null;
-    if (makeStr && makeStr.length > 1 && makeStr !== ' ') {
-        make = makeStr.trim();
-        // Normalize
-        const makeLower = make.toLowerCase();
-        if (makeLower === 'chevy') make = 'Chevrolet';
-        if (makeLower === 'vw') make = 'Volkswagen';
-        if (makeLower === 'land rover' || makeLower === 'landrover') make = 'Land Rover';
-    } else {
-        const lower = titleStr.toLowerCase();
-        for (const m of VEHICLE_MAKES) {
-            if (lower.includes(m)) {
-                make = m.charAt(0).toUpperCase() + m.slice(1);
-                if (make === 'Chevy') make = 'Chevrolet';
-                if (make === 'Vw') make = 'Volkswagen';
+for (const searchText of searchTerms) {
+    console.log(`[AllSurplus] Searching: "${searchText}"`);
+    
+    for (let page = 1; page <= maxSearchPages; page++) {
+        try {
+            const data = await searchMaestro(searchText, page, displayRows, [], sessionId);
+            
+            if (!data || !Array.isArray(data.assetSearchResults)) {
+                console.log(`[AllSurplus] No results for "${searchText}" page ${page}`);
                 break;
             }
-        }
-    }
-
-    // Model — prefer API field
-    const resolvedModel = modelStr && modelStr.length > 1 && modelStr !== ' '
-        ? modelStr.trim()
-        : null;
-
-    return { year, make, model: resolvedModel };
-}
-
-function parseState(stateCode, country) {
-    if (country && country !== 'USA') return null; // only US vehicles
-    if (!stateCode) return null;
-    // AllSurplus uses 2-letter state codes directly
-    const s = stateCode.replace(/^US-/, '').toUpperCase();
-    return s.length === 2 ? s : null;
-}
-
-function parseBid(value) {
-    if (!value && value !== 0) return 0;
-    const match = String(value).replace(/,/g, '').match(/[\d]+\.?\d*/);
-    return match ? parseFloat(match[0]) : 0;
-}
-
-function parseDate(dateStr) {
-    if (!dateStr) return null;
-    try {
-        const d = new Date(dateStr);
-        if (!isNaN(d.getTime())) return d.toISOString();
-    } catch {}
-    return null;
-}
-
-function buildPhotoUrl(photoFile) {
-    if (!photoFile) return null;
-    if (photoFile.startsWith('http')) return photoFile;
-    return `${PHOTO_BASE}/${photoFile}`;
-}
-
-function applyFilters(listing) {
-    const state = listing.state;
-
-    if (state && HIGH_RUST_STATES.has(state)) {
-        log.debug(`[SKIP] High-rust state: ${state} — ${listing.title}`);
-        return false;
-    }
-    if (state && !targetStateSet.has(state)) {
-        log.debug(`[SKIP] Out-of-target state: ${state}`);
-        return false;
-    }
-    if (!state) {
-        log.debug(`[SKIP] No US state — ${listing.title}`);
-        return false;
-    }
-    if (listing.current_bid > 0 && listing.current_bid < minBid) {
-        log.debug(`[SKIP] Bid too low: $${listing.current_bid}`);
-        return false;
-    }
-    if (listing.current_bid > 0 && listing.current_bid > maxBid) {
-        log.debug(`[SKIP] Bid too high: $${listing.current_bid}`);
-        return false;
-    }
-    if (listing.year && listing.year < minYear) {
-        log.debug(`[SKIP] Too old: ${listing.year}`);
-        return false;
-    }
-    if (listing.mileage && listing.mileage > maxMileage) {
-        log.debug(`[SKIP] Too many miles: ${listing.mileage}`);
-        return false;
-    }
-    return true;
-}
-
-// ─── Maestro API ─────────────────────────────────────────────────────────────
-
-async function maestroSearch({ categoryFilter, page = 1, rows = displayRows }) {
-    const correlationId = uuidv4();
-    const sessionId = uuidv4();
-
-    const body = {
-        categoryIds: '',
-        businessId: 'AD',
-        searchText: '*',
-        isQAL: false,
-        locationId: null,
-        model: '',
-        makebrand: '',
-        auctionTypeId: null,
-        page,
-        displayRows: rows,
-        sortField: 'enddate',
-        sortOrder: 'asc',
-        requestType: 'search',
-        responseStyle: 'productsOnly',
-        facets: ['categoryName', 'region'],
-        facetsFilter: [categoryFilter],
-        timeType: '',
-        sellerTypeId: null,
-        accountIds: [],
-    };
-
-    const res = await fetch(MAESTRO_API, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'x-api-key': API_KEY,
-            'ocp-apim-subscription-key': SUBSCRIPTION_KEY,
-            'x-api-correlation-id': correlationId,
-            'x-ecom-session-id': sessionId,
-            'x-user-id': '-1',
-            'x-user-timezone': 'America/Los_Angeles',
-            'Referer': `${BASE}/`,
-            'x-referer': `${BASE}/en/search`,
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(30000),
-    });
-
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Maestro API HTTP ${res.status}: ${text.slice(0, 200)}`);
-    }
-
-    const data = await res.json();
-    return {
-        items: data.assetSearchResults || [],
-        total: data.totalAssets || 0,
-    };
-}
-
-function processItem(item) {
-    const listingId = `allsurplus-${item.accountId}-${item.assetId}`;
-    if (allListings.has(listingId)) return null; // deduplicate
-
-    // Only process US vehicles in our target categories
-    if (item.country !== 'USA') return null;
-
-    const assetCategory = item.assetCategory || '';
-    if (!isVehicleCategory(assetCategory)) {
-        log.debug(`[SKIP-CAT] ${assetCategory}: ${item.assetShortDescription}`);
-        return null;
-    }
-
-    totalFound++;
-
-    const title = String(item.assetShortDescription || '');
-    const state = parseState(item.locationState, item.country);
-    const { year, make, model } = parseVehicleTitle(title, item.makebrand, item.model, item.modelYear);
-    const bid = parseBid(item.currentBid);
-
-    // Mileage from odometer field if present (API sometimes includes it)
-    const mileageRaw = item.odometer || item.mileage || null;
-    const mileage = mileageRaw ? parseInt(String(mileageRaw).replace(/,/g, '')) : null;
-
-    const listing = {
-        listing_id: listingId,
-        title,
-        current_bid: bid,
-        buy_now_price: parseBid(item.buyNowPrice || item.assetBuyNow || null) || null,
-        auction_end_date: parseDate(item.assetAuctionEndDate || item.assetAuctionEndDateUtc || null),
-        state,
-        listing_url: `${BASE}/asset/${item.assetId}/${item.accountId}`,
-        image_url: buildPhotoUrl(item.photo),
-        lot_number: String(item.lotNumber || item.assetId || ''),
-        mileage: mileage && mileage > 0 ? mileage : null,
-        vin: item.vin || null,
-        year,
-        make,
-        model,
-        category: item.categoryDescription || assetCategory,
-        source: SOURCE,
-        scraped_at: new Date().toISOString(),
-    };
-
-    return listing;
-}
-
-// ─── Main Scrape Loop ─────────────────────────────────────────────────────────
-
-log.info('[AllSurplus] Starting maestro API scrape');
-log.info(`[AllSurplus] Target: ${targetStateSet.size} states, bid $${minBid}-$${maxBid}, year >=${minYear}`);
-
-// We use the Passenger Vehicles (94Q) and Trucks (94C) filters separately
-// to maximize coverage. Pickup trucks (94B) are under 94C so no need for separate query.
-const CATEGORY_QUERIES = [
-    { label: 'Passenger Vehicles', filter: '{!tag=product_category_external_id}product_category_external_id:"94Q"' },
-    { label: 'Trucks', filter: '{!tag=product_category_external_id}product_category_external_id:"94C"' },
-];
-
-for (const { label, filter } of CATEGORY_QUERIES) {
-    log.info(`[AllSurplus] Fetching category: ${label}`);
-
-    try {
-        // First page to get total
-        const { items: firstPage, total } = await maestroSearch({ categoryFilter: filter, page: 1 });
-        const totalPages = Math.min(Math.ceil(total / displayRows), maxPages);
-        log.info(`[AllSurplus] ${label}: ${total} total items, ${totalPages} pages`);
-
-        // Process first page
-        for (const item of firstPage) {
-            const listing = processItem(item);
-            if (!listing) continue;
-            if (applyFilters(listing)) {
-                totalAfterFilters++;
-                log.info(`[PASS] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
-                allListings.set(listing.listing_id, listing);
+            
+            const results = data.assetSearchResults;
+            console.log(`[AllSurplus] "${searchText}" page ${page}: ${results.length} results`);
+            
+            if (results.length === 0) break;
+            
+            for (const item of results) {
+                totalFound++;
+                
+                const itemId = `${item.accountId}-${item.assetId}`;
+                if (seenIds.has(itemId)) continue;
+                seenIds.add(itemId);
+                
+                const title = (item.assetShortDescription || '').trim();
+                const categoryDesc = item.categoryDescription || '';
+                
+                // Vehicle check
+                if (!isVehicle(title, categoryDesc)) {
+                    continue;
+                }
+                
+                // State check - must be US state
+                const state = parseState(item.locationState);
+                if (!state) {
+                    console.log(`[SKIP] Non-US state: ${item.locationState} — ${title}`);
+                    continue;
+                }
+                
+                // Currency check - must be USD
+                if (item.currencyCode && item.currencyCode !== 'USD') {
+                    console.log(`[SKIP] Non-USD currency: ${item.currencyCode} — ${title}`);
+                    continue;
+                }
+                
+                if (!allowHighRust && HIGH_RUST_STATES.has(state)) {
+                    console.log(`[SKIP] High-rust state: ${state} — ${title}`);
+                    continue;
+                }
+                
+                if (targetStatesOnly && !TARGET_STATES.has(state)) {
+                    console.log(`[SKIP] Non-target state: ${state}`);
+                    continue;
+                }
+                
+                const bid = parseBid(item.currentBid);
+                
+                if (bid > 0 && bid < minBid) {
+                    console.log(`[SKIP] Bid too low: $${bid} — ${title}`);
+                    continue;
+                }
+                if (bid > 0 && bid > maxBid) {
+                    console.log(`[SKIP] Bid too high: $${bid} — ${title}`);
+                    continue;
+                }
+                
+                const year = item.modelYear ? parseInt(item.modelYear) : null;
+                if (year && year < minYear) {
+                    console.log(`[SKIP] Too old: ${year} — ${title}`);
+                    continue;
+                }
+                
+                const lotUrl = buildLotUrl(item.assetId, item.accountId);
+                const imageUrl = buildImageUrl(item.photo);
+                const auctionEndDate = item.assetAuctionEndDateUtc || item.assetAuctionEndDate 
+                    ? new Date(item.assetAuctionEndDateUtc || item.assetAuctionEndDate).toISOString()
+                    : null;
+                
+                const listing = {
+                    // Required DealerScope fields (normalize_apify_vehicle compatible)
+                    year: year || null,
+                    make: item.makebrand || null,
+                    model: item.model || null,
+                    mileage: null, // not available from search list API
+                    title_status: 'Unknown', // not in list API
+                    auction_source: 'AllSurplus',
+                    source_site: 'allsurplus',
+                    source: 'allsurplus',
+                    current_bid: bid,
+                    auction_end_date: auctionEndDate,
+                    // Field aliases for ingest compatibility
+                    state: state,           // normalize_apify_vehicle reads "state"
+                    location_state: state,  // extra alias
+                    listing_url: lotUrl,    // normalize_apify_vehicle reads "listing_url" or "url"
+                    lot_url: lotUrl,        // extra alias
+                    image_url: imageUrl,
+                    photo_url: imageUrl,    // normalize_apify_vehicle reads "image_url" or "photo_url"
+                    description: title,
+                    
+                    // Additional metadata
+                    listing_id: itemId,
+                    title,
+                    lot_number: String(item.lotNumber || item.assetId),
+                    vin: null,
+                    category: categoryDesc,
+                    company_name: item.companyName || null,
+                    account_id: item.accountId,
+                    asset_id: item.assetId,
+                    event_id: item.eventId,
+                    scraped_at: new Date().toISOString(),
+                };
+                
+                totalPassed++;
+                console.log(`[PASS] ${title} | $${bid} | ${state} | ${year || '?'} ${item.makebrand || '?'} ${item.model || '?'}`);
+                allListings.push(listing);
                 await Actor.pushData(listing);
             }
+            
+            // Check if there are more pages
+            if (results.length < displayRows) break;
+            
+            // Small delay between pages
+            await new Promise(r => setTimeout(r, 500));
+            
+        } catch (err) {
+            console.error(`[AllSurplus] Error searching "${searchText}" page ${page}: ${err.message}`);
+            break;
         }
-
-        // Fetch remaining pages
-        for (let pageNum = 2; pageNum <= totalPages; pageNum++) {
-            log.info(`[AllSurplus] ${label}: page ${pageNum}/${totalPages}`);
-
-            try {
-                const { items } = await maestroSearch({ categoryFilter: filter, page: pageNum });
-                if (!items || items.length === 0) break;
-
-                for (const item of items) {
-                    const listing = processItem(item);
-                    if (!listing) continue;
-                    if (applyFilters(listing)) {
-                        totalAfterFilters++;
-                        log.info(`[PASS] ${listing.title} | $${listing.current_bid} | ${listing.state}`);
-                        allListings.set(listing.listing_id, listing);
-                        await Actor.pushData(listing);
-                    }
-                }
-
-                // Polite delay
-                await new Promise(r => setTimeout(r, 500));
-            } catch (err) {
-                log.error(`[AllSurplus] Page ${pageNum} error: ${err.message}`);
-                break;
-            }
-        }
-    } catch (err) {
-        log.error(`[AllSurplus] Category "${label}" failed: ${err.message}`);
     }
-
-    // Delay between category queries
+    
+    // Small delay between search terms
     await new Promise(r => setTimeout(r, 1000));
 }
 
-log.info(`[ALLSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Unique: ${allListings.size}`);
+console.log(`[ALLSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed} | Unique: ${seenIds.size}`);
 
 await Actor.exit();
