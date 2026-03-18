@@ -66,6 +66,14 @@
       "webhookId": "lcQSaKEq2yb3EfoZb",
       "status": "enabled",
       "notes": "Sandhills Cloud platform — ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Schedule: every 3hr."
+    },
+    "ds-usgovbid": {
+      "id": "6XO9La81aEmtsCT3g",
+      "scheduleId": "PZRUZq76opvUAxTzV",
+      "webhookId": "QhPfZWcztslsbKDlm",
+      "status": "enabled",
+      "schedule": "0 */3 * * *",
+      "notes": "USGovBid (usgovbid.com) impound/surplus vehicle auctions. WordPress Events Calendar REST API + Maxanet platform (bid.usgovbid.com). Playwright required for AJAX lot loading."
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",

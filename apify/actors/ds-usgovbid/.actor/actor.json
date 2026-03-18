@@ -1,0 +1,39 @@
+{
+  "actorSpecification": 1,
+  "name": "ds-usgovbid",
+  "title": "DealerScope — USGovBid Impound Vehicle Scraper",
+  "description": "Scrapes impound and government surplus vehicle listings from usgovbid.com. Uses WordPress Events Calendar REST API to discover active auctions, then Playwright to load individual lot pages from bid.usgovbid.com (Maxanet platform).",
+  "version": "1.0.0",
+  "input": {
+    "schemaVersion": 1,
+    "title": "USGovBid Scraper Input",
+    "description": "Configuration for the USGovBid vehicle auction scraper",
+    "type": "object",
+    "properties": {
+      "maxAuctions": {
+        "title": "Max Auctions",
+        "description": "Maximum number of auction events to process",
+        "type": "integer",
+        "default": 10
+      },
+      "maxLotsPerAuction": {
+        "title": "Max Lots Per Auction",
+        "description": "Maximum number of lots to fetch per auction",
+        "type": "integer",
+        "default": 200
+      },
+      "minBid": {
+        "title": "Minimum Bid ($)",
+        "description": "Skip lots with current bid below this amount",
+        "type": "integer",
+        "default": 500
+      },
+      "maxBid": {
+        "title": "Maximum Bid ($)",
+        "description": "Skip lots with current bid above this amount",
+        "type": "integer",
+        "default": 35000
+      }
+    }
+  }
+}
