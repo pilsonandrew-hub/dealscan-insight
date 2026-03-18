@@ -7,6 +7,7 @@ import {
 import { useAuth } from '@/contexts/ModernAuthContext';
 import api from '@/services/api';
 import { Opportunity } from '@/types/dealerscope';
+import { supabase } from '@/integrations/supabase/client';
 
 // ─── Icons (lucide-react is in package.json) ──────────────────────────────────
 import {

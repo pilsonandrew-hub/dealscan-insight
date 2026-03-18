@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CanonicalQuery, SearchResponse, CrosshairIntent, CanonicalListing } from '@/types/crosshair';
 import { Zap, AlertTriangle, Activity, TrendingUp, Clock, Search, Crosshair } from 'lucide-react';
+import { roverAPI } from '@/services/roverAPI';
 
 export const CrosshairDashboard = () => {
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
@@ -248,6 +249,9 @@ export const CrosshairDashboard = () => {
   const handleWatch = async (listing: CanonicalListing) => {
     try {
       // Create an alert for this specific listing
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+
       const { error } = await supabase
         .from('user_alerts')
         .insert({
@@ -257,10 +261,29 @@ export const CrosshairDashboard = () => {
           message: `Price: ${listing.bid_current ? `$${listing.bid_current}` : 'N/A'} - ${listing.source}`,
           priority: 'medium',
           opportunity_data: listing as any,
-          user_id: (await supabase.auth.getUser()).data.user?.id!
+          user_id: userId!
         });
 
       if (error) throw error;
+
+      // Fire Rover save event (non-blocking)
+      if (userId) {
+        roverAPI.trackEvent({
+          userId,
+          event: 'save',
+          item: {
+            id: listing.id,
+            make: listing.make,
+            model: listing.model,
+            year: listing.year,
+            price: listing.bid_current ?? listing.buy_now ?? 0,
+            source: listing.source,
+            source_site: listing.source,
+            state: listing.location.state,
+            mileage: listing.odo_miles,
+          },
+        });
+      }
 
       toast({
         title: "Watching Listing",
