@@ -29,6 +29,13 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
+// DISABLED: HiBid is a general auction site (coins, jewelry, estate sales).
+// Vehicle lots are rare (<1%), location data missing from tiles, CAD currency mixing.
+// Not worth the Apify compute cost. Disabled 2026-03-17.
+await Actor.init();
+console.log('[HIBID] Actor disabled - not a viable vehicle source');
+await Actor.exit();
+
 const SOURCE = 'hibid-bidcal';
 const BASE_URL = 'https://hibid.com';
 // Lots search = individual items (not auction events). Vehicle keywords filter for relevant lots.
