@@ -3,47 +3,56 @@
     "ds-govdeals": {
       "id": "CuKaIAcWyFS0EPrAz",
       "scheduleId": "qjgekMFdXQDRrULto",
-      "webhookId": "ZtD68eBxLI416ql80"
+      "webhookId": "ZtD68eBxLI416ql80",
+      "status": "enabled"
     },
     "ds-publicsurplus": {
       "id": "9xxQLlRsROnSgA42i",
       "scheduleId": "IZsc1DPIraSBlT4eu",
-      "webhookId": "8yqQfG35cyEAjQ0z1"
+      "webhookId": "8yqQfG35cyEAjQ0z1",
+      "status": "enabled"
     },
     "ds-hibid": {
       "id": "e8UeyRvQ6QSnX5fhP",
       "scheduleId": "LNhrCXrqdHMuzInc3",
-      "webhookId": "caMGRnk95hTAWmjcr"
+      "webhookId": "caMGRnk95hTAWmjcr",
+      "status": "enabled"
     },
     "ds-municibid": {
       "id": "svmsItf3CRBZuIntp",
       "scheduleId": "YRrPwLatWXzJnOzeS",
-      "webhookId": "QYOKGB6ejtlcfSaXm"
+      "webhookId": "QYOKGB6ejtlcfSaXm",
+      "status": "enabled"
     },
     "ds-gsaauctions": {
       "id": "fvDnYmGuFBCrwpEi9",
       "scheduleId": "rJ2FyiGHrxIOOHhor",
-      "webhookId": "QgKHl5U66MXMpoBHs"
+      "webhookId": "QgKHl5U66MXMpoBHs",
+      "status": "enabled"
     },
     "ds-allsurplus": {
       "id": "gYGIfHeYeN3EzmLnB",
       "scheduleId": "MBuO3CqsBprCha5fH",
-      "webhookId": "fjxMgUc6GH6rJRISU"
+      "webhookId": "fjxMgUc6GH6rJRISU",
+      "status": "enabled"
     },
     "ds-bidcal": {
       "id": "DF1THdFOBSYlxyNjD",
       "scheduleId": "ZmaJLeGu3klW8Yd2Z",
-      "webhookId": "pDMsSYxpqaFwC8s2Y"
+      "webhookId": "pDMsSYxpqaFwC8s2Y",
+      "status": "enabled"
     },
     "ds-auctiontime": {
       "id": "eb4oYXDf8qs1Ckbth",
       "scheduleId": "ayw0gnoHxgezNswF6",
-      "webhookId": "IqLsgHfhiAT04sPtB"
+      "webhookId": "IqLsgHfhiAT04sPtB",
+      "status": "enabled"
     },
     "ds-govplanet": {
       "id": "pO2t5UDoSVmO1gvKJ",
       "scheduleId": "jijJOYPk449GYMD6b",
-      "webhookId": "SINNRTPxfC8F5szXq"
+      "webhookId": "SINNRTPxfC8F5szXq",
+      "status": "enabled"
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
