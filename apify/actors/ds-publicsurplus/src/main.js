@@ -1,5 +1,17 @@
+/**
+ * PublicSurplus scraper with VIN extraction.
+ *
+ * VIN extraction strategy:
+ * 1. TX titles already embed VIN (regex extracted in parseTXSurplusTitle)
+ * 2. Standard listings: regex VIN scan over title + description
+ * 3. Fallback: visit detail page and regex over full page text
+ *    - Capped at MAX_DETAIL_PAGES (200) per run, ~1 req/sec
+ */
+
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
+
+const MAX_DETAIL_PAGES = 200;
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
@@ -190,6 +202,19 @@ function parseState(location) {
     return match ? match[1].toUpperCase() : null;
 }
 
+// Queue of passing standard listings that need VIN detail-page scraping
+const vinQueue = [];
+let detailPageCount = 0;
+
+/**
+ * Extract VIN via regex from combined title + description text.
+ * Returns null if not found.
+ */
+function extractVinFromText(text) {
+    const match = String(text || '').match(VIN_PATTERN);
+    return match ? match[1].toUpperCase() : null;
+}
+
 async function pushListing(listing, sourceUrl, log) {
     const title = normalizeText(listing.title);
     const description = normalizeText(listing.description);
@@ -227,11 +252,15 @@ async function pushListing(listing, sourceUrl, log) {
 
     const { year, make, model } = parseVehicleTitle(title);
 
+    // Try extracting VIN from title + description text first
+    const vinFromText = extractVinFromText([title, description].join(' '));
+
     const vehicle = {
         title,
         year,
         make,
         model,
+        vin: vinFromText || null,
         current_bid: currentBid,
         buyer_premium: 0.10,
         doc_fee: 50,
@@ -249,8 +278,14 @@ async function pushListing(listing, sourceUrl, log) {
     };
 
     totalAfterFilters++;
-    log.info(`[PASS] ${vehicle.title} | $${vehicle.current_bid} | ${vehicle.state}`);
-    await Actor.pushData(vehicle);
+    log.info(`[PASS] ${vehicle.title} | $${vehicle.current_bid} | ${vehicle.state} | VIN: ${vehicle.vin || 'pending'}`);
+
+    // If no VIN found yet and we have a detail URL, queue for detail page scrape
+    if (!vehicle.vin && listingUrl && detailPageCount < MAX_DETAIL_PAGES) {
+        vinQueue.push(vehicle);
+    } else {
+        await Actor.pushData(vehicle);
+    }
     return true;
 }
 
@@ -320,13 +355,31 @@ const crawler = new PlaywrightCrawler({
             headless: true,
         },
     },
-    maxRequestsPerCrawl: effectiveMaxPages + maxTXPages + 5,
+    maxRequestsPerCrawl: effectiveMaxPages + maxTXPages + MAX_DETAIL_PAGES + 5,
     navigationTimeoutSecs: 60,
     requestHandlerTimeoutSecs: 120,
     maxConcurrency: 2,
     minConcurrency: 1,
 
     async requestHandler({ page, request, enqueueLinks, log }) {
+        // ── PublicSurplus detail page — extract VIN ────────────────────────────
+        if (request.label === 'DETAIL_VIN') {
+            const vehicle = request.userData.vehicle;
+            try {
+                await page.waitForLoadState('domcontentloaded', { timeout: 20000 }).catch(() => {});
+                await page.waitForTimeout(1000);
+                const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+                const vin = extractVinFromText(bodyText);
+                if (vin) {
+                    vehicle.vin = vin;
+                    log.info(`[VIN DETAIL] Found VIN ${vin} for: ${vehicle.title}`);
+                }
+            } catch (err) {
+                log.warning(`[VIN DETAIL] Failed for ${request.url}: ${err.message}`);
+            }
+            await Actor.pushData(vehicle);
+            return;
+        }
         // ── Texas State Surplus (mobile site) ──────────────────────────────────
         if (request.label === 'TX_LIST') {
             const currentPage = request.userData?.pageNum ?? 1;
@@ -520,6 +573,19 @@ await crawler.run([
     { url: startUrl, label: 'LIST', userData: { pageNum: 1 } },
     { url: TX_SURPLUS_BASE, label: 'TX_LIST', userData: { pageNum: 1 } },
 ]);
+
+// ── VIN enrichment: visit detail pages for listings without a VIN ──────────
+if (vinQueue.length > 0) {
+    console.log(`[PUBLICSURPLUS] Enriching VINs: ${vinQueue.length} detail pages to visit`);
+    const detailRequests = vinQueue.map((vehicle) => ({
+        url: vehicle.listing_url,
+        label: 'DETAIL_VIN',
+        userData: { vehicle },
+    }));
+    await crawler.run(detailRequests);
+} else {
+    console.log('[PUBLICSURPLUS] No VIN detail pages needed (all VINs found inline or no passing lots)');
+}
 
 console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
 

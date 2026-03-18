@@ -14,6 +14,11 @@
  * - POST https://maestro.lqdt1.com/search/list
  * - x-api-key auth header
  * - assetSearchResults response shape
+ *
+ * VIN extraction strategy:
+ * 1. Check lot.vin field from API response
+ * 2. Extract VIN regex from lot description/notes fields
+ * 3. Fallback: visit GovDeals detail page via Playwright (up to 200/run, 1 req/sec)
  */
 
 import { Actor } from 'apify';
@@ -24,6 +29,10 @@ const HIGH_RUST_STATES = new Set([
     'ND','SD','NE','KS','WV','ME','NH','VT','MA','RI',
     'CT','NJ','MD','DE',
 ]);
+
+// Standard 17-char VIN pattern (no I, O, Q)
+const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
+const MAX_DETAIL_PAGES = 200;
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
@@ -37,6 +46,9 @@ const capturedApi = {
     requestHeaders: null,
     interceptedLots: [],  // lots captured directly from page responses
 };
+
+// Collect passing lots in memory so we can VIN-enrich before pushing
+const passingLots = [];
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
 function extractLots(json) {
@@ -63,9 +75,32 @@ function passes(item) {
     return true;
 }
 
+/**
+ * Extract VIN from lot JSON fields. Checks explicit vin field first,
+ * then falls back to regex over description/notes text.
+ */
+function extractVinFromLot(lot) {
+    // 1. Explicit VIN field
+    if (lot.vin && VIN_PATTERN.test(lot.vin)) return lot.vin.toUpperCase();
+
+    // 2. Regex over description/notes fields
+    const textFields = [
+        lot.assetShortDescription,
+        lot.longDescription,
+        lot.itemDescription,
+        lot.description,
+        lot.notes,
+        lot.assetLongDescription,
+        lot.itemNotes,
+    ].filter(Boolean).join(' ');
+
+    const match = textFields.match(VIN_PATTERN);
+    return match ? match[1].toUpperCase() : null;
+}
+
 const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: 1,
-    requestHandlerTimeoutSecs: 180,
+    requestHandlerTimeoutSecs: 360, // extended for detail page scraping
     async requestHandler({ page, log }) {
         log.info('Loading GovDeals and capturing maestro /search/list traffic...');
 
@@ -150,22 +185,30 @@ const crawler = new PlaywrightCrawler({
             log.info('✅ maestro x-api-key captured successfully');
             log.info(`Search API URL: ${capturedApi.searchUrl || 'NOT FOUND'}`);
 
-            // Step 1: Save intercepted lots from page load (guaranteed to work, page 1)
+            // Step 1: Collect intercepted lots from page load (page 1)
             const seenIds = new Set();
             if (capturedApi.interceptedLots.length > 0) {
-                log.info(`Saving ${capturedApi.interceptedLots.length} intercepted lots from page load`);
+                log.info(`Processing ${capturedApi.interceptedLots.length} intercepted lots from page load`);
                 for (const lot of capturedApi.interceptedLots) {
                     seenIds.add(lot.assetId);
                     totalFound++;
                     if (!passes(lot)) continue;
                     totalPassed++;
-                    await Actor.pushData(normalizeLot(lot));
+                    passingLots.push(normalizeLot(lot));
                 }
             }
 
             // Step 2: Attempt direct API pagination for pages 2+ (Node.js fetch, no CORS)
             if (capturedApi.searchPayload) {
                 await paginateWithAuth(page, log, seenIds);
+            }
+
+            // Step 3: VIN enrichment via detail page scraping for lots missing VIN
+            await scrapeDetailPagesForVin(page, passingLots, log);
+
+            // Step 4: Push all passing lots (now with VINs where found)
+            for (const lot of passingLots) {
+                await Actor.pushData(lot);
             }
         } else {
             log.warning('❌ No maestro x-api-key captured');
@@ -187,11 +230,57 @@ function normalizeLot(lot) {
         listing_url:   lot.url || `https://www.govdeals.com/asset/${lot.assetId}/${lot.accountId}`,
         seller:        lot.displaySellerName || lot.companyName || lot.seller || '',
         photo_url:     lot.imageUrl || (lot.photo ? `https://webassets.lqdt1.com/assets/photos/${lot.photo}` : ''),
-        vin:           lot.vin || null,
+        vin:           extractVinFromLot(lot),
         mileage:       lot.meterCount || null,
         source_site:   'govdeals',
         scraped_at:    new Date().toISOString(),
     };
+}
+
+/**
+ * Visit GovDeals detail pages for lots missing a VIN.
+ * Caps at MAX_DETAIL_PAGES (200) to stay within Apify free tier limits.
+ * Rate-limited to ~1 req/sec.
+ */
+async function scrapeDetailPagesForVin(page, lots, log) {
+    const lotsWithoutVin = lots.filter(l => !l.vin && l.listing_url);
+    const toScrape = lotsWithoutVin.slice(0, MAX_DETAIL_PAGES);
+
+    if (toScrape.length === 0) {
+        log.info('[VIN DETAIL] All lots already have VINs or no detail URLs — skipping detail scrape');
+        return;
+    }
+
+    log.info(`[VIN DETAIL] Scraping detail pages for ${toScrape.length} lots without VIN`);
+    let vinFound = 0;
+
+    for (const lot of toScrape) {
+        try {
+            await page.goto(lot.listing_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            // GovDeals is Angular SPA — wait for content to render
+            await page.waitForTimeout(2000);
+
+            const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+
+            // Look for explicit VIN label first
+            const vinLabelMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
+                ?? bodyText.match(/Vehicle Identification Number[:\s]*([A-HJ-NPR-Z0-9]{17})\b/i);
+            const rawMatch = vinLabelMatch ?? bodyText.match(VIN_PATTERN);
+
+            if (rawMatch) {
+                lot.vin = rawMatch[1].toUpperCase();
+                vinFound++;
+                log.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
+            }
+
+            // ~1 req/sec
+            await page.waitForTimeout(1000);
+        } catch (err) {
+            log.warning(`[VIN DETAIL] Failed for ${lot.listing_url}: ${err.message}`);
+        }
+    }
+
+    log.info(`[VIN DETAIL] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs`);
 }
 
 async function paginateWithAuth(page, log, seenIds = new Set()) {
@@ -242,7 +331,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
                 totalFound++;
                 if (!passes(lot)) continue;
                 totalPassed++;
-                await Actor.pushData(normalizeLot(lot));
+                passingLots.push(normalizeLot(lot));
             }
         } catch (err) {
             log.warning(`Page ${pageNum} failed: ${err.message}`);
@@ -255,4 +344,5 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
 console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
 console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
+console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} passing lots`);
 await Actor.exit();
