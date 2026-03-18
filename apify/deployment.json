@@ -53,6 +53,12 @@
       "scheduleId": "jijJOYPk449GYMD6b",
       "webhookId": "SINNRTPxfC8F5szXq",
       "status": "enabled"
+    },
+    "ds-proxibid": {
+      "id": "bxhncvtHEP712WX2e",
+      "scheduleId": "KZkaBQXUaQS56kkPW",
+      "webhookId": "OB4e8BQJFnySBse5M",
+      "status": "enabled"
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
