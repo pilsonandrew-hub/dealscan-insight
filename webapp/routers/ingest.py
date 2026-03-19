@@ -2028,7 +2028,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"Basis: {acquisition_basis_source}\n"
                 f"{truth_note}"
                 f"State: {deal.get('state', '?')}\n"
-                f"[View Listing]({deal.get('listing_url', '')})"
+                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({deal.get('listing_url', '')})"
             )
         else:
             msg = (
@@ -2042,7 +2042,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"{truth_note}"
                 f"State: {deal.get('state', '?')}\n"
                 f"Gross: ${score_breakdown.get('gross_margin', 0):,.0f}\n"
-                f"[View Listing]({deal.get('listing_url', '')})"
+                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({deal.get('listing_url', '')})"
             )
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
