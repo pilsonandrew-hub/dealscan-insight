@@ -10,7 +10,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { roverAPI } from "@/services/roverAPI";
 import { api } from "@/services/api";
-import { Search, Target, Plus, X, Settings } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { Search, Target, Plus, X, Settings, Bell } from "lucide-react";
 import { SniperButton } from "@/components/SniperButton";
 
 interface CrosshairSearchProps {
@@ -51,6 +52,11 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveSearchName, setSaveSearchName] = useState("");
+  const [saveDosThreshold, setSaveDosThreshold] = useState("65");
+  const [saveTelegramChatId, setSaveTelegramChatId] = useState("");
+  const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
   const updateCriteria = useCallback((key: keyof SearchCriteria, value: any) => {
@@ -144,8 +150,116 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
     }
   }, [criteria, toast]);
 
+  const openSaveModal = useCallback(() => {
+    if (!criteria.make && !criteria.model && !criteria.yearMin) {
+      toast({
+        title: "Add criteria first",
+        description: "Set at least one filter before saving a search.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaveSearchName(generateIntentTitle(criteria));
+    setSaveModalOpen(true);
+  }, [criteria, toast]);
+
+  const confirmSaveSearch = useCallback(async () => {
+    const name = saveSearchName.trim();
+    if (!name) {
+      toast({ title: "Name required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const resp = await fetch(`${apiUrl}/api/saved-searches`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify({
+          name,
+          filters: criteria,
+          dos_threshold: parseInt(saveDosThreshold) || 65,
+          telegram_chat_id: saveTelegramChatId.trim() || undefined,
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      toast({ title: "Search saved", description: `"${name}" will alert you when new matches arrive.` });
+      setSaveModalOpen(false);
+      setSaveSearchName("");
+      setSaveTelegramChatId("");
+    } catch (err) {
+      toast({ title: "Failed to save search", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }, [saveSearchName, saveDosThreshold, saveTelegramChatId, criteria, toast]);
+
   return (
     <div className="space-y-6">
+      {/* Save Search Modal */}
+      {saveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-6 w-full max-w-md space-y-4 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Save Search + Alerts</h3>
+              <button onClick={() => setSaveModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="ss-name">Search name</Label>
+                <Input
+                  id="ss-name"
+                  value={saveSearchName}
+                  onChange={e => setSaveSearchName(e.target.value)}
+                  placeholder="e.g. Ford F-150 TX deals"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ss-threshold">Min DOS score to alert</Label>
+                <Input
+                  id="ss-threshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={saveDosThreshold}
+                  onChange={e => setSaveDosThreshold(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ss-telegram">Telegram chat ID (optional)</Label>
+                <Input
+                  id="ss-telegram"
+                  value={saveTelegramChatId}
+                  onChange={e => setSaveTelegramChatId(e.target.value)}
+                  placeholder="e.g. -1001234567890"
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Get your chat ID from @userinfobot on Telegram.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" className="flex-1" onClick={() => setSaveModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button className="flex-1" onClick={confirmSaveSearch} disabled={saving}>
+                {saving ? "Saving..." : "Save Search"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Search Form */}
       <Card>
         <CardHeader>
@@ -295,6 +409,10 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
             <Button variant="outline" onClick={saveAsIntent} disabled={!criteria.make && !criteria.model}>
               <Plus className="h-4 w-4 mr-2" />
               Save as Intent
+            </Button>
+            <Button variant="outline" onClick={openSaveModal}>
+              <Bell className="h-4 w-4 mr-2" />
+              Save Search
             </Button>
           </div>
 
