@@ -96,8 +96,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-if settings.secret_key == "dev-secret-change-in-prod" and settings.is_production:
-    logger.critical(
-        "SECRET_KEY is not set; using development fallback in production. "
-        "Set SECRET_KEY immediately."
-    )
