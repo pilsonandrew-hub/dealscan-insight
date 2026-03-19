@@ -7,7 +7,7 @@ import { DollarSign, MapPin, Clock, TrendingUp, Star } from 'lucide-react';
 
 interface RoverCardProps {
   item: DealItem;
-  onInteraction: (item: DealItem, eventType: 'view' | 'click' | 'save' | 'bid') => void;
+  onInteraction: (item: DealItem, eventType: 'view' | 'click' | 'save' | 'bid' | 'pass') => void;
   showExplanation?: boolean;
 }
 
@@ -28,6 +28,11 @@ export const RoverCard: React.FC<RoverCardProps> = ({
   const handleBid = (e: React.MouseEvent) => {
     e.stopPropagation();
     onInteraction(item, 'bid');
+  };
+
+  const handlePass = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onInteraction(item, 'pass');
   };
 
   const getScoreColor = (score: number) => {
@@ -110,20 +115,11 @@ export const RoverCard: React.FC<RoverCardProps> = ({
               </div>
             )}
 
-            {showExplanation && item._score && (
+            {showExplanation && item.why_signals && item.why_signals.length > 0 && (
               <div className="bg-muted/50 p-3 rounded-lg mb-4">
                 <h4 className="text-sm font-medium mb-2">Why Rover recommends this:</h4>
                 <ul className="text-xs text-muted-foreground space-y-1">
-                  {item.roi_percentage && item.roi_percentage > 15 && (
-                    <li>• High ROI potential ({Math.round(item.roi_percentage)}%)</li>
-                  )}
-                  {item._score > 0.7 && (
-                    <li>• Strong match for your preferences</li>
-                  )}
-                  {item.arbitrage_score && item.arbitrage_score > 70 && (
-                    <li>• Excellent arbitrage opportunity</li>
-                  )}
-                  <li>• Recently discovered opportunity</li>
+                  {item.why_signals.map((s, i) => <li key={i}>• {s}</li>)}
                 </ul>
               </div>
             )}
@@ -131,24 +127,26 @@ export const RoverCard: React.FC<RoverCardProps> = ({
         </div>
 
         <div className="flex space-x-3">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={handleSave}
           >
             Save
           </Button>
-          <Button 
+          <Button
             size="sm"
             onClick={handleBid}
           >
             Place Bid
           </Button>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="sm"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={handlePass}
           >
-            View Details
+            Pass
           </Button>
         </div>
       </CardContent>

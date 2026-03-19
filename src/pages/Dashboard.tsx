@@ -855,6 +855,10 @@ const RoverTab = () => {
   const handleAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
     await api.trackRoverEvent(deal, action);
     setActionedIds(prev => new Set([...prev, `${deal.id}-${action}`]));
+    // Refresh recommendations after save or pass so the ranking reflects the new signal
+    if (action === 'save' || action === 'pass') {
+      load();
+    }
   };
 
   return (

@@ -3,7 +3,7 @@ import { logger } from "@/lib/logger";
 
 export interface RoverEvent {
   userId: string;
-  event: 'view' | 'click' | 'save' | 'bid' | 'purchase';
+  event: 'view' | 'click' | 'save' | 'bid' | 'purchase' | 'pass';
   item: DealItem;
   timestamp?: number;
 }
@@ -76,10 +76,6 @@ class RoverAPIService {
   }
 
   async trackEvent(event: RoverEvent): Promise<void> {
-    if (event.event === "pass") {
-      return;
-    }
-
     try {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
       const { data: { session } } = await supabase.auth.getSession();

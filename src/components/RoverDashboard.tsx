@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { roverAPI, DealItem, RoverRecommendations } from "@/services/roverAPI";
 import { CrosshairSearch } from "./CrosshairSearch";
 import { formatCurrency, formatMileage, formatScore, getScoreColor, timeAgo, formatDate, isHighValue } from "@/utils/roverUtils";
-import { Rocket, Target, TrendingUp, AlertTriangle, Star, Clock, DollarSign, MapPin, Search, BarChart3, Crosshair } from "lucide-react";
+import { Rocket, Target, TrendingUp, AlertTriangle, Star, Clock, DollarSign, MapPin, Search, BarChart3, Crosshair, ChevronDown } from "lucide-react";
 import { useAuth } from "@/contexts/ModernAuthContext";
 
 interface RoverDashboardProps {
@@ -92,7 +92,7 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, minDo
   }, [isPremium, loadRecommendations, loadSavedIntents]);
 
   const handleItemInteraction = useCallback(
-    async (item: DealItem, eventType: "view" | "click" | "save" | "bid") => {
+    async (item: DealItem, eventType: "view" | "click" | "save" | "bid" | "pass") => {
       try {
         await roverAPI.trackEvent({ userId: currentUserId, event: eventType, item });
         if (eventType === "save") {
@@ -100,6 +100,10 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, minDo
             title: "Deal saved",
             description: `${[item.year, item.make, item.model].filter(Boolean).join(" ")} added to your watchlist.`,
           });
+          loadRecommendations();
+        } else if (eventType === "pass") {
+          toast({ title: "Noted", description: "Rover will show you fewer deals like this." });
+          loadRecommendations();
         } else if (eventType === "bid") {
           toast({
             title: "Bid tracked",
@@ -110,7 +114,7 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, minDo
         console.warn("trackEvent failed", e);
       }
     },
-    [currentUserId, toast]
+    [currentUserId, toast, loadRecommendations]
   );
 
   const handleCreateIntent = useCallback(async (item: DealItem) => {
@@ -272,92 +276,12 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, minDo
             {!loading && !!recommendations?.items?.length && (
               <div className="space-y-4">
                 {recommendations.items.map((item) => (
-                  <Card
+                  <RoverFeedCard
                     key={item.id}
-                    className="hover:shadow-lg transition-shadow cursor-pointer"
-                    onClick={() => handleItemInteraction(item, "click")}
-                    aria-label={`View ${[item.year, item.make, item.model].filter(Boolean).join(" ")}`}
-                  >
-                    <CardContent className="p-6">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-3 mb-2">
-                            <h3 className="text-lg font-semibold">{[item.year, item.make, item.model].filter(Boolean).join(" ")}</h3>
-                            <Badge variant="outline" className={getScoreColor(item._score)}>
-                              Score: {formatScore(item._score)}
-                            </Badge>
-                            {item.roi_percentage && (
-                              <Badge variant="outline" className="bg-green-100 text-green-800">
-                                ROI: {Math.round(item.roi_percentage)}%
-                              </Badge>
-                            )}
-                            {isHighValue(item) && (
-                              <Badge variant="default" className="bg-primary">
-                                High Value
-                              </Badge>
-                            )}
-                          </div>
-
-                          <div className="flex items-center flex-wrap gap-4 text-sm text-muted-foreground">
-                            <div className="flex items-center space-x-1">
-                              <DollarSign className="h-4 w-4" aria-hidden />
-                              <span>{formatCurrency(item.price)}</span>
-                            </div>
-                            {item.mileage && <span>{formatMileage(item.mileage)} miles</span>}
-                            {item.state && (
-                              <div className="flex items-center space-x-1">
-                                <MapPin className="h-4 w-4" aria-hidden />
-                                <span>{item.state}</span>
-                              </div>
-                            )}
-                            {item.source && <Badge variant="secondary">{item.source}</Badge>}
-                          </div>
-
-                          {item.potential_profit && (
-                            <div className="mt-2">
-                              <span className="text-sm font-medium text-green-600">
-                                Potential Profit: {formatCurrency(item.potential_profit)}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCreateIntent(item);
-                            }}
-                            aria-label="Track this vehicle type"
-                          >
-                            🎯 Track
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleItemInteraction(item, "save");
-                            }}
-                            aria-label="Save deal"
-                          >
-                            Save
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleItemInteraction(item, "bid");
-                            }}
-                          >
-                            Track Bid
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                    item={item}
+                    onInteraction={handleItemInteraction}
+                    onTrack={handleCreateIntent}
+                  />
                 ))}
               </div>
             )}
@@ -438,6 +362,127 @@ export const RoverDashboard: React.FC<RoverDashboardProps> = ({ isPremium, minDo
     </div>
   );
 };
+
+/* ------------------------------ RoverFeedCard ------------------------------ */
+
+function RoverFeedCard({
+  item,
+  onInteraction,
+  onTrack,
+}: {
+  item: DealItem;
+  onInteraction: (item: DealItem, eventType: "view" | "click" | "save" | "bid" | "pass") => void;
+  onTrack: (item: DealItem) => void;
+}) {
+  const [showWhy, setShowWhy] = React.useState(false);
+  const signals = (item as any).why_signals as string[] | undefined;
+
+  return (
+    <Card
+      className="hover:shadow-lg transition-shadow cursor-pointer"
+      onClick={() => onInteraction(item, "click")}
+      aria-label={`View ${[item.year, item.make, item.model].filter(Boolean).join(" ")}`}
+    >
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <div className="flex items-center space-x-3 mb-2">
+              <h3 className="text-lg font-semibold">{[item.year, item.make, item.model].filter(Boolean).join(" ")}</h3>
+              <Badge variant="outline" className={getScoreColor(item._score)}>
+                Score: {formatScore(item._score)}
+              </Badge>
+              {item.roi_percentage != null && (
+                <Badge variant="outline" className="bg-green-100 text-green-800">
+                  ROI: {Math.round(item.roi_percentage)}%
+                </Badge>
+              )}
+              {isHighValue(item) && (
+                <Badge variant="default" className="bg-primary">
+                  High Value
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex items-center flex-wrap gap-4 text-sm text-muted-foreground">
+              <div className="flex items-center space-x-1">
+                <DollarSign className="h-4 w-4" aria-hidden />
+                <span>{formatCurrency(item.price)}</span>
+              </div>
+              {item.mileage != null && <span>{formatMileage(item.mileage)} miles</span>}
+              {item.state && (
+                <div className="flex items-center space-x-1">
+                  <MapPin className="h-4 w-4" aria-hidden />
+                  <span>{item.state}</span>
+                </div>
+              )}
+              {item.source && <Badge variant="secondary">{item.source}</Badge>}
+            </div>
+
+            {item.potential_profit != null && (
+              <div className="mt-2">
+                <span className="text-sm font-medium text-green-600">
+                  Potential Profit: {formatCurrency(item.potential_profit)}
+                </span>
+              </div>
+            )}
+
+            {signals && signals.length > 0 && (
+              <div className="mt-2">
+                <button
+                  className="flex items-center gap-1 text-xs text-primary/80 hover:text-primary transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setShowWhy(v => !v); }}
+                  aria-expanded={showWhy}
+                >
+                  <Star className="h-3 w-3" />
+                  Why this deal?
+                  <ChevronDown className={`h-3 w-3 transition-transform ${showWhy ? "rotate-180" : ""}`} />
+                </button>
+                {showWhy && (
+                  <ul className="mt-1 text-xs text-muted-foreground space-y-0.5 pl-1">
+                    {signals.map((s, i) => (
+                      <li key={i} className="flex items-start gap-1">
+                        <span className="text-primary shrink-0">•</span>
+                        <span>{s}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col space-y-2 ml-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => { e.stopPropagation(); onTrack(item); }}
+              aria-label="Track this vehicle type"
+            >
+              🎯 Track
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => { e.stopPropagation(); onInteraction(item, "save"); }}
+              aria-label="Save deal"
+            >
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={(e) => { e.stopPropagation(); onInteraction(item, "pass"); }}
+              aria-label="Not interested"
+            >
+              Pass
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 /* ------------------------------ helpers ------------------------------ */
 
