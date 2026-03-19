@@ -10,6 +10,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import Auth from '@/pages/Auth';
 
 const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const DealDetail = React.lazy(() => import("./pages/DealDetail"));
 const NotFound = React.lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient({
@@ -47,6 +48,7 @@ const App = () => (
                     <Dashboard />
                   </ProtectedRoute>
                 } />
+                <Route path="/deal/:id" element={<DealDetail />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

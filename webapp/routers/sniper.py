@@ -116,7 +116,9 @@ def _build_alert_60min(opp: dict, target: dict) -> str:
     ceiling = float(target.get("max_bid") or 0)
     state = opp.get("state", "?")
     source = opp.get("source", "?")
+    opp_id = opp.get("id", "")
     lot_url = opp.get("listing_url", "")
+    deal_url = f"https://dealscan-insight.vercel.app/deal/{opp_id}"
     return (
         f"⚡ *SniperScope Alert*\n"
         f"{title}\n"
@@ -124,7 +126,7 @@ def _build_alert_60min(opp: dict, target: dict) -> str:
         f"💰 Current bid: ${current:,.0f}\n"
         f"🎯 Your ceiling: ${ceiling:,.0f}\n"
         f"⏰ Closes in *60 minutes*\n\n"
-        f"👉 [Bid Now]({lot_url})"
+        f"👉 [Bid Now]({deal_url}) | [Direct →]({lot_url})"
     )
 
 
@@ -133,13 +135,15 @@ def _build_alert_15min(opp: dict, target: dict) -> str:
     current = opp.get("current_bid") or 0
     ceiling = float(target.get("max_bid") or 0)
     headroom = ceiling - current
+    opp_id = opp.get("id", "")
     lot_url = opp.get("listing_url", "")
+    deal_url = f"https://dealscan-insight.vercel.app/deal/{opp_id}"
     return (
         f"🔥 *FINAL WARNING — 15 Minutes*\n"
         f"{title}\n"
         f"💰 Current: ${current:,.0f} → Ceiling: ${ceiling:,.0f}\n"
         f"${headroom:,.0f} headroom remaining\n\n"
-        f"👉 [BID NOW]({lot_url})"
+        f"👉 [BID NOW]({deal_url}) | [Direct →]({lot_url})"
     )
 
 
@@ -147,12 +151,14 @@ def _build_alert_5min(opp: dict, target: dict) -> str:
     title = f"{opp.get('year','')} {opp.get('make','')} {opp.get('model','')}".strip()
     current = opp.get("current_bid") or 0
     ceiling = float(target.get("max_bid") or 0)
+    opp_id = opp.get("id", "")
     lot_url = opp.get("listing_url", "")
+    deal_url = f"https://dealscan-insight.vercel.app/deal/{opp_id}"
     return (
         f"🚨 *5 MINUTES LEFT*\n"
         f"{title}\n"
         f"💰 ${current:,.0f} → ${ceiling:,.0f} ceiling\n"
-        f"GO NOW 👉 [PLACE BID]({lot_url})"
+        f"GO NOW 👉 [PLACE BID]({deal_url}) | [Direct →]({lot_url})"
     )
 
 
@@ -160,14 +166,20 @@ def _build_alert_ceiling_exceeded(opp: dict, target: dict) -> str:
     title = f"{opp.get('year','')} {opp.get('make','')} {opp.get('model','')}".strip()
     current = opp.get("current_bid") or 0
     ceiling = float(target.get("max_bid") or 0)
+    opp_id = opp.get("id", "")
     lot_url = opp.get("listing_url", "")
+    deal_url = f"https://dealscan-insight.vercel.app/deal/{opp_id}"
     msg = (
         f"❌ *SniperScope — Ceiling Exceeded*\n"
         f"{title}\n"
         f"Current bid (${current:,.0f}) exceeded your ceiling (${ceiling:,.0f})\n"
         f"Target cancelled."
     )
-    if lot_url:
+    if opp_id:
+        msg += f"\n\n👉 [View Deal]({deal_url})"
+        if lot_url:
+            msg += f" | [Direct →]({lot_url})"
+    elif lot_url:
         msg += f"\n\n👉 [View Listing]({lot_url})"
     return msg
 
