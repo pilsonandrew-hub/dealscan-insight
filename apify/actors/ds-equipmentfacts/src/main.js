@@ -31,13 +31,13 @@ const VEHICLE_CATEGORIES = [
     'vans',
 ];
 
-// EquipmentFacts search URLs for vehicle/truck categories
+// EquipmentFacts (Sandhills Cloud) search URLs for vehicle/truck categories
+// URL pattern: /listings/upcoming-auctions/[slug]/[catid]  OR  /listings/search?q=...
+// Kept to 3 URLs so Playwright runs complete within the 300s timeout
 const SEARCH_URLS = [
-    `${BASE_URL}/equipmentsearch?category=trucks-trailers&subcat=semi-trucks`,
-    `${BASE_URL}/equipmentsearch?category=trucks-trailers&subcat=pickup-trucks`,
-    `${BASE_URL}/equipmentsearch?category=trucks-trailers`,
-    `${BASE_URL}/equipmentsearch?category=automobiles`,
-    `${BASE_URL}/equipmentsearch?category=rvs-motorhomes`,
+    `${BASE_URL}/listings/upcoming-auctions/box-trucks/16004`,
+    `${BASE_URL}/listings/search?q=pickup+truck&ListingType=Upcoming+Auctions`,
+    `${BASE_URL}/listings/search?q=truck&ListingType=Upcoming+Auctions`,
 ];
 
 const TARGET_STATES = new Set([
@@ -139,20 +139,28 @@ const capturedApi = {
 
 function extractLotsFromJson(json) {
     if (!json || typeof json !== 'object') return [];
-    // Sandhills Cloud API response shapes
+    // Sandhills Cloud / EquipmentFacts AJAX API response shapes
+    // /ajax/listings/* returns shapes observed: {listings:[...]}, {results:[...]}, plain arrays
     const candidates = [
         json.equipmentList,
         json.listings,
         json.lots,
         json.items,
         json.results,
+        json.SearchResults,
+        json.searchResults,
         json.data?.listings,
         json.data?.lots,
         json.data?.items,
         json.data?.equipmentList,
+        json.data?.results,
         json.payload?.listings,
         json.payload?.lots,
-        json.searchResults,
+        json.payload?.results,
+        json.ResultList,
+        json.resultList,
+        json.ListingList,
+        json.listingList,
     ].filter(Array.isArray);
     if (candidates.length) return candidates[0];
     if (Array.isArray(json)) return json;
@@ -182,8 +190,8 @@ function passes(item) {
 }
 
 const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 5,
-    requestHandlerTimeoutSecs: 240,
+    maxRequestsPerCrawl: 6,
+    requestHandlerTimeoutSecs: 90,
     headless: true,
     async requestHandler({ page, request, log }) {
         log.info(`Loading: ${request.url}`);
@@ -249,16 +257,25 @@ const crawler = new PlaywrightCrawler({
             const ct = resp.headers()['content-type'] || '';
             if (!ct.includes('json')) return;
 
-            // Track all JSON API URLs
+            // Track all JSON API URLs — broad to avoid missing Sandhills Cloud endpoints
+            // Key pattern: /ajax/listings/* is the equipmentfacts.com search/facet API
             const isApiLike = (
+                url.includes('/ajax/') ||
                 url.includes('api.') ||
                 url.includes('/api/') ||
+                url.includes('/Api/') ||
                 url.includes('/Search') ||
                 url.includes('/search') ||
                 url.includes('/listings') ||
+                url.includes('/Listings') ||
                 url.includes('/equipment') ||
+                url.includes('/Equipment') ||
+                url.includes('/Result') ||
+                url.includes('/result') ||
                 url.includes('sandhills') ||
-                url.includes('equipmentfacts')
+                url.includes('equipmentfacts') ||
+                url.includes('cloudfront') ||
+                url.includes('amazonaws')
             );
             if (!isApiLike) return;
 
@@ -283,85 +300,133 @@ const crawler = new PlaywrightCrawler({
 
         // ── Navigate to search page ──
         await page.goto(request.url, { waitUntil: 'networkidle', timeout: 60000 });
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(3000);
 
-        // ── Try scrolling to trigger more data loads ──
-        for (let i = 0; i < 3; i++) {
-            await page.evaluate(() => window.scrollBy(0, 1000));
-            await page.waitForTimeout(2000);
+        // ── Try AJAX HTML listing endpoint (same cookie jar, bypasses bot detection) ──
+        // Pattern observed: /ajax/listings/getfacet/?... for facets (JSON)
+        // Listings HTML: /ajax/listings/?<same-params> returns HTML fragment
+        if (capturedApi.interceptedLots.length === 0) {
+            const ajaxResult = await page.evaluate(async (pageUrl) => {
+                try {
+                    const u = new URL(pageUrl);
+                    const params = new URLSearchParams(u.search);
+                    // Derive path from page path: /listings/search → /ajax/listings/
+                    // or /listings/upcoming-auctions/box-trucks/16004 → /ajax/listings/?Category=16004
+                    let ajaxPath;
+                    if (u.pathname.includes('/listings/search') || u.pathname.includes('/listings/upcoming-auctions/') || u.pathname.includes('/listings/')) {
+                        ajaxPath = '/ajax/listings/';
+                        // For category pages, extract category ID from path
+                        const catMatch = u.pathname.match(/\/(\d+)\/?$/);
+                        if (catMatch) params.set('Category', catMatch[1]);
+                        params.set('lang', 'en-US');
+                        params.set('sort', '1');
+                    } else {
+                        return { html: null, error: 'unknown URL pattern' };
+                    }
+                    const ajaxUrl = ajaxPath + '?' + params.toString();
+                    const resp = await fetch(ajaxUrl, {
+                        headers: {
+                            'Accept': 'text/html, */*; q=0.01',
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        credentials: 'include',
+                    });
+                    const html = await resp.text();
+                    return { html: html.slice(0, 5000), status: resp.status, url: resp.url };
+                } catch (e) {
+                    return { html: null, error: e.message };
+                }
+            }, request.url);
+
+            log.info(`[AJAX] ${request.url} → status=${ajaxResult.status} url=${ajaxResult.url} error=${ajaxResult.error || 'none'}`);
+            if (ajaxResult.html) {
+                log.info(`[AJAX HTML preview] ${ajaxResult.html.slice(0, 800)}`);
+            }
+
+            // Parse the AJAX HTML response for listing items
+            if (ajaxResult.html && ajaxResult.status === 200) {
+                const htmlLots = await page.evaluate((html) => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const results = [];
+
+                    // Try to find listing items in the HTML fragment
+                    const selectors = [
+                        'a[href*="/listing/"]',
+                        '.listing-card',
+                        '.result-item',
+                        '.search-result-item',
+                        '[class*="listing"]',
+                        '[class*="result"]',
+                        'article',
+                        'li[data-id]',
+                        'div[data-id]',
+                    ];
+
+                    let cards = [];
+                    for (const sel of selectors) {
+                        cards = Array.from(doc.querySelectorAll(sel));
+                        if (cards.length > 0 && cards[0].textContent.trim().length > 10) break;
+                    }
+
+                    for (const card of cards.slice(0, 100)) {
+                        const titleEl = card.querySelector('h2, h3, h4, .title, [class*="title"]') || card;
+                        const title = titleEl.textContent.trim().slice(0, 200);
+                        const linkEl = card.tagName === 'A' ? card : card.querySelector('a[href]');
+                        const url = linkEl ? (linkEl.href || linkEl.getAttribute('href') || '') : '';
+                        const imgEl = card.querySelector('img');
+                        const imageUrl = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
+                        const bidEl = card.querySelector('[class*="bid"], [class*="price"], [class*="amount"]');
+                        const bidText = bidEl ? bidEl.textContent.replace(/[^0-9.]/g, '') : '0';
+                        const locEl = card.querySelector('[class*="location"], [class*="city"], [class*="state"]');
+                        const location = locEl ? locEl.textContent.trim() : '';
+
+                        if (title.length > 3) {
+                            results.push({ title, url, imageUrl, currentBid: parseFloat(bidText) || 0, location, id: url || title });
+                        }
+                    }
+                    return { count: cards.length, lots: results, selectorUsed: selectors.find((s) => doc.querySelectorAll(s).length > 0) || 'none' };
+                }, ajaxResult.html);
+
+                log.info(`[AJAX PARSE] selector="${htmlLots.selectorUsed}" cards=${htmlLots.count} lots=${htmlLots.lots.length}`);
+                if (htmlLots.lots.length > 0) {
+                    capturedApi.interceptedLots.push(...htmlLots.lots);
+                }
+            }
         }
 
-        // ── Try DOM scraping as fallback if API not captured ──
+        // ── Fallback: DOM scrape from the live page ──
         if (capturedApi.interceptedLots.length === 0) {
-            log.info('No API lots captured, attempting DOM scrape...');
+            log.info('AJAX approach yielded nothing, attempting live DOM scrape...');
+
+            // Log all unique classes in the page to identify listing card selectors
+            const pageClasses = await page.evaluate(() => {
+                const allClasses = new Set();
+                document.querySelectorAll('[class]').forEach(el => {
+                    el.className.toString().split(/\s+/).forEach(c => {
+                        if (c && !c.startsWith('Mui') && !c.startsWith('css-') && c.length > 3 && c.length < 40) allClasses.add(c);
+                    });
+                });
+                return [...allClasses].slice(0, 50).join(' | ');
+            });
+            log.info(`[PAGE CLASSES] ${pageClasses}`);
+
             const domLots = await page.evaluate(() => {
                 const results = [];
+                // Look for any anchor links to listings (the most reliable marker)
+                const listingLinks = Array.from(document.querySelectorAll('a[href]'))
+                    .filter(a => a.href && a.href.includes('/listing/'));
 
-                // Common Sandhills Cloud selectors
-                const selectors = [
-                    '.listing-card',
-                    '.equipment-listing',
-                    '.lot-card',
-                    '.search-result',
-                    '[data-lot-id]',
-                    '[data-listing-id]',
-                    '.inventory-item',
-                    '.auction-item',
-                    'article.card',
-                    '.ef-listing',
-                    '.ef-card',
-                ];
-
-                let cards = [];
-                for (const sel of selectors) {
-                    cards = Array.from(document.querySelectorAll(sel));
-                    if (cards.length > 0) break;
-                }
-
-                for (const card of cards.slice(0, 100)) {
-                    const getText = (sel) => {
-                        const el = card.querySelector(sel);
-                        return el ? el.textContent.trim() : '';
-                    };
-                    const getAttr = (sel, attr) => {
-                        const el = card.querySelector(sel);
-                        return el ? el.getAttribute(attr) : '';
-                    };
-
-                    const titleEl = card.querySelector('h2, h3, h4, .title, .listing-title, .equipment-title');
-                    const title = titleEl ? titleEl.textContent.trim() : '';
-
-                    const bidEl = card.querySelector('.bid, .current-bid, .price, .bid-amount, [class*="bid"]');
+                for (const link of listingLinks.slice(0, 100)) {
+                    const card = link.closest('article, [class*="card"], [class*="item"], li, div') || link;
+                    const titleEl = card.querySelector('h2, h3, h4, [class*="title"]') || link;
+                    const title = titleEl.textContent.trim().slice(0, 200);
+                    const bidEl = card.querySelector('[class*="bid"], [class*="price"]');
                     const bidText = bidEl ? bidEl.textContent.replace(/[^0-9.]/g, '') : '0';
-
-                    const linkEl = card.querySelector('a[href]');
-                    const url = linkEl ? linkEl.href : '';
-
                     const imgEl = card.querySelector('img');
-                    const imageUrl = imgEl ? (imgEl.dataset.src || imgEl.src) : '';
-
-                    const locationEl = card.querySelector('.location, .city, .state, [class*="location"]');
-                    const locationText = locationEl ? locationEl.textContent.trim() : '';
-
-                    const sellerEl = card.querySelector('.seller, .auctioneer, .company, [class*="seller"], [class*="auctioneer"]');
-                    const sellerName = sellerEl ? sellerEl.textContent.trim() : '';
-
-                    const endEl = card.querySelector('.end-time, .auction-end, .close-time, [class*="end"]');
-                    const endTime = endEl ? endEl.textContent.trim() : '';
-
-                    const lotId = card.dataset.lotId || card.dataset.listingId || card.dataset.id || '';
-
-                    if (title || url) {
-                        results.push({
-                            title,
-                            currentBid: parseFloat(bidText) || 0,
-                            url,
-                            imageUrl,
-                            location: locationText,
-                            sellerName,
-                            endTime,
-                            id: lotId,
-                        });
+                    if (title.length > 3) {
+                        results.push({ title, url: link.href, currentBid: parseFloat(bidText) || 0,
+                            imageUrl: imgEl ? imgEl.src : '', id: link.href });
                     }
                 }
                 return results;
@@ -371,10 +436,10 @@ const crawler = new PlaywrightCrawler({
                 log.info(`DOM scrape yielded ${domLots.length} items`);
                 capturedApi.interceptedLots.push(...domLots);
             } else {
-                log.warning('DOM scrape found no items — site may require JS or different selectors');
-                // Log page title and first 500 chars of body for debugging
-                const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 500) || '');
-                log.info(`Page body preview: ${bodyText}`);
+                log.warning('DOM scrape found no items');
+                const bodyHtml = await page.evaluate(() =>
+                    document.body?.innerHTML?.slice(0, 1500) || '');
+                log.info(`[PAGE HTML] ${bodyHtml}`);
             }
         }
 
