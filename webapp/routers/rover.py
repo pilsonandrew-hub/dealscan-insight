@@ -21,6 +21,10 @@ from backend.rover.heuristic_scorer import build_preference_vector, score_item, 
 router = APIRouter(prefix="/api/rover", tags=["rover"])
 logger = logging.getLogger(__name__)
 
+_event_rate: dict[str, list[float]] = {}
+
+_VALID_EVENT_TYPES = ['view', 'click', 'save', 'bid', 'purchase', 'pass']
+
 # Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
 _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
@@ -268,7 +272,20 @@ async def track_event(
     authorization: Optional[str] = Header(None),
 ):
     """Track a user interaction event for preference learning."""
+    # Validate event_type before JWT auth (fail fast)
+    event_type = payload.get("event", "view")
+    if event_type not in _VALID_EVENT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid event_type")
+
     auth_user_id = _verify_auth(authorization)
+
+    # Rate limit: max 10 events per user per minute
+    now_ts = time.time()
+    bucket = _event_rate.setdefault(auth_user_id, [])
+    bucket[:] = [t for t in bucket if now_ts - t < 60]
+    if len(bucket) >= 10:
+        raise HTTPException(status_code=429, detail="Too many events, slow down")
+    bucket.append(now_ts)
 
     if not supa:
         raise HTTPException(status_code=503, detail="Service unavailable")
@@ -280,10 +297,6 @@ async def track_event(
 
     try:
         from backend.rover.heuristic_scorer import EVENT_WEIGHTS
-
-        event_type = payload.get("event", "view")
-        if event_type not in EVENT_WEIGHTS:
-            raise HTTPException(status_code=400, detail=f"Invalid event type: {event_type}")
 
         raw_weight = EVENT_WEIGHTS[event_type]
 
