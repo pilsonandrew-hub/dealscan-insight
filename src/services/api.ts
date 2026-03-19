@@ -17,6 +17,7 @@ export interface CrosshairSearchFilters {
   minPrice?: number;
   maxPrice?: number;
   minScore?: number;
+  maxMileage?: number;
   limit?: number;
 }
 
@@ -183,6 +184,7 @@ function buildOpportunityQuery(filters?: CrosshairSearchFilters) {
   if (filters?.minPrice != null) query = query.gte('current_bid', filters.minPrice);
   if (filters?.maxPrice != null) query = query.lte('current_bid', filters.maxPrice);
   if (filters?.minScore != null) query = query.gte('dos_score', filters.minScore);
+  if (filters?.maxMileage != null) query = query.lte('mileage', filters.maxMileage);
 
   return query;
 }

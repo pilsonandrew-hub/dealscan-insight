@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
+import { SniperButton } from '@/components/SniperButton';
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend
@@ -299,14 +300,29 @@ const DealCard = ({
       </div>
     )}
 
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
+      {deal.id && (
+        <SniperButton
+          opportunity={{ id: deal.id, year: deal.year, make: deal.make, model: deal.model, current_bid: deal.current_bid }}
+          className="flex-1 min-w-[120px]"
+        />
+      )}
+      {deal.id && (
+        <Link
+          to={`/deal/${deal.id}`}
+          className="flex items-center justify-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 px-2 rounded-lg transition-colors"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Detail
+        </Link>
+      )}
       {onSendToSniperScope && deal.id && (
         <button
           onClick={() => onSendToSniperScope(deal)}
-          className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 px-2 rounded-lg transition-colors"
+          className="flex items-center justify-center gap-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 px-2 rounded-lg transition-colors"
         >
           <Target className="h-3 w-3" />
-          Send to SniperScope
+          Scope
         </button>
       )}
       {deal.vin && (
@@ -314,10 +330,10 @@ const DealCard = ({
           href={`https://www.google.com/search?q=${encodeURIComponent(`${deal.year} ${deal.make} ${deal.model} ${deal.vin}`)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 flex items-center justify-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 px-2 rounded-lg transition-colors"
+          className="flex items-center justify-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 px-2 rounded-lg transition-colors"
         >
           <ExternalLink className="h-3 w-3" />
-          View
+          VIN
         </a>
       )}
       {onAction && deal.id && (
@@ -480,24 +496,29 @@ const CrosshairTab = () => {
   const [results, setResults] = useState<Opportunity[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [page, setPage] = useState(1);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const buildFilters = (lim: number, offset = 0) => ({
+    make: filters.make || undefined,
+    model: filters.model || undefined,
+    yearMin: filters.yearMin ? parseInt(filters.yearMin) : undefined,
+    yearMax: filters.yearMax ? parseInt(filters.yearMax) : undefined,
+    state: filters.state || undefined,
+    minScore: filters.minScore ? parseInt(filters.minScore) : undefined,
+    minPrice: filters.minBid ? parseInt(filters.minBid) : undefined,
+    maxPrice: filters.maxBid ? parseInt(filters.maxBid) : undefined,
+    limit: lim,
+  });
 
   const search = async () => {
     setLoading(true);
     setSearched(true);
+    setPage(1);
     try {
-      const { data, total: t } = await api.searchCrosshairOpportunities({
-        make: filters.make || undefined,
-        model: filters.model || undefined,
-        yearMin: filters.yearMin ? parseInt(filters.yearMin) : undefined,
-        yearMax: filters.yearMax ? parseInt(filters.yearMax) : undefined,
-        state: filters.state || undefined,
-        minScore: filters.minScore ? parseInt(filters.minScore) : undefined,
-        minPrice: filters.minBid ? parseInt(filters.minBid) : undefined,
-        maxPrice: filters.maxBid ? parseInt(filters.maxBid) : undefined,
-        limit: 50
-      });
+      const { data, total: t } = await api.searchCrosshairOpportunities(buildFilters(50));
       setResults(data);
       setTotal(t);
     } catch (e) {
@@ -505,6 +526,28 @@ const CrosshairTab = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    try {
+      const { data } = await api.searchCrosshairOpportunities(buildFilters(50 * nextPage));
+      setResults(data);
+      setPage(nextPage);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const resetFilters = () => {
+    setFilters({ make: '', model: '', yearMin: '', yearMax: '', state: '', minScore: '', minBid: '', maxBid: '' });
+    setResults([]);
+    setTotal(0);
+    setSearched(false);
+    setPage(1);
   };
 
   const handleSendToSniperScope = (deal: Opportunity) => {
@@ -594,19 +637,35 @@ const CrosshairTab = () => {
         </div>
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-gray-500">Results are pulled from the live `opportunities` table and ranked by DOS score.</p>
-          <button
-            onClick={search}
-            disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors flex items-center gap-2"
-          >
-            <Filter className="h-4 w-4" />
-            {loading ? 'Searching...' : 'Search Deals'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={resetFilters}
+              className="text-xs text-gray-400 hover:text-gray-200 px-3 py-2 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
+            >
+              Reset
+            </button>
+            <button
+              onClick={search}
+              disabled={loading}
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors flex items-center gap-2"
+            >
+              <Filter className="h-4 w-4" />
+              {loading ? 'Searching...' : 'Search Deals'}
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* Loading state */}
+      {loading && (
+        <div className="text-center py-10 text-gray-400 flex flex-col items-center gap-3">
+          <RefreshCw className="h-6 w-6 animate-spin text-emerald-500" />
+          <span className="text-sm">Searching deals…</span>
+        </div>
+      )}
+
       {/* Results */}
-      {searched && (
+      {!loading && searched && (
         <div>
           {/* Result count + filter summary */}
           {total > 0 && (
@@ -640,16 +699,30 @@ const CrosshairTab = () => {
               No deals match your filters
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {results.map(deal => (
-                <DealCard
-                  key={deal.id}
-                  deal={deal}
-                  onSendToSniperScope={handleSendToSniperScope}
-                  onAction={handleCrosshairAction}
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {results.map(deal => (
+                  <DealCard
+                    key={deal.id}
+                    deal={deal}
+                    onSendToSniperScope={handleSendToSniperScope}
+                    onAction={handleCrosshairAction}
+                  />
+                ))}
+              </div>
+              {results.length < total && (
+                <div className="mt-6 text-center">
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-sm px-6 py-2 rounded-lg border border-gray-700 transition-colors flex items-center gap-2 mx-auto"
+                  >
+                    {loadingMore ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+                    {loadingMore ? 'Loading…' : `Load more (${total - results.length} remaining)`}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
