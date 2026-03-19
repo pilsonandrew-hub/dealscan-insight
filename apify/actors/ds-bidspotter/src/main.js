@@ -45,11 +45,6 @@ const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box tru
 
 await Actor.init();
 
-const proxyConfiguration = await Actor.createProxyConfiguration({
-    groups: ['RESIDENTIAL'],
-    countryCode: 'US',
-});
-
 const input = await Actor.getInput() ?? {};
 const {
     maxPages = 10,
@@ -332,20 +327,30 @@ router.addDefaultHandler(async ({ body, request, log, crawler }) => {
     });
 });
 
+// Use residential proxies to bypass Cloudflare/CAPTCHA on BidSpotter
+const proxyConfiguration = await Actor.createProxyConfiguration({
+    groups: ['RESIDENTIAL'],
+    countryCode: 'US',
+});
+
 const crawler = new HttpCrawler({
     requestHandler: router,
-    proxyConfiguration,
     maxRequestsPerCrawl: maxPages * 50,
-    maxConcurrency: 3,
+    maxConcurrency: 2,
     additionalMimeTypes: ['text/html'],
-    additionalHttpHeaders: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': 'https://www.google.com/',
-        'Upgrade-Insecure-Requests': '1',
-    },
+    proxyConfiguration,
+    preNavigationHooks: [
+        async (_crawlingContext, gotOptions) => {
+            gotOptions.headers = {
+                ...gotOptions.headers,
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://www.google.com/',
+                'Upgrade-Insecure-Requests': '1',
+            };
+        },
+    ],
 });
 
 await crawler.run([{
