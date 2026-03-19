@@ -127,10 +127,11 @@ export const DealOpportunities = ({
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {deals.map((deal) => (
-          <Card key={deal.id} className="group relative overflow-hidden transition-all hover:shadow-lg">
+          <Card key={deal.id} className="group relative overflow-hidden transition-all hover:shadow-lg w-full min-h-16 touch-target-md">
+          <Card key={deal.id} className="group relative overflow-hidden transition-all hover:shadow-lg w-full min-h-16 touch-target-md">
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
             
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-3 relative">
               <div className="flex items-start justify-between">
                 <Badge className={getStatusColor(deal.status)} variant="secondary">
                   {deal.status.toUpperCase()}
