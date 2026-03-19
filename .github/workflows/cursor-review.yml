@@ -1,0 +1,57 @@
+name: Cursor Code Review
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  cursor-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Business Rules
+        run: |
+          echo "=== DEALERSCOPE BUSINESS RULE VALIDATION ==="
+
+          # Check bid ceiling constant
+          if grep -rn "COST_TO_MARKET_MAX" backend/ --include="*.py" | grep -v "0.88"; then
+            echo "❌ FAIL: COST_TO_MARKET_MAX changed from 0.88"
+            exit 1
+          fi
+          echo "✅ Bid ceiling (0.88) intact"
+
+          # Check no localhost in production services
+          if grep -rn "localhost" src/services/ --include="*.ts" 2>/dev/null; then
+            echo "❌ FAIL: localhost found in frontend services"
+            exit 1
+          fi
+          echo "✅ No localhost in frontend services"
+
+          # Check no hardcoded secrets
+          if grep -rn "apify_api_\|sk-proj-\|sk-ant-\|ntn_" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v ".cursorrules\|MEMORY\|test\|#"; then
+            echo "❌ FAIL: Hardcoded API key found in source"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets"
+
+          # Check SECRET_KEY safety
+          if grep -n "dev-secret-change-in-prod" config/settings.py 2>/dev/null; then
+            echo "❌ FAIL: Weak SECRET_KEY default found"
+            exit 1
+          fi
+          echo "✅ SECRET_KEY is hardened"
+
+          # Check rust state list is present
+          if ! grep -rn "HIGH_RUST_STATES\|RUST_STATES\|rust_states" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
+            echo "⚠️ WARNING: Rust state filter may be missing"
+          else
+            echo "✅ Rust state filter present"
+          fi
+
+          echo ""
+          echo "=== ALL BUSINESS RULE CHECKS PASSED ==="
