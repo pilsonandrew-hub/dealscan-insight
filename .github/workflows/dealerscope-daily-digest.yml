@@ -16,7 +16,7 @@ jobs:
         env:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: "7529788084"
+          CHAT_ID: "-1003672399222"
         run: |
           python3 << 'PYEOF'
           import json, urllib.request, ssl, datetime, sys, os
