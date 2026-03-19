@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import { CanonicalListing, SearchResponse } from "@/types/crosshair";
 import { formatDistanceToNow } from "date-fns";
 import { roverAPI } from "@/services/roverAPI";
 import { supabase } from "@/integrations/supabase/client";
+import { SniperButton } from "@/components/SniperButton";
 
 interface CrosshairResultsProps {
   searchResponse: SearchResponse;
@@ -287,7 +289,18 @@ export const CrosshairResults = ({
                   <Separator />
 
                   {/* Actions */}
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      asChild
+                    >
+                      <Link to={`/deal/${listing.id}`}>
+                        <Eye className="w-3 h-3 mr-1" />
+                        Details
+                      </Link>
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -296,7 +309,7 @@ export const CrosshairResults = ({
                     >
                       <a href={listing.url} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="w-3 h-3 mr-1" />
-                        View
+                        Listing
                       </a>
                     </Button>
                     <Button
@@ -326,10 +339,22 @@ export const CrosshairResults = ({
                         });
                       }}
                     >
-                      <Eye className="w-3 h-3 mr-1" />
+                      <Bell className="w-3 h-3 mr-1" />
                       Watch
                     </Button>
                   </div>
+                  {/* SniperButton */}
+                  <SniperButton
+                    opportunity={{
+                      id: listing.id,
+                      year: listing.year,
+                      make: listing.make,
+                      model: listing.model,
+                      current_bid: listing.bid_current ?? listing.buy_now,
+                      listing_url: listing.url,
+                    }}
+                    className="w-full mt-1"
+                  />
                 </div>
               </CardContent>
             </Card>
