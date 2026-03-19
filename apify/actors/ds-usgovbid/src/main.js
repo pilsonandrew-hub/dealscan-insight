@@ -1,27 +1,27 @@
 /**
  * ds-usgovbid — USGovBid Impound Vehicle Auction Scraper
  *
- * STATUS: WORKING — Playwright (required for AJAX item loading)
+ * STATUS: WORKING — Playwright (required for dynamic bid values)
  *
  * Architecture:
  *   USGovBid uses two layers:
  *   1. usgovbid.com/auctions/ — WordPress + The Events Calendar plugin
  *      → Public REST API: /wp-json/tribe/events/v1/events (returns auction events w/ venue/state)
- *   2. bid.usgovbid.com (Maxanet platform) — individual lot pages
- *      → Items loaded via AJAX: POST /Public/Auction/GetAuctionItems
- *      → Requires session cookie + CSRF token captured from page load
+ *   2. bid.auctionlistservices.com (ALS/Global Auction Platform) — individual lot pages
+ *      → Lots are server-rendered in HTML (no AJAX auth required)
+ *      → Bid values loaded dynamically but title/URL/image are in static HTML
  *
  * Strategy:
  *   1. Fetch upcoming auction events via WordPress REST API
- *   2. For each auction: load AuctionItems page in Playwright to get session/CSRF
- *   3. POST to GetAuctionItems AJAX endpoint to retrieve lot HTML
+ *   2. For each auction: crawl event page to find bid.auctionlistservices.com link
+ *   3. Load auction catalog page in Playwright to get dynamic bid values
  *   4. Parse lot cards: title, current bid, end date, lot URL, photo
  *   5. Filter for vehicles, apply rust-state and bid-range filters
  *   6. Push normalized records to Apify dataset
  *
- * Note: USGovBid typically lists 3–10 active auctions with 20–200 lots each.
- * Vehicle lots are clearly labeled ("Vehicles" category). Each auction covers
- * a single government agency (county sheriff, state surplus, etc.).
+ * Note: USGovBid typically lists 1–5 active auctions with 20–200 lots each.
+ * Vehicle lots are clearly labeled. Each auction covers a single government
+ * agency (county sheriff, state surplus, etc.).
  */
 
 import { Actor } from 'apify';
@@ -29,7 +29,7 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'usgovbid';
 const WP_EVENTS_API = 'https://www.usgovbid.com/wp-json/tribe/events/v1/events?per_page=50&status=publish';
-const BID_BASE = 'https://bid.usgovbid.com';
+const BID_BASE = 'https://bid.auctionlistservices.com';
 
 const HIGH_RUST_STATES = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
@@ -63,7 +63,7 @@ await Actor.init();
 const input = await Actor.getInput() ?? {};
 const {
     maxAuctions = 10,
-    maxLotsPerAuction = 200,
+    maxLotsPerAuction = 500,
     minBid = 500,
     maxBid = 35000,
 } = input;
@@ -125,39 +125,50 @@ function parseDate(v) {
     return null;
 }
 
-function extractAuctionItems($) {
+/**
+ * Parse lot cards from ALS (bid.auctionlistservices.com) auction catalog HTML.
+ *
+ * Card structure:
+ *   <div class="card lot-list-item" id="lot-list-item-{uuid}" data-lot-id="{uuid}">
+ *     <a href="/auctions/{id}/{ref}/lot-details/{uuid}">  ← lot URL + image
+ *       <img class="lot-grid-image" src="...">
+ *     </a>
+ *     <div class="content lot-grid-content">
+ *       <div class="meta lot-number">1A</div>
+ *       <a class="header lot-grid-header" name="lot-title" href="...">TITLE</a>
+ *       <div class="current-bid-value" data-current-bid="1234.0">1,234</div>
+ *       ...
+ *     </div>
+ *   </div>
+ */
+function extractAuctionItems($, auctionEndDate) {
     const items = [];
-    // Maxanet grid view: each lot is in .ibox-content or auction-item-card
-    // Look for lot cards with title, bid, end date, image
-    $('[id^="catelog_time_"], .auction-item-card, .ibox-content').each((i, el) => {
+
+    $('.lot-list-item').each((i, el) => {
         const $el = $(el);
 
-        // Title — usually in an h4, h3, or .public-item-font-color link
-        const titleEl = $el.find('.public-item-font-color, h4 a, h3 a, .catelog-desc h2, .item-title').first();
+        // Title
+        const titleEl = $el.find('a[name="lot-title"], a.lot-grid-header').first();
         const title = normalizeText(titleEl.text() || titleEl.attr('title') || '');
         if (!title) return;
 
-        // Lot URL
-        const href = titleEl.attr('href') || $el.find('a[href*="AuctionItemId"]').first().attr('href') || '';
+        // Lot URL — href is relative, prepend BID_BASE
+        const href = titleEl.attr('href') || $el.find('a[href*="lot-details"]').first().attr('href') || '';
         const listing_url = href ? (href.startsWith('http') ? href : `${BID_BASE}${href}`) : '';
 
-        // Current bid
-        const bidText = $el.find('.min_bid_amount_text_quantity, .current-bid, [class*="current_bid"], [class*="CurrentBid"], .min-bid-text').first().text();
-        const current_bid = parseBid(bidText);
-
-        // End date — stored in data-enddate on .remain-time or .local-date-time spans
-        const endEl = $el.find('.remain-time, [data-enddate], .bid-content-date[data-auc-date]').first();
-        const endRaw = endEl.attr('data-enddate') || endEl.attr('data-auc-date') || '';
-        const auction_end_time = parseDate(endRaw) || parseDate($el.find('[data-auc-date]').last().attr('data-auc-date'));
+        // Current bid — prefer data-current-bid attribute (numeric, always present even if 0)
+        const bidEl = $el.find('.current-bid-value').first();
+        const bidAttr = bidEl.attr('data-current-bid');
+        const current_bid = bidAttr !== undefined ? parseFloat(bidAttr) : parseBid(bidEl.text());
 
         // Photo
-        const imgEl = $el.find('img[src*="maxanet"], img[src*="amazonaws"], img[src*="prod.maxanet"], .carousel-item img').first();
-        const photo_url = imgEl.attr('src') || imgEl.attr('data-src') || '';
+        const imgEl = $el.find('img.lot-grid-image').first();
+        const photo_url = imgEl.attr('src') || imgEl.attr('data-zoom-src') || '';
 
-        // Lot number from title or catelog id
-        const lotNum = $el.attr('id')?.match(/catelog_time_(\w+)/)?.[1] || '';
+        // Lot number
+        const lot_num = normalizeText($el.find('.meta.lot-number').first().text());
 
-        items.push({ title, listing_url, current_bid, auction_end_time, photo_url, lot_num: lotNum });
+        items.push({ title, listing_url, current_bid, auction_end_time: auctionEndDate, photo_url, lot_num });
     });
 
     return items;
@@ -184,14 +195,13 @@ async function fetchUpcomingAuctions(log) {
         const city = venue.city || '';
         const location = [city, state].filter(Boolean).join(', ');
 
-        // Extract bid.usgovbid.com URL from description
+        // Try to extract bid.auctionlistservices.com URL from description
         const desc = ev.description || '';
-        const bidMatch = desc.match(/href="(https?:\/\/bid\.usgovbid\.com[^"&]+)/);
+        const bidMatch = desc.match(/href="(https?:\/\/bid\.auctionlistservices\.com[^"&]+)/);
         const auctionUrl = bidMatch
             ? bidMatch[1].replace(/&#038;/g, '&').replace(/&amp;/g, '&')
             : null;
 
-        // Also try the event's own page for the bid URL
         return {
             id: ev.id,
             title: normalizeText(ev.title?.replace(/<[^>]+>/g, '') || ''),
@@ -212,7 +222,7 @@ async function fetchUpcomingAuctions(log) {
 const auctions = [];
 
 const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 50,
+    maxRequestsPerCrawl: 100,
     requestHandlerTimeoutSecs: 120,
     navigationTimeoutSecs: 60,
     browserPoolOptions: {
@@ -220,98 +230,65 @@ const crawler = new PlaywrightCrawler({
     },
     async requestHandler({ page, request, log }) {
         const { auctionMeta } = request.userData;
-
-        // ── Step 1: Load the AuctionItems page to get session & CSRF ──────────
         log.info(`Processing auction: ${auctionMeta.title} [${auctionMeta.state}] — ${request.url}`);
+
+        // Wait for lot cards to render
+        await page.waitForSelector('.lot-list-item', { timeout: 30000 }).catch(() => {
+            log.warning(`No .lot-list-item found on ${request.url}`);
+        });
         await page.waitForTimeout(2000);
 
-        // Extract hidden field values for AJAX call
-        const auctionId = await page.$eval('#hdn_AuctionId', el => el.value).catch(() => null);
-        const aucId = await page.$eval('#hdn_AucId', el => el.value).catch(() => null);
-        const csrfToken = await page.$eval('#__RequestVerificationToken', el => el.value).catch(() => null);
+        // Extract auction-level end date from the page header
+        const auctionEndDate = await page.evaluate(() => {
+            const saleDates = document.querySelectorAll('.sale-date');
+            // Last .sale-date is usually the "ends from" date
+            const last = saleDates[saleDates.length - 1];
+            return last ? last.textContent.trim() : null;
+        }).catch(() => null);
 
-        if (!auctionId) {
-            log.warning(`Could not extract AuctionId from ${request.url} — trying DOM parse`);
-        }
+        const endDateIso = parseDate(auctionEndDate) || parseDate(auctionMeta.end_date);
 
-        // ── Step 2: Trigger AJAX to load all lots ────────────────────────────
+        // Parse all lot pages (ALS shows ~60 lots per page; handle pagination)
         let allLots = [];
-        let page_num = 1;
-        const PAGE_SIZE = 100;
+        let pageNum = 1;
 
         while (allLots.length < maxLotsPerAuction) {
-            log.info(`Fetching lots page ${page_num} for auction ${auctionId || 'unknown'}...`);
-
-            let lotsHtml = null;
-            try {
-                // Use page.evaluate to call the AJAX endpoint from within browser context (avoids CORS)
-                lotsHtml = await page.evaluate(async ({ auctionId, pageNum, pageSize, csrf }) => {
-                    const formData = new URLSearchParams({
-                        AuctionId: auctionId,
-                        pageNumber: String(pageNum),
-                        itemsPerPage: String(pageSize),
-                        viewType: '2',
-                        Categoryfilter: '',
-                        ShowFilter: 'all',
-                        SortBy: 'ordernumber_asc',
-                        SearchFilter: '',
-                        pageSize: String(pageSize),
-                        __RequestVerificationToken: csrf || '',
-                    });
-                    const resp = await fetch('/Public/Auction/GetAuctionItems', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: formData.toString(),
-                        credentials: 'include',
-                    });
-                    if (!resp.ok) return null;
-                    return await resp.text();
-                }, { auctionId, pageNum: page_num, pageSize: PAGE_SIZE, csrf: csrfToken });
-            } catch (err) {
-                log.warning(`GetAuctionItems AJAX failed: ${err.message}`);
-                break;
-            }
-
-            if (!lotsHtml || lotsHtml.includes('No Data Found') || lotsHtml.length < 100) {
-                log.info(`No more lots on page ${page_num}`);
-                break;
-            }
-
-            // Parse lots from HTML response
+            const html = await page.content();
             const cheerio = await import('cheerio');
-            const $ = cheerio.load(lotsHtml);
-            const pageLots = extractAuctionItems($);
-            log.info(`Page ${page_num}: ${pageLots.length} lots parsed`);
+            const $ = cheerio.load(html);
+            const pageLots = extractAuctionItems($, endDateIso);
+            log.info(`Page ${pageNum}: ${pageLots.length} lots parsed`);
 
             if (!pageLots.length) break;
             allLots = allLots.concat(pageLots);
 
-            // Check if there are more pages
-            const hasNextPage = lotsHtml.includes('next-page') || lotsHtml.includes('page-next') ||
-                (pageLots.length === PAGE_SIZE);
-            if (!hasNextPage) break;
-            page_num++;
+            // Check for next page link
+            const nextHref = await page.$eval(
+                'a.item[data-page].next, .pagination a[rel="next"], a.next-page',
+                el => el.href
+            ).catch(() => null);
+
+            if (!nextHref) break;
+            await page.goto(nextHref, { waitUntil: 'domcontentloaded' });
+            await page.waitForSelector('.lot-list-item', { timeout: 20000 }).catch(() => {});
             await page.waitForTimeout(1000);
+            pageNum++;
         }
 
         log.info(`Auction ${auctionMeta.title}: ${allLots.length} lots total`);
 
-        // ── Step 3: Filter and push ──────────────────────────────────────────
+        // ── Filter and push ──────────────────────────────────────────────────
         for (const lot of allLots) {
             totalFound++;
             const { title, listing_url, current_bid, auction_end_time, photo_url } = lot;
 
-            // Vehicle filter
             if (!isVehicle(title)) continue;
 
-            // State filter
             const state = auctionMeta.state;
             if (state && HIGH_RUST_STATES.has(state)) continue;
 
-            // Bid filter
             if (current_bid > 0 && (current_bid < minBid || current_bid > maxBid)) continue;
 
-            // Age filter
             const year = parseYear(title);
             if (year && (new Date().getFullYear() - year) > 12) continue;
 
@@ -347,7 +324,6 @@ const crawler = new PlaywrightCrawler({
 
 // ── Orchestrate ──────────────────────────────────────────────────────────────
 
-// Fetch auction list from WP Events API
 let events = [];
 try {
     events = await fetchUpcomingAuctions(console);
@@ -360,13 +336,12 @@ if (!events.length) {
     await Actor.exit();
 }
 
-// Build request list — for each auction that has a bid URL, crawl the lots page
+// Build request list — for each auction, find the ALS bid URL
 const requests = [];
 for (const auction of events.slice(0, maxAuctions)) {
     let bidUrl = auction.bid_url;
 
     if (!bidUrl) {
-        // Fall back: crawl event page to find bid.usgovbid.com link
         console.log(`No direct bid URL for ${auction.title} — will crawl event page`);
         requests.push({
             url: auction.event_url,
@@ -381,9 +356,8 @@ for (const auction of events.slice(0, maxAuctions)) {
     });
 }
 
-// Handle event pages that need redirect to bid URL
+// Pre-pass: resolve event pages → ALS bid URL
 if (requests.some(r => r.userData.needsRedirect)) {
-    // Use a pre-pass crawler to resolve event page → bid URL
     const redirectCrawler = new PlaywrightCrawler({
         maxRequestsPerCrawl: 20,
         requestHandlerTimeoutSecs: 60,
@@ -391,9 +365,9 @@ if (requests.some(r => r.userData.needsRedirect)) {
             const { auctionMeta } = request.userData;
             log.info(`Resolving bid URL from event page: ${request.url}`);
 
-            // Find the bid.usgovbid.com link
+            // Find bid.auctionlistservices.com link (current platform)
             const bidLink = await page.$eval(
-                'a[href*="bid.usgovbid.com"]',
+                'a[href*="bid.auctionlistservices.com"]',
                 el => el.href
             ).catch(() => null);
 
@@ -402,7 +376,12 @@ if (requests.some(r => r.userData.needsRedirect)) {
                 auctions.push({ url: bidLink, userData: { auctionMeta } });
                 log.info(`Found bid URL: ${bidLink}`);
             } else {
-                log.warning(`No bid.usgovbid.com link found on ${request.url}`);
+                log.warning(`No bid.auctionlistservices.com link found on ${request.url}`);
+                // Log all external links for debugging
+                const links = await page.$$eval('a[href^="http"]', els =>
+                    els.map(el => el.href).filter(h => !h.includes('usgovbid.com'))
+                ).catch(() => []);
+                log.info(`External links: ${links.slice(0, 10).join(', ')}`);
             }
         },
     });
@@ -413,7 +392,6 @@ if (requests.some(r => r.userData.needsRedirect)) {
     }
 }
 
-// Build final request list for main crawler
 const mainRequests = [
     ...requests.filter(r => !r.userData.needsRedirect),
     ...auctions,
