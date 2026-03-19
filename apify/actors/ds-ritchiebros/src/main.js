@@ -22,7 +22,13 @@ const crawler = new PlaywrightCrawler({
         found += items.length;
         for (const item of items) {
             const state = item.location?.match(/\b([A-Z]{2})\b/)?.[1];
-            if (state && HIGH_RUST.has(state)) continue;
+            if (state && HIGH_RUST.has(state)) {
+                const yearMatch = (item.title || '').match(/\b(20\d{2}|19[89]\d)\b/);
+                const year = yearMatch ? parseInt(yearMatch[1]) : null;
+                const currentYear = new Date().getFullYear();
+                if (!(year && year >= currentYear - 2)) continue;
+                log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+            }
             await Actor.pushData({...item, source: 'ritchiebros'});
             passed++;
         }

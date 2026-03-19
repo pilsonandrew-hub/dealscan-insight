@@ -181,11 +181,15 @@ let totalPassed = 0;
 
 function passes(item) {
     const state = normalizeState(item.state || item.locationState || '');
-    if (!includeRustStates && HIGH_RUST_STATES.has(state)) return false;
+    const year = parseInt(item.year || item.modelYear || 0);
+    const currentYear = new Date().getFullYear();
+    if (!includeRustStates && HIGH_RUST_STATES.has(state)) {
+        if (!(year && year >= currentYear - 2)) return false;
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+    }
     const bid = parseFloat(item.currentBid || item.bidAmount || item.currentPrice || 0);
     if (bid > 0 && (bid < minBid || bid > maxBid)) return false;
-    const year = parseInt(item.year || item.modelYear || 0);
-    if (year && (new Date().getFullYear() - year) > 15) return false;
+    if (year && (currentYear - year) > 15) return false;
     return true;
 }
 

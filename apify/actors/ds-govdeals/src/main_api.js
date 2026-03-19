@@ -67,11 +67,15 @@ function extractLots(json) {
 
 function passes(item) {
     const state = (item.locationState || item.state || '').toUpperCase();
-    if (HIGH_RUST_STATES.has(state)) return false;
     const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;
     const year = parseInt(item.modelYear || item.year || 0);
-    if (year && (new Date().getFullYear() - year) > 12) return false;
+    const currentYear = new Date().getFullYear();
+    if (year && (currentYear - year) > 12) return false;
+    if (HIGH_RUST_STATES.has(state)) {
+        if (!(year && year >= currentYear - 2)) return false;
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+    }
     return true;
 }
 

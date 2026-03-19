@@ -1352,15 +1352,18 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
             item.get("state") or ""
         ).strip().upper()
 
-        # Skip high rust states at normalize time
-        if state in HIGH_RUST_STATES:
-            return None
-
         # Make/model/year: parseforge provides these directly
         make = item.get("make") or extract_make(title) or ""
         model = item.get("model") or extract_model(title, make) or ""
         year_raw = item.get("modelYear") or item.get("year")
         year = int(year_raw) if year_raw and str(year_raw).isdigit() else extract_year(title)
+
+        # Skip high rust states at normalize time — bypass allowed for ≤3yr old vehicles
+        if state in HIGH_RUST_STATES:
+            current_year = datetime.now().year
+            if not year or year < current_year - 2:
+                return None
+            logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤3yr old)')
 
         # Bid: parseforge uses currentBid, ours uses current_bid
         current_bid = float(item.get("currentBid") or item.get("current_bid") or 0)
@@ -1555,7 +1558,10 @@ def passes_basic_gates(vehicle: dict) -> dict:
         return {"pass": False, "reason": f"non_us_state ({state})"}
 
     if state in HIGH_RUST_STATES:
-        return {"pass": False, "reason": f"high_rust_state ({state})"}
+        current_year = datetime.now().year
+        if not year or year < current_year - 2:
+            return {"pass": False, "reason": f"high_rust_state ({state})"}
+        logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤3yr old)')
 
     title_brand_issue = _find_title_brand_issue(vehicle)
     if title_brand_issue:

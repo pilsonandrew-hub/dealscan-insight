@@ -285,12 +285,16 @@ const crawler = new PlaywrightCrawler({
             if (!isVehicle(title)) continue;
 
             const state = auctionMeta.state;
-            if (state && HIGH_RUST_STATES.has(state)) continue;
+            const year = parseYear(title);
+            const currentYear = new Date().getFullYear();
+            if (state && HIGH_RUST_STATES.has(state)) {
+                if (!(year && year >= currentYear - 2)) continue;
+                console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+            }
 
             if (current_bid > 0 && (current_bid < minBid || current_bid > maxBid)) continue;
 
-            const year = parseYear(title);
-            if (year && (new Date().getFullYear() - year) > 12) continue;
+            if (year && (currentYear - year) > 12) continue;
 
             const make = parseMake(title);
             const model = parseModel(title, make);

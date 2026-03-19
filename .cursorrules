@@ -23,8 +23,10 @@
 ## DOS SCORING FORMULA (CANONICAL — DO NOT CHANGE WITHOUT APPROVAL)
 DOS = Margin×0.35 + Velocity×0.25 + Segment×0.20 + Model×0.12 + Source×0.08
 
-## RUST STATE REJECTION (HARD FILTER — NEVER BUY FROM THESE STATES)
+## RUST STATE REJECTION (HARD FILTER — WITH NEW VEHICLE EXCEPTION)
 REJECTED: OH, MI, PA, NY, WI, MN, IL, IN, MO, IA, ND, SD, NE, KS, WV, ME, NH, VT, MA, RI, CT, NJ, MD, DE
+EXCEPTION: High-rust states ALLOWED if vehicle is ≤3 years old (model year >= current_year - 2, i.e. 2024+ for 2026).
+  Rationale: Newer vehicles haven't had time to accumulate rust damage. Flag as rust_state_bypass=True.
 TARGET: AZ, CA, NV, CO, NM, UT, TX, FL, GA, SC, TN, NC, VA, WA, OR, HI
 
 ## ARCHITECTURE DECISIONS (FINAL — DO NOT REVISIT)

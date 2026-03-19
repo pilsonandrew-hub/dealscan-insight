@@ -200,7 +200,11 @@ const crawler = new PlaywrightCrawler({
                 if (!year || year < minYear) continue;
                 if (bid > 0 && (bid < minBid || bid > maxBid)) continue;
                 if (!state || !US_STATES.has(state)) continue;
-                if (HIGH_RUST.has(state)) continue;
+                if (HIGH_RUST.has(state)) {
+                    const currentYear = new Date().getFullYear();
+                    if (!(year && year >= currentYear - 2)) continue;
+                    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+                }
 
                 totalPassed++;
                 const titleParts = card.title.match(/^(\d{4})\s+(.+)/);

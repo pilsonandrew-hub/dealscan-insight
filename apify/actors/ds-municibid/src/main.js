@@ -152,11 +152,15 @@ const crawler = new CheerioCrawler({
                 if (!year || !make) return;
                 if (!isPassengerVehicle(title)) return;
                 if (bid < minBid || bid > maxBid) return;
+                const currentYear = new Date().getFullYear();
                 if (state) {
                     if (!US_STATES.has(state)) return;
-                    if (HIGH_RUST.has(state)) return;
+                    if (HIGH_RUST.has(state)) {
+                        if (!(year >= currentYear - 2)) return;
+                        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+                    }
                 }
-                const age = 2026 - year;
+                const age = currentYear - year;
                 if (age > 12 || age < 0) return;
 
                 passed++;

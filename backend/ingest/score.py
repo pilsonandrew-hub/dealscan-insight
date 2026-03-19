@@ -16,6 +16,12 @@ except ImportError:  # pragma: no cover - exercised in minimal local environment
 from .transport import calc_transport_cost
 from .retail_comps import retail_comp_is_usable
 
+HIGH_RUST_STATES = {
+    'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
+    'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
+    'CT', 'NJ', 'MD', 'DE',
+}
+
 _CONFIGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
 
@@ -917,6 +923,14 @@ def score_deal(
     roi_per_day = gross_margin / estimated_days_to_sale if estimated_days_to_sale > 0 else 0.0
     investment_grade = _investment_grade(retail_ctm_pct, estimated_days_to_sale, segment_tier)
 
+    current_year = datetime.now().year
+    rust_state_bypass = bool(
+        state and state.upper() in HIGH_RUST_STATES
+        and year and year >= current_year - 2
+    )
+    if rust_state_bypass:
+        print(f'[BYPASS] Rust state {state.upper()} allowed — vehicle is {year} (≤3yr old)')
+
     legacy_dos_score = (
         m_score * 0.35
         + v_score * 0.25
@@ -987,6 +1001,7 @@ def score_deal(
         "dos_score": round(weighted_score, 2),
         "score": round(weighted_score, 2),
         "score_version": SCORE_VERSION,
+        "rust_state_bypass": rust_state_bypass,
         # Condition enrichment (from score_condition() in condition.py)
         "condition_grade": condition_grade,
         "condition_score": condition_score,

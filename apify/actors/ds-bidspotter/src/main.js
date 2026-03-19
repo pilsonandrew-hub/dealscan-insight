@@ -89,7 +89,12 @@ const crawler = new PlaywrightCrawler({
 
         for (const listing of listings) {
             const stateMatch = listing.location.match(/\b([A-Z]{2})\b/);
-            if (stateMatch && HIGH_RUST.has(stateMatch[1])) continue;
+            if (stateMatch && HIGH_RUST.has(stateMatch[1])) {
+                const currentYear = new Date().getFullYear();
+                const year = listing.year || parseInt((listing.title || '').match(/\b(20\d{2}|19[89]\d)\b/)?.[1] || '0');
+                if (!(year && year >= currentYear - 2)) continue;
+                console.log(`[BYPASS] Rust state ${stateMatch[1]} allowed — vehicle is ${year} (≤3yr old)`);
+            }
             await Actor.pushData(listing);
             totalPassed++;
         }
