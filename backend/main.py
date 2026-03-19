@@ -251,7 +251,7 @@ _prefix_map = {
     "analytics": "",
     "sniper": "",  # SniperScope — mounts /api/sniper/*
     "saved_searches": "",  # Saved Searches — mounts /api/saved-searches/*
-    "vin": "",  # VIN decoder — mounts /api/vin/*
+    "vin": "/api/vin",  # VIN decoder — mounts /api/vin/*
 }
 for _name, _mod in _routers.items():
     try:
