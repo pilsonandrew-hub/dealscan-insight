@@ -20,11 +20,11 @@ Goal: Full codebase + site recon before building anything.
 - [x] 0.5 — Produce full phased roadmap → ROADMAP.md ✅
 
 ## PHASE 1: FIX BROKEN PIPES
-- [ ] 1.1 — Fix deal-alerts.sh actor IDs (N/A — script doesn't call actors directly; IDs in apify/deployment.json ✅)
-- [ ] 1.2 — Set VITE_API_URL in Railway prod env to https://dealscan-insight-production.up.railway.app
-- [ ] 1.3 — Verify GovPlanet actor webhook wiring (actor present, webhook wired ✅)
-- [ ] 1.4 — OpenAI/Gemini fallbacks — only provenanceTracker.ts calls LLM; already has try/catch fallback ✅
-- [ ] 1.5 — Create dealer_sales Supabase schema (if not present)
+- [x] 1.1 — Fix deal-alerts.sh actor IDs (N/A — script doesn't call actors directly; IDs in apify/deployment.json ✅)
+- [x] 1.2 — Set VITE_API_URL in Railway prod env to https://dealscan-insight-production.up.railway.app ✅ (set via API 2026-03-18 5:03 PM PT)
+- [x] 1.3 — Verify GovPlanet actor webhook wiring (actor present, webhook wired ✅)
+- [x] 1.4 — OpenAI/Gemini fallbacks — only provenanceTracker.ts calls LLM; already has try/catch fallback ✅
+- [ ] 1.5 — Create dealer_sales Supabase schema (MANUAL STEP: apply migration in Supabase SQL editor)
 
 ## PHASE 2: EXPAND AUCTION COVERAGE
 - [ ] 2.1 — HiBid (has dedicated vehicle auctions, uses hibid.com API — Med effort)

@@ -14,7 +14,7 @@ interface RoverCardProps {
 export const RoverCard: React.FC<RoverCardProps> = ({ 
   item, 
   onInteraction, 
-  showExplanation = false 
+  showExplanation = true
 }) => {
   const handleClick = () => {
     onInteraction(item, 'click');
