@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Target, Lock, Trash2, Calculator, Upload, Search, RefreshCw } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Target, Lock, Trash2, Calculator, Upload, Search, RefreshCw, Crosshair, Clock, DollarSign } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -94,6 +94,120 @@ const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: 
 ];
 
 const STORAGE_KEY = 'dealerscope_sniper_targets';
+const API_BASE = (typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_API_URL : '') || 'https://dealscan-insight-production.up.railway.app';
+
+// ─── Active DB Sniper Targets ─────────────────────────────────────────────────
+interface LiveTarget {
+  id: string;
+  status: string;
+  max_bid: number;
+  created_at: string;
+  opportunity?: {
+    year?: number;
+    make?: string;
+    model?: string;
+    state?: string;
+    source?: string;
+    current_bid?: number;
+    auction_end_date?: string;
+    listing_url?: string;
+  };
+}
+
+function LiveTargetStatusBadge({ status }: { status: string }) {
+  if (status === 'active') return <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-700/50">Armed 🎯</span>;
+  if (status === 'ceiling_exceeded') return <span className="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-900/60 text-red-300 border border-red-700/50">Ceiling Exceeded ❌</span>;
+  if (status === 'expired') return <span className="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">Expired</span>;
+  if (status === 'cancelled') return <span className="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">Cancelled</span>;
+  return <span className="text-[11px] text-gray-500">{status}</span>;
+}
+
+function timeUntil(iso?: string): string {
+  if (!iso) return '—';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'Ended';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function ActiveSniperTargets() {
+  const [targets, setTargets] = useState<LiveTarget[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) { setLoading(false); return; }
+      const resp = await fetch(`${API_BASE}/api/sniper/targets`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!resp.ok) return;
+      const json = await resp.json();
+      setTargets(json.targets || []);
+    } catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  if (loading) return <div className="text-center py-4 text-gray-500 text-sm">Loading active targets…</div>;
+  if (targets.length === 0) return (
+    <div className="text-center py-4 text-gray-600 text-sm">
+      No active sniper targets. Arm one from Crosshair or the Dashboard.
+    </div>
+  );
+
+  return (
+    <div className="divide-y divide-gray-800">
+      {targets.map(t => {
+        const opp = t.opportunity || {};
+        const vehicle = [opp.year, opp.make, opp.model].filter(Boolean).join(' ') || 'Unknown vehicle';
+        return (
+          <div key={t.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-white text-sm font-medium truncate">{vehicle}</span>
+                <LiveTargetStatusBadge status={t.status} />
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                {opp.state && <span className="flex items-center gap-0.5">📍 {opp.state}</span>}
+                {opp.source && <span>{opp.source}</span>}
+                {opp.auction_end_date && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {timeUntil(opp.auction_end_date)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-sm">
+              {opp.current_bid != null && (
+                <div className="text-center">
+                  <p className="text-[11px] text-gray-500">Live bid</p>
+                  <p className="text-white font-medium">${opp.current_bid.toLocaleString()}</p>
+                </div>
+              )}
+              <div className="text-center">
+                <p className="text-[11px] text-gray-500">Your ceiling</p>
+                <p className="text-emerald-400 font-semibold">${t.max_bid.toLocaleString()}</p>
+              </div>
+              {opp.listing_url && (
+                <a href={opp.listing_url} target="_blank" rel="noopener noreferrer"
+                  className="text-xs text-gray-500 hover:text-emerald-400 underline"
+                >
+                  View ↗
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function fmt$(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -453,6 +567,16 @@ export default function SniperScopeDashboard() {
           <h2 className="text-xl font-bold text-white">SniperScope</h2>
           <p className="text-sm text-gray-400">Bid execution calculator — find your max bid before you raise your hand</p>
         </div>
+      </div>
+
+      {/* ── Active DB Sniper Targets ────────────────────────────────────────── */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800">
+          <Crosshair className="h-4 w-4 text-emerald-400" />
+          <h3 className="text-sm font-semibold text-gray-200">Active Sniper Targets</h3>
+          <span className="text-xs text-gray-500 ml-1">(from database)</span>
+        </div>
+        <ActiveSniperTargets />
       </div>
 
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-3">

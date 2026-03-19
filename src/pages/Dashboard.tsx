@@ -59,6 +59,7 @@ interface RoverRecommendation {
   confidence_score?: number;
   match_pct?: number;
   vehicle?: Partial<Opportunity['vehicle']>;
+  why_signals?: string[];
   // Pricing / scoring fields used by DealCard
   roi_per_day?: number;
   retail_ctm_pct?: number;
@@ -153,12 +154,16 @@ function manheimSourceLabel(source: Opportunity['manheim_source_status']): strin
 const DealCard = ({
   deal,
   onAction,
-  onSendToSniperScope
+  onSendToSniperScope,
+  whySignals,
 }: {
   deal: Opportunity;
   onAction?: (deal: Opportunity, action: 'view' | 'save' | 'pass') => void;
   onSendToSniperScope?: (deal: Opportunity) => void;
-}) => (
+  whySignals?: string[];
+}) => {
+  const [showWhy, setShowWhy] = React.useState(false);
+  return (
   <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors">
     <div className="flex items-start justify-between mb-3">
       <div>
@@ -276,6 +281,24 @@ const DealCard = ({
       </div>
     )}
 
+    {/* Why this deal? tooltip */}
+    {whySignals && whySignals.length > 0 && (
+      <div className="mb-3 relative">
+        <button
+          onClick={() => setShowWhy(v => !v)}
+          className="flex items-center gap-1 text-xs text-emerald-400/80 hover:text-emerald-300 transition-colors"
+        >
+          <Star className="h-3 w-3" />
+          Why this deal?
+        </button>
+        {showWhy && (
+          <div className="mt-1 bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-gray-300 space-y-1">
+            {whySignals.map((s, i) => <div key={i} className="flex items-start gap-1.5"><span className="text-emerald-400 shrink-0">•</span><span>{s}</span></div>)}
+          </div>
+        )}
+      </div>
+    )}
+
     <div className="flex items-center gap-2">
       {onSendToSniperScope && deal.id && (
         <button
@@ -315,7 +338,8 @@ const DealCard = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 const StatCard = ({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) => (
@@ -584,7 +608,33 @@ const CrosshairTab = () => {
       {/* Results */}
       {searched && (
         <div>
-          <p className="text-xs text-gray-500 mb-3">{total} results</p>
+          {/* Result count + filter summary */}
+          {total > 0 && (
+            <div className="mb-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg px-4 py-2 flex items-center gap-2 text-sm text-emerald-300">
+              <Filter className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                Showing <strong>{results.length}</strong> of <strong>{total}</strong> deals
+                {[
+                  filters.make && filters.make,
+                  filters.model && filters.model,
+                  filters.state && filters.state,
+                  filters.yearMin && `${filters.yearMin}+`,
+                  filters.minBid && `≥$${parseInt(filters.minBid).toLocaleString()}`,
+                  filters.maxBid && `≤$${parseInt(filters.maxBid).toLocaleString()}`,
+                ].filter(Boolean).length > 0 && (
+                  <> matching: {[
+                    filters.make,
+                    filters.model,
+                    filters.state,
+                    filters.yearMin && `${filters.yearMin}+`,
+                    filters.minBid && `≥$${parseInt(filters.minBid).toLocaleString()}`,
+                    filters.maxBid && `≤$${parseInt(filters.maxBid).toLocaleString()}`,
+                  ].filter(Boolean).join(', ')}</>
+                )}
+                {' '}— sorted by DOS score
+              </span>
+            </div>
+          )}
           {results.length === 0 ? (
             <div className="text-center py-8 text-gray-500 bg-gray-900 rounded-xl border border-gray-800">
               No deals match your filters
@@ -623,8 +673,8 @@ const RoverTab = () => {
       const items = result?.items ?? [];
 
       if (items.length > 0) {
-        // Map DealItem → RoverRecommendation
-        const mapped: RoverRecommendation[] = items.map(item => ({
+        // Map DealItem → RoverRecommendation; preserve why_signals from backend
+        const mapped: RoverRecommendation[] = items.map((item: any) => ({
           id: item.id,
           make: item.make,
           model: item.model,
@@ -639,6 +689,7 @@ const RoverTab = () => {
           state: item.state,
           source_site: item.source_site ?? item.source,
           vin: item.vin,
+          why_signals: item.why_signals ?? [],
         }));
         setRecs(mapped);
       } else {
@@ -766,63 +817,108 @@ const RoverTab = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {recs.map((rec) => {
-            const id = rec.id || rec.opportunity_id || Math.random().toString();
-            const deal: Opportunity = {
-              id,
-              make: rec.make || rec.vehicle?.make || '',
-              model: rec.model || rec.vehicle?.model || '',
-              year: rec.year || rec.vehicle?.year || 0,
-              mileage: rec.mileage,
-              current_bid: rec.current_bid || 0,
-              estimated_sale_price: rec.estimated_sale_price || 0,
-              score: rec.score || rec.dos_score,
-              profit_margin: rec.gross_margin ?? rec.potential_profit ?? rec.profit_margin ?? 0,
-              state: rec.state,
-              source_site: rec.source_site || '',
-              auction_end: rec.auction_end,
-              vin: rec.vin,
-              total_cost: rec.total_cost || 0,
-              risk_score: rec.risk_score || 0,
-              transportation_cost: rec.transportation_cost || 0,
-              fees_cost: rec.fees_cost || 0,
-              profit: rec.potential_profit || 0,
-              expected_price: rec.estimated_sale_price || 0,
-              acquisition_cost: rec.total_cost || 0,
-              roi: (rec.roi ?? rec.roi_percentage ?? 0) > 1 ? (rec.roi ?? rec.roi_percentage ?? 0) / 100 : (rec.roi ?? rec.roi_percentage ?? 0),
-              confidence: rec.confidence_score || 0,
-              // Pricing / scoring fields required by DealCard
-              roi_per_day: rec.roi_per_day,
-              retail_ctm_pct: rec.retail_ctm_pct,
-              estimated_days_to_sale: rec.estimated_days_to_sale,
-              max_bid: rec.max_bid,
-              pricing_source: rec.pricing_source,
-              manheim_mmr_mid: rec.manheim_mmr_mid,
-              manheim_mmr_low: rec.manheim_mmr_low,
-              manheim_mmr_high: rec.manheim_mmr_high,
-              pricing_updated_at: rec.pricing_updated_at,
-              investment_grade: rec.investment_grade as Opportunity['investment_grade'],
-              vehicle: {
-                make: rec.make || '',
-                model: rec.model || '',
-                year: rec.year || 0,
-                vin: rec.vin || '',
-                mileage: rec.mileage || 0
-              }
-            };
+        (() => {
+          // Helper: map rec → Opportunity for DealCard
+          const recToDeal = (rec: RoverRecommendation): Opportunity => ({
+            id: rec.id || rec.opportunity_id || '',
+            make: rec.make || rec.vehicle?.make || '',
+            model: rec.model || rec.vehicle?.model || '',
+            year: rec.year || rec.vehicle?.year || 0,
+            mileage: rec.mileage,
+            current_bid: rec.current_bid || 0,
+            estimated_sale_price: rec.estimated_sale_price || 0,
+            score: rec.score || rec.dos_score,
+            profit_margin: rec.gross_margin ?? rec.potential_profit ?? rec.profit_margin ?? 0,
+            state: rec.state,
+            source_site: rec.source_site || '',
+            auction_end: rec.auction_end,
+            vin: rec.vin,
+            total_cost: rec.total_cost || 0,
+            risk_score: rec.risk_score || 0,
+            transportation_cost: rec.transportation_cost || 0,
+            fees_cost: rec.fees_cost || 0,
+            profit: rec.potential_profit || 0,
+            expected_price: rec.estimated_sale_price || 0,
+            acquisition_cost: rec.total_cost || 0,
+            roi: (rec.roi ?? rec.roi_percentage ?? 0) > 1 ? (rec.roi ?? rec.roi_percentage ?? 0) / 100 : (rec.roi ?? rec.roi_percentage ?? 0),
+            confidence: rec.confidence_score || 0,
+            roi_per_day: rec.roi_per_day,
+            retail_ctm_pct: rec.retail_ctm_pct,
+            estimated_days_to_sale: rec.estimated_days_to_sale,
+            max_bid: rec.max_bid,
+            pricing_source: rec.pricing_source,
+            manheim_mmr_mid: rec.manheim_mmr_mid,
+            manheim_mmr_low: rec.manheim_mmr_low,
+            manheim_mmr_high: rec.manheim_mmr_high,
+            pricing_updated_at: rec.pricing_updated_at,
+            investment_grade: rec.investment_grade as Opportunity['investment_grade'],
+            vehicle: { make: rec.make || '', model: rec.model || '', year: rec.year || 0, vin: rec.vin || '', mileage: rec.mileage || 0 },
+          });
+
+          // Infer body type from model name for cold-start categorization
+          const inferType = (model = ''): 'truck' | 'suv' | 'other' => {
+            const m = model.toLowerCase();
+            if (/f-?150|f-?250|f-?350|silverado|sierra|ram\s*1500|ram\s*2500|tacoma|tundra|ranger|frontier|titan|colorado|canyon/.test(m)) return 'truck';
+            if (/explorer|tahoe|suburban|expedition|yukon|highlander|pilot|pathfinder|4runner|sequoia|armada|traverse|equinox|cr-?v|rav4|escape|tucson|sorento|telluride|cx-?5|cx-?9|outback|forester|rogue|murano|durango|grand cherokee|wrangler|defender/.test(m)) return 'suv';
+            return 'other';
+          };
+
+          // Cold start: show categorized deal buckets
+          if (isFallback) {
+            const trucks = recs.filter(r => inferType(r.model) === 'truck').slice(0, 6);
+            const suvs   = recs.filter(r => inferType(r.model) === 'suv').slice(0, 6);
+            const bestVal = [...recs].sort((a, b) => (b.potential_profit ?? 0) - (a.potential_profit ?? 0)).slice(0, 6);
+            const buckets = [
+              { label: '🚛 Top Trucks', items: trucks },
+              { label: '🚙 Top SUVs', items: suvs },
+              { label: '💰 Best Value', items: bestVal },
+            ].filter(b => b.items.length > 0);
+
             return (
-              <div key={id} className="relative">
-                {rec.match_pct != null && (
-                  <div className="absolute -top-2 -right-2 z-10 bg-emerald-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                    {rec.match_pct}% match
+              <div className="space-y-8">
+                {buckets.map(bucket => (
+                  <div key={bucket.label}>
+                    <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">{bucket.label}</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {bucket.items.map(rec => {
+                        const id = rec.id || rec.opportunity_id || Math.random().toString();
+                        return (
+                          <div key={id} className="relative">
+                            {rec.match_pct != null && (
+                              <div className="absolute -top-2 -right-2 z-10 bg-emerald-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                {rec.match_pct}% match
+                              </div>
+                            )}
+                            <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} whySignals={rec.why_signals} />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                )}
-                <DealCard deal={deal} onAction={handleAction} />
+                ))}
               </div>
             );
-          })}
-        </div>
+          }
+
+          // Personalized: flat grid with why-signals tooltip
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {recs.map((rec) => {
+                const id = rec.id || rec.opportunity_id || Math.random().toString();
+                return (
+                  <div key={id} className="relative">
+                    {rec.match_pct != null && (
+                      <div className="absolute -top-2 -right-2 z-10 bg-emerald-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                        {rec.match_pct}% match
+                      </div>
+                    )}
+                    <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} whySignals={rec.why_signals} />
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()
       )}
     </div>
   );

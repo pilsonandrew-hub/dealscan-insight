@@ -160,12 +160,16 @@ def _build_alert_ceiling_exceeded(opp: dict, target: dict) -> str:
     title = f"{opp.get('year','')} {opp.get('make','')} {opp.get('model','')}".strip()
     current = opp.get("current_bid") or 0
     ceiling = float(target.get("max_bid") or 0)
-    return (
+    lot_url = opp.get("listing_url", "")
+    msg = (
         f"❌ *SniperScope — Ceiling Exceeded*\n"
         f"{title}\n"
         f"Current bid (${current:,.0f}) exceeded your ceiling (${ceiling:,.0f})\n"
         f"Target cancelled."
     )
+    if lot_url:
+        msg += f"\n\n👉 [View Listing]({lot_url})"
+    return msg
 
 
 # ─── POST /api/sniper/targets ─────────────────────────────────────────────────
@@ -441,6 +445,10 @@ async def sniper_check(
 
         # ── Parse auction end time ────────────────────────────────────────────
         if not auction_end_raw:
+            logger.debug(
+                "[SNIPER_CHECK] Target %s skipped — opportunity %s has no auction_end_date",
+                target_id, opp_id,
+            )
             continue
         try:
             end_dt = datetime.fromisoformat(auction_end_raw.replace("Z", "+00:00"))

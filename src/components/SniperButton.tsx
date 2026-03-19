@@ -42,6 +42,7 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
   const [maxBid, setMaxBid] = useState<string>('');
   const [telegramChatId, setTelegramChatId] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [armedTargetId, setArmedTargetId] = useState<string | null>(null);
 
   const vehicleLabel = [opportunity.year, opportunity.make, opportunity.model]
     .filter(Boolean)
@@ -105,6 +106,8 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
         return;
       }
 
+      const respData = await resp.json().catch(() => ({}));
+      if (respData?.target?.id) setArmedTargetId(respData.target.id);
       setState('armed');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -113,10 +116,23 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
     }
   }, [opportunity.id, maxBid, telegramChatId]);
 
-  // ── Cancel from armed ────────────────────────────────────────────────────────
-  const handleCancel = useCallback(() => {
+  // ── Cancel from armed — calls DELETE endpoint to remove DB record ────────────
+  const handleCancel = useCallback(async () => {
+    if (armedTargetId) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          await fetch(`${API_BASE}/api/sniper/targets/${armedTargetId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+        }
+      } catch {
+        // non-fatal — UI state update still happens
+      }
+    }
     setState('cancelled');
-  }, []);
+  }, [armedTargetId]);
 
   // ── Close modal ──────────────────────────────────────────────────────────────
   const handleCloseModal = useCallback(() => {

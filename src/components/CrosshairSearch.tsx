@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { roverAPI } from "@/services/roverAPI";
+import { api } from "@/services/api";
 import { Search, Target, Plus, X, Settings } from "lucide-react";
 
 interface CrosshairSearchProps {
@@ -70,14 +71,34 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
 
     setSearching(true);
     try {
-      // Simulate crosshair search - in real implementation, this would call specific search API
-      const searchResults = await simulateCrosshairSearch(criteria);
-      setResults(searchResults);
-      onResultsFound?.(searchResults);
-      
+      const { data: searchResults, total } = await api.searchCrosshairOpportunities({
+        make: criteria.make,
+        model: criteria.model,
+        yearMin: criteria.yearMin,
+        yearMax: criteria.yearMax,
+        state: criteria.state,
+        minPrice: criteria.priceMin,
+        maxPrice: criteria.priceMax,
+        limit: 50,
+      });
+      // CrosshairSearch uses a plain object shape; map Opportunity → display shape
+      const mapped = searchResults.map(o => ({
+        id: o.id,
+        year: o.year,
+        make: o.make,
+        model: o.model,
+        price: o.current_bid,
+        mileage: o.mileage,
+        state: o.state,
+        roi_percentage: o.roi ? o.roi * 100 : 0,
+        dos_score: o.score,
+      }));
+      setResults(mapped);
+      onResultsFound?.(mapped);
+
       toast({
         title: "Search completed",
-        description: `Found ${searchResults.length} matching opportunities.`
+        description: `Found ${total} matching opportunities.`
       });
     } catch (error) {
       toast({
@@ -295,13 +316,13 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
           <CardHeader>
             <CardTitle>Search Results ({results.length})</CardTitle>
             <CardDescription>
-              Opportunities matching your criteria
+              Sorted by DOS score — {[criteria.make, criteria.model, criteria.yearMin ? `${criteria.yearMin}+` : null, criteria.state].filter(Boolean).join(', ') || 'all criteria'}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {results.map((result, index) => (
-                <div key={index} className="p-3 border rounded-lg">
+                <div key={result.id || index} className="p-3 border rounded-lg">
                   <div className="flex justify-between items-start">
                     <div>
                       <h4 className="font-medium">
@@ -314,9 +335,16 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
                         <p className="text-xs text-muted-foreground">{result.state}</p>
                       )}
                     </div>
-                    <Badge variant="outline">
-                      ROI: {result.roi_percentage || 0}%
-                    </Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      {result.dos_score != null && (
+                        <Badge variant="default" className="text-xs">
+                          DOS {Math.round(result.dos_score)}
+                        </Badge>
+                      )}
+                      <Badge variant="outline">
+                        ROI: {result.roi_percentage ? result.roi_percentage.toFixed(1) : 0}%
+                      </Badge>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -350,28 +378,5 @@ function generateIntentTitle(criteria: SearchCriteria): string {
   return parts.join(" ") || "Custom Search";
 }
 
-async function simulateCrosshairSearch(criteria: SearchCriteria): Promise<any[]> {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  // Mock results based on criteria
-  const mockResults = [
-    { year: 2020, make: "Toyota", model: "Camry", price: 18500, mileage: 45000, state: "CA", roi_percentage: 15 },
-    { year: 2019, make: "Honda", model: "Accord", price: 17200, mileage: 52000, state: "TX", roi_percentage: 12 },
-    { year: 2021, make: "Ford", model: "F-150", price: 32000, mileage: 38000, state: "FL", roi_percentage: 18 }
-  ];
-  
-  return mockResults.filter(result => {
-    if (criteria.make && result.make !== criteria.make) return false;
-    if (criteria.model && !result.model.toLowerCase().includes(criteria.model.toLowerCase())) return false;
-    if (criteria.yearMin && result.year < criteria.yearMin) return false;
-    if (criteria.yearMax && result.year > criteria.yearMax) return false;
-    if (criteria.priceMin && result.price < criteria.priceMin) return false;
-    if (criteria.priceMax && result.price > criteria.priceMax) return false;
-    if (criteria.mileageMax && result.mileage > criteria.mileageMax) return false;
-    if (criteria.state && result.state !== criteria.state) return false;
-    return true;
-  });
-}
 
 export default CrosshairSearch;
