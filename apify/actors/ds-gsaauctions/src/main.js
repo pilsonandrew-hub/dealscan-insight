@@ -42,7 +42,7 @@ await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 20,
+    maxPages = 10,
     minBid = 1000,
     maxMileage = 50000,
     minYear = 2022,
@@ -207,7 +207,7 @@ function applyFilters(listing, log) {
 async function waitForAngular(page) {
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => {});
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1000);
 }
 
 // Extract each preview link together with the location text from its card on the list page.
