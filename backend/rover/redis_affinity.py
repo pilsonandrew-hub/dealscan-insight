@@ -62,6 +62,24 @@ def _flat_key_prefix(user_id: str) -> str:
     return f"rover:affinity:{user_id}:"
 
 
+def _dedup_key(user_id: str, event_type: str, item_id: str) -> str:
+    return f"rover:dedup:{user_id}:{event_type}:{item_id}"
+
+
+def is_duplicate_event(redis_client, user_id: str, event_type: str, item_id: str, ttl_seconds: int = 300) -> bool:
+    """
+    Returns True if this user+event+item combo was seen within the last ttl_seconds.
+    Uses Redis SETNX so the first caller wins — subsequent identical events are deduped.
+    ttl defaults to 5 minutes (view events) — callers may pass shorter for high-weight events.
+    """
+    if not item_id:
+        return False
+    key = _dedup_key(user_id, event_type, item_id)
+    set_result = redis_client.set(key, 1, nx=True, ex=ttl_seconds)
+    # set returns None if key already existed (NX condition failed) → duplicate
+    return set_result is None
+
+
 def _last_event_key(user_id: str) -> str:
     return f"rover:last_event:{user_id}"
 
