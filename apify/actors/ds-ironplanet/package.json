@@ -1,0 +1,15 @@
+{
+  "name": "ds-ironplanet",
+  "version": "0.1.0",
+  "description": "DealerScope scraper for IronPlanet.com vehicle auctions",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3",
+    "crawlee": "^3",
+    "playwright": "^1.40"
+  }
+}
