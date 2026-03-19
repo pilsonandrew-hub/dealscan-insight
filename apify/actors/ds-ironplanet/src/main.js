@@ -94,7 +94,7 @@ await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 10,
+    maxPages = 4,
     maxMileage = 150000,
     maxAgeYears = 8,
     minBid = 0,
