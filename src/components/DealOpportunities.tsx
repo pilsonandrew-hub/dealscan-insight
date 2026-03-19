@@ -95,30 +95,30 @@ export const DealOpportunities = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
             Deal Opportunities
             {isRealtime && <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />}
           </h2>
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {isRealtime ? 'Live updates enabled - ' : ''}High-potential arbitrage opportunities from government auctions
           </p>
         </div>
-        <div className="flex items-center space-x-4">
-          <div className="text-right">
-            <p className="text-sm text-muted-foreground">Total Opportunities</p>
-            <p className="text-2xl font-bold text-success">{deals.length}</p>
+        <div className="flex items-center gap-4 sm:gap-4 flex-wrap">
+          <div>
+            <p className="text-xs text-muted-foreground">Total</p>
+            <p className="text-xl font-bold text-success">{deals.length}</p>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-muted-foreground">Avg. ROI</p>
-            <p className="text-2xl font-bold text-primary">
+          <div>
+            <p className="text-xs text-muted-foreground">Avg. ROI</p>
+            <p className="text-xl font-bold text-primary">
               {((deals.reduce((sum, deal) => sum + deal.roi * 100, 0) / deals.length) || 0).toFixed(1)}%
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-muted-foreground">Avg. Confidence</p>
-            <p className="text-2xl font-bold text-warning">
+          <div>
+            <p className="text-xs text-muted-foreground">Avg. Confidence</p>
+            <p className="text-xl font-bold text-warning">
               {((deals.reduce((sum, deal) => sum + (deal.confidence * 100), 0) / deals.length) || 0).toFixed(0)}%
             </p>
           </div>
@@ -202,8 +202,8 @@ export const DealOpportunities = ({
                 )}
               </div>
 
-              <div className="flex gap-2">
-                <Button className="flex-1" size="sm">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button className="w-full sm:flex-1" size="sm">
                   <ExternalLink className="mr-2 h-4 w-4" />
                   View Auction
                 </Button>
@@ -215,6 +215,7 @@ export const DealOpportunities = ({
                     model: deal.vehicle?.model ?? deal.model,
                     current_bid: deal.current_bid ?? deal.acquisition_cost,
                   }}
+                  className="w-full sm:w-auto"
                 />
               </div>
             </CardContent>
