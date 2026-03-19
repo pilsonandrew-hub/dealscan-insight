@@ -8,7 +8,7 @@
  *   "loading" → submitting to API
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Target, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -47,6 +47,42 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
   const vehicleLabel = [opportunity.year, opportunity.make, opportunity.model]
     .filter(Boolean)
     .join(' ');
+
+  // ── Restore armed state on mount via API call ───────────────────────────────
+  useEffect(() => {
+    if (!opportunity.id) return;
+    let cancelled = false;
+
+    const restore = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+
+        const resp = await fetch(`${API_BASE}/api/sniper/targets`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (!resp.ok || cancelled) return;
+
+        const data = await resp.json().catch(() => ({}));
+        const targets: Array<{ id: string; opportunity_id: string; status: string }> =
+          data?.targets ?? [];
+
+        const match = targets.find(
+          (t) => String(t.opportunity_id) === String(opportunity.id) && t.status === 'active',
+        );
+        if (match && !cancelled) {
+          setArmedTargetId(match.id);
+          setState('armed');
+        }
+      } catch {
+        // non-fatal — default to idle
+      }
+    };
+
+    restore();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opportunity.id]);
 
   // ── Open modal ──────────────────────────────────────────────────────────────
   const handleSnipeClick = useCallback(() => {

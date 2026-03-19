@@ -241,6 +241,28 @@ async def create_sniper_target(
         logger.error("[SNIPER] Opportunity lookup failed: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
 
+    # Check for existing active target (same user + opportunity)
+    try:
+        existing_check = (
+            supa.table("sniper_targets")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("opportunity_id", str(opportunity_id))
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+        if existing_check.data:
+            raise HTTPException(
+                status_code=409,
+                detail="An active sniper target already exists for this opportunity",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[SNIPER] Duplicate check failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
     # Insert sniper target
     try:
         row = {
@@ -480,41 +502,64 @@ async def sniper_check(
                 stats["errors"] += 1
             continue
 
-        updates = {}
-
-        # ── T-60 alert ────────────────────────────────────────────────────────
+        # ── T-60 alert — atomic CAS: only update if flag is still False ─────────
         if 55 <= minutes_to_close <= 65 and not target.get("alert_60min_sent"):
-            updates["alert_60min_sent"] = True
-            if chat_id:
-                msg = _build_alert_60min(opp, target)
-                alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
-                stats["alerts_sent"] += 1
-                logger.info("[SNIPER_CHECK] T-60 alert queued for target %s", target_id)
-
-        # ── T-15 alert ────────────────────────────────────────────────────────
-        if 12 <= minutes_to_close <= 18 and not target.get("alert_15min_sent"):
-            updates["alert_15min_sent"] = True
-            if chat_id:
-                msg = _build_alert_15min(opp, target)
-                alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
-                stats["alerts_sent"] += 1
-                logger.info("[SNIPER_CHECK] T-15 alert queued for target %s", target_id)
-
-        # ── T-5 alert ─────────────────────────────────────────────────────────
-        if 3 <= minutes_to_close <= 7 and not target.get("alert_5min_sent"):
-            updates["alert_5min_sent"] = True
-            if chat_id:
-                msg = _build_alert_5min(opp, target)
-                alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
-                stats["alerts_sent"] += 1
-                logger.info("[SNIPER_CHECK] T-5 alert queued for target %s", target_id)
-
-        # ── Persist flag updates ──────────────────────────────────────────────
-        if updates:
             try:
-                supa.table("sniper_targets").update(updates).eq("id", target_id).execute()
+                cas_result = (
+                    supa.table("sniper_targets")
+                    .update({"alert_60min_sent": True})
+                    .eq("id", target_id)
+                    .eq("alert_60min_sent", False)  # guard — only one concurrent writer wins
+                    .execute()
+                )
+                if cas_result.data:  # we won the race
+                    if chat_id:
+                        msg = _build_alert_60min(opp, target)
+                        alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
+                        stats["alerts_sent"] += 1
+                        logger.info("[SNIPER_CHECK] T-60 alert queued for target %s", target_id)
             except Exception as exc:
-                logger.error("[SNIPER_CHECK] Flag update failed for %s: %s", target_id, exc)
+                logger.error("[SNIPER_CHECK] T-60 flag update failed for %s: %s", target_id, exc)
+                stats["errors"] += 1
+
+        # ── T-15 alert — atomic CAS ───────────────────────────────────────────
+        if 10 <= minutes_to_close <= 20 and not target.get("alert_15min_sent"):
+            try:
+                cas_result = (
+                    supa.table("sniper_targets")
+                    .update({"alert_15min_sent": True})
+                    .eq("id", target_id)
+                    .eq("alert_15min_sent", False)
+                    .execute()
+                )
+                if cas_result.data:
+                    if chat_id:
+                        msg = _build_alert_15min(opp, target)
+                        alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
+                        stats["alerts_sent"] += 1
+                        logger.info("[SNIPER_CHECK] T-15 alert queued for target %s", target_id)
+            except Exception as exc:
+                logger.error("[SNIPER_CHECK] T-15 flag update failed for %s: %s", target_id, exc)
+                stats["errors"] += 1
+
+        # ── T-5 alert — atomic CAS ────────────────────────────────────────────
+        if 0 <= minutes_to_close <= 7 and not target.get("alert_5min_sent"):
+            try:
+                cas_result = (
+                    supa.table("sniper_targets")
+                    .update({"alert_5min_sent": True})
+                    .eq("id", target_id)
+                    .eq("alert_5min_sent", False)
+                    .execute()
+                )
+                if cas_result.data:
+                    if chat_id:
+                        msg = _build_alert_5min(opp, target)
+                        alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
+                        stats["alerts_sent"] += 1
+                        logger.info("[SNIPER_CHECK] T-5 alert queued for target %s", target_id)
+            except Exception as exc:
+                logger.error("[SNIPER_CHECK] T-5 flag update failed for %s: %s", target_id, exc)
                 stats["errors"] += 1
 
     # Fire all Telegram tasks concurrently (fire-and-forget)
