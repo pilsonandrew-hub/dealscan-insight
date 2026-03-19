@@ -219,7 +219,7 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
         variant="outline"
         size="sm"
         onClick={handleSnipeClick}
-        className={`border-primary/40 text-primary hover:bg-primary/5 ${className}`}
+        className={`border-primary/40 text-primary hover:bg-primary/5 ${className} w-full sm:w-auto`}
       >
         <Target className="h-3.5 w-3.5 mr-1" />
         Snipe This
@@ -298,7 +298,7 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
           )}
 
           {/* Actions */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
@@ -331,7 +331,7 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
       <Button
         variant="outline"
         size="sm"
-        className={`border-primary/40 text-primary ${className}`}
+        className={`border-primary/40 text-primary ${className} w-full sm:w-auto`}
         disabled
       >
         <Target className="h-3.5 w-3.5 mr-1" />
