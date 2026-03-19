@@ -172,3 +172,13 @@
     100% { background-position: 200% 0; }
   }
 }
+
+@layer utilities {
+  /* Safe-area helpers for iOS notch / home indicator */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pb-nav-safe {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+}

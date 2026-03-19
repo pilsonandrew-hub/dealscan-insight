@@ -1481,12 +1481,12 @@ export default function Dashboard() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+      <main className="flex-1 overflow-y-auto pb-nav-safe md:pb-0">
         {renderTab()}
       </main>
 
       {/* Bottom tab bar — mobile */}
-      <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-gray-900 border-t border-gray-800 z-50 overflow-x-auto">
+      <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-gray-900 border-t border-gray-800 z-50 overflow-x-auto pb-safe">
         <div className="flex min-w-max">
         {TABS.map(({ id, label, Icon }) => (
           <button

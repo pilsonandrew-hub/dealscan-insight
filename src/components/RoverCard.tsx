@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DealItem } from '@/services/roverAPI';
-import { DollarSign, MapPin, Clock, TrendingUp, Star } from 'lucide-react';
+import { DollarSign, MapPin, Clock, TrendingUp, Star, ChevronDown } from 'lucide-react';
 
 interface RoverCardProps {
   item: DealItem;
@@ -11,11 +11,13 @@ interface RoverCardProps {
   showExplanation?: boolean;
 }
 
-export const RoverCard: React.FC<RoverCardProps> = ({ 
-  item, 
-  onInteraction, 
+export const RoverCard: React.FC<RoverCardProps> = ({
+  item,
+  onInteraction,
   showExplanation = true
 }) => {
+  const [whyExpanded, setWhyExpanded] = useState(false);
+
   const handleClick = () => {
     onInteraction(item, 'click');
   };
@@ -117,8 +119,16 @@ export const RoverCard: React.FC<RoverCardProps> = ({
 
             {showExplanation && item.why_signals && item.why_signals.length > 0 && (
               <div className="bg-muted/50 p-3 rounded-lg mb-4">
-                <h4 className="text-sm font-medium mb-2">Why Rover recommends this:</h4>
-                <ul className="text-xs text-muted-foreground space-y-1">
+                <button
+                  className="w-full flex items-center justify-between text-sm font-medium md:cursor-default"
+                  onClick={(e) => { e.stopPropagation(); setWhyExpanded(v => !v); }}
+                >
+                  <span>Why Rover recommends this:</span>
+                  <ChevronDown
+                    className={`h-4 w-4 md:hidden transition-transform duration-200 ${whyExpanded ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                <ul className={`text-xs text-muted-foreground space-y-1 mt-2 ${whyExpanded ? '' : 'hidden md:block'}`}>
                   {item.why_signals.map((s, i) => <li key={i}>• {s}</li>)}
                 </ul>
               </div>
