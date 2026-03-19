@@ -289,6 +289,18 @@ async def track_event(
 
         item_data = payload.get("item", {})
 
+        # Deduplicate: view events within 5 min, other events within 30 s
+        if _redis_client:
+            try:
+                from backend.rover.redis_affinity import is_duplicate_event
+                item_id = str(item_data.get("id") or item_data.get("deal_id") or "")
+                dedup_ttl = 300 if event_type == "view" else 30
+                if item_id and is_duplicate_event(_redis_client, auth_user_id, event_type, item_id, dedup_ttl):
+                    logger.debug("[ROVER] Deduplicated event type=%s user=%s... item=%s", event_type, auth_user_id[:8], item_id)
+                    return {"ok": True, "deduped": True}
+            except Exception as _de:
+                logger.debug(f"[ROVER] Dedup check failed (non-fatal): {_de}")
+
         # Store raw weight — decay is applied at read time in build_preference_vector()
         insert_result = supa.table("rover_events").insert({
             "user_id": auth_user_id,

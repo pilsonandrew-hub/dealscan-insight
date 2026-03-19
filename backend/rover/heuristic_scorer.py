@@ -6,13 +6,14 @@ Algorithm from Rover SPEC-01 v1.2
 from typing import Dict, Any
 import math
 
-# Event weights for preference building
+# Event weights for preference building (negative = dislike signal)
 EVENT_WEIGHTS = {
     "view": 0.2,
     "click": 1.0,
     "save": 3.0,
     "bid": 5.0,
     "purchase": 8.0,
+    "pass": -1.5,
 }
 
 DECAY_HALF_LIFE_MS = 72 * 60 * 60 * 1000  # 72 hours
@@ -99,7 +100,7 @@ def score_item(prefs: Dict[str, float], item: Dict[str, Any]) -> float:
 
     # Under-MMR bonus (key arbitrage signal)
     mmr = item.get("mmr", 0)
-    price = item.get("price", 0)
+    price = item.get("current_bid") or item.get("price") or 0
     if mmr and price and price < mmr:
         under_mmr_pct = (mmr - price) / mmr
         score += under_mmr_pct * 10  # Up to 10 bonus points
