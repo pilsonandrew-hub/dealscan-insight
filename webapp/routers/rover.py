@@ -71,7 +71,7 @@ def _serialize_recommendation(row: dict) -> dict:
     elif dos_score >= 65:
         why_signals.append(f"Solid DOS score ({dos_score:.0f})")
     if roi >= 25:
-        why_signals.append(f"{roi:.0f}% ROI")
+        why_signals.append(f"Excellent {roi:.0f}% ROI")
     elif roi >= 15:
         why_signals.append(f"{roi:.0f}% ROI")
     if profit >= 2000:
@@ -251,7 +251,7 @@ async def get_recommendations(
             "data": items,
             "totalCount": len(items),
             "confidence": min(1.0, len(items) / 20),
-            "coldStart": False,
+            "coldStart": not personalized,
             "personalized": personalized,
         }
 
