@@ -230,9 +230,16 @@ async function pushListing(listing, sourceUrl, log) {
         log.debug(`[SKIP] Not a vehicle: ${title}`);
         return false;
     }
+    const { year, make, model } = parseVehicleTitle(title);
+
     if (HIGH_RUST_STATES.has(state)) {
-        log.debug(`[SKIP] High-rust state: ${state} - ${title}`);
-        return false;
+        const currentYear = new Date().getFullYear();
+        if (year && year >= currentYear - 2) {
+            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+        } else {
+            log.debug(`[SKIP] High-rust state: ${state} - ${title}`);
+            return false;
+        }
     }
     if (!targetStateSet.has(state)) {
         log.debug(`[SKIP] Out-of-target state: ${state} - ${title}`);
@@ -249,8 +256,6 @@ async function pushListing(listing, sourceUrl, log) {
         return false;
     }
     seenListings.add(dedupeKey);
-
-    const { year, make, model } = parseVehicleTitle(title);
 
     // Try extracting VIN from title + description text first
     const vinFromText = extractVinFromText([title, description].join(' '));

@@ -79,8 +79,12 @@ function parsePriceString(priceString = '') {
 function passesFilters({ state, mileage, year, currentBid, maxMileage, maxAgeYears, minBid, maxBid }) {
     // Must be USA
     if (!state || !US_STATES.has(state)) return false;
-    // Skip high-rust states
-    if (HIGH_RUST.has(state)) return false;
+    // Skip high-rust states — bypass for ≤3yr old vehicles
+    if (HIGH_RUST.has(state)) {
+        const currentYear = new Date().getFullYear();
+        if (!(year !== null && year >= currentYear - 2)) return false;
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+    }
     // Mileage filter (if available)
     if (mileage !== null && mileage > maxMileage) return false;
     // Age filter (if year available)

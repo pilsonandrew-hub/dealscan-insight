@@ -159,7 +159,7 @@ let totalPassed = 0;
 const categoryFilter = `(${VEHICLE_CATEGORIES.map(c => `category:"${c}"`).join(' OR ')})`;
 
 for (const state of targetStates) {
-    if (HIGH_RUST_STATES.has(state)) continue;
+    // HIGH_RUST pre-filter removed — bypass handled per-item below (year needed)
 
     const stateFilter = `offSitePhysicalState:${state}`;
     let page = 0;
@@ -201,8 +201,11 @@ for (const state of targetStates) {
                 const listing_url = buildListingUrl(itemId);
                 const photo_url = buildImageUrl(itemId);
 
-                // Filter: rust states (belt check already done at state level, but extra safety)
-                if (HIGH_RUST_STATES.has(state_code)) continue;
+                // Filter: rust states — bypass allowed for ≤3yr old vehicles
+                if (HIGH_RUST_STATES.has(state_code)) {
+                    if (!(year && year >= currentYear - 2)) continue;
+                    console.log(`[BYPASS] Rust state ${state_code} allowed — vehicle is ${year} (≤3yr old)`);
+                }
 
                 // Filter: year age
                 if (year && (currentYear - year) > maxYearAge) continue;

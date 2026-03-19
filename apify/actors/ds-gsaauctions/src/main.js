@@ -175,8 +175,13 @@ function applyFilters(listing, log) {
     }
 
     if (listing.state && HIGH_RUST_STATES.has(listing.state)) {
-        log.debug(`[GSA] Skipping high-rust state ${listing.state}: ${listing.title}`);
-        return false;
+        const currentYear = new Date().getFullYear();
+        if (listing.year && listing.year >= currentYear - 2) {
+            log.info(`[BYPASS] Rust state ${listing.state} allowed — vehicle is ${listing.year} (≤3yr old)`);
+        } else {
+            log.debug(`[GSA] Skipping high-rust state ${listing.state}: ${listing.title}`);
+            return false;
+        }
     }
 
     if (listing.state && targetStateSet.size > 0 && !targetStateSet.has(listing.state)) {
@@ -387,10 +392,7 @@ const crawler = new PlaywrightCrawler({
                 filteredUrls.push(url);
                 continue;
             }
-            if (HIGH_RUST_STATES.has(state)) {
-                log.debug(`[GSA] Pre-filter: skipping high-rust state ${state} (${locationText})`);
-                continue;
-            }
+            // High-rust pre-filter removed — year needed for bypass; handled in applyFilters()
             if (targetStateSet.size > 0 && !targetStateSet.has(state)) {
                 log.debug(`[GSA] Pre-filter: skipping out-of-target state ${state} (${locationText})`);
                 continue;

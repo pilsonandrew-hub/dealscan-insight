@@ -19,6 +19,12 @@ import { createLogger } from '@/utils/productionLogger';
 const logger = createLogger('EnhancedDealScoring');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+const HIGH_RUST_STATES = new Set([
+  'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
+  'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
+  'CT', 'NJ', 'MD', 'DE',
+]);
+
 const MDS_THRESHOLD = 35;
 const MAX_AGE_YEARS = 4;
 const MAX_MILEAGE = 50000;
@@ -35,9 +41,19 @@ const DAILY_HOLDING_COST = 35;
 export function runGate1AgeMileage(
   age_years: number,
   mileage: number,
-  price: number
+  price: number,
+  state?: string,
 ): AgeMileageGate {
-  const passes = age_years >= 1 && age_years <= MAX_AGE_YEARS && mileage < MAX_MILEAGE;
+  const currentYear = new Date().getFullYear();
+  const vehicleYear = currentYear - age_years;
+  const rustStateRejected =
+    !!state &&
+    HIGH_RUST_STATES.has(state) &&
+    vehicleYear < currentYear - 2;
+  if (state && HIGH_RUST_STATES.has(state) && !rustStateRejected) {
+    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${vehicleYear} (≤3yr old)`);
+  }
+  const passes = !rustStateRejected && age_years >= 1 && age_years <= MAX_AGE_YEARS && mileage < MAX_MILEAGE;
   const price_tier =
     price >= PREMIUM_PRICE ? "premium" : price < SUB_FLOOR_PRICE ? "sub_floor" : "mid";
 
@@ -106,7 +122,8 @@ export function runFiveLayerFilter(opportunity: Opportunity): FiveLayerFilterRes
     opportunity.market_price?.avg_price ??
     opportunity.estimated_sale_price * 0.82;
 
-  const gate1 = runGate1AgeMileage(age_years, mileage, price);
+  const state = (opportunity as any).state?.toUpperCase();
+  const gate1 = runGate1AgeMileage(age_years, mileage, price, state);
   const gate2 = runGate2MDS(mds);
   const gate3 = runGate3Scarcity(demand_score, local_supply_count, discovery_type);
   const gate4 = runGate4CostToMarket(opportunity.total_cost, wholesale_benchmark);

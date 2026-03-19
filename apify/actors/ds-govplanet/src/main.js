@@ -171,9 +171,13 @@ function isPassengerVehicle(title = '') {
 function passesFilters({ title, year, bid, state }) {
     if (!title || !isPassengerVehicle(title)) return false;
     if (!state || !US_STATES.has(state)) return false;
-    if (HIGH_RUST.has(state)) return false;
+    const currentYear = new Date().getFullYear();
+    if (HIGH_RUST.has(state)) {
+        if (!(year && year >= currentYear - 2)) return false;
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+    }
     if (year && year < 1980) return false;
-    if (year && (new Date().getFullYear() - year) > 12) return false;
+    if (year && (currentYear - year) > 12) return false;
     if (bid < minBid || bid > maxBid) return false;
     return true;
 }

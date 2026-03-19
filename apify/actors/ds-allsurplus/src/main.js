@@ -272,18 +272,24 @@ for (const searchText of searchTerms) {
                     continue;
                 }
                 
+                const year = item.modelYear ? parseInt(item.modelYear) : null;
+
                 if (!allowHighRust && HIGH_RUST_STATES.has(state)) {
-                    console.log(`[SKIP] High-rust state: ${state} — ${title}`);
-                    continue;
+                    if (year && year >= currentYear - 2) {
+                        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+                    } else {
+                        console.log(`[SKIP] High-rust state: ${state} — ${title}`);
+                        continue;
+                    }
                 }
-                
+
                 if (targetStatesOnly && !TARGET_STATES.has(state)) {
                     console.log(`[SKIP] Non-target state: ${state}`);
                     continue;
                 }
-                
+
                 const bid = parseBid(item.currentBid);
-                
+
                 if (bid > 0 && bid < minBid) {
                     console.log(`[SKIP] Bid too low: $${bid} — ${title}`);
                     continue;
@@ -292,8 +298,7 @@ for (const searchText of searchTerms) {
                     console.log(`[SKIP] Bid too high: $${bid} — ${title}`);
                     continue;
                 }
-                
-                const year = item.modelYear ? parseInt(item.modelYear) : null;
+
                 if (year && year < minYear) {
                     console.log(`[SKIP] Too old: ${year} — ${title}`);
                     continue;

@@ -179,8 +179,13 @@ function applyFilters(listing, log) {
     }
     const state = listing.state;
     if (state && HIGH_RUST_STATES.has(state)) {
-        log.debug(`[SKIP] High-rust state: ${state} — ${listing.title}`);
-        return false;
+        const currentYear = new Date().getFullYear();
+        if (listing.year && listing.year >= currentYear - 2) {
+            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${listing.year} (≤3yr old)`);
+        } else {
+            log.debug(`[SKIP] High-rust state: ${state} — ${listing.title}`);
+            return false;
+        }
     }
     if (state && !targetStateSet.has(state)) {
         log.debug(`[SKIP] Out-of-target state: ${state}`);
