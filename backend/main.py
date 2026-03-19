@@ -52,7 +52,7 @@ except Exception as e:
 # Routers — import each independently so one failure doesn't kill everything
 import importlib
 _routers = {}
-for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches"]:
+for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin"]:
     try:
         _routers[_rname] = importlib.import_module(f"webapp.routers.{_rname}")
         logging.info(f"Router loaded: {_rname}")
@@ -251,6 +251,7 @@ _prefix_map = {
     "analytics": "",
     "sniper": "",  # SniperScope — mounts /api/sniper/*
     "saved_searches": "",  # Saved Searches — mounts /api/saved-searches/*
+    "vin": "",  # VIN decoder — mounts /api/vin/*
 }
 for _name, _mod in _routers.items():
     try:
