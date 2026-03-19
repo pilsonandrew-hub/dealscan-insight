@@ -59,6 +59,17 @@ interface RoverRecommendation {
   confidence_score?: number;
   match_pct?: number;
   vehicle?: Partial<Opportunity['vehicle']>;
+  // Pricing / scoring fields used by DealCard
+  roi_per_day?: number;
+  retail_ctm_pct?: number;
+  estimated_days_to_sale?: number;
+  max_bid?: number;
+  pricing_source?: string;
+  manheim_mmr_mid?: number;
+  manheim_mmr_low?: number;
+  manheim_mmr_high?: number;
+  pricing_updated_at?: string;
+  investment_grade?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -634,7 +645,7 @@ const RoverTab = () => {
         // Cold-start fallback: query Supabase for top DOS score deals
         const { data: fallbackDeals } = await supabase
           .from('opportunities')
-          .select('*')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade')
           .gte('dos_score', 65)
           .order('dos_score', { ascending: false })
           .limit(25);
@@ -664,6 +675,16 @@ const RoverTab = () => {
             roi: d.roi,
             roi_percentage: d.roi_percentage,
             confidence_score: d.confidence_score,
+            roi_per_day: d.roi_per_day,
+            retail_ctm_pct: d.retail_ctm_pct,
+            estimated_days_to_sale: d.estimated_days_to_sale,
+            max_bid: d.max_bid,
+            pricing_source: d.pricing_source,
+            manheim_mmr_mid: d.manheim_mmr_mid,
+            manheim_mmr_low: d.manheim_mmr_low,
+            manheim_mmr_high: d.manheim_mmr_high,
+            pricing_updated_at: d.pricing_updated_at,
+            investment_grade: d.investment_grade,
           }));
           setRecs(mapped);
           setIsFallback(true);
@@ -677,7 +698,7 @@ const RoverTab = () => {
       try {
         const { data: fallbackDeals } = await supabase
           .from('opportunities')
-          .select('*')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade')
           .gte('dos_score', 65)
           .order('dos_score', { ascending: false })
           .limit(25);
@@ -687,6 +708,11 @@ const RoverTab = () => {
             current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
             score: d.dos_score, dos_score: d.dos_score, potential_profit: d.potential_profit,
             state: d.state, source_site: d.source_site, vin: d.vin,
+            roi_per_day: d.roi_per_day, retail_ctm_pct: d.retail_ctm_pct,
+            estimated_days_to_sale: d.estimated_days_to_sale, max_bid: d.max_bid,
+            pricing_source: d.pricing_source, manheim_mmr_mid: d.manheim_mmr_mid,
+            manheim_mmr_low: d.manheim_mmr_low, manheim_mmr_high: d.manheim_mmr_high,
+            pricing_updated_at: d.pricing_updated_at, investment_grade: d.investment_grade,
           }));
           setRecs(mapped);
           setIsFallback(true);
@@ -766,6 +792,17 @@ const RoverTab = () => {
               acquisition_cost: rec.total_cost || 0,
               roi: (rec.roi ?? rec.roi_percentage ?? 0) > 1 ? (rec.roi ?? rec.roi_percentage ?? 0) / 100 : (rec.roi ?? rec.roi_percentage ?? 0),
               confidence: rec.confidence_score || 0,
+              // Pricing / scoring fields required by DealCard
+              roi_per_day: rec.roi_per_day,
+              retail_ctm_pct: rec.retail_ctm_pct,
+              estimated_days_to_sale: rec.estimated_days_to_sale,
+              max_bid: rec.max_bid,
+              pricing_source: rec.pricing_source,
+              manheim_mmr_mid: rec.manheim_mmr_mid,
+              manheim_mmr_low: rec.manheim_mmr_low,
+              manheim_mmr_high: rec.manheim_mmr_high,
+              pricing_updated_at: rec.pricing_updated_at,
+              investment_grade: rec.investment_grade as Opportunity['investment_grade'],
               vehicle: {
                 make: rec.make || '',
                 model: rec.model || '',
