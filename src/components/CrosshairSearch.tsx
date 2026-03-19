@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { roverAPI } from "@/services/roverAPI";
 import { api } from "@/services/api";
 import { Search, Target, Plus, X, Settings } from "lucide-react";
+import { SniperButton } from "@/components/SniperButton";
 
 interface CrosshairSearchProps {
   onResultsFound?: (results: any[]) => void;
@@ -47,6 +49,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
   const [criteria, setCriteria] = useState<SearchCriteria>({});
   const [savedIntents, setSavedIntents] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const { toast } = useToast();
 
@@ -57,6 +60,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
   const clearCriteria = useCallback(() => {
     setCriteria({});
     setResults([]);
+    setHasSearched(false);
   }, []);
 
   const executeSearch = useCallback(async () => {
@@ -70,6 +74,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
     }
 
     setSearching(true);
+    setHasSearched(true);
     try {
       const { data: searchResults, total } = await api.searchCrosshairOpportunities({
         make: criteria.make,
@@ -79,6 +84,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
         state: criteria.state,
         minPrice: criteria.priceMin,
         maxPrice: criteria.priceMax,
+        maxMileage: criteria.mileageMax,
         limit: 50,
       });
       // CrosshairSearch uses a plain object shape; map Opportunity → display shape
@@ -212,7 +218,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
                 onChange={(e) => updateCriteria("yearMin", parseInt(e.target.value) || undefined)}
                 placeholder="2010"
                 min="1990"
-                max="2024"
+                max="2026"
               />
             </div>
             <div className="space-y-2">
@@ -224,7 +230,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
                 onChange={(e) => updateCriteria("yearMax", parseInt(e.target.value) || undefined)}
                 placeholder="2024"
                 min="1990"
-                max="2024"
+                max="2026"
               />
             </div>
           </div>
@@ -346,6 +352,22 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
                       </Badge>
                     </div>
                   </div>
+                  <div className="flex gap-2 mt-3">
+                    {result.id && (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link to={`/deal/${result.id}`}>View Deal</Link>
+                      </Button>
+                    )}
+                    <SniperButton
+                      opportunity={{
+                        id: result.id,
+                        year: result.year,
+                        make: result.make,
+                        model: result.model,
+                        current_bid: result.price,
+                      }}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -354,7 +376,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
       )}
 
       {/* No Results Message */}
-      {!searching && results.length === 0 && Object.keys(criteria).length > 0 && (
+      {!searching && hasSearched && results.length === 0 && (
         <Alert>
           <Settings className="h-4 w-4" />
           <AlertDescription>
