@@ -181,4 +181,13 @@
   .pb-nav-safe {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
   }
+}\n/* Mobile safe area support for iPhone notch/home bar */
+.safe-bottom-padding {
+  padding-bottom: env(safe-area-inset-bottom);
 }
+@supports (padding: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+}
+
