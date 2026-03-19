@@ -17,6 +17,10 @@ CREATE TABLE public.sniper_targets (
 
 CREATE INDEX idx_sniper_targets_user ON public.sniper_targets(user_id);
 CREATE INDEX idx_sniper_targets_status ON public.sniper_targets(status) WHERE status = 'active';
+-- Prevent duplicate active targets for the same user+opportunity pair
+CREATE UNIQUE INDEX idx_sniper_targets_user_opp_active
+  ON public.sniper_targets(user_id, opportunity_id)
+  WHERE status = 'active';
 
 ALTER TABLE public.sniper_targets ENABLE ROW LEVEL SECURITY;
 
