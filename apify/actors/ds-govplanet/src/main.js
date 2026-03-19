@@ -221,8 +221,8 @@ function extractSearchListings($) {
     const listings = [];
     const seenUrlsOnPage = new Set();
 
-    const cards = $('.featured-item, .searchResults .featured-item, .searchResults .searchResult, .searchResults li, .searchResults article');
-    const cardNodes = cards.length ? cards.toArray() : $('a[href*="/for-sale/"]').toArray().map((link) => $(link).closest('li, article, .featured-item').get(0)).filter(Boolean);
+    const cards = $('.sr_list_item, .featured-item, .searchResults .featured-item, .searchResults .searchResult, .searchResults li, .searchResults article');
+    const cardNodes = cards.length ? cards.toArray() : $('a[href*="/for-sale/"]').toArray().map((link) => $(link).closest('li, article, .sr_list_item, .featured-item').get(0)).filter(Boolean);
 
     for (const node of cardNodes) {
         const card = $(node);
@@ -236,10 +236,10 @@ function extractSearchListings($) {
         if (!title) continue;
 
         const bidText = normalizeText(
-            card.find('.pdprice, .price, [class*="price"], [class*="Price"], [class*="bid"], [class*="Bid"]').first().text(),
+            card.find('.sr_price, .pdprice, .price, [class*="price"], [class*="Price"], [class*="bid"], [class*="Bid"]').first().text(),
         );
         const locationText = normalizeText(
-            card.find('.itemLocation, .location, [class*="location"], [class*="Location"]').first().text(),
+            card.find('.sr_location, .sr_current_location, .itemLocation, .location, [class*="location"], [class*="Location"]').first().text(),
         ) || normalizeText(card.text());
         recordLocationSample(locationText);
         const endText = normalizeText(

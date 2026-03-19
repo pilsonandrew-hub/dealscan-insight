@@ -20,6 +20,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 import { roverAPI } from '@/services/roverAPI';
+import { OnboardingFlow } from '@/components/OnboardingFlow';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'analytics' | 'settings';
@@ -1426,6 +1427,9 @@ function parseTab(tab: string | null): Tab {
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = parseTab(searchParams.get('tab'));
+  const [showOnboarding, setShowOnboarding] = useState(
+    !localStorage.getItem('onboarding_completed')
+  );
 
   const navigateToTab = (tab: Tab) => {
     const next = new URLSearchParams(searchParams);
@@ -1446,6 +1450,9 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
+      {showOnboarding && (
+        <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+      )}
       {/* Sidebar — desktop */}
       <aside className="hidden md:flex flex-col w-56 bg-gray-900 border-r border-gray-800 shrink-0">
         <div className="px-4 py-5 border-b border-gray-800">
