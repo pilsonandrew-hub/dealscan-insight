@@ -87,11 +87,15 @@ def score_item(prefs: Dict[str, float], item: Dict[str, Any]) -> float:
     # Make/model/body affinity
     score += prefs.get(f"make:{item.get('make', '')}", 0)
     score += prefs.get(f"model:{item.get('model', '')}", 0)
-    score += prefs.get(f"body:{item.get('bodyType', '')}", 0) * 0.7
-    score += prefs.get(f"source:{item.get('source', '')}", 0) * 0.5
+    # Support both camelCase (event item_data) and snake_case (DB opportunity rows)
+    body = item.get('body_type') or item.get('bodyType') or ''
+    score += prefs.get(f"body:{body}", 0) * 0.7
+    score += prefs.get(f"source:{item.get('source_site') or item.get('source', '')}", 0) * 0.5
     score += prefs.get(f"state:{item.get('state', '')}", 0) * 0.6
     score += prefs.get(f"mileage_bucket:{mileage_bucket(item.get('mileage', 50000))}", 0) * 0.8
-    score += prefs.get(f"price_bucket:{price_bucket(item.get('price', 25000))}", 0) * 0.9
+    # Opportunity rows use current_bid, not price
+    _price = item.get('current_bid') or item.get('price') or item.get('estimated_sale_price') or 25000
+    score += prefs.get(f"price_bucket:{price_bucket(_price)}", 0) * 0.9
 
     # Under-MMR bonus (key arbitrage signal)
     mmr = item.get("mmr", 0)
