@@ -1,0 +1,1 @@
+{"name":"ds-ritchiebros","version":"1.0.0","type":"module","main":"src/main.js","scripts":{"start":"node src/main.js"},"dependencies":{"apify":"^3.0.0","crawlee":"^3.5.0","playwright":"^1.40.0"}}
