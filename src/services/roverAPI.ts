@@ -78,7 +78,7 @@ class RoverAPIService {
 
   async trackEvent(event: RoverEvent): Promise<void> {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       await fetch(`${apiUrl}/api/rover/events`, {
@@ -107,7 +107,7 @@ class RoverAPIService {
       const token = session?.access_token;
       if (!user) return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
 
-      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
       const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${user.id}&limit=${limit}`, {
         headers: {
           Authorization: token ? `Bearer ${token}` : "",
