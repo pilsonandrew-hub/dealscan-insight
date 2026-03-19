@@ -1,3 +1,4 @@
+console.log('[BIDSPOTTER] Actor starting...');
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
