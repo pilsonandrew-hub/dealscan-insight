@@ -1,135 +1,219 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
-const HIGH_RUST_STATES = ['AK', 'ME', 'NH', 'VT', 'NY', 'MI', 'WI', 'MN', 'ND', 'SD', 'WV', 'OH', 'PA', 'MA', 'CT', 'RI', 'NJ', 'DE', 'MD'];
-const MAX_MILEAGE = 50000;
-const MAX_AGE_YEARS = 4;
-const CURRENT_YEAR = new Date().getFullYear();
+// IronPlanet trucks & trailers category (ct=3)
+// Search results API: /jsp/s/search.ips?mode=6&ct=3&format=json
+// Pagination via pstart=60, pstart=120, etc. (60 items per page)
+// NOTE: mode=6 JSON API requires a valid browser session (cookies) — we use Playwright
+// to load the first page, which sets session cookies, then call the JSON API via page.evaluate/fetch.
+
+const SOURCE = 'ironplanet';
+const BASE = 'https://www.ironplanet.com';
+const SEARCH_URL = `${BASE}/jsp/s/search.ips?ct=3`;
+
+const HIGH_RUST = new Set([
+    'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
+    'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
+    'CT', 'NJ', 'MD', 'DE',
+]);
+
+const US_STATES = new Set([
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+    'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
+    'VA', 'WA', 'WV', 'WI', 'WY', 'DC',
+]);
+
+// State code from IronPlanet locationCode field (e.g. "USA-CA", "CAN-AB")
+function extractStateFromCode(locationCode) {
+    if (!locationCode) return '';
+    const match = locationCode.match(/^USA-([A-Z]{2})$/);
+    return match ? match[1] : '';
+}
+
+// Extract state from locationString (plain text like "California" or "Texas, USA")
+const STATE_NAME_TO_ABBREV = {
+    ALABAMA: 'AL', ALASKA: 'AK', ARIZONA: 'AZ', ARKANSAS: 'AR', CALIFORNIA: 'CA',
+    COLORADO: 'CO', CONNECTICUT: 'CT', DELAWARE: 'DE', FLORIDA: 'FL', GEORGIA: 'GA',
+    HAWAII: 'HI', IDAHO: 'ID', ILLINOIS: 'IL', INDIANA: 'IN', IOWA: 'IA',
+    KANSAS: 'KS', KENTUCKY: 'KY', LOUISIANA: 'LA', MAINE: 'ME', MARYLAND: 'MD',
+    MASSACHUSETTS: 'MA', MICHIGAN: 'MI', MINNESOTA: 'MN', MISSISSIPPI: 'MS', MISSOURI: 'MO',
+    MONTANA: 'MT', NEBRASKA: 'NE', NEVADA: 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
+    'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND',
+    OHIO: 'OH', OKLAHOMA: 'OK', OREGON: 'OR', PENNSYLVANIA: 'PA', 'RHODE ISLAND': 'RI',
+    'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', TENNESSEE: 'TN', TEXAS: 'TX',
+    UTAH: 'UT', VERMONT: 'VT', VIRGINIA: 'VA', WASHINGTON: 'WA', 'WEST VIRGINIA': 'WV',
+    WISCONSIN: 'WI', WYOMING: 'WY', 'DISTRICT OF COLUMBIA': 'DC',
+};
+
+function extractStateFromName(locationString) {
+    if (!locationString) return '';
+    const upper = locationString.toUpperCase().trim();
+    // Direct two-letter match
+    const twoLetter = upper.match(/\b([A-Z]{2})\b/);
+    if (twoLetter && US_STATES.has(twoLetter[1])) return twoLetter[1];
+    // Full state name
+    for (const [name, code] of Object.entries(STATE_NAME_TO_ABBREV)) {
+        if (upper.includes(name)) return code;
+    }
+    return '';
+}
+
+function extractYear(text = '') {
+    const match = String(text).match(/\b(19[89]\d|20[0-3]\d)\b/);
+    return match ? parseInt(match[1], 10) : null;
+}
+
+function parseMileage(meterString = '') {
+    // e.g. "38,655 mi" or "171,828 mi" or "" (hours/etc)
+    const match = String(meterString).replace(/,/g, '').match(/(\d+)\s*(mi|mile)/i);
+    return match ? parseInt(match[1], 10) : null;
+}
+
+function parsePriceString(priceString = '') {
+    // priceString is HTML like: <span class="price"><span itemprop="price">US $19,000</span></span>
+    const match = String(priceString).replace(/,/g, '').match(/\$\s*([\d]+(?:\.\d+)?)/);
+    return match ? parseFloat(match[1]) : 0;
+}
+
+function passesFilters({ state, mileage, year, currentBid, maxMileage, maxAgeYears, minBid, maxBid }) {
+    // Must be USA
+    if (!state || !US_STATES.has(state)) return false;
+    // Skip high-rust states
+    if (HIGH_RUST.has(state)) return false;
+    // Mileage filter (if available)
+    if (mileage !== null && mileage > maxMileage) return false;
+    // Age filter (if year available)
+    if (year !== null && (new Date().getFullYear() - year) > maxAgeYears) return false;
+    // Price filter (if price available — 0 means TBD/not set, skip price filter for those)
+    if (currentBid > 0 && (currentBid < minBid || currentBid > maxBid)) return false;
+    return true;
+}
 
 await Actor.init();
 
-const proxyConfiguration = await Actor.createProxyConfiguration({
-  groups: ['RESIDENTIAL'],
-});
+const input = await Actor.getInput() ?? {};
+const {
+    maxPages = 10,
+    maxMileage = 150000,
+    maxAgeYears = 8,
+    minBid = 0,
+    maxBid = 150000,
+    maxItems = 0, // 0 = unlimited
+} = input;
+
+let totalScraped = 0;
+let totalPushed = 0;
 
 const crawler = new PlaywrightCrawler({
-  proxyConfiguration,
-  maxRequestsPerCrawl: 50,
-  requestHandlerTimeoutSecs: 120,
-  launchContext: {
-    launchOptions: {
-      headless: true,
+    maxRequestsPerCrawl: maxPages + 5,
+    maxConcurrency: 1,
+    minConcurrency: 1,
+    requestHandlerTimeoutSecs: 120,
+    launchContext: {
+        launchOptions: {
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        },
     },
-  },
-  async requestHandler({ page, request, enqueueLinks, log }) {
-    log.info(`Processing: ${request.url}`);
 
-    await page.waitForLoadState('networkidle', { timeout: 60000 });
+    async requestHandler({ page, request, log }) {
+        const pageNum = request.userData.pageNum || 1;
+        const pstart = (pageNum - 1) * 60;
 
-    // Extract listings
-    const listings = await page.evaluate(() => {
-      const items = [];
-      const cards = document.querySelectorAll('[class*="item-card"], [class*="lot-card"], [class*="listing-card"], .search-result-item, [data-testid*="lot"], [class*="asset-card"]');
+        log.info(`[IRONPLANET] Loading page ${pageNum} (pstart=${pstart}): ${request.url}`);
 
-      cards.forEach(card => {
-        try {
-          const titleEl = card.querySelector('[class*="title"], h2, h3, [class*="name"]');
-          const priceEl = card.querySelector('[class*="price"], [class*="bid"], [class*="amount"]');
-          const locationEl = card.querySelector('[class*="location"], [class*="city"], [class*="state"]');
-          const dateEl = card.querySelector('[class*="date"], [class*="end"], [class*="auction-date"], time');
-          const linkEl = card.querySelector('a[href]');
-          const mileageEl = card.querySelector('[class*="mileage"], [class*="meter"], [class*="odometer"]');
-          const yearEl = card.querySelector('[class*="year"]');
+        // Wait for the page to load (domcontentloaded avoids networkidle timeout)
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(2000);
 
-          if (titleEl) {
-            items.push({
-              title: titleEl.textContent?.trim() || '',
-              current_bid: priceEl?.textContent?.trim() || '',
-              location: locationEl?.textContent?.trim() || '',
-              end_date: dateEl?.textContent?.trim() || dateEl?.getAttribute('datetime') || '',
-              listing_url: linkEl?.href || '',
-              mileage_text: mileageEl?.textContent?.trim() || '',
-              year_text: yearEl?.textContent?.trim() || '',
-              source: 'ironplanet',
+        // Fetch JSON data via in-page fetch (uses the session cookies Playwright established)
+        const apiUrl = `${BASE}/jsp/s/search.ips?mode=6&ct=3&format=json${pstart > 0 ? `&pstart=${pstart}` : ''}`;
+        log.info(`[IRONPLANET] Fetching API: ${apiUrl}`);
+
+        const apiData = await page.evaluate(async (url) => {
+            try {
+                const res = await fetch(url, { credentials: 'include' });
+                if (!res.ok) return { error: `HTTP ${res.status}`, items: [], total: 0 };
+                const json = await res.json();
+                return json.jsonData || { items: [], total: 0 };
+            } catch (e) {
+                return { error: e.message, items: [], total: 0 };
+            }
+        }, apiUrl);
+
+        if (apiData.error) {
+            log.error(`[IRONPLANET] API error: ${apiData.error}`);
+            return;
+        }
+
+        const total = apiData.total || 0;
+        const items = apiData.items || [];
+        log.info(`[IRONPLANET] Page ${pageNum}: ${items.length} items (total=${total})`);
+
+        for (const item of items) {
+            totalScraped++;
+
+            const state = extractStateFromCode(item.locationCode) || extractStateFromName(item.locationString);
+            const mileage = parseMileage(item.meterString);
+            const year = extractYear(item.description);
+            const currentBid = parsePriceString(item.priceString);
+
+            if (!passesFilters({ state, mileage, year, currentBid, maxMileage, maxAgeYears, minBid, maxBid })) {
+                continue;
+            }
+
+            const listingUrl = item.itemPageUri ? `${BASE}${item.itemPageUri.split('?')[0]}` : '';
+            const endDate = item.aucEndDate ? new Date(item.aucEndDate).toISOString() : null;
+
+            await Actor.pushData({
+                title: item.description || '',
+                year,
+                current_bid: currentBid,
+                state,
+                city: item.locationString || '',
+                location: item.locationString || '',
+                auction_end_time: endDate,
+                listing_url: listingUrl,
+                photo_url: item.photo || item.photoBigger || null,
+                mileage,
+                source_site: SOURCE,
+                equip_id: item.equipId || '',
+                scraped_at: new Date().toISOString(),
             });
-          }
-        } catch (e) {}
-      });
-      return items;
-    });
+            totalPushed++;
 
-    log.info(`Found ${listings.length} raw listings on page`);
+            if (maxItems > 0 && totalPushed >= maxItems) {
+                log.info(`[IRONPLANET] Reached maxItems=${maxItems}, stopping.`);
+                return;
+            }
+        }
 
-    // Filter listings
-    const filtered = listings.filter(item => {
-      // Filter by HIGH_RUST states
-      const locationUpper = item.location.toUpperCase();
-      const stateMatch = locationUpper.match(/,\s*([A-Z]{2})(\s|$)/);
-      if (stateMatch && HIGH_RUST_STATES.includes(stateMatch[1])) {
-        return false;
-      }
+        log.info(`[IRONPLANET] Page ${pageNum}: pushed ${totalPushed} total so far`);
 
-      // Filter by mileage
-      const mileageMatch = item.mileage_text.replace(/,/g, '').match(/(\d+)/);
-      if (mileageMatch) {
-        const mileage = parseInt(mileageMatch[1]);
-        if (mileage > MAX_MILEAGE) return false;
-      }
+        // Enqueue next page if more results exist
+        const totalPages = Math.ceil(total / 60);
+        if (pageNum < maxPages && pageNum < totalPages) {
+            const nextPageNum = pageNum + 1;
+            const nextPstart = nextPageNum * 60 - 60;
+            const nextUrl = `${SEARCH_URL}&pstart=${nextPstart}`;
+            await crawler.addRequests([{
+                url: nextUrl,
+                uniqueKey: `ironplanet-page-${nextPageNum}`,
+                userData: { pageNum: nextPageNum },
+            }]);
+        }
+    },
 
-      // Filter by age
-      const yearMatch = (item.title + ' ' + item.year_text).match(/\b(20\d{2}|19\d{2})\b/);
-      if (yearMatch) {
-        const year = parseInt(yearMatch[1]);
-        if (CURRENT_YEAR - year > MAX_AGE_YEARS) return false;
-      }
-
-      return true;
-    });
-
-    log.info(`${filtered.length} listings after filtering`);
-
-    for (const item of filtered) {
-      delete item.mileage_text;
-      delete item.year_text;
-      await Actor.pushData(item);
-    }
-
-    // Pagination - look for next page button
-    const currentPage = request.userData.page || 1;
-    if (currentPage < 10) {
-      const nextPageExists = await page.evaluate((currentPage) => {
-        // Try to find next page link or button
-        const nextBtn = document.querySelector('[aria-label="Next page"], [class*="next"]:not([disabled]), [class*="pagination"] a[rel="next"]');
-        if (nextBtn) return true;
-
-        // Check URL-based pagination
-        return false;
-      }, currentPage);
-
-      if (nextPageExists) {
-        const nextUrl = new URL(request.url);
-        // IronPlanet uses hash-based URLs, try page parameter
-        const hash = nextUrl.hash;
-        const newHash = hash.includes('page=')
-          ? hash.replace(/page=\d+/, `page=${currentPage + 1}`)
-          : hash + `&page=${currentPage + 1}`;
-        nextUrl.hash = newHash;
-
-        await crawler.addRequests([{
-          url: nextUrl.toString(),
-          userData: { page: currentPage + 1 },
-        }]);
-      }
-    }
-  },
-  failedRequestHandler({ request, log }) {
-    log.error(`Request failed: ${request.url}`);
-  },
+    failedRequestHandler({ request, log }) {
+        log.error(`[IRONPLANET] Request failed: ${request.url}`);
+    },
 });
 
 await crawler.run([{
-  url: 'https://www.ironplanet.com/search#!?category=Trucks+%26+Trailers',
-  userData: { page: 1 },
+    url: SEARCH_URL,
+    uniqueKey: 'ironplanet-page-1',
+    userData: { pageNum: 1 },
 }]);
 
+console.log(`[IRONPLANET] Done. Scraped: ${totalScraped} | Pushed: ${totalPushed}`);
 await Actor.exit();
