@@ -1,11 +1,11 @@
 console.log('[BIDSPOTTER] Actor starting...');
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
+import { HttpCrawler, createHttpRouter } from 'crawlee';
+import * as cheerio from 'cheerio';
 
 const SOURCE = 'bidspotter';
 const BASE = 'https://www.bidspotter.com';
 const START_URL = `${BASE}/en-us/for-sale/automotive-and-vehicles`;
-const STEALTH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const HIGH_RUST = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
@@ -44,6 +44,11 @@ const MAKES = new Set([
 const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box truck|stake bed|dump truck|flatbed|refuse|crane truck|utility body|work van|sprinter cargo|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper)\b/i;
 
 await Actor.init();
+
+const proxyConfiguration = await Actor.createProxyConfiguration({
+    groups: ['RESIDENTIAL'],
+    countryCode: 'US',
+});
 
 const input = await Actor.getInput() ?? {};
 const {
@@ -132,262 +137,214 @@ function passesFilters({ title, bid, state, mileage }) {
     return true;
 }
 
-const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: maxPages * 50,
-    maxConcurrency: 1,
+const router = createHttpRouter();
 
-    launchContext: {
-        launchOptions: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-            ],
-        },
-    },
+router.addHandler('DETAIL', async ({ body, request, log }) => {
+    const $ = cheerio.load(body);
 
-    preNavigationHooks: [
-        async ({ page }) => {
-            await page.setExtraHTTPHeaders({
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-                'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                'Sec-CH-UA-Mobile': '?0',
-                'Sec-CH-UA-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Upgrade-Insecure-Requests': '1',
-            });
-            await page.setExtraHTTPHeaders({ 'User-Agent': STEALTH_UA });
-        },
-    ],
+    // Check for CAPTCHA/block page
+    const bodyText = $.text();
+    const titleText = $('title').text();
+    if (titleText.toLowerCase().includes('just a moment') || $('form#challenge-form').length > 0) {
+        log.warning(`[BIDSPOTTER] Cloudflare challenge on detail page: ${request.url}`);
+        return;
+    }
 
-    async requestHandler({ page, request, log, enqueueLinks }) {
-        const label = request.userData.label || 'LIST';
+    const partial = request.userData.partial || {};
 
-        // Override navigator.webdriver to evade detection
-        await page.addInitScript(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    const title = normalizeText(
+        $('h1, .lot-title, .item-title, [class*="lotTitle"], [class*="itemTitle"]').first().text()
+    ) || partial.title || '';
+
+    const bidText = normalizeText(
+        $('.current-bid, .bid-amount, [class*="currentBid"], [class*="bidAmount"], [class*="current-bid"], [data-testid="current-bid"]').first().text()
+    );
+
+    const endDateText = normalizeText(
+        $('.auction-end, .closing-time, [class*="auctionEnd"], [class*="closingTime"], [class*="end-date"], [data-testid="end-date"]').first().text()
+    );
+
+    const locationText = normalizeText(
+        $('.location, .item-location, [class*="location"], [class*="Location"]').first().text()
+    ) || partial.location || '';
+
+    const mileageMatch = bodyText.match(/(\d[\d,]+)\s*(miles?|mi\.?|odometer)\b/i);
+    const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, ''), 10) : null;
+    const vin = bodyText.match(/\bVIN[:\s#-]*([A-HJ-NPR-Z0-9]{17})\b/i)?.[1] || null;
+
+    const photoUrl = $('meta[property="og:image"]').attr('content') || null;
+
+    const currentBid = parseBid(bidText) || partial.current_bid || 0;
+    const state = extractState(locationText) || partial.state || '';
+    const finalTitle = title || partial.title || '';
+    const make = extractMake(finalTitle);
+
+    const record = {
+        title: finalTitle,
+        year: extractYear(finalTitle),
+        make,
+        model: extractModel(finalTitle, make || ''),
+        current_bid: currentBid,
+        auction_end_date: parseDate(endDateText) || partial.auction_end_date || null,
+        state,
+        location: locationText || partial.location || '',
+        listing_url: partial.listing_url || request.url,
+        photo_url: photoUrl,
+        vin,
+        mileage,
+        source: SOURCE,
+        scraped_at: new Date().toISOString(),
+    };
+
+    totalFound += 1;
+
+    if (!passesFilters({ title: record.title, bid: record.current_bid, state: record.state, mileage: record.mileage })) {
+        log.debug(`[BIDSPOTTER] Filtered: ${record.title} | state=${record.state} | bid=${record.current_bid}`);
+        return;
+    }
+
+    totalPassed += 1;
+    await Actor.pushData(record);
+});
+
+router.addDefaultHandler(async ({ body, request, log, crawler }) => {
+    const $ = cheerio.load(body);
+
+    // Check for CAPTCHA/block page
+    const titleText = $('title').text();
+    if (titleText.toLowerCase().includes('just a moment') || $('form#challenge-form').length > 0) {
+        log.warning(`[BIDSPOTTER] Cloudflare/CAPTCHA detected on list page: ${request.url}`);
+        log.info(`[BIDSPOTTER] Page title: ${titleText}`);
+        log.info(`[BIDSPOTTER] HTML snippet: ${$('body').html()?.slice(0, 2000)}`);
+        return;
+    }
+
+    const pageNum = request.userData.pageNum || 1;
+    log.info(`[BIDSPOTTER] Parsing list page ${pageNum}: ${request.url}`);
+
+    // Try multiple card selectors in priority order
+    const cardSelectors = [
+        '.lot-tile', '.lot-card', '.auction-item', '[data-testid="lot"]',
+        '[class*="lot-tile"]', '[class*="lotTile"]', '[class*="lot-card"]', '[class*="lotCard"]',
+        '[class*="auction-item"]', '[class*="auctionItem"]',
+        'article', '.item-card', '[class*="item-card"]',
+    ];
+
+    let cards = null;
+    let usedSelector = null;
+    for (const sel of cardSelectors) {
+        const found = $(sel);
+        if (found.length > 0) {
+            cards = found;
+            usedSelector = sel;
+            log.info(`[BIDSPOTTER] Found ${found.length} cards with selector: ${sel}`);
+            break;
+        }
+    }
+
+    if (!cards || cards.length === 0) {
+        log.warning('[BIDSPOTTER] No listing cards found. Dumping HTML snippet for debugging.');
+        log.info(`[BIDSPOTTER] HTML snippet: ${$('body').html()?.slice(0, 3000)}`);
+        return;
+    }
+
+    const detailRequests = [];
+    cards.each((i, el) => {
+        const card = $(el);
+
+        const linkEl = card.find('a[href*="/en-us/auction"], a[href*="/lot/"], a[href*="/item/"], a[href]').first();
+        const href = linkEl.attr('href');
+        if (!href) return;
+
+        const listingUrl = new URL(href, BASE).toString();
+        if (seenUrls.has(listingUrl)) return;
+        seenUrls.add(listingUrl);
+
+        const titleText2 = normalizeText(
+            card.find('[class*="title"], [class*="name"], h2, h3, h4, a').first().text()
+        );
+        const bidText = normalizeText(
+            card.find('[class*="price"], [class*="bid"], [class*="amount"]').first().text()
+        );
+        const endDateText = normalizeText(
+            card.find('[class*="end"], [class*="close"], [class*="time"]').first().text()
+        );
+        const locationText2 = normalizeText(
+            card.find('[class*="location"], [class*="state"], [class*="city"]').first().text()
+        );
+
+        const partial = {
+            title: titleText2,
+            current_bid: parseBid(bidText),
+            auction_end_date: parseDate(endDateText),
+            state: extractState(locationText2),
+            location: locationText2,
+            listing_url: listingUrl,
+        };
+
+        detailRequests.push({
+            url: listingUrl,
+            uniqueKey: `bidspotter-detail:${listingUrl}`,
+            label: 'DETAIL',
+            userData: { label: 'DETAIL', partial },
         });
+    });
 
-        // Wait past Cloudflare challenge / initial load
-        await page.waitForLoadState('networkidle').catch(() => {});
-        await new Promise((r) => setTimeout(r, 3000));
+    if (detailRequests.length > 0) {
+        await crawler.addRequests(detailRequests);
+        log.info(`[BIDSPOTTER] Enqueued ${detailRequests.length} detail requests`);
+    }
 
-        // Check if still on Cloudflare waiting room
-        const pageTitle = await page.title();
-        if (pageTitle.toLowerCase().includes('just a moment') || pageTitle.toLowerCase().includes('checking')) {
-            log.warning(`[BIDSPOTTER] Cloudflare challenge detected on ${request.url}, waiting 10s...`);
-            await new Promise((r) => setTimeout(r, 10000));
-            await page.waitForLoadState('networkidle').catch(() => {});
-        }
+    // Pagination
+    if (pageNum >= maxPages) return;
 
-        if (label === 'DETAIL') {
-            const partial = request.userData.partial || {};
+    const nextHref = $('a[rel="next"], [class*="next"]:not([class*="disabled"]) a, [aria-label="Next page"]').first().attr('href')
+        || $('a').filter((i, el) => $(el).text().trim().toLowerCase() === 'next').first().attr('href');
 
-            const title = normalizeText(await page.$eval(
-                'h1, .lot-title, .item-title, [class*="lotTitle"], [class*="itemTitle"]',
-                (el) => el.textContent,
-            ).catch(() => partial.title || ''));
-
-            const bidText = normalizeText(await page.$eval(
-                '.current-bid, .bid-amount, [class*="currentBid"], [class*="bidAmount"], [class*="current-bid"], [data-testid="current-bid"]',
-                (el) => el.textContent,
-            ).catch(() => ''));
-
-            const endDateText = normalizeText(await page.$eval(
-                '.auction-end, .closing-time, [class*="auctionEnd"], [class*="closingTime"], [class*="end-date"], [data-testid="end-date"]',
-                (el) => el.textContent,
-            ).catch(() => ''));
-
-            const locationText = normalizeText(await page.$eval(
-                '.location, .item-location, [class*="location"], [class*="Location"]',
-                (el) => el.textContent,
-            ).catch(() => partial.location || ''));
-
-            const bodyText = await page.evaluate(() => document.body.innerText);
-            const mileageMatch = bodyText.match(/(\d[\d,]+)\s*(miles?|mi\.?|odometer)\b/i);
-            const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, ''), 10) : null;
-            const vin = bodyText.match(/\bVIN[:\s#-]*([A-HJ-NPR-Z0-9]{17})\b/i)?.[1] || null;
-
-            const photoUrl = await page.$eval(
-                'meta[property="og:image"]', (el) => el.content,
-            ).catch(() => null);
-
-            const currentBid = parseBid(bidText) || partial.current_bid || 0;
-            const state = extractState(locationText) || partial.state || '';
-            const finalTitle = title || partial.title || '';
-            const make = extractMake(finalTitle);
-
-            const record = {
-                title: finalTitle,
-                year: extractYear(finalTitle),
-                make,
-                model: extractModel(finalTitle, make || ''),
-                current_bid: currentBid,
-                auction_end_date: parseDate(endDateText) || partial.auction_end_date || null,
-                state,
-                location: locationText || partial.location || '',
-                listing_url: partial.listing_url || request.url,
-                photo_url: photoUrl || null,
-                vin,
-                mileage,
-                source: SOURCE,
-                scraped_at: new Date().toISOString(),
-            };
-
-            totalFound += 1;
-
-            if (!passesFilters({ title: record.title, bid: record.current_bid, state: record.state, mileage: record.mileage })) {
-                log.debug(`[BIDSPOTTER] Filtered: ${record.title} | state=${record.state} | bid=${record.current_bid}`);
-                return;
-            }
-
-            totalPassed += 1;
-            await Actor.pushData(record);
-            return;
-        }
-
-        // LIST page
-        const pageNum = request.userData.pageNum || 1;
-        log.info(`[BIDSPOTTER] Parsing list page ${pageNum}: ${request.url}`);
-
-        // Try multiple selectors for lot cards
-        const lotSelectors = [
-            '.lot-tile', '.lot-card', '.auction-item', '[data-testid="lot"]',
-            '[class*="lot-tile"]', '[class*="lotTile"]', '[class*="lot-card"]', '[class*="lotCard"]',
-            '[class*="auction-item"]', '[class*="auctionItem"]',
-        ];
-
-        let cards = [];
-        for (const selector of lotSelectors) {
-            const found = await page.$$(selector);
-            if (found.length > 0) {
-                log.info(`[BIDSPOTTER] Found ${found.length} cards with selector: ${selector}`);
-                cards = found;
-                break;
-            }
-        }
-
-        // Fallback: find divs containing both a link and a price-like element
-        if (cards.length === 0) {
-            log.warning('[BIDSPOTTER] No cards found with primary selectors, trying fallback div scan');
-            cards = await page.$$('div:has(a):has([class*="price"]), div:has(a):has([class*="bid"])');
-        }
-
-        if (cards.length === 0) {
-            log.warning(`[BIDSPOTTER] No listing cards found on page ${pageNum}. Dumping HTML snippet for debugging.`);
-            const snippet = await page.evaluate(() => document.body.innerHTML.slice(0, 2000));
-            log.info(`[BIDSPOTTER] HTML snippet: ${snippet}`);
-        }
-
-        for (const card of cards) {
-            const linkEl = await card.$('a[href*="/en-us/auction"], a[href*="/lot/"], a[href*="/item/"], a[href]');
-            const listingUrl = linkEl
-                ? new URL(await linkEl.getAttribute('href'), BASE).toString()
-                : null;
-
-            if (!listingUrl || seenUrls.has(listingUrl)) continue;
-            seenUrls.add(listingUrl);
-
-            const titleText = normalizeText(await card.$eval(
-                '[class*="title"], [class*="name"], h2, h3, h4, a',
-                (el) => el.textContent,
-            ).catch(() => ''));
-
-            const bidText = normalizeText(await card.$eval(
-                '[class*="price"], [class*="bid"], [class*="amount"]',
-                (el) => el.textContent,
-            ).catch(() => ''));
-
-            const endDateText = normalizeText(await card.$eval(
-                '[class*="end"], [class*="close"], [class*="time"]',
-                (el) => el.textContent,
-            ).catch(() => ''));
-
-            const locationText = normalizeText(await card.$eval(
-                '[class*="location"], [class*="state"], [class*="city"]',
-                (el) => el.textContent,
-            ).catch(() => ''));
-
-            const partial = {
-                title: titleText,
-                current_bid: parseBid(bidText),
-                auction_end_date: parseDate(endDateText),
-                state: extractState(locationText),
-                location: locationText,
-                listing_url: listingUrl,
-            };
-
+    if (nextHref) {
+        const nextUrl = new URL(nextHref, BASE).toString();
+        if (!seenUrls.has(nextUrl)) {
+            seenUrls.add(nextUrl);
             await crawler.addRequests([{
-                url: listingUrl,
-                uniqueKey: `bidspotter-detail:${listingUrl}`,
-                userData: { label: 'DETAIL', partial },
+                url: nextUrl,
+                uniqueKey: `bidspotter-list:p${pageNum + 1}:${nextUrl}`,
+                userData: { label: 'LIST', pageNum: pageNum + 1 },
             }]);
         }
+        return;
+    }
 
-        // Pagination
-        if (pageNum >= maxPages) return;
-
-        // Try to find Next button
-        const nextEl = await page.$('a[rel="next"], a:has-text("Next"), button:has-text("Next"), [aria-label="Next page"], [class*="next"]:not([class*="disabled"])');
-        if (nextEl) {
-            const nextHref = await nextEl.getAttribute('href');
-            if (nextHref) {
-                const nextUrl = new URL(nextHref, BASE).toString();
-                if (!seenUrls.has(nextUrl)) {
-                    seenUrls.add(nextUrl);
-                    await crawler.addRequests([{
-                        url: nextUrl,
-                        uniqueKey: `bidspotter-list:p${pageNum + 1}:${nextUrl}`,
-                        userData: { label: 'LIST', pageNum: pageNum + 1 },
-                    }]);
-                }
-            } else {
-                // Button-based pagination — click it
-                await nextEl.click();
-                await page.waitForLoadState('networkidle').catch(() => {});
-                await new Promise((r) => setTimeout(r, 2000));
-                const newUrl = page.url();
-                if (!seenUrls.has(newUrl) && newUrl !== request.url) {
-                    seenUrls.add(newUrl);
-                    await crawler.addRequests([{
-                        url: newUrl,
-                        uniqueKey: `bidspotter-list:p${pageNum + 1}:${newUrl}`,
-                        userData: { label: 'LIST', pageNum: pageNum + 1 },
-                    }]);
-                }
-            }
-            return;
+    // Fallback: numbered page links
+    $('a[href*="page="], a[href*="p="], [class*="pagination"] a').each((i, el) => {
+        const href2 = $(el).attr('href');
+        if (!href2) return;
+        const url = new URL(href2, BASE).toString();
+        if (seenUrls.has(url)) return;
+        const num = parseInt($(el).text().trim(), 10);
+        if (!isNaN(num) && num === pageNum + 1) {
+            seenUrls.add(url);
+            crawler.addRequests([{
+                url,
+                uniqueKey: `bidspotter-list:p${num}:${url}`,
+                userData: { label: 'LIST', pageNum: num },
+            }]);
         }
+    });
+});
 
-        // Fallback: page number links
-        const pageLinks = await page.$$('a[href*="page="], a[href*="p="], [class*="pagination"] a');
-        for (const link of pageLinks) {
-            const href = await link.getAttribute('href');
-            if (!href) continue;
-            const url = new URL(href, BASE).toString();
-            if (seenUrls.has(url)) continue;
-            const text = normalizeText(await link.textContent());
-            const num = parseInt(text, 10);
-            if (!isNaN(num) && num === pageNum + 1) {
-                seenUrls.add(url);
-                await crawler.addRequests([{
-                    url,
-                    uniqueKey: `bidspotter-list:p${num}:${url}`,
-                    userData: { label: 'LIST', pageNum: num },
-                }]);
-                break;
-            }
-        }
+const crawler = new HttpCrawler({
+    requestHandler: router,
+    proxyConfiguration,
+    maxRequestsPerCrawl: maxPages * 50,
+    maxConcurrency: 3,
+    additionalMimeTypes: ['text/html'],
+    additionalHttpHeaders: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://www.google.com/',
+        'Upgrade-Insecure-Requests': '1',
     },
 });
 
