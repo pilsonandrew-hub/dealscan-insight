@@ -97,15 +97,36 @@ function parseDate(value) {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+const STATE_NAME_TO_ABBREV = {
+    ALABAMA: 'AL', ALASKA: 'AK', ARIZONA: 'AZ', ARKANSAS: 'AR', CALIFORNIA: 'CA',
+    COLORADO: 'CO', CONNECTICUT: 'CT', DELAWARE: 'DE', FLORIDA: 'FL', GEORGIA: 'GA',
+    HAWAII: 'HI', IDAHO: 'ID', ILLINOIS: 'IL', INDIANA: 'IN', IOWA: 'IA',
+    KANSAS: 'KS', KENTUCKY: 'KY', LOUISIANA: 'LA', MAINE: 'ME', MARYLAND: 'MD',
+    MASSACHUSETTS: 'MA', MICHIGAN: 'MI', MINNESOTA: 'MN', MISSISSIPPI: 'MS', MISSOURI: 'MO',
+    MONTANA: 'MT', NEBRASKA: 'NE', NEVADA: 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
+    'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND',
+    OHIO: 'OH', OKLAHOMA: 'OK', OREGON: 'OR', PENNSYLVANIA: 'PA', 'RHODE ISLAND': 'RI',
+    'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', TENNESSEE: 'TN', TEXAS: 'TX',
+    UTAH: 'UT', VERMONT: 'VT', VIRGINIA: 'VA', WASHINGTON: 'WA', 'WEST VIRGINIA': 'WV',
+    WISCONSIN: 'WI', WYOMING: 'WY', 'DISTRICT OF COLUMBIA': 'DC',
+};
+
 function extractState(value) {
     const text = normalizeText(value).toUpperCase();
     if (!text) return '';
 
+    // Try abbrev patterns first (for detail pages with "City, ST 12345")
     const match = text.match(/,\s*([A-Z]{2})(?:\s+\d{5})?\b/)
         ?? text.match(/\b([A-Z]{2})\s+\d{5}\b/)
         ?? text.match(/\b([A-Z]{2})\b$/);
-    const state = match?.[1] ?? '';
-    return US_STATES.has(state) ? state : '';
+    const abbrev = match?.[1] ?? '';
+    if (US_STATES.has(abbrev)) return abbrev;
+
+    // Fallback: full state name (e.g. "Arizona" from sr_location)
+    for (const [name, code] of Object.entries(STATE_NAME_TO_ABBREV)) {
+        if (text.includes(name)) return code;
+    }
+    return '';
 }
 
 function extractCity(value) {
@@ -221,12 +242,13 @@ function extractSearchListings($) {
     const listings = [];
     const seenUrlsOnPage = new Set();
 
-    const cards = $('.sr_list_item, .featured-item, .searchResults .featured-item, .searchResults .searchResult, .searchResults li, .searchResults article');
-    const cardNodes = cards.length ? cards.toArray() : $('a[href*="/for-sale/"]').toArray().map((link) => $(link).closest('li, article, .sr_list_item, .featured-item').get(0)).filter(Boolean);
+    // Primary: sr_grid_tile (grid view), sr_item (alternate), fallbacks for old layout
+    const cards = $('.sr_grid_tile, .sr_item, .sr_list_item, .featured-item, .searchResults .featured-item, .searchResults .searchResult, .searchResults li, .searchResults article');
+    const cardNodes = cards.length ? cards.toArray() : $('a[href*="/for-sale/"]').toArray().map((link) => $(link).closest('li, article, div[class*="item"], div[class*="tile"]').get(0)).filter(Boolean);
 
     for (const node of cardNodes) {
         const card = $(node);
-        const link = card.find('.itemTitle a[href*="/for-sale/"], a[href*="/for-sale/"]').first();
+        const link = card.find('.sr_equip_desc a[href*="/for-sale/"], .itemTitle a[href*="/for-sale/"], a[href*="/for-sale/"]').first();
         const listingUrl = toAbsoluteUrl(link.attr('href'));
         if (!listingUrl || seenUrlsOnPage.has(listingUrl)) continue;
         seenUrlsOnPage.add(listingUrl);
