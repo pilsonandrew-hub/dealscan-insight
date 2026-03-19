@@ -1,5 +1,5 @@
 import { Actor } from 'apify';
-import { CheerioCrawler } from 'crawlee';
+import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'govplanet';
 const BASE = 'https://www.govplanet.com';
@@ -31,13 +31,12 @@ const PASSENGER_KEYWORDS = [
 ];
 
 const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box truck|stake bed|dump truck|flatbed|refuse|crane truck|utility body|work van|sprinter cargo|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper)\b/i;
-const REQUEST_DELAY_MS = 2500;
 
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 10,
+    maxPages = 3,
     minBid = 500,
     maxBid = 35000,
 } = input;
@@ -49,7 +48,6 @@ const sampleLocations = [];
 
 let totalFound = 0;
 let totalPassed = 0;
-let lastRequestStartedAt = 0;
 
 function normalizeText(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -59,14 +57,6 @@ function recordLocationSample(locationText) {
     const normalized = normalizeText(locationText);
     if (!normalized || sampleLocations.includes(normalized) || sampleLocations.length >= 5) return;
     sampleLocations.push(normalized);
-}
-
-async function throttleRequests() {
-    const waitMs = lastRequestStartedAt ? Math.max(0, REQUEST_DELAY_MS - (Date.now() - lastRequestStartedAt)) : 0;
-    if (waitMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-    }
-    lastRequestStartedAt = Date.now();
 }
 
 function toAbsoluteUrl(href) {
@@ -115,14 +105,12 @@ function extractState(value) {
     const text = normalizeText(value).toUpperCase();
     if (!text) return '';
 
-    // Try abbrev patterns first (for detail pages with "City, ST 12345")
     const match = text.match(/,\s*([A-Z]{2})(?:\s+\d{5})?\b/)
         ?? text.match(/\b([A-Z]{2})\s+\d{5}\b/)
         ?? text.match(/\b([A-Z]{2})\b$/);
     const abbrev = match?.[1] ?? '';
     if (US_STATES.has(abbrev)) return abbrev;
 
-    // Fallback: full state name (e.g. "Arizona" from sr_location)
     for (const [name, code] of Object.entries(STATE_NAME_TO_ABBREV)) {
         if (text.includes(name)) return code;
     }
@@ -190,127 +178,6 @@ function passesFilters({ title, year, bid, state }) {
     return true;
 }
 
-function findLabelValue($, labels) {
-    for (const selector of ['th', 'td', 'dt', 'label', '.label', '[class*="label"]', 'strong']) {
-        const nodes = $(selector).toArray();
-        for (const node of nodes) {
-            const text = normalizeText($(node).text()).toLowerCase();
-            if (!text) continue;
-            if (!labels.some((label) => text.includes(label))) continue;
-
-            const adjacent = normalizeText($(node).next('td, dd, div, span').first().text());
-            if (adjacent) return adjacent;
-
-            const parentText = normalizeText($(node).parent().text());
-            if (parentText && parentText.toLowerCase() !== text) return parentText;
-        }
-    }
-    return '';
-}
-
-function extractCategoryRequests($) {
-    const requests = [];
-
-    $('a[href*="/jsp/s/search.ips?"]').each((_, element) => {
-        const href = $(element).attr('href');
-        const url = toAbsoluteUrl(href);
-        if (!url || discoveredCategoryUrls.has(url)) return;
-
-        const text = normalizeText($(element).text());
-        const haystack = `${text} ${url}`.toLowerCase();
-        if (!haystack.includes('ct=13')) return;
-        if (!/(passenger|sedan|car|suv|sport utility|crossover|pickup|crew cab)/.test(haystack)) return;
-        if (COMMERCIAL_PATTERN.test(haystack)) return;
-
-        discoveredCategoryUrls.add(url);
-        requests.push({
-            url,
-            uniqueKey: `govplanet-category:${url}`,
-            userData: {
-                label: 'LIST',
-                pageNum: 1,
-                category: text || 'discovered',
-                discoveredFromRoot: true,
-            },
-        });
-    });
-
-    return requests;
-}
-
-function extractSearchListings($) {
-    const listings = [];
-    const seenUrlsOnPage = new Set();
-
-    // Primary: sr_grid_tile (grid view), sr_item (alternate), fallbacks for old layout
-    const cards = $('.sr_grid_tile, .sr_item, .sr_list_item, .featured-item, .searchResults .featured-item, .searchResults .searchResult, .searchResults li, .searchResults article');
-    const cardNodes = cards.length ? cards.toArray() : $('a[href*="/for-sale/"]').toArray().map((link) => $(link).closest('li, article, div[class*="item"], div[class*="tile"]').get(0)).filter(Boolean);
-
-    for (const node of cardNodes) {
-        const card = $(node);
-        const link = card.find('.sr_equip_desc a[href*="/for-sale/"], .itemTitle a[href*="/for-sale/"], a[href*="/for-sale/"]').first();
-        const listingUrl = toAbsoluteUrl(link.attr('href'));
-        if (!listingUrl || seenUrlsOnPage.has(listingUrl)) continue;
-        seenUrlsOnPage.add(listingUrl);
-
-        const title = normalizeText(link.text())
-            || normalizeText(card.find('h1, h2, h3, h4, [class*="title"]').first().text());
-        if (!title) continue;
-
-        const bidText = normalizeText(
-            card.find('.sr_price, .pdprice, .price, [class*="price"], [class*="Price"], [class*="bid"], [class*="Bid"]').first().text(),
-        );
-        const locationText = normalizeText(
-            card.find('.sr_location, .sr_current_location, .itemLocation, .location, [class*="location"], [class*="Location"]').first().text(),
-        ) || normalizeText(card.text());
-        recordLocationSample(locationText);
-        const endText = normalizeText(
-            card.find('.timeLeft, .timeRemaining, [class*="time"], [class*="Time"], [class*="close"], [class*="Close"]').first().text(),
-        );
-        const imageUrl = toAbsoluteUrl(
-            card.find('img').first().attr('src')
-            || card.find('img').first().attr('data-src')
-            || '',
-        );
-
-        listings.push({
-            title,
-            current_bid: parseBid(bidText),
-            state: extractState(locationText),
-            city: extractCity(locationText),
-            auction_end_time: parseDate(endText),
-            listing_url: listingUrl,
-            photo_url: imageUrl || null,
-        });
-    }
-
-    return listings;
-}
-
-function findNextPageUrl($, currentUrl) {
-    const explicitNext = $('a[rel="next"], a:contains("Next"), a:contains("next")').first().attr('href');
-    if (explicitNext) return toAbsoluteUrl(explicitNext);
-
-    const current = new URL(currentUrl);
-    const currentStart = parseInt(current.searchParams.get('pstart') || '0', 10);
-    let nextUrl = '';
-
-    $('a[href*="pstart="]').each((_, element) => {
-        if (nextUrl) return;
-        const href = $(element).attr('href');
-        const absolute = toAbsoluteUrl(href);
-        if (!absolute) return;
-
-        const candidate = new URL(absolute);
-        const start = parseInt(candidate.searchParams.get('pstart') || '0', 10);
-        if (start > currentStart) {
-            nextUrl = absolute;
-        }
-    });
-
-    return nextUrl;
-}
-
 function buildRecord(detail, partial) {
     const title = normalizeText(detail.title || partial.title);
     const year = detail.year ?? extractYear(title);
@@ -339,53 +206,77 @@ function buildRecord(detail, partial) {
     };
 }
 
-const crawler = new CheerioCrawler({
-    maxRequestsPerCrawl: maxPages * 250,
+const crawler = new PlaywrightCrawler({
+    maxRequestsPerCrawl: 30,
     maxConcurrency: 1,
     minConcurrency: 1,
     requestHandlerTimeoutSecs: 180,
+    launchContext: {
+        launchOptions: {
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        },
+    },
 
-    async requestHandler({ $, request, log }) {
-        await throttleRequests();
+    async requestHandler({ page, request, log }) {
         const label = request.userData.label || 'LIST';
+
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(3000);
 
         if (label === 'DETAIL') {
             const partial = request.userData.partial || {};
-            const bodyText = normalizeText($('body').text());
-            const title = normalizeText(
-                $('h1, .itemTitle, [class*="hero-title"], meta[property="og:title"]').first().text()
-                || $('meta[property="og:title"]').attr('content'),
-            ) || partial.title;
 
-            const currentBidText = findLabelValue($, ['current bid']) || bodyText.match(/Current Bid[^$]*\$[\d,]+(?:\.\d+)?/i)?.[0] || '';
-            const closingText = findLabelValue($, ['closing time', 'close time', 'auction end', 'ends'])
-                || bodyText.match(/(Closing Time|Auction End|Ends)[^A-Z0-9]{0,8}[A-Za-z]{3,9}[^.|\n]+\d{4}(?:[^.|\n]+(?:AM|PM))?/i)?.[0]
-                || '';
-            const locationText = findLabelValue($, ['item location', 'located in', 'location'])
-                || bodyText.match(/(Item Location|Located in|Location)[^A-Z0-9]{0,8}[^.|\n]+,\s*[A-Z]{2}(?:\s+\d{5})?/i)?.[0]
-                || '';
-            const vin = bodyText.match(/\bVIN[:\s#-]*([A-HJ-NPR-Z0-9]{17})\b/i)?.[1] || null;
-            const mileageMatch = bodyText.match(/(\d[\d,]+)\s*(miles?|mi\.?|odometer)\b/i);
-            const imageUrl = toAbsoluteUrl(
-                $('meta[property="og:image"]').attr('content')
-                || $('img[src]').first().attr('src')
-                || $('img[data-src]').first().attr('data-src')
-                || '',
-            );
+            const rawDetail = await page.evaluate(() => {
+                const findLabelValue = (labels) => {
+                    const cells = [...document.querySelectorAll('th, td, dt, label, .label, [class*="label"], strong')];
+                    for (const cell of cells) {
+                        const text = (cell.textContent || '').trim().toLowerCase();
+                        if (!labels.some((l) => text.includes(l))) continue;
+                        const adj = cell.nextElementSibling;
+                        if (adj?.textContent?.trim()) return adj.textContent.trim();
+                        const parent = cell.parentElement;
+                        const parentText = (parent?.textContent || '').trim();
+                        if (parentText && parentText.toLowerCase() !== text) return parentText;
+                    }
+                    return '';
+                };
+
+                const bodyText = document.body?.innerText || '';
+                const title = document.querySelector('h1, .itemTitle, [class*="hero-title"]')?.textContent?.trim()
+                    || document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
+
+                const currentBidMatch = bodyText.match(/Current Bid[^$]*\$[\d,]+(?:\.\d+)?/i);
+                const closingMatch = bodyText.match(/(Closing Time|Auction End|Ends)[^A-Z0-9]{0,8}[A-Za-z]{3,9}[^.|\n]+\d{4}(?:[^.|\n]+(?:AM|PM))?/i);
+                const locationMatch = bodyText.match(/(Item Location|Located in|Location)[^A-Z0-9]{0,8}[^.|\n]+,\s*[A-Z]{2}(?:\s+\d{5})?/i);
+                const vinMatch = bodyText.match(/\bVIN[:\s#-]*([A-HJ-NPR-Z0-9]{17})\b/i);
+                const mileageMatch = bodyText.match(/(\d[\d,]+)\s*(miles?|mi\.?|odometer)\b/i);
+
+                return {
+                    title,
+                    bodyText: bodyText.slice(0, 5000),
+                    currentBidText: findLabelValue(['current bid']) || currentBidMatch?.[0] || '',
+                    closingText: findLabelValue(['closing time', 'close time', 'auction end', 'ends']) || closingMatch?.[0] || '',
+                    locationText: findLabelValue(['item location', 'located in', 'location']) || locationMatch?.[0] || '',
+                    imageUrl: document.querySelector('meta[property="og:image"]')?.getAttribute('content')
+                        || document.querySelector('img[src]')?.src || '',
+                    vin: vinMatch?.[1] || null,
+                    mileageStr: mileageMatch?.[1] || null,
+                };
+            });
 
             const detail = {
-                title,
-                year: extractYear(title),
-                make: extractMake(title),
+                title: rawDetail.title || partial.title,
+                year: extractYear(rawDetail.title || partial.title || ''),
+                make: extractMake(rawDetail.title || partial.title || ''),
                 model: null,
-                current_bid: parseBid(currentBidText),
-                auction_end_time: parseDate(closingText),
-                location: locationText,
-                state: extractState(locationText),
-                city: extractCity(locationText),
-                photo_url: imageUrl || null,
-                vin,
-                mileage: mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, ''), 10) : null,
+                current_bid: parseBid(rawDetail.currentBidText),
+                auction_end_time: parseDate(rawDetail.closingText),
+                location: rawDetail.locationText,
+                state: extractState(rawDetail.locationText),
+                city: extractCity(rawDetail.locationText),
+                photo_url: toAbsoluteUrl(rawDetail.imageUrl) || null,
+                vin: rawDetail.vin || null,
+                mileage: rawDetail.mileageStr ? parseInt(rawDetail.mileageStr.replace(/,/g, ''), 10) : null,
             };
 
             const record = buildRecord(detail, partial);
@@ -407,19 +298,127 @@ const crawler = new CheerioCrawler({
 
         log.info(`[GOVPLANET] Parsing search page ${request.url}`);
 
+        // Extract category URLs (page 1 only)
         if (request.userData.pageNum === 1) {
-            const categoryRequests = extractCategoryRequests($);
+            const categoryLinks = await page.evaluate(() => {
+                return Array.from(document.querySelectorAll('a[href*="/jsp/s/search.ips?"]'))
+                    .map((a) => ({ href: a.href, text: (a.textContent || '').trim() }));
+            });
+
+            const categoryRequests = [];
+            for (const { href, text } of categoryLinks) {
+                const url = href;
+                if (!url || discoveredCategoryUrls.has(url)) continue;
+                const haystack = `${text} ${url}`.toLowerCase();
+                if (!haystack.includes('ct=13')) continue;
+                if (!/(passenger|sedan|car|suv|sport utility|crossover|pickup|crew cab)/.test(haystack)) continue;
+                if (COMMERCIAL_PATTERN.test(haystack)) continue;
+
+                discoveredCategoryUrls.add(url);
+                categoryRequests.push({
+                    url,
+                    uniqueKey: `govplanet-category:${url}`,
+                    userData: {
+                        label: 'LIST',
+                        pageNum: 1,
+                        category: text || 'discovered',
+                        discoveredFromRoot: true,
+                    },
+                });
+            }
+
             if (categoryRequests.length > 0) {
                 await crawler.addRequests(categoryRequests);
                 log.info(`[GOVPLANET] Discovered ${categoryRequests.length} passenger category URLs`);
             }
         }
 
-        const listings = extractSearchListings($);
-        log.info(`[GOVPLANET] Found ${listings.length} listing cards on ${request.url}`);
+        // Extract listing cards using multiple selectors
+        const rawListings = await page.evaluate(() => {
+            const SELECTORS = [
+                '.sr_grid_tile', '.sr_item', '.sr_list_item', '.featured-item',
+                '.lot-card', '.item-card', '.search-result-item', '.listing-item',
+                '.product-card', '[data-testid="lot"]',
+                '.searchResults .searchResult', '.searchResults li', '.searchResults article',
+            ];
+
+            let cards = [];
+            let usedSelector = '';
+            for (const sel of SELECTORS) {
+                const found = document.querySelectorAll(sel);
+                if (found.length > 0) {
+                    cards = Array.from(found);
+                    usedSelector = sel;
+                    break;
+                }
+            }
+
+            // Fallback: find all /for-sale/ links and climb to card parent
+            if (cards.length === 0) {
+                const links = document.querySelectorAll('a[href*="/for-sale/"]');
+                const seen = new Set();
+                for (const link of links) {
+                    const parent = link.closest('li, article, [class*="item"], [class*="tile"], [class*="card"]') || link.parentElement;
+                    if (parent && !seen.has(parent)) {
+                        seen.add(parent);
+                        cards.push(parent);
+                    }
+                }
+                usedSelector = 'fallback-for-sale-links';
+            }
+
+            const results = [];
+            const seenUrls = new Set();
+
+            for (const card of cards) {
+                const link = card.querySelector('a[href*="/for-sale/"]');
+                if (!link) continue;
+                const href = link.href;
+                if (!href || seenUrls.has(href)) continue;
+                seenUrls.add(href);
+
+                const title = (link.textContent || '').trim()
+                    || card.querySelector('h1, h2, h3, h4, [class*="title"]')?.textContent?.trim() || '';
+
+                const priceEl = card.querySelector(
+                    '.sr_price, .pdprice, .price, [class*="price"], [class*="Price"], [class*="bid"], [class*="Bid"]',
+                );
+                const locationEl = card.querySelector(
+                    '.sr_location, .sr_current_location, .itemLocation, .location, [class*="location"], [class*="Location"]',
+                );
+                const timeEl = card.querySelector(
+                    '.timeLeft, .timeRemaining, [class*="time"], [class*="Time"], [class*="close"], [class*="Close"]',
+                );
+                const imgEl = card.querySelector('img');
+
+                results.push({
+                    title,
+                    bidText: priceEl?.textContent?.trim() || '',
+                    locationText: locationEl?.textContent?.trim() || '',
+                    endText: timeEl?.textContent?.trim() || '',
+                    imageUrl: imgEl?.src || imgEl?.dataset?.src || '',
+                    listingUrl: href,
+                });
+            }
+
+            return { results, usedSelector, totalCards: cards.length };
+        });
+
+        log.info(`[GOVPLANET] Found ${rawListings.results.length} listing cards (selector: ${rawListings.usedSelector}, total card nodes: ${rawListings.totalCards}) on ${request.url}`);
 
         const detailRequests = [];
-        for (const partial of listings) {
+        for (const raw of rawListings.results) {
+            const partial = {
+                title: raw.title,
+                current_bid: parseBid(raw.bidText),
+                state: extractState(raw.locationText),
+                city: extractCity(raw.locationText),
+                auction_end_time: parseDate(raw.endText),
+                listing_url: raw.listingUrl,
+                photo_url: toAbsoluteUrl(raw.imageUrl) || null,
+            };
+            recordLocationSample(raw.locationText);
+
             if (!partial.listing_url || enqueuedListingUrls.has(partial.listing_url)) continue;
             enqueuedListingUrls.add(partial.listing_url);
 
@@ -440,7 +439,26 @@ const crawler = new CheerioCrawler({
         const currentPage = request.userData.pageNum || 1;
         if (currentPage >= maxPages) return;
 
-        const nextUrl = findNextPageUrl($, request.url);
+        // Find next page URL
+        const nextUrl = await page.evaluate((currentUrl) => {
+            const nextLink = document.querySelector('a[rel="next"]')
+                ?? [...document.querySelectorAll('a')].find((a) => /^\s*next\s*$/i.test(a.textContent || ''));
+            if (nextLink?.href) return nextLink.href;
+
+            try {
+                const current = new URL(currentUrl);
+                const currentStart = parseInt(current.searchParams.get('pstart') || '0', 10);
+                for (const a of document.querySelectorAll('a[href*="pstart="]')) {
+                    try {
+                        const url = new URL(a.href);
+                        const start = parseInt(url.searchParams.get('pstart') || '0', 10);
+                        if (start > currentStart) return a.href;
+                    } catch { /* skip */ }
+                }
+            } catch { /* skip */ }
+            return '';
+        }, request.url);
+
         if (!nextUrl) return;
 
         const nextPageKey = `govplanet-list:${request.userData.category || 'root'}:${nextUrl}`;
