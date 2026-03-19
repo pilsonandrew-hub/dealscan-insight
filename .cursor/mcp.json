@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": ["-y", "@supabase/mcp-server-supabase@latest"],
+      "env": {
+        "SUPABASE_URL": "https://lbnxzvqppccajllsqaaw.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "SET_FROM_LOCAL_ENV"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "SET_FROM_LOCAL_ENV"
+      }
+    }
+  }
+}
