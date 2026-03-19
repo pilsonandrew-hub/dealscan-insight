@@ -22,32 +22,61 @@ jobs:
           APIFY_TOKEN = os.environ["APIFY_TOKEN"]
           BOT_TOKEN = os.environ["BOT_TOKEN"]
           CHAT_ID = os.environ["CHAT_ID"]
-          ACTOR_IDS = ["CuKaIAcWyFS0EPrAz", "9xxQLlRsROnSgA42i"]  # govdeals, publicsurplus
+
+          # All active actors from apify/deployment.json
+          ACTORS = {
+              "ds-govdeals":       "CuKaIAcWyFS0EPrAz",
+              "ds-publicsurplus":  "9xxQLlRsROnSgA42i",
+              "ds-hibid":          "e8UeyRvQ6QSnX5fhP",
+              "ds-municibid":      "svmsItf3CRBZuIntp",
+              "ds-gsaauctions":    "fvDnYmGuFBCrwpEi9",
+              "ds-allsurplus":     "gYGIfHeYeN3EzmLnB",
+              "ds-bidcal":         "DF1THdFOBSYlxyNjD",
+              "ds-auctiontime":    "eb4oYXDf8qs1Ckbth",
+              "ds-govplanet":      "pO2t5UDoSVmO1gvKJ",
+              "ds-proxibid":       "bxhncvtHEP712WX2e",
+              "ds-equipmentfacts": "0XjoegYZVcPldLstl",
+              "ds-usgovbid":       "6XO9La81aEmtsCT3g",
+              "ds-jjkane":         "lvb7T6VMFfNUQpqlq",
+          }
 
           ctx = ssl.create_default_context()
-          now = datetime.datetime.utcnow()
-          cutoff = now - datetime.timedelta(hours=4)
+          now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+          cutoff = now - datetime.timedelta(hours=6)
           stalled = []
 
-          for actor_id in ACTOR_IDS:
-              req = urllib.request.Request(
-                  f"https://api.apify.com/v2/acts/{actor_id}/runs?limit=1&status=SUCCEEDED",
-                  headers={"Authorization": f"Bearer {APIFY_TOKEN}"}
-              )
+          for name, actor_id in ACTORS.items():
+              # Query most recent run (any status), sorted desc by creation time
+              url = f"https://api.apify.com/v2/acts/{actor_id}/runs?limit=1&desc=1&token={APIFY_TOKEN}"
+              req = urllib.request.Request(url)
               try:
                   with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
                       data = json.loads(r.read())
                   runs = data.get("data", {}).get("items", [])
                   if not runs:
-                      stalled.append(f"Actor {actor_id}: no runs found")
-                  else:
-                      finished = runs[0].get("finishedAt", "")
-                      if finished:
-                          run_time = datetime.datetime.fromisoformat(finished.replace("Z", "+00:00")).replace(tzinfo=None)
-                          if run_time < cutoff:
-                              stalled.append(f"Actor {actor_id}: last success {finished}")
+                      stalled.append(f"<b>{name}</b>: no runs found")
+                      continue
+
+                  run = runs[0]
+                  status = run.get("status", "UNKNOWN")
+                  started_at = run.get("startedAt", "")
+
+                  if not started_at:
+                      stalled.append(f"<b>{name}</b>: no startedAt in latest run (status={status})")
+                      continue
+
+                  run_time = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+
+                  if status != "SUCCEEDED":
+                      # Last run didn't succeed — always alert regardless of time
+                      stalled.append(f"<b>{name}</b>: last run status={status} at {started_at[:16]}Z")
+                  elif run_time < cutoff:
+                      # Succeeded but too long ago
+                      hours_ago = round((now - run_time).total_seconds() / 3600, 1)
+                      stalled.append(f"<b>{name}</b>: last success {hours_ago}h ago ({started_at[:16]}Z)")
+
               except Exception as e:
-                  stalled.append(f"Actor {actor_id}: error checking — {e}")
+                  stalled.append(f"<b>{name}</b>: error checking — {e}")
 
           if stalled:
               def send_telegram(text):
@@ -61,7 +90,7 @@ jobs:
 
               msg = "⚠️ <b>DealerScope Scraper Alert</b>\n\n" + "\n".join(stalled)
               send_telegram(msg)
-              print("Stall detected, alert sent")
+              print("Stall detected, alert sent:\n" + "\n".join(stalled))
               sys.exit(1)
           else:
               print("All scrapers healthy")
