@@ -600,15 +600,100 @@ const CrosshairTab = () => {
 const RoverTab = () => {
   const [recs, setRecs] = useState<RoverRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFallback, setIsFallback] = useState(false);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
+    setIsFallback(false);
     try {
-      const data = await api.getRoverRecommendations();
-      setRecs(data);
+      // Use roverAPI.getRecommendations() — properly authenticated via Supabase JWT → Railway
+      const result = await roverAPI.getRecommendations(25);
+      const items = result?.items ?? [];
+
+      if (items.length > 0) {
+        // Map DealItem → RoverRecommendation
+        const mapped: RoverRecommendation[] = items.map(item => ({
+          id: item.id,
+          make: item.make,
+          model: item.model,
+          year: item.year,
+          mileage: item.mileage,
+          current_bid: item.current_bid ?? item.price,
+          estimated_sale_price: item.price,
+          score: item._score != null ? (item._score <= 1 ? item._score * 100 : item._score) : item.arbitrage_score,
+          dos_score: item.arbitrage_score,
+          potential_profit: item.potential_profit,
+          roi_percentage: item.roi_percentage,
+          state: item.state,
+          source_site: item.source_site ?? item.source,
+          vin: item.vin,
+        }));
+        setRecs(mapped);
+      } else {
+        // Cold-start fallback: query Supabase for top DOS score deals
+        const { data: fallbackDeals } = await supabase
+          .from('opportunities')
+          .select('*')
+          .gte('dos_score', 65)
+          .order('dos_score', { ascending: false })
+          .limit(25);
+
+        if (fallbackDeals && fallbackDeals.length > 0) {
+          const mapped: RoverRecommendation[] = fallbackDeals.map((d: any) => ({
+            id: d.id,
+            make: d.make,
+            model: d.model,
+            year: d.year,
+            mileage: d.mileage,
+            current_bid: d.current_bid,
+            estimated_sale_price: d.estimated_sale_price,
+            score: d.dos_score,
+            dos_score: d.dos_score,
+            gross_margin: d.gross_margin,
+            potential_profit: d.potential_profit,
+            profit_margin: d.profit_margin,
+            state: d.state,
+            source_site: d.source_site,
+            auction_end: d.auction_end,
+            vin: d.vin,
+            total_cost: d.total_cost,
+            risk_score: d.risk_score,
+            transportation_cost: d.transportation_cost,
+            fees_cost: d.fees_cost,
+            roi: d.roi,
+            roi_percentage: d.roi_percentage,
+            confidence_score: d.confidence_score,
+          }));
+          setRecs(mapped);
+          setIsFallback(true);
+        } else {
+          setRecs([]);
+        }
+      }
     } catch (e) {
-      console.error(e);
+      console.error('RoverTab load error:', e);
+      // On error, still try the Supabase fallback
+      try {
+        const { data: fallbackDeals } = await supabase
+          .from('opportunities')
+          .select('*')
+          .gte('dos_score', 65)
+          .order('dos_score', { ascending: false })
+          .limit(25);
+        if (fallbackDeals && fallbackDeals.length > 0) {
+          const mapped: RoverRecommendation[] = fallbackDeals.map((d: any) => ({
+            id: d.id, make: d.make, model: d.model, year: d.year, mileage: d.mileage,
+            current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
+            score: d.dos_score, dos_score: d.dos_score, potential_profit: d.potential_profit,
+            state: d.state, source_site: d.source_site, vin: d.vin,
+          }));
+          setRecs(mapped);
+          setIsFallback(true);
+        }
+      } catch (fallbackErr) {
+        console.error('RoverTab fallback also failed:', fallbackErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -626,12 +711,23 @@ const RoverTab = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white">Rover</h2>
-          <p className="text-sm text-gray-400">Personalized recommendations based on your activity</p>
+          <p className="text-sm text-gray-400">
+            {isFallback
+              ? 'Top Deals — Training Rover — interact with deals to personalize'
+              : 'Personalized recommendations based on your activity'}
+          </p>
         </div>
         <button onClick={load} disabled={loading} className="text-gray-400 hover:text-white">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
+
+      {isFallback && (
+        <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
+          <Navigation className="h-4 w-4 flex-shrink-0" />
+          <span>Training Rover — interact with deals to personalize your recommendations over time.</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-12 text-gray-500">Loading recommendations...</div>
