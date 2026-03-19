@@ -522,10 +522,6 @@ export const api = {
     opportunity: Pick<Opportunity, 'id' | 'make' | 'model' | 'year' | 'source_site' | 'current_bid' | 'state' | 'mileage'>,
     event: 'view' | 'save' | 'pass'
   ): Promise<void> {
-    if (event === 'pass') {
-      return;
-    }
-
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
