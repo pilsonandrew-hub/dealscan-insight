@@ -1,6 +1,6 @@
 # Scraper Status
 
-Updated: 2026-03-12
+Updated: 2026-03-18
 
 | Actor | Current status | Last known issue | What is needed to fix |
 | --- | --- | --- | --- |
@@ -13,3 +13,15 @@ Updated: 2026-03-12
 | `ds-gsaauctions` | Blocked for Phase 5 | Marked Phase 5 blocked alongside GovDeals per triage instructions; current actor should not be treated as selector-fixable in this phase. | OpenClaw browser recon in Phase 5 to confirm the real navigation/data path before further implementation. |
 | `ds-hibid` | Not triaged in this phase | Out of scope for this request; no Phase 3 changes made. | Separate validation pass if HiBid is part of the next scraper triage batch. |
 | `ds-govplanet` | Built — needs live test | Brand new actor (2026-03-13). GovPlanet is JS-rendered (React/Next.js) but no bot protection. Uses PlaywrightCrawler + response intercept to capture lot arrays from XHR/fetch API calls. Paginates via detected API URL param patterns. DOM fallback included if API intercept yields nothing. Categories: Passenger Vehicles, Trucks. | Deploy to Apify and verify intercept captures GovPlanet's search/browse API responses. Check which JSON key holds the lot array and confirm pagination param name (`page`, `offset`, etc.). |
+| `ds-jjkane` | Built — needs deploy | Brand new actor (2026-03-18). JJ Kane is a major govt surplus auctioneer used by Nevada State Surplus and heavily present in FL. Exposes a **public Algolia API** (app_id=ICB6K32PD0, key=9d3241f7a3ee8947997deaa33cb0b249, index=api_items) — no Playwright needed, pure HTTP. Queries by vehicle category + state. 5600+ total lots, ~420 FL vehicles, 10+ NV vehicles active now. | Deploy to Apify. Verify Algolia key stays stable (it's a public read-only search key embedded in page JS). Monitor key rotation. |
+
+## State Surplus Site Recon (2026-03-18)
+
+| State | Site | Auction Platform | Status | Notes |
+| --- | --- | --- | --- | --- |
+| **Florida** | floridabid.com | **JJ Kane** | ✅ Covered via ds-jjkane | floridabid.com is a Florida procurement portal (contracts/bids), NOT a surplus auction site. FL surplus vehicles auction via JJ Kane (Tampa, West Palm Beach, etc.) — 420+ vehicles active. |
+| **Nevada** | purchasing.nv.gov/Property_Management/auction | **JJ Kane** | ✅ Covered via ds-jjkane | Nevada State Surplus officially routes all auctions to JJ Kane (Las Vegas + Reno sites). Currently ~10 NV vehicles active. |
+| **North Carolina** | recoup.bid.assetworks.com/bid/f?p=2501:4000 | **AssetWorks Recoup BID** | ⚠️ Not covered — new platform | NC uses AssetWorks "Recoup BID" (APEX-based Oracle app). 103 vehicle lots currently active (category ID=76). Requires session-based form POST to paginate. NC is a rust-adjacent state (skip). |
+| **Washington** | des.wa.gov → govdeals.com/wasurplus + govdeals.com/surpluseast | **GovDeals** | ✅ Already covered by ds-govdeals | Both Western WA and Eastern WA surplus link directly to GovDeals. |
+| **New York** | ogs.ny.gov → govdeals.com/stateofnewyork | **GovDeals** | ✅ Already covered by ds-govdeals | NY OGS page explicitly directs to govdeals.com/stateofnewyork. NY is rust-belt (skip for DealerScope filters). |
+| **Oregon** | oregon.gov/das/Surplus/Pages/auction-providers.aspx | **PublicSurplus + GovDeals** | ✅ Already covered | Oregon uses both PublicSurplus (org=202854) and GovDeals (accountId=5859) plus GSA Auctions. All three already scraped. |

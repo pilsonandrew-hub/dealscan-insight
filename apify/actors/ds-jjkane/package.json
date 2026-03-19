@@ -1,0 +1,13 @@
+{
+  "name": "ds-jjkane-scraper",
+  "version": "1.0.0",
+  "description": "DealerScope scraper for JJ Kane government surplus vehicle auctions (covers NV, FL, and nationwide)",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.0.0"
+  }
+}

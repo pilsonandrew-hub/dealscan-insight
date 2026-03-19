@@ -54,7 +54,8 @@ class RoverAPIService {
     click: 1,
     save: 3,
     bid: 5,
-    purchase: 8
+    purchase: 8,
+    pass: -1.5,
   };
 
   private decayHalfLife = 72 * 60 * 60 * 1000; // 72 hours in ms
