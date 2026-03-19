@@ -56,28 +56,32 @@ const crawler = new PlaywrightCrawler({
             await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
         }
 
+        // DEBUG: capture actual HTML structure to find correct selectors
         const html = await page.content();
-        const $ = cheerio.load(html);
+        await Actor.setValue('PAGE_HTML', html, { contentType: 'text/html' });
+        const classes = await page.$$eval('[class]', els =>
+            [...new Set(els.flatMap(el => Array.from(el.classList)))].slice(0, 60)
+        ).catch(() => []);
+        log.info('[BIDSPOTTER DEBUG] Classes: ' + classes.join(', '));
 
-        // Try multiple selectors for BidSpotter listings
+        // Use Playwright native selectors — no cheerio needed
         const listings = [];
-        const selectors = [
-            '.lot-card', '.sr_lot_item', '[data-testid="lot"]',
-            '.auction-item', '.item-card', 'article.lot',
-            '.listing-card', '.vehicle-card'
-        ];
+        const selectors = ['.lot-card', '.sr_lot_item', '[data-testid="lot"]', '.auction-item', '.item-card', '.listing-card', '.vehicle-card'];
 
         for (const sel of selectors) {
-            $(sel).each((i, el) => {
-                const title = $(el).find('h2,h3,.title,.lot-title').first().text().trim();
-                const price = $(el).find('.current-bid,.price,.amount').first().text().trim();
-                const location = $(el).find('.location,.lot-location,.city-state').first().text().trim();
-                const link = $(el).find('a').first().attr('href');
-                if (title && title.length > 3) {
-                    listings.push({ title, price, location, link: link ? new URL(link, BASE).href : '', source: SOURCE });
-                }
-            });
-            if (listings.length > 0) break;
+            const count = await page.$$(sel).then(els => els.length);
+            if (count > 0) {
+                const extracted = await page.$$eval(sel, (els, base) => {
+                    return els.map(el => ({
+                        title: el.querySelector('h2,h3,.title,.lot-title')?.textContent?.trim() || '',
+                        price: el.querySelector('.current-bid,.price,.amount')?.textContent?.trim() || '',
+                        location: el.querySelector('.location,.lot-location,.city-state')?.textContent?.trim() || '',
+                        link: el.querySelector('a')?.href || '',
+                    })).filter(item => item.title.length > 3);
+                }, BASE);
+                listings.push(...extracted);
+                break;
+            }
         }
 
         log.info(`[BIDSPOTTER] Page ${request.userData.pageNum || 1}: ${listings.length} listings`);
@@ -90,14 +94,13 @@ const crawler = new PlaywrightCrawler({
             totalPassed++;
         }
 
-        // Pagination
+        // Pagination using Playwright
         const pageNum = request.userData.pageNum || 1;
         if (pageNum < MAX_PAGES) {
-            const nextHref = $('a[rel="next"]').attr('href') ||
-                $('[aria-label="Next page"]').attr('href');
+            const nextHref = await page.$eval('a[rel="next"], [aria-label="Next page"]', el => el.href).catch(() => null);
             if (nextHref) {
                 await crawler.addRequests([{
-                    url: new URL(nextHref, BASE).href,
+                    url: nextHref,
                     userData: { pageNum: pageNum + 1 }
                 }]);
             }
