@@ -42,7 +42,7 @@ await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 15,
+    maxPages = 3,
     minBid = 1000,
     maxMileage = 50000,
     minYear = 2022,
@@ -206,7 +206,7 @@ function applyFilters(listing, log) {
 // an extra fixed delay for the framework to hydrate the DOM.
 async function waitForAngular(page) {
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-    await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => {});
+    
     await page.waitForTimeout(500);
 }
 
@@ -302,10 +302,10 @@ async function extractDetailData(page) {
 }
 
 const crawler = new PlaywrightCrawler({
-    // One list page + up to maxPages-1 additional pages + detail pages.
-    maxRequestsPerCrawl: maxPages + 500,
+    // Hard cap: 3 list pages + up to 37 detail pages = ~480s, well within 600s timeout.
+    maxRequestsPerCrawl: 40,
     maxConcurrency: 1,
-    requestHandlerTimeoutSecs: 120,
+    requestHandlerTimeoutSecs: 45,
     launchContext: {
         launchOptions: {
             args: [
