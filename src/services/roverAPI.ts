@@ -29,6 +29,7 @@ export interface DealItem {
   arbitrage_score?: number;
   roi_percentage?: number;
   potential_profit?: number;
+  why_signals?: string[];
 }
 
 export interface RoverRecommendations {

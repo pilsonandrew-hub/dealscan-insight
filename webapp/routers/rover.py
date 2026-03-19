@@ -62,6 +62,31 @@ def _serialize_recommendation(row: dict) -> dict:
     roi = _coerce_number(row.get("roi_percentage", row.get("roi")), 0.0)
     profit = _coerce_number(row.get("potential_profit", row.get("gross_margin", row.get("profit_margin"))), 0.0)
 
+    mmr_val = _coerce_number(row.get("mmr", row.get("estimated_sale_price")), 0.0)
+
+    # Build human-readable "why this deal?" signal list for the UI tooltip
+    why_signals: list[str] = []
+    if dos_score >= 80:
+        why_signals.append(f"Top-tier DOS score ({dos_score:.0f})")
+    elif dos_score >= 65:
+        why_signals.append(f"Solid DOS score ({dos_score:.0f})")
+    if roi >= 25:
+        why_signals.append(f"{roi:.0f}% ROI")
+    elif roi >= 15:
+        why_signals.append(f"{roi:.0f}% ROI")
+    if profit >= 2000:
+        why_signals.append(f"${profit:,.0f} profit potential")
+    inv_grade = row.get("investment_grade")
+    if inv_grade in ("Platinum", "Gold"):
+        why_signals.append(f"{inv_grade} investment grade")
+    if mmr_val and price and price < mmr_val:
+        under_pct = (mmr_val - price) / mmr_val * 100
+        if under_pct >= 10:
+            why_signals.append(f"{under_pct:.0f}% below MMR")
+    state = row.get("state")
+    if state:
+        why_signals.append(f"{state} (low-rust state)" if state in ("CA", "TX", "AZ", "FL", "NV", "CO") else state)
+
     return {
         "id": row.get("id"),
         "make": row.get("make"),
@@ -73,9 +98,9 @@ def _serialize_recommendation(row: dict) -> dict:
         "mileage": row.get("mileage"),
         "source": row.get("source") or row.get("source_site"),
         "source_site": row.get("source_site") or row.get("source"),
-        "state": row.get("state"),
+        "state": state,
         "vin": row.get("vin"),
-        "mmr": _coerce_number(row.get("mmr", row.get("estimated_sale_price")), 0.0),
+        "mmr": mmr_val,
         "dos_score": round(dos_score, 2),
         "score": round(dos_score, 2),
         "match_pct": round(dos_score, 2),
@@ -91,6 +116,7 @@ def _serialize_recommendation(row: dict) -> dict:
         "auction_end": row.get("auction_end") or row.get("auction_end_date"),
         "created_at": row.get("created_at"),
         "investment_grade": row.get("investment_grade"),
+        "why_signals": why_signals,
     }
 
 
@@ -264,13 +290,24 @@ async def track_event(
         item_data = payload.get("item", {})
 
         # Store raw weight — decay is applied at read time in build_preference_vector()
-        supa.table("rover_events").insert({
+        insert_result = supa.table("rover_events").insert({
             "user_id": auth_user_id,
             "event_type": event_type,
             "item_data": item_data,
             "weight": raw_weight,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }).execute()
+        rows_written = len(insert_result.data or [])
+        if rows_written:
+            logger.info(
+                "[ROVER] Event written OK: type=%s user=%s... rows=%d",
+                event_type, auth_user_id[:8], rows_written,
+            )
+        else:
+            logger.warning(
+                "[ROVER] Event insert returned 0 rows (possible write failure): type=%s user=%s...",
+                event_type, auth_user_id[:8],
+            )
 
         # Update Redis affinity vector (non-fatal)
         if _redis_client:
