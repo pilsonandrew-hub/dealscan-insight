@@ -27,6 +27,7 @@ except Exception as _recon_err:
     _log.getLogger("main").error(f"[RECON] Failed to load recon router: {_recon_err}")
     recon_module = None
     _recon_loaded = False
+    _recon_err_msg = str(_recon_err)
 from webapp.database import init_db
 from webapp.monitoring import setup_monitoring
 
@@ -125,10 +126,11 @@ if __name__ == "__main__":
         timeout_graceful_shutdown=30
     )
 
+_recon_err_msg = ""
 @app.get("/debug/recon-status")
 async def recon_debug():
     return {
         "recon_loaded": _recon_loaded,
-        "recon_module": str(recon_module),
-        "error": str(_recon_err) if not _recon_loaded else None
+        "recon_module": str(recon_module) if recon_module else None,
+        "error": _recon_err_msg
     }
