@@ -263,7 +263,35 @@ async def get_history(authorization: Optional[str] = Header(None)):
     if result.data is None:
         raise HTTPException(status_code=500, detail="Failed to fetch history")
 
-    return result.data
+    # Normalize DB column names → ReconResult interface field names
+    def normalize(row: dict) -> dict:
+        return {
+            "id": row.get("id"),
+            "verdict": row.get("verdict"),
+            "verdict_reason": row.get("verdict_reason") or row.get("reason", ""),
+            "reliability_grade": row.get("reliability_grade") or row.get("grade", "C"),
+            "max_bid": row.get("max_bid", 0),
+            "asking_price": row.get("asking_price", 0),
+            "profit_expected": row.get("profit_expected") or row.get("profit", 0),
+            "profit_pessimistic": row.get("profit_pessimistic") or row.get("profit", 0),
+            "profit_optimistic": row.get("profit_optimistic") or row.get("profit", 0),
+            "adjusted_dos": row.get("adjusted_dos", 0),
+            "comp_count": row.get("comp_count", 0),
+            "condition_penalty": row.get("condition_penalty", 0),
+            "fleet_stigma_penalty": row.get("fleet_stigma_penalty") or row.get("fleet_penalty", 0),
+            "manheim_sell_fee": row.get("manheim_sell_fee") or row.get("sell_fee", 0),
+            "transport_cost": row.get("transport_cost", 800),
+            "total_all_in_cost": row.get("total_all_in_cost") or row.get("total_cost", 0),
+            "promoted_to_pipeline": row.get("promoted_to_pipeline", False),
+            "pricing_source": row.get("pricing_source") or row.get("source", "Estimated"),
+            "make": row.get("make", ""),
+            "model": row.get("model", ""),
+            "year": row.get("year", 0),
+            "vin": row.get("vin", ""),
+            "created_at": row.get("created_at"),
+        }
+
+    return [normalize(r) for r in result.data]
 
 @router.post("/promote/{recon_id}")
 async def promote_recon(recon_id: str = Path(...), authorization: Optional[str] = Header(None)):
