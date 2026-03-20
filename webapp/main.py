@@ -19,15 +19,12 @@ from webapp.middleware.rate_limit import RateLimitMiddleware
 from webapp.middleware.security import SecurityMiddleware
 from webapp.middleware.error_handler import ErrorHandlerMiddleware
 from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest
+recon_module = None
+_recon_load_error = ""
 try:
     from webapp.routers import recon as recon_module
-    _recon_loaded = True
-except Exception as _recon_err:
-    import logging as _log
-    _log.getLogger("main").error(f"[RECON] Failed to load recon router: {_recon_err}")
-    recon_module = None
-    _recon_loaded = False
-    _recon_err_msg = str(_recon_err)
+except Exception as _e:
+    _recon_load_error = str(_e)
 from webapp.database import init_db
 from webapp.monitoring import setup_monitoring
 
@@ -100,9 +97,8 @@ app.include_router(upload.router, prefix="/upload", tags=["Data Upload"])
 app.include_router(ml.router, prefix="/ml", tags=["Machine Learning"])
 app.include_router(admin.router, prefix="/admin", tags=["Administration"])
 app.include_router(ingest.router)
-if _recon_loaded and recon_module:
+if recon_module:
     app.include_router(recon_module.router, prefix="/api", tags=["Recon"])
-    import logging; logging.getLogger("main").info("[RECON] Router registered at /api/recon/*")
 
 # Global exception handler
 @app.exception_handler(Exception)
@@ -126,11 +122,10 @@ if __name__ == "__main__":
         timeout_graceful_shutdown=30
     )
 
-_recon_err_msg = ""
 @app.get("/debug/recon-status")
 async def recon_debug():
     return {
-        "recon_loaded": _recon_loaded,
-        "recon_module": str(recon_module) if recon_module else None,
-        "error": _recon_err_msg
+        "recon_loaded": recon_module is not None,
+        "recon_module": str(type(recon_module)) if recon_module else None,
+        "error": _recon_load_error or None
     }
