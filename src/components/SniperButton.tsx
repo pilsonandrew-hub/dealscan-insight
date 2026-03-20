@@ -197,7 +197,7 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
           variant="outline"
           size="sm"
           className="border-green-500 text-green-700 bg-green-50 hover:bg-green-100 cursor-default"
-          title="SniperScope is armed — you'll receive alerts at T-60, T-15, T-5"
+          title="Sniper is armed — you'll receive alerts at T-60, T-15, T-5"
         >
           <Target className="h-3.5 w-3.5 mr-1 text-green-600" />
           Armed 🎯
@@ -314,14 +314,14 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
               onClick={handleSubmit}
               disabled={state === 'loading'}
             >
-              {state === 'loading' ? 'Arming…' : 'Arm SniperScope 🎯'}
+              {state === 'loading' ? 'Arming…' : 'Arm Sniper 🎯'}
             </Button>
           </div>
 
           {/* Confirmation note shown when armed */}
           {state === 'armed' && (
             <p className="text-xs text-green-700 mt-3 font-medium text-center">
-              SniperScope armed 🎯 You'll get alerts at T-60, T-15, T-5
+              Sniper armed 🎯 You'll get alerts at T-60, T-15, T-5
             </p>
           )}
         </div>

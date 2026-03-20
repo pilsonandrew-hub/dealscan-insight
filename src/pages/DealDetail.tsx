@@ -293,7 +293,7 @@ const DealDetail: React.FC = () => {
           {/* Not logged in note */}
           {!userId && (
             <p className="text-xs text-gray-500 mt-4">
-              Sign in to track this deal, arm SniperScope alerts, and get personalized recommendations.
+              Sign in to track this deal, arm Sniper alerts, and get personalized recommendations.
             </p>
           )}
         </div>
