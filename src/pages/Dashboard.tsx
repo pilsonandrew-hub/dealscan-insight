@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
+import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
 import { OnboardingFlow } from '@/components/OnboardingFlow';
 
@@ -1416,6 +1417,7 @@ const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
   { id: 'crosshair', label: 'Crosshair', Icon: Crosshair },
   { id: 'sniper', label: 'Sniper', Icon: Target },
   { id: 'rover', label: 'Rover', Icon: Navigation },
+  { id: 'recon', label: 'Recon', Icon: Crosshair },
   { id: 'analytics', label: 'Analytics', Icon: BarChart2 },
   { id: 'settings', label: 'Settings', Icon: Settings },
 ];
@@ -1443,6 +1445,7 @@ export default function Dashboard() {
       case 'crosshair': return <CrosshairTab />;
       case 'sniper': return <SniperScopeDashboard />;
       case 'rover': return <RoverTab />;
+      case 'recon': return <ReconPanel />;
       case 'analytics': return <AnalyticsTab />;
       case 'settings': return <SettingsTab />;
     }
