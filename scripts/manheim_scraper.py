@@ -178,24 +178,29 @@ def collect_sidebar_dates(page):
 
 def run():
     with sync_playwright() as p:
-        # Connect to your already-open Chrome browser with remote debugging
-        # First start Chrome with: open -a "Google Chrome" --args --remote-debugging-port=9222
-        try:
-            browser = p.chromium.connect_over_cdp('http://localhost:9222')
-            context = browser.contexts[0]
-            page = context.pages[0]
-            print('✅ Connected to your existing Chrome browser')
-        except Exception:
-            # Fallback: launch new browser and wait for manual login
-            print('Could not connect to existing Chrome. Launching new browser...')
-            browser = p.chromium.launch(headless=False)
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto('https://www.manheim.com')
+        # Use your real Chrome profile so Manheim sees your existing session/cookies
+        import os
+        chrome_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
+        print(f'Using Chrome profile: {chrome_profile}')
+        # Kill Chrome first so we can use the profile
+        os.system('pkill -x "Google Chrome" 2>/dev/null; sleep 2')
+        browser = p.chromium.launch_persistent_context(
+            chrome_profile,
+            channel='chrome',
+            headless=False,
+            args=['--no-first-run', '--no-default-browser-check']
+        )
+        page = browser.pages[0] if browser.pages else browser.new_page()
+        page.goto('https://www.manheim.com')
+        page.wait_for_load_state('networkidle')
+        time.sleep(3)
+        if 'login' in page.url.lower() or 'signin' in page.url.lower():
             print('========================================')
             print('LOG IN to Manheim, then press Enter here.')
             print('========================================')
             input()
+        else:
+            print('✅ Already logged in via your Chrome profile')
 
         print('\nConnecting to Supabase...')
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
