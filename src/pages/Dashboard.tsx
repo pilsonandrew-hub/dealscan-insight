@@ -1414,7 +1414,7 @@ const SettingsTab = () => {
 const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
   { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
   { id: 'crosshair', label: 'Crosshair', Icon: Crosshair },
-  { id: 'sniper', label: 'SniperScope', Icon: Target },
+  { id: 'sniper', label: 'Sniper', Icon: Target },
   { id: 'rover', label: 'Rover', Icon: Navigation },
   { id: 'analytics', label: 'Analytics', Icon: BarChart2 },
   { id: 'settings', label: 'Settings', Icon: Settings },

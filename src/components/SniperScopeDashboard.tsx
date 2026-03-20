@@ -564,7 +564,7 @@ export default function SniperScopeDashboard() {
       <div className="flex items-center gap-3">
         <Target className="h-6 w-6 text-emerald-400" />
         <div>
-          <h2 className="text-xl font-bold text-white">SniperScope</h2>
+          <h2 className="text-xl font-bold text-white">Sniper</h2>
           <p className="text-sm text-gray-400">Bid execution calculator — find your max bid before you raise your hand</p>
         </div>
       </div>
