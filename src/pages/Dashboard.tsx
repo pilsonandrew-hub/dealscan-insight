@@ -15,7 +15,7 @@ import {
   LayoutDashboard, Crosshair, Navigation, BarChart2, Settings, Target,
   ExternalLink, RefreshCw, CheckCircle, XCircle, AlertCircle,
   TrendingUp, Car, MapPin, Clock, Star, Filter, ChevronDown,
-  ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff
+  ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff, ScanSearch
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
@@ -1417,7 +1417,7 @@ const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
   { id: 'crosshair', label: 'Crosshair', Icon: Crosshair },
   { id: 'sniper', label: 'Sniper', Icon: Target },
   { id: 'rover', label: 'Rover', Icon: Navigation },
-  { id: 'recon', label: 'Recon', Icon: Crosshair },
+  { id: 'recon', label: 'Recon', Icon: ScanSearch },
   { id: 'analytics', label: 'Analytics', Icon: BarChart2 },
   { id: 'settings', label: 'Settings', Icon: Settings },
 ];
