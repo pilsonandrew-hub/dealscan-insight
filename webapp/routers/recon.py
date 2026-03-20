@@ -5,13 +5,11 @@ Recon manual vehicle evaluation router for DealerScope.
 import os
 import re
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status, Path
-from fastapi.security import HTTPAuthorizationCredentials
+import logging
+from fastapi import APIRouter, HTTPException, Header, Path, status
 from typing import List, Optional
 from urllib.parse import quote
 from pydantic import BaseModel, Field
-from fastapi import Header
-from typing import Optional
 
 _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
