@@ -10,8 +10,8 @@ from fastapi.security import HTTPAuthorizationCredentials
 from typing import List, Optional
 from urllib.parse import quote
 from pydantic import BaseModel, Field
-from webapp.auth import get_current_user
-from webapp.models.user import User
+from fastapi import Header
+from typing import Optional
 
 _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
@@ -25,6 +25,25 @@ except Exception as e:
     logging.warning(f"Supabase client init failed: {e}")
 
 router = APIRouter(prefix="/recon", tags=["recon"])
+
+def _verify_auth(authorization: Optional[str]) -> str:
+    """Validate Supabase JWT. Returns user_id on success."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1]
+    if not _supabase_client:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+    try:
+        user = _supabase_client.auth.get_user(token)
+        if not user or not user.user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return user.user.id
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
 
 VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{1,17}$")
 
@@ -49,7 +68,7 @@ class PromoteResponse(BaseModel):
     message: str
 
 @router.get("/vin/{vin}")
-async def vin_decode(vin: str = Path(..., description="VIN to decode"), user: User = Depends(get_current_user)):
+async def vin_decode(vin: str = Path(..., description="VIN to decode"), authorization: Optional[str] = Header(None)):
     """Decode VIN via NHTSA free API"""
     vin = vin.upper()
     if not VIN_PATTERN.match(vin):
@@ -63,7 +82,7 @@ async def vin_decode(vin: str = Path(..., description="VIN to decode"), user: Us
     return data
 
 @router.post("/evaluate")
-async def evaluate_vehicle(req: EvaluateRequest, user: User = Depends(get_current_user)):
+async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = Header(None)):
     """Main evaluation endpoint — real scoring against dealer_sales comps"""
     reason = ""
 
@@ -72,6 +91,8 @@ async def evaluate_vehicle(req: EvaluateRequest, user: User = Depends(get_curren
         verdict = "PASS"
         reason = "Non-clean title — immediate pass"
         return {"verdict": verdict, "reason": reason}
+
+    user_id = _verify_auth(authorization)
 
     if not _supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not configured")
@@ -168,7 +189,7 @@ async def evaluate_vehicle(req: EvaluateRequest, user: User = Depends(get_curren
 
     # Save evaluation to Supabase
     eval_row = {
-        "user_id": user.id,
+        "user_id": user_id,
         "vin": req.vin,
         "mileage": req.mileage,
         "year": req.year,
@@ -221,19 +242,21 @@ async def evaluate_vehicle(req: EvaluateRequest, user: User = Depends(get_curren
     }
 
 @router.get("/history")
-async def get_history(user: User = Depends(get_current_user)):
+async def get_history(authorization: Optional[str] = Header(None)):
     """List past evaluations for authenticated user"""
+    user_id = _verify_auth(authorization)
     if not _supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not configured")
-    result = _supabase_client.table("recon_evaluations").select("*").eq("user_id", user.id).order("created_at", desc=True).execute()
+    result = _supabase_client.table("recon_evaluations").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     if not result.data and result.data is None:
         raise HTTPException(status_code=500, detail="Failed to fetch history")
 
     return result.data
 
 @router.post("/promote/{recon_id}")
-async def promote_recon(recon_id: int = Path(...), user: User = Depends(get_current_user)):
+async def promote_recon(recon_id: int = Path(...), authorization: Optional[str] = Header(None)):
     """Promote to opportunities pipeline — atomic ownership guard"""
+    user_id = _verify_auth(authorization)
     if not _supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not configured")
 
@@ -243,7 +266,7 @@ async def promote_recon(recon_id: int = Path(...), user: User = Depends(get_curr
         .table("recon_evaluations")
         .select("*")
         .eq("id", recon_id)
-        .eq("user_id", user.id)
+        .eq("user_id", user_id)
         .limit(1)
         .execute()
     )
@@ -257,7 +280,7 @@ async def promote_recon(recon_id: int = Path(...), user: User = Depends(get_curr
 
     # Create opportunity record
     opp_data = {
-        "user_id": user.id,
+        "user_id": user_id,
         "recon_id": recon_id,
         "vin": eval_data.get("vin"),
         "make": eval_data.get("make"),
