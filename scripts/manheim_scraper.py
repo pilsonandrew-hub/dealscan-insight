@@ -65,27 +65,17 @@ def scrape_current_table(page):
     return rows_data
 
 
-def set_view_all(page):
-    """Try to set the View dropdown to show ALL makes instead of filtered by make."""
+def get_make_options(page):
+    """Return list of (value, label) for every make in the View dropdown."""
     try:
-        # Find the View dropdown (shows "ACURA (11)" etc.)
-        dropdown = page.query_selector('select, [role="combobox"]')
-        if dropdown:
-            # Try selecting the first/all option
-            options = page.query_selector_all('option, [role="option"]')
-            for opt in options:
-                text = safe_text(opt)
-                if 'all' in text.lower() or text == '' or 'show all' in text.lower():
-                    opt.click()
-                    time.sleep(1)
-                    return True
-            # If no "all" option, try selecting the dropdown and choosing first item
-            page.select_option('select', index=0)
-            time.sleep(1)
-            return True
+        opts = page.eval_on_selector_all(
+            'select option, [role="option"]',
+            'els => els.map(el => ({value: el.value || el.innerText.trim(), text: el.innerText.trim()}))'
+        )
+        # Filter out empty/placeholder options
+        return [(o['value'], o['text']) for o in opts if o['text'].strip()]
     except Exception:
-        pass
-    return False
+        return []
 
 
 def run():
@@ -156,17 +146,32 @@ def run():
                     page.wait_for_load_state('networkidle')
                     time.sleep(1)
 
-                    # Try to set View to ALL makes
-                    set_view_all(page)
+                    # Get all makes in the dropdown — loop through each one
+                    makes = get_make_options(page)
+                    if not makes:
+                        # No dropdown found — try scraping directly
+                        makes = [('', 'ALL')]
 
-                    rows = scrape_current_table(page)
-                    for row in rows:
-                        writer.writerow(row + [sale_date])
-                        total_rows += 1
-                        if total_rows % 100 == 0:
-                            print(f'  → {total_rows} total rows so far...')
+                    date_total = 0
+                    for make_val, make_label in makes:
+                        try:
+                            if make_val:
+                                page.select_option('select', value=make_val)
+                                page.wait_for_load_state('networkidle')
+                                time.sleep(1)
 
-                    print(f'  → {len(rows)} vehicles from {sale_date}')
+                            rows = scrape_current_table(page)
+                            for row in rows:
+                                writer.writerow(row + [sale_date])
+                                total_rows += 1
+                                date_total += 1
+                                if total_rows % 500 == 0:
+                                    print(f'  → {total_rows} total rows so far...')
+                        except Exception as e:
+                            print(f'  skipping make {make_label}: {e}')
+                            continue
+
+                    print(f'  → {date_total} vehicles from {sale_date} ({len(makes)} makes)')
                     csvfile.flush()
 
                 except Exception as e:
