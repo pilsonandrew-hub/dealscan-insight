@@ -183,11 +183,20 @@ def run():
         page = context.new_page()
 
         page.goto('https://www.manheim.com')
-        print('========================================')
-        print('LOG IN to Manheim in the browser window.')
-        print('When fully logged in, press Enter here.')
-        print('========================================')
-        input()
+        print('Opening Manheim...')
+        # If already logged in this will go straight through
+        # If not, log in manually in the browser then press Enter
+        page.wait_for_load_state('networkidle')
+        time.sleep(3)
+        # Check if login page appeared
+        if 'login' in page.url.lower() or 'signin' in page.url.lower():
+            print('========================================')
+            print('LOG IN to Manheim in the browser window.')
+            print('When fully logged in, press Enter here.')
+            print('========================================')
+            input()
+        else:
+            print('✅ Already logged in — proceeding automatically')
 
         print('\nConnecting to Supabase...')
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
