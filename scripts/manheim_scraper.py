@@ -178,25 +178,24 @@ def collect_sidebar_dates(page):
 
 def run():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
-        page = context.new_page()
-
-        page.goto('https://www.manheim.com')
-        print('Opening Manheim...')
-        # If already logged in this will go straight through
-        # If not, log in manually in the browser then press Enter
-        page.wait_for_load_state('networkidle')
-        time.sleep(3)
-        # Check if login page appeared
-        if 'login' in page.url.lower() or 'signin' in page.url.lower():
+        # Connect to your already-open Chrome browser with remote debugging
+        # First start Chrome with: open -a "Google Chrome" --args --remote-debugging-port=9222
+        try:
+            browser = p.chromium.connect_over_cdp('http://localhost:9222')
+            context = browser.contexts[0]
+            page = context.pages[0]
+            print('✅ Connected to your existing Chrome browser')
+        except Exception:
+            # Fallback: launch new browser and wait for manual login
+            print('Could not connect to existing Chrome. Launching new browser...')
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context()
+            page = context.new_page()
+            page.goto('https://www.manheim.com')
             print('========================================')
-            print('LOG IN to Manheim in the browser window.')
-            print('When fully logged in, press Enter here.')
+            print('LOG IN to Manheim, then press Enter here.')
             print('========================================')
             input()
-        else:
-            print('✅ Already logged in — proceeding automatically')
 
         print('\nConnecting to Supabase...')
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
