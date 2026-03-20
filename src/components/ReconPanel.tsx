@@ -202,7 +202,7 @@ export const ReconPanel: React.FC = () => {
       });
       if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
       setPromoted(prev => new Set([...prev, recon_id]));
-      if (result?.recon_id === recon_id) {
+      if (result?.id === recon_id) {
         setResult(prev => prev ? { ...prev, promoted_to_pipeline: true } : prev);
       }
     } catch (e: unknown) {
@@ -210,7 +210,7 @@ export const ReconPanel: React.FC = () => {
     }
   };
 
-  const isPromoted = (r: ReconResult) => r.promoted_to_pipeline || promoted.has(r.recon_id);
+  const isPromoted = (r: ReconResult) => r.promoted_to_pipeline || promoted.has(r.id);
 
   return (
     <div className="w-full max-w-2xl mx-auto p-4">
