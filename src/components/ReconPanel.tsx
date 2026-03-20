@@ -8,12 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DollarSign, TrendingUp, AlertTriangle, CheckCircle, Search, Clock, ChevronRight } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/integrations/supabase/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
 
 interface ReconResult {
-  recon_id: string;
+  id: string;
   verdict: 'HOT BUY' | 'BUY' | 'WATCH' | 'PASS';
   verdict_reason: string;
   max_bid: number;
@@ -116,11 +116,16 @@ export const ReconPanel: React.FC = () => {
       });
       if (!res.ok) throw new Error(`VIN decode failed: ${res.status}`);
       const data = await res.json();
+      const results = data.Results || [];
+      const get = (variable: string) => results.find((r: { Variable: string; Value: string }) => r.Variable === variable)?.Value || '';
+      const make = get('Make');
+      const model = get('Model');
+      const year = get('Model Year') || get('ModelYear');
       setForm(prev => ({
         ...prev,
-        make: data.make ?? prev.make,
-        model: data.model ?? prev.model,
-        year: data.year ? String(data.year) : prev.year,
+        make: make || prev.make,
+        model: model || prev.model,
+        year: year ? String(year) : prev.year,
       }));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'VIN decode failed');
@@ -145,6 +150,7 @@ export const ReconPanel: React.FC = () => {
         source: form.source || undefined,
         state: form.state || undefined,
         condition_grade: form.condition_grade,
+        title_status: "clean",
         is_fleet: form.is_fleet,
         fleet_has_records: form.fleet_has_records,
       };
@@ -396,7 +402,7 @@ export const ReconPanel: React.FC = () => {
                 <span className="text-xs text-muted-foreground">{result.comp_count} comps</span>
               </div>
 
-              <p className="text-sm text-muted-foreground mb-4">{result.verdict_reason}</p>
+              <p className="text-sm text-muted-foreground mb-4">{result.verdict_reason || result.reason}</p>
 
               {/* Key numbers */}
               <div className="grid grid-cols-2 gap-3 mb-4">
@@ -473,7 +479,7 @@ export const ReconPanel: React.FC = () => {
                 <Button
                   className="w-full"
                   variant="outline"
-                  onClick={() => promote(result.recon_id)}
+                  onClick={() => promote(result.id)}
                 >
                   <ChevronRight className="h-4 w-4 mr-1" />
                   Promote to Pipeline
@@ -509,26 +515,26 @@ export const ReconPanel: React.FC = () => {
               </div>
             )}
             {history.map(item => (
-              <Card key={item.recon_id} className="hover:shadow-md transition-all duration-200">
+              <Card key={item.id} className="hover:shadow-md transition-all duration-200">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <span className={`text-xs font-bold px-2 py-0.5 rounded ${VERDICT_BADGE[item.verdict]}`}>
                         {item.verdict}
                       </span>
-                      <span className={`text-sm font-bold ${GRADE_COLORS[item.reliability_grade]}`}>
-                        {item.reliability_grade}
+                      <span className={`text-sm font-bold ${GRADE_COLORS[item.reliability_grade || item.grade]}`}>
+                        {item.reliability_grade || item.grade}
                       </span>
                     </div>
                     <div className="flex items-center gap-3 text-sm">
                       <span className="text-muted-foreground">Ask: ${item.asking_price.toLocaleString()}</span>
-                      <span className={`font-semibold ${item.profit_expected >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        ${item.profit_expected.toLocaleString()}
+                      <span className={`font-semibold ${item.profit_expected || item.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        ${item.profit_expected || item.profit.toLocaleString()}
                       </span>
                     </div>
                   </div>
 
-                  <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{item.verdict_reason}</p>
+                  <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{item.verdict_reason || item.reason}</p>
 
                   <div className="flex items-center justify-between">
                     <div className="flex gap-3 text-xs text-muted-foreground">
@@ -540,7 +546,7 @@ export const ReconPanel: React.FC = () => {
                         size="sm"
                         variant="outline"
                         className="text-xs h-7"
-                        onClick={() => promote(item.recon_id)}
+                        onClick={() => promote(item.id)}
                       >
                         Promote
                       </Button>
