@@ -15,11 +15,16 @@ SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 BATCH_SIZE = 100
 
 CA_LOCATIONS = [
-    'Manheim California',
+    'Manheim California Anaheim',   # ⭐ MOST IMPORTANT
+    'Manheim California',           # Santa Clarita
     'Manheim Los Angeles',
+    'Manheim Riverside',
+    'Manheim Fontana',
+    'Manheim Southern California',  # Fontana / So Cal
+    'Manheim Oceanside',
+    'Manheim San Diego',
     'Manheim San Francisco Bay',
     'Manheim Fresno',
-    'Manheim San Diego',
 ]
 
 # Fallback make list if dropdown detection fails
