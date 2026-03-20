@@ -15,26 +15,8 @@ def safe_text(el):
         return ''
 
 
-def get_select_options(page, select_index=0):
-    """Get all non-empty options from a select dropdown by index."""
-    try:
-        selects = page.query_selector_all('select')
-        if not selects or select_index >= len(selects):
-            return []
-        opts = selects[select_index].query_selector_all('option')
-        results = []
-        for opt in opts:
-            val = opt.get_attribute('value') or ''
-            txt = safe_text(opt)
-            if val and txt and val not in ('', '0', 'null', 'undefined'):
-                results.append((val, txt))
-        return results
-    except Exception:
-        return []
-
-
 def scrape_table(page):
-    """Scrape all rows from current visible table."""
+    """Scrape all rows from the currently visible results table."""
     rows_data = []
     try:
         page.wait_for_selector('table tbody tr', timeout=8000)
@@ -45,29 +27,78 @@ def scrape_table(page):
     for row in rows:
         try:
             cells = row.query_selector_all('td')
-            # Columns visible: Year, Make, Model + more off-screen
-            year  = safe_text(cells[0])  if len(cells) > 0  else ''
-            make  = safe_text(cells[1])  if len(cells) > 1  else ''
-            model = safe_text(cells[2])  if len(cells) > 2  else ''
-            col3  = safe_text(cells[3])  if len(cells) > 3  else ''
-            col4  = safe_text(cells[4])  if len(cells) > 4  else ''
-            col5  = safe_text(cells[5])  if len(cells) > 5  else ''
-            col6  = safe_text(cells[6])  if len(cells) > 6  else ''
-            col7  = safe_text(cells[7])  if len(cells) > 7  else ''
-            col8  = safe_text(cells[8])  if len(cells) > 8  else ''
-            col9  = safe_text(cells[9])  if len(cells) > 9  else ''
-            col10 = safe_text(cells[10]) if len(cells) > 10 else ''
-            col11 = safe_text(cells[11]) if len(cells) > 11 else ''
-            col12 = safe_text(cells[12]) if len(cells) > 12 else ''
-            col13 = safe_text(cells[13]) if len(cells) > 13 else ''
+            # Full column order (some may be scrolled off — capture all):
+            # Year, Make, Model, Color, Drs, Cyl, Fuel, Trans, 4x4, Radio, Int, Odometer, Price
+            data = [safe_text(c) for c in cells]
+            # Pad to 14 columns
+            while len(data) < 14:
+                data.append('')
+            if any(data[:3]):  # skip blank rows
+                rows_data.append(data[:14])
         except Exception:
-            year = make = model = col3 = col4 = col5 = col6 = col7 = ''
-            col8 = col9 = col10 = col11 = col12 = col13 = ''
-
-        if year or make or model:  # skip blank rows
-            rows_data.append([year, make, model, col3, col4, col5, col6, col7,
-                               col8, col9, col10, col11, col12, col13])
+            continue
     return rows_data
+
+
+def open_view_dropdown_and_get_makes(page):
+    """Open the View dropdown and return list of make option texts."""
+    makes = []
+    try:
+        # Try clicking the "View" button to open the dropdown
+        view_btn = page.query_selector('button:has-text("View"), [aria-label*="View"], .view-dropdown, #viewDropdown')
+        if not view_btn:
+            # Try finding by partial text
+            view_btn = page.locator('button', has_text='View').first
+        if view_btn:
+            view_btn.click()
+            time.sleep(0.8)
+
+        # Get all make options from the open dropdown
+        # They appear as list items or menu items
+        opts = page.query_selector_all('[role="menuitem"], [role="option"], .dropdown-item, ul.dropdown-menu li a, .view-menu li')
+        for opt in opts:
+            txt = safe_text(opt)
+            if txt:
+                makes.append(txt)
+
+        if not makes:
+            # Fallback: look for any list inside an open dropdown
+            opts = page.query_selector_all('.show li, .open li, [aria-expanded="true"] li')
+            for opt in opts:
+                txt = safe_text(opt)
+                if txt:
+                    makes.append(txt)
+
+    except Exception as e:
+        print(f'  Could not open View dropdown: {e}')
+
+    return makes
+
+
+def select_make(page, make_text):
+    """Click a make option in the open dropdown."""
+    try:
+        # Find and click the option matching this make text
+        # Strip the count in parens e.g. "ACURA (11)" -> click element with that text
+        el = page.locator(f'[role="menuitem"]:has-text("{make_text}"), [role="option"]:has-text("{make_text}"), .dropdown-item:has-text("{make_text}")').first
+        if el:
+            el.click()
+            page.wait_for_load_state('networkidle')
+            time.sleep(1)
+            return True
+    except Exception:
+        pass
+
+    # Fallback: find any clickable element with that text
+    try:
+        page.click(f'text="{make_text}"')
+        page.wait_for_load_state('networkidle')
+        time.sleep(1)
+        return True
+    except Exception:
+        pass
+
+    return False
 
 
 def run():
@@ -88,99 +119,110 @@ def run():
         page.wait_for_load_state('networkidle')
         time.sleep(2)
 
-        # Screenshot to verify page loaded correctly
+        # Save debug screenshot
         page.screenshot(path='scripts/manheim_debug.png')
-        print('Debug screenshot saved to scripts/manheim_debug.png')
+        print('Debug screenshot saved.')
 
-        # Find all date links in the LEFT SIDEBAR (List of Sales)
-        # They are clickable links like "March 18, 2026", "March 17, 2026" etc.
+        # Find all date links in the LEFT SIDEBAR
+        # e.g. "26 Sales Results for Wednesday March 18th" or just "March 18"
         date_links = page.eval_on_selector_all(
             'a',
             '''els => els
-                .map(el => ({text: el.innerText.trim(), href: el.href, id: el.id || ""}))
-                .filter(l => /\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b/i.test(l.text) && /202[0-9]/.test(l.text))
+                .map(el => ({text: el.innerText.trim(), href: el.href}))
+                .filter(l =>
+                    l.text.length > 0 &&
+                    l.href.includes("postsale") &&
+                    l.href !== window.location.href &&
+                    (
+                        /\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b/i.test(l.text) ||
+                        /sales results/i.test(l.text)
+                    )
+                )
             '''
         )
 
-        if not date_links:
-            print('ERROR: No date links found in sidebar.')
-            print('Check scripts/manheim_debug.png to see what loaded.')
+        # Deduplicate
+        seen = set()
+        unique_dates = []
+        for l in date_links:
+            if l['href'] not in seen:
+                seen.add(l['href'])
+                unique_dates.append(l)
+
+        if not unique_dates:
+            print('ERROR: No date links found. Check scripts/manheim_debug.png')
             browser.close()
             return
 
-        print(f'Found {len(date_links)} date links.')
+        print(f'Found {len(unique_dates)} auction dates to scrape.\n')
 
-        # Prepare CSV — use generic column headers, first row will define actual content
+        # KNOWN MAKES from your screenshot (fallback if dropdown detection fails)
+        KNOWN_MAKES = [
+            'ACURA', 'ALFA ROMEO', 'AUDI', 'BENTLEY', 'BMW', 'BUICK', 'CADILLAC',
+            'CHEVROLET', 'CHRYSLER', 'DODGE', 'FIAT', 'FORD', 'GENESIS', 'GMC',
+            'HONDA', 'HYUNDAI', 'INFINITI', 'JAGUAR', 'JEEP', 'KIA', 'LAND ROVER',
+            'LEXUS', 'LINCOLN', 'MACK', 'MASERATI', 'MAZDA', 'MERCEDES',
+            'MERCEDES B', 'MERCEDES-B', 'MINI', 'MITSUBISHI', 'NISSAN', 'PONTIAC',
+            'PORSCHE', 'RAM', 'RIVIAN', 'SAAB', 'SCION', 'SUBARU', 'TESLA',
+            'TOYOTA', 'VOLKSWAGEN', 'VOLVO'
+        ]
+
         with open(CSV_FILE, mode='w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['year', 'make', 'model', 'col4', 'col5', 'col6',
-                             'col7', 'col8', 'col9', 'col10', 'col11', 'col12',
-                             'col13', 'col14', 'sale_date'])
+            writer.writerow([
+                'year', 'make', 'model', 'color', 'doors', 'cyl', 'fuel',
+                'trans', '4x4', 'radio', 'interior', 'odometer', 'price', 'col14',
+                'sale_date', 'make_filter'
+            ])
 
             total_rows = 0
 
-            for i, link in enumerate(date_links):
+            for i, link in enumerate(unique_dates):
                 sale_date = link['text']
                 href = link['href']
-                print(f'\n[{i+1}/{len(date_links)}] {sale_date}')
+                print(f'[{i+1}/{len(unique_dates)}] {sale_date}')
 
                 try:
-                    # Navigate to the date (sidebar click loads in-place)
                     page.goto(href)
                     page.wait_for_load_state('networkidle')
                     time.sleep(1.5)
 
-                    # LEVEL 1 — Loop through every Make in first dropdown
-                    makes = get_select_options(page, 0)
+                    # Try to get makes from View dropdown
+                    makes = open_view_dropdown_and_get_makes(page)
+
                     if not makes:
-                        # No dropdown — scrape whatever is visible
-                        rows = scrape_table(page)
-                        for row in rows:
-                            writer.writerow(row + [sale_date])
-                            total_rows += 1
-                        print(f'  → {len(rows)} rows (no make filter)')
-                        csvfile.flush()
-                        continue
+                        # Use known makes list as fallback
+                        print('  Using known makes list as fallback')
+                        makes = KNOWN_MAKES
 
                     date_total = 0
-                    for make_val, make_label in makes:
+                    for make in makes:
                         try:
-                            selects = page.query_selector_all('select')
-                            selects[0].select_option(make_val)
-                            page.wait_for_load_state('networkidle')
-                            time.sleep(1)
+                            # Re-open dropdown and select make
+                            view_btn = page.query_selector('button:has-text("View"), .view-dropdown')
+                            if not view_btn:
+                                view_btn = page.locator('button', has_text='View').first
+                            if view_btn:
+                                view_btn.click()
+                                time.sleep(0.5)
 
-                            # LEVEL 2 — Loop through every Model in second dropdown
-                            models = get_select_options(page, 1)
-                            if not models:
-                                models = [('', 'ALL')]
+                            selected = select_make(page, make)
+                            if not selected:
+                                continue
 
-                            for model_val, model_label in models:
-                                try:
-                                    if model_val:
-                                        selects = page.query_selector_all('select')
-                                        if len(selects) > 1:
-                                            selects[1].select_option(model_val)
-                                            page.wait_for_load_state('networkidle')
-                                            time.sleep(0.8)
-
-                                    rows = scrape_table(page)
-                                    for row in rows:
-                                        writer.writerow(row + [sale_date])
-                                        total_rows += 1
-                                        date_total += 1
-                                        if total_rows % 500 == 0:
-                                            print(f'  → {total_rows} total rows...')
-
-                                except Exception as e:
-                                    print(f'    skip model {model_label}: {e}')
-                                    continue
+                            rows = scrape_table(page)
+                            for row in rows:
+                                writer.writerow(row + [sale_date, make])
+                                total_rows += 1
+                                date_total += 1
+                                if total_rows % 500 == 0:
+                                    print(f'  → {total_rows} total rows...')
 
                         except Exception as e:
-                            print(f'  skip make {make_label}: {e}')
+                            print(f'  skip {make}: {e}')
                             continue
 
-                    print(f'  → {date_total} vehicles ({len(makes)} makes)')
+                    print(f'  → {date_total} vehicles')
                     csvfile.flush()
 
                 except Exception as e:
@@ -189,8 +231,8 @@ def run():
 
         browser.close()
         print(f'\n========================================')
-        print(f'COMPLETE. Total rows: {total_rows}')
-        print(f'Saved to: {CSV_FILE}')
+        print(f'COMPLETE. {total_rows} total rows saved.')
+        print(f'File: {CSV_FILE}')
         print(f'========================================')
 
 
