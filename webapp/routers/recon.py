@@ -19,7 +19,6 @@ try:
         from supabase import create_client
         _supabase_client = create_client(_supabase_url, _supabase_key)
 except Exception as e:
-    import logging
     logging.warning(f"Supabase client init failed: {e}")
 
 router = APIRouter(prefix="/recon", tags=["recon"])
@@ -58,6 +57,7 @@ class EvaluateRequest(BaseModel):
     condition: str
     condition_grade: Optional[str] = None  # Overrides condition for penalty lookup
     fleet: bool = False
+    fleet_has_records: Optional[bool] = None
     source: str
     state: str
 
@@ -84,6 +84,15 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     """Main evaluation endpoint — real scoring against dealer_sales comps"""
     user_id = _verify_auth(authorization)
     reason = ""
+
+    # Normalize inputs
+    req.title_status = req.title_status.strip().lower()
+    req.condition = req.condition.strip().title()
+    if req.condition_grade:
+        req.condition_grade = req.condition_grade.strip().title()
+    req.make = req.make.strip().title()
+    req.model = req.model.strip()
+    req.state = req.state.strip().upper()
 
     # Non-clean title immediate pass
     if req.title_status.lower() not in {"clean"}:
@@ -245,13 +254,13 @@ async def get_history(authorization: Optional[str] = Header(None)):
     if not _supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not configured")
     result = _supabase_client.table("recon_evaluations").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-    if not result.data and result.data is None:
+    if result.data is None:
         raise HTTPException(status_code=500, detail="Failed to fetch history")
 
     return result.data
 
 @router.post("/promote/{recon_id}")
-async def promote_recon(recon_id: int = Path(...), authorization: Optional[str] = Header(None)):
+async def promote_recon(recon_id: str = Path(...), authorization: Optional[str] = Header(None)):
     """Promote to opportunities pipeline — atomic ownership guard"""
     user_id = _verify_auth(authorization)
     if not _supabase_client:
