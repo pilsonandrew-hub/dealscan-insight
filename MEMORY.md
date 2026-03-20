@@ -41,6 +41,7 @@ AI-powered wholesale vehicle arbitrage platform. Scrapes government/public aucti
 - **CPO premium:** 10–15% above standard MMR (1–3yr old, clean title)
 - **DOS score to save to Supabase:** ≥50; Rover display: ≥65; Alert: ≥80
 - **High-rust states REJECTED:** OH, MI, PA, NY, WI, MN, IL, IN, MO, IA, ND, SD, NE, KS, WV, ME, NH, VT, MA, RI, CT, NJ, MD, DE
+- **EXCEPTION:** Vehicles ≤3 years old (model year >= current_year - 2) BYPASS the rust state rejection — newer vehicles haven't had time to rust
 - **Target states:** AZ, CA, NV, CO, NM, UT, TX, FL, GA, SC, TN, NC, VA, WA, OR, HI
 
 ### DOS Formula
@@ -156,16 +157,17 @@ All 4 phases of roadmap completed. Key additions:
 - 🔴 Apply `dealer_sales` migration in Supabase SQL Editor (created Mar 14, never confirmed applied)
 
 ### 🟠 Pending Features
-- 🟠 Manheim API OAuth credentials — still needed, #1 SOW priority
+- 🟠 Manheim API OAuth credentials — still needed, #1 priority
 - 🟡 Manheim post-sale trend engine (dynamic hot models list)
 - 🟡 Cross-reference matcher (Manheim demand × Apify listings)
-- 🟡 Subscription tier gating (Stripe) — selected as priority #2 after SniperScope
-- 🟡 Saved searches / Crosshair alerts
-- 🟡 Mobile UI polish
-- 🟡 Dealer onboarding flow (seeds Rover on first login)
-- 🟡 VIN scanner on mobile (camera → instant scoring)
-- 🟡 Notion integration (discussed Day 1, never built)
+- 🟡 Saved searches / Crosshair alerts (built, needs testing)
+- 🟡 Dealer onboarding flow (built, needs testing)
 - 🟡 SniperScope full bid automation (actual bot bidding — deferred)
+
+### ⛔ DO NOT MENTION (until ~2026-06-19)
+- Stripe / subscription gating / charging dealers / onboarding other dealers
+- Andrew has decided: NO charging, NO multi-tenant, NO dealer onboarding for foreseeable future (~90 days from 2026-03-19)
+- DealerScope is personal use only for now. Do not suggest monetization.
 
 ### Apify Actors (as of 2026-03-18) — 9 active
 - ds-govdeals `CuKaIAcWyFS0EPrAz` ✅
@@ -224,11 +226,22 @@ All 4 phases of roadmap completed. Key additions:
 - Key: `AIzaSyCFl6jhR9T2L2sAJOgKslGmSwz1qwivCvM` ("Gemini ChatClaw Api")
 - Status: ✅ Live — 45 models available, free tier
 
+### OpenRouter
+- Key: `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`
+- Status: ✅ Live — 350 models (GPT-5, Claude, Gemini, Grok, Llama, Mistral, etc.)
+- Added as 5th fallback in openclaw.json
+- Base URL: https://openrouter.ai/api/v1
+
 ### Telegram Bot
 - Token: `8770839167:AAEPvbNtS5Fr3LPmoEUM-9CJ14r7OXhIgzI`
 - **Dealerscope Alerts channel ID: `-1003672399222`**
 - Bot (@JarviscousinJavariousbot) is admin in the channel
 - All hot deal alerts + SniperScope alerts route here
+
+### Notion
+- Integration Token: `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` ("DealerScope Bot")
+- Database ID: `32034c00de4c80fdae18eb02848a9f39` ("Dealerscope Deals")
+- Status: ✅ Live — wired to Railway, deals will auto-sync on ingest
 
 ### Perplexity
 - Key: `01e7a2ff-1076-4ca1-8721-c43f19770950`
