@@ -149,9 +149,10 @@ export const ReconPanel: React.FC = () => {
         asking_price: form.asking_price ? parseFloat(form.asking_price) : undefined,
         source: form.source || undefined,
         state: form.state || undefined,
+        condition: form.condition_grade,
         condition_grade: form.condition_grade,
         title_status: "clean",
-        is_fleet: form.is_fleet,
+        fleet: form.is_fleet,
         fleet_has_records: form.fleet_has_records,
       };
       const res = await fetch(`${API_BASE}/api/recon/evaluate`, {
