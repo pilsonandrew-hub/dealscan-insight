@@ -82,6 +82,7 @@ async def vin_decode(vin: str = Path(..., description="VIN to decode"), authoriz
 @router.post("/evaluate")
 async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = Header(None)):
     """Main evaluation endpoint — real scoring against dealer_sales comps"""
+    user_id = _verify_auth(authorization)
     reason = ""
 
     # Non-clean title immediate pass
@@ -89,8 +90,6 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         verdict = "PASS"
         reason = "Non-clean title — immediate pass"
         return {"verdict": verdict, "reason": reason}
-
-    user_id = _verify_auth(authorization)
 
     if not _supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not configured")
