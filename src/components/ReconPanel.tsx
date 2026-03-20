@@ -186,7 +186,7 @@ export const ReconPanel: React.FC = () => {
       });
       if (!res.ok) throw new Error(`History failed: ${res.status}`);
       const data: ReconResult[] = await res.json();
-      setHistory(data);
+      setHistory((data || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load history');
     } finally {
@@ -201,6 +201,7 @@ export const ReconPanel: React.FC = () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 409) { setPromoted(prev => new Set([...prev, recon_id])); setResult(prev => prev ? { ...prev, promoted_to_pipeline: true } : prev); return; }
       if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
       setPromoted(prev => new Set([...prev, recon_id]));
       if (result?.id === recon_id) {

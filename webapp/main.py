@@ -122,10 +122,3 @@ if __name__ == "__main__":
         timeout_graceful_shutdown=30
     )
 
-@app.get("/debug/recon-status")
-async def recon_debug():
-    return {
-        "recon_loaded": recon_module is not None,
-        "recon_module": str(type(recon_module)) if recon_module else None,
-        "error": _recon_load_error or None
-    }
