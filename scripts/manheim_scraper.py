@@ -65,15 +65,20 @@ def scrape_current_table(page):
     return rows_data
 
 
-def get_make_options(page):
-    """Return list of (value, label) for every make in the View dropdown."""
+def get_select_options(page, select_index=0):
+    """Return list of (value, label) for a <select> dropdown by index. Skips blank/placeholder."""
     try:
-        opts = page.eval_on_selector_all(
-            'select option, [role="option"]',
-            'els => els.map(el => ({value: el.value || el.innerText.trim(), text: el.innerText.trim()}))'
-        )
-        # Filter out empty/placeholder options
-        return [(o['value'], o['text']) for o in opts if o['text'].strip()]
+        selects = page.query_selector_all('select')
+        if not selects or select_index >= len(selects):
+            return []
+        opts = selects[select_index].query_selector_all('option')
+        results = []
+        for opt in opts:
+            val = opt.get_attribute('value') or ''
+            txt = safe_text(opt)
+            if val and txt:
+                results.append((val, txt))
+        return results
     except Exception:
         return []
 
@@ -146,27 +151,45 @@ def run():
                     page.wait_for_load_state('networkidle')
                     time.sleep(1)
 
-                    # Get all makes in the dropdown — loop through each one
-                    makes = get_make_options(page)
+                    # LEVEL 1: Loop through every Make in first dropdown
+                    makes = get_select_options(page, select_index=0)
                     if not makes:
-                        # No dropdown found — try scraping directly
                         makes = [('', 'ALL')]
 
                     date_total = 0
                     for make_val, make_label in makes:
                         try:
-                            if make_val:
-                                page.select_option('select', value=make_val)
+                            # Select the make
+                            selects = page.query_selector_all('select')
+                            if selects and make_val:
+                                selects[0].select_option(make_val)
                                 page.wait_for_load_state('networkidle')
                                 time.sleep(1)
 
-                            rows = scrape_current_table(page)
-                            for row in rows:
-                                writer.writerow(row + [sale_date])
-                                total_rows += 1
-                                date_total += 1
-                                if total_rows % 500 == 0:
-                                    print(f'  → {total_rows} total rows so far...')
+                            # LEVEL 2: Loop through every Model in second dropdown (if present)
+                            models = get_select_options(page, select_index=1)
+                            if not models:
+                                models = [('', 'ALL')]
+
+                            for model_val, model_label in models:
+                                try:
+                                    selects = page.query_selector_all('select')
+                                    if len(selects) > 1 and model_val:
+                                        selects[1].select_option(model_val)
+                                        page.wait_for_load_state('networkidle')
+                                        time.sleep(1)
+
+                                    rows = scrape_current_table(page)
+                                    for row in rows:
+                                        writer.writerow(row + [sale_date])
+                                        total_rows += 1
+                                        date_total += 1
+                                        if total_rows % 500 == 0:
+                                            print(f'  → {total_rows} total rows so far...')
+                                except Exception as e:
+                                    print(f'    skipping model {model_label}: {e}')
+                                    continue
+
                         except Exception as e:
                             print(f'  skipping make {make_label}: {e}')
                             continue
