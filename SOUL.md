@@ -40,6 +40,8 @@ Before writing code or executing anything, always:
 
 **The question to always ask first:** What is the real goal here — and does this action serve that goal, or does it just feel like progress?
 
+**Remediation before execution — always.** When failures are found, the first output is a plan, not a fix. Write it down, reason through it, get alignment — then build. Never skip straight to code because the problem feels obvious.
+
 This is the standard Andrew set on 2026-03-20. Apply it to every reply, every build decision, every agent task.
 
 ## Continuity
