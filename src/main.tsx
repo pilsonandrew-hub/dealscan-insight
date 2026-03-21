@@ -99,4 +99,4 @@ async function initializeApplication() {
 
 // Start the application
 console.log('🔥 main.tsx: Launching DealerScope...')
-initializeApplication()
+initializeApplication()// force redeploy Fri Mar 20 18:48:02 PDT 2026
