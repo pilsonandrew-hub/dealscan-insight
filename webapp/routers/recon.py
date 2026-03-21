@@ -117,6 +117,29 @@ async def vin_decode(vin: str = Path(..., description="VIN to decode"), authoriz
         data = resp.json()
     return data
 
+def _wholesale_ratio(make: str, model: str) -> float:
+    """Return segment-appropriate wholesale ratio based on Manheim data."""
+    make_l = make.lower().strip()
+    model_l = model.lower().strip()
+
+    TRUCK_MODELS = {"f-150","f150","silverado","sierra","ram","tacoma","tundra",
+                    "frontier","ranger","colorado","canyon","f-250","f250","f-350","f350",
+                    "1500","2500","3500","titan","ridgeline"}
+    LUXURY_MAKES = {"bmw","mercedes","mercedes-benz","audi","lexus","porsche",
+                    "cadillac","lincoln","genesis","infiniti","jaguar","land rover","tesla"}
+    SUV_MODELS = {"explorer","tahoe","suburban","navigator","escalade","4runner",
+                  "sequoia","pilot","traverse","expedition","yukon","armada",
+                  "highlander","pathfinder","durango","grand cherokee"}
+
+    if any(tm in model_l for tm in TRUCK_MODELS):
+        return 0.80
+    if make_l in LUXURY_MAKES:
+        return 0.75
+    if any(sm in model_l for sm in SUV_MODELS):
+        return 0.82
+    return 0.84
+
+
 @router.post("/evaluate")
 async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = Header(None)):
     """Main evaluation endpoint — real scoring against dealer_sales comps"""
@@ -172,10 +195,10 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         grade = "C"
         if auction_mode:
             # Use Marketcheck retail data even in auction mode — gives a real max_bid ceiling
-            pessimistic = retail_value * 0.85 if retail_value is not None else None
+            pessimistic = retail_value * _wholesale_ratio(req.make, req.model) if retail_value is not None else None
         else:
             if retail_value is not None:
-                pessimistic = retail_value * 0.85  # wholesale = ~85% of retail
+                pessimistic = retail_value * _wholesale_ratio(req.make, req.model)  # wholesale ratio by segment
             else:
                 pessimistic = req.asking_price * 0.70
 
