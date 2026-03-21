@@ -169,11 +169,12 @@ async def get_recommendations(
         effective_limit = max(1, min(limit, 20))
         # Fetch a wider pool so affinity re-ranking has room to surface better matches
         fetch_limit = min(effective_limit * 3, 60)
+        now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
         opps_resp = supa.table("opportunities")\
             .select("*")\
             .gte("dos_score", 65)\
             .order("dos_score", desc=True)\
-            .gt("auction_end_date", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00"))\
+            .or_(f"auction_end_date.gt.{now_iso},auction_end_date.is.null")\
             .limit(fetch_limit)\
             .execute()
 

@@ -790,7 +790,7 @@ const RoverTab = () => {
           .from('opportunities')
           .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
           .gte('dos_score', 65)
-          .gt('auction_end_date', new Date().toISOString())
+          .or(`auction_end_date.gt.${new Date().toISOString()},auction_end_date.is.null`)
           .order('dos_score', { ascending: false })
           .limit(25);
 
@@ -845,7 +845,7 @@ const RoverTab = () => {
           .from('opportunities')
           .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
           .gte('dos_score', 65)
-          .gt('auction_end_date', new Date().toISOString())
+          .or(`auction_end_date.gt.${new Date().toISOString()},auction_end_date.is.null`)
           .order('dos_score', { ascending: false })
           .limit(25);
         if (fallbackDeals && fallbackDeals.length > 0) {
