@@ -13,6 +13,7 @@ Redis affinity vectors added (2026-03-14):
 """
 from fastapi import APIRouter, HTTPException, Header
 from typing import Optional
+from datetime import datetime
 import time
 import os
 import logging
@@ -172,6 +173,7 @@ async def get_recommendations(
             .select("*")\
             .gte("dos_score", 65)\
             .order("dos_score", desc=True)\
+            .gt("auction_end_date", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00"))\
             .limit(fetch_limit)\
             .execute()
 
