@@ -44,8 +44,9 @@ async def get_retail_market_value(year: int, make: str, model: str, mileage: int
             pass
 
     try:
-        miles_min = max(0, mileage - 15000)
-        miles_max = mileage + 15000
+        window = max(8000, int(mileage * 0.20))  # 20% of mileage, min 8k — avoids CPO/near-new contamination
+        miles_min = max(0, mileage - window)
+        miles_max = mileage + window
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(
                 "https://mc-api.marketcheck.com/v2/search/car/active",
@@ -195,8 +196,9 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         raise HTTPException(status_code=503, detail="Supabase client not configured")
 
     # ── FIX 2a: Query dealer_sales for comps ─────────────────────────────────
-    low_odo = req.mileage - 25000
-    high_odo = req.mileage + 25000
+    odo_window = max(10000, int(req.mileage * 0.25))  # 25% of mileage, min 10k
+    low_odo = max(0, req.mileage - odo_window)
+    high_odo = req.mileage + odo_window
     comps_res = (
         _supabase_client
         .table("dealer_sales")
