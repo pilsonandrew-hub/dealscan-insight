@@ -183,7 +183,7 @@ class ProductionConfigManager {
     // Check URL for staging/production indicators
     const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
     
-    if (hostname.includes('lovable.app') || viteMode === 'production') {
+    if (viteMode === 'production') {
       return 'production';
     }
     
