@@ -33,6 +33,11 @@ interface ReconResult {
   promoted_to_pipeline: boolean;
   pricing_source: string;
   pessimistic_sale?: number | null;
+  retail_market_value?: number | null;
+  retail_low?: number | null;
+  retail_high?: number | null;
+  retail_count?: number;
+  retail_source?: string;
 }
 
 interface FormState {
@@ -414,11 +419,31 @@ export const ReconPanel: React.FC = () => {
 
               {/* Key numbers */}
               <div className="grid grid-cols-2 gap-3 mb-4">
+                {/* Marketcheck street value — real-time retail listings */}
+                {result.retail_market_value != null && result.retail_source === 'marketcheck' ? (
+                  <div className="col-span-2 bg-green-950/50 border border-green-700/60 rounded-md p-3">
+                    <div className="flex items-center gap-1 text-xs text-green-300 mb-1">
+                      <DollarSign className="h-3 w-3" />
+                      Street Value (Marketcheck — live listings)
+                    </div>
+                    <div className="text-2xl font-bold text-green-200">
+                      ${(result.retail_market_value ?? 0).toLocaleString()}
+                    </div>
+                    <div className="text-xs text-green-400 mt-1">
+                      Range: ${(result.retail_low ?? 0).toLocaleString()} — ${(result.retail_high ?? 0).toLocaleString()} · {result.retail_count} listings
+                    </div>
+                    {result.max_bid != null && result.retail_market_value != null && (
+                      <div className={`text-sm font-semibold mt-2 ${(result.retail_market_value - result.max_bid) > 0 ? 'text-green-300' : 'text-red-400'}`}>
+                        Spread: ${((result.retail_market_value ?? 0) - (result.max_bid ?? 0)).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 {result.pessimistic_sale != null && (
                   <div className="col-span-2 bg-blue-950/40 border border-blue-800/40 rounded-md p-3">
                     <div className="flex items-center gap-1 text-xs text-blue-300 mb-1">
                       <DollarSign className="h-3 w-3" />
-                      Est. Market Value ({result.pricing_source})
+                      {result.retail_source === 'marketcheck' ? 'Wholesale Target (85% of retail)' : `Est. Market Value (${result.pricing_source})`}
                     </div>
                     <div className="text-xl font-bold text-blue-200">
                       ${(result.pessimistic_sale ?? 0).toLocaleString()}
