@@ -58,6 +58,21 @@ _POSITIVE_SIGNALS: dict[str, int] = {
     "government fleet": 5,
     "well maintained": 4,
     "runs and drives": 10,
+    "runs & drives": 10,
+    "runs and moves": 8,
+    "runs & moves": 8,
+    "fleet maintained": 6,
+    "fleet vehicle": 5,
+    "maintenance records": 5,
+    "jump to start": -8,
+    "jump start": -8,
+    "body damage": -10,
+    "paint damage": -6,
+    "body/paint damage": -10,
+    "frame damage": -20,
+    "structural damage": -20,
+    "as is": -5,
+    "as-is": -5,
 }
 
 # Numeric grade-code patterns in descriptions ("Grade 5", "Condition 3", etc.)
