@@ -421,7 +421,7 @@ export const ReconPanel: React.FC = () => {
                       Est. Market Value ({result.pricing_source})
                     </div>
                     <div className="text-xl font-bold text-blue-200">
-                      ${result.pessimistic_sale.toLocaleString()}
+                      ${(result.pessimistic_sale ?? 0).toLocaleString()}
                     </div>
                   </div>
                 )}
@@ -432,7 +432,7 @@ export const ReconPanel: React.FC = () => {
                     {result.auction_mode ? 'MAX BID — Do not exceed' : 'Max Bid'}
                   </div>
                   <div className={`font-bold text-foreground ${result.auction_mode ? 'text-3xl text-emerald-300' : 'text-lg'}`}>
-                    ${result.max_bid.toLocaleString()}
+                    ${(result.max_bid ?? 0).toLocaleString()}
                   </div>
                   {result.auction_mode && (
                     <div className="text-xs text-emerald-500 mt-1">Profit calculable after auction closes</div>
@@ -446,24 +446,24 @@ export const ReconPanel: React.FC = () => {
                       <DollarSign className="h-3 w-3" />
                       Expected Profit
                     </div>
-                    <div className={`text-lg font-bold ${result.profit_expected >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      ${result.profit_expected.toLocaleString()}
+                    <div className={`text-lg font-bold ${(result.profit_expected ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      ${(result.profit_expected ?? 0).toLocaleString()}
                     </div>
                   </div>
                 )}
                 {!result.auction_mode && result.profit_pessimistic != null && (
                   <div className="bg-black/30 rounded-md p-3">
                     <div className="text-xs text-muted-foreground mb-1">Pessimistic</div>
-                    <div className={`font-semibold ${result.profit_pessimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
-                      ${result.profit_pessimistic.toLocaleString()}
+                    <div className={`font-semibold ${(result.profit_pessimistic ?? 0) >= 0 ? 'text-green-300' : 'text-red-400'}`}>
+                      ${(result.profit_pessimistic ?? 0).toLocaleString()}
                     </div>
                   </div>
                 )}
                 {!result.auction_mode && result.profit_optimistic != null && (
                   <div className="bg-black/30 rounded-md p-3">
                     <div className="text-xs text-muted-foreground mb-1">Optimistic</div>
-                    <div className={`font-semibold ${result.profit_optimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
-                      ${result.profit_optimistic.toLocaleString()}
+                    <div className={`font-semibold ${(result.profit_optimistic ?? 0) >= 0 ? 'text-green-300' : 'text-red-400'}`}>
+                      ${(result.profit_optimistic ?? 0).toLocaleString()}
                     </div>
                   </div>
                 )}
@@ -473,26 +473,26 @@ export const ReconPanel: React.FC = () => {
               <div className="bg-black/20 rounded-md p-3 mb-4 space-y-1 text-sm">
                 <div className="flex justify-between text-muted-foreground">
                   <span>All-in Cost</span>
-                  <span className="text-foreground font-medium">${result.total_all_in_cost.toLocaleString()}</span>
+                  <span className="text-foreground font-medium">${(result.total_all_in_cost ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>Transport</span>
-                  <span>${result.transport_cost.toLocaleString()}</span>
+                  <span>${(result.transport_cost ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>Manheim Fee</span>
-                  <span>${result.manheim_sell_fee.toLocaleString()}</span>
+                  <span>${(result.manheim_sell_fee ?? 0).toLocaleString()}</span>
                 </div>
                 {result.condition_penalty > 0 && (
                   <div className="flex justify-between text-muted-foreground">
                     <span>Condition Penalty</span>
-                    <span className="text-orange-400">-${result.condition_penalty.toLocaleString()}</span>
+                    <span className="text-orange-400">-${(result.condition_penalty ?? 0).toLocaleString()}</span>
                   </div>
                 )}
                 {result.fleet_stigma_penalty > 0 && (
                   <div className="flex justify-between text-muted-foreground">
                     <span>Fleet Penalty</span>
-                    <span className="text-orange-400">-${result.fleet_stigma_penalty.toLocaleString()}</span>
+                    <span className="text-orange-400">-${(result.fleet_stigma_penalty ?? 0).toLocaleString()}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-muted-foreground">
@@ -569,7 +569,7 @@ export const ReconPanel: React.FC = () => {
 
                   <div className="flex items-center justify-between">
                     <div className="flex gap-3 text-xs text-muted-foreground">
-                      <span>Max Bid: <span className="text-foreground font-medium">${item.max_bid.toLocaleString()}</span></span>
+                      <span>Max Bid: <span className="text-foreground font-medium">${(item.max_bid ?? 0).toLocaleString()}</span></span>
                       <span>{item.comp_count} comps</span>
                     </div>
                     {!isPromoted(item) ? (
