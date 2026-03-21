@@ -74,6 +74,7 @@ interface RoverRecommendation {
   manheim_mmr_high?: number;
   pricing_updated_at?: string;
   investment_grade?: string;
+  listing_url?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -309,7 +310,17 @@ const DealCard = ({
           className="flex-1 min-w-[120px]"
         />
       )}
-      {deal.id && (
+      {deal.listing_url ? (
+        <a
+          href={deal.listing_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 px-2 rounded-lg transition-colors"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Listing
+        </a>
+      ) : deal.id ? (
         <Link
           to={`/deal/${deal.id}`}
           className="flex items-center justify-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 px-2 rounded-lg transition-colors"
@@ -317,7 +328,7 @@ const DealCard = ({
           <ExternalLink className="h-3 w-3" />
           Detail
         </Link>
-      )}
+      ) : null}
       {onSendToSniperScope && deal.id && (
         <button
           onClick={() => onSendToSniperScope(deal)}
@@ -777,7 +788,7 @@ const RoverTab = () => {
         // Cold-start fallback: query Supabase for top DOS score deals
         const { data: fallbackDeals } = await supabase
           .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
           .gte('dos_score', 65)
           .order('dos_score', { ascending: false })
           .limit(25);
@@ -799,6 +810,7 @@ const RoverTab = () => {
             state: d.state,
             source_site: d.source_site,
             auction_end: d.auction_end,
+            listing_url: d.listing_url,
             vin: d.vin,
             total_cost: d.total_cost,
             risk_score: d.risk_score,
@@ -830,7 +842,7 @@ const RoverTab = () => {
       try {
         const { data: fallbackDeals } = await supabase
           .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
           .gte('dos_score', 65)
           .order('dos_score', { ascending: false })
           .limit(25);
@@ -921,6 +933,7 @@ const RoverTab = () => {
             state: rec.state,
             source_site: rec.source_site || '',
             auction_end: rec.auction_end,
+            listing_url: rec.listing_url,
             vin: rec.vin,
             total_cost: rec.total_cost || 0,
             risk_score: rec.risk_score || 0,
