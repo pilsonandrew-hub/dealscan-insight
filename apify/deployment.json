@@ -34,7 +34,10 @@
       "id": "pO2t5UDoSVmO1gvKJ",
       "scheduleId": "jijJOYPk449GYMD6b",
       "webhookId": "SINNRTPxfC8F5szXq",
-      "status": "enabled"
+      "status": "enabled",
+      "build": "1.0.8",
+      "itemsPerRun": 306,
+      "notes": "FIXED 2026-03-21: CheerioCrawler (was PlaywrightCrawler), 6 category URLs with l2=USA, quickviews.push() extraction. Was 7 items/run, now 306. Webhook 200 confirmed. 7k+ item auth-gated endpoint is Mission 4 scope."
     },
     "ds-proxibid": {
       "id": "bxhncvtHEP712WX2e",
