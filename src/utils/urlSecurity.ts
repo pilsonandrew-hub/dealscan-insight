@@ -59,6 +59,15 @@ const ALLOWED_DOMAINS = new Set([
   'dgs.ca.gov',
   'generalservices.state.nm.us',
   'bid4assets.com',
+
+  // DealerScope infrastructure
+  'railway.app',
+  'up.railway.app',
+  'supabase.co',
+  'supabase.com',
+  'vercel.app',
+  'vpic.nhtsa.dot.gov',
+  'api.apify.com',
 ]);
 
 /**
