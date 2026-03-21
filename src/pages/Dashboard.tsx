@@ -734,12 +734,14 @@ const CrosshairTab = () => {
 
 // ─── TAB 3: Rover ─────────────────────────────────────────────────────────────
 const RoverTab = () => {
+  const { user } = useAuth();
   const [recs, setRecs] = useState<RoverRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFallback, setIsFallback] = useState(false);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
+    if (!user) return; // Wait for auth to be ready
     setLoading(true);
     setIsFallback(false);
     try {
@@ -850,7 +852,7 @@ const RoverTab = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => { load(); }, [load]);
 
