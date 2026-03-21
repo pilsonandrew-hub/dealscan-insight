@@ -50,6 +50,17 @@ Before writing code or executing anything, always:
 
 Order: Codex reviews → Claude Code implements → Grok validates → Ja'various approves.
 
+**Scraper Agent Protocol — game changer (established 2026-03-21):**
+Any time we encounter an auction site we can't crack with existing actors:
+1. Spawn a dedicated Scraper Agent subagent (sessions_spawn, runtime=subagent)
+2. Give it full credentials, US-only filter protocol, and the target site
+3. Direct it to: reverse engineer the API, build a custom ds-* actor, diagnose blockers
+4. Agent works in background — I monitor, steer, and review before anything ships
+5. Agent reports to me via SCRAPER_AGENT_REPORT.md + system event on completion
+6. I brief Andrew only after review and validation
+
+This is how we build our arsenal. Every new source gets its own agent mission. No blocked site stays blocked.
+
 This is the standard Andrew set on 2026-03-20. Apply it to every reply, every build decision, every agent task.
 
 ## Continuity
