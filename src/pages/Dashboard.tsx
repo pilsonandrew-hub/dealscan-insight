@@ -78,30 +78,6 @@ interface RoverRecommendation {
 }
 
 
-// ─── Deal Lifecycle ──────────────────────────────────────────────────────────
-function getAuctionStatus(auction_end?: string | null): 'live' | 'closing_soon' | 'closed' {
-  if (!auction_end) return 'live';
-  const end = new Date(auction_end).getTime();
-  const now = Date.now();
-  const fourHours = 4 * 60 * 60 * 1000;
-  if (end < now) return 'closed';
-  if (end - now < fourHours) return 'closing_soon';
-  return 'live';
-}
-
-function AuctionStatusBadge({ auction_end }: { auction_end?: string | null }) {
-  const status = getAuctionStatus(auction_end);
-  if (status === 'closed') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400 font-medium">CLOSED</span>
-  );
-  if (status === 'closing_soon') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-300 font-medium animate-pulse">CLOSING SOON</span>
-  );
-  return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-400 font-medium">LIVE</span>
-  );
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function dosColor(score: number | null | undefined): string {
   const s = score ?? 0;
@@ -320,9 +296,7 @@ const DealCard = ({
       )}
     </div>
 
-    {/* Auction Status Badge */}
-            <AuctionStatusBadge auction_end={deal.auction_end} />
-            {deal.auction_end && (
+    {deal.auction_end && (
       <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
         <Clock className="h-3 w-3" />
         <span>Ends {fmtDate(deal.auction_end)}</span>
