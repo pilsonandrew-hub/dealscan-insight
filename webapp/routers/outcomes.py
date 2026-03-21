@@ -30,6 +30,14 @@ class OutcomePayload(BaseModel):
     notes: Optional[str] = None
 
 
+class BidOutcomePayload(BaseModel):
+    opportunity_id: str
+    bid: bool
+    won: bool = False
+    purchase_price: Optional[float] = None
+    notes: Optional[str] = None
+
+
 def _verify_auth(authorization: Optional[str]) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -149,4 +157,58 @@ async def create_outcome(
         raise
     except Exception as exc:
         logger.error(f"[OUTCOMES] Insert failed: {exc}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/outcomes/bid")
+async def create_bid_outcome(
+    payload: BidOutcomePayload,
+    authorization: Optional[str] = Header(None),
+):
+    """Record whether a bid was placed and/or won at auction."""
+    if not supa:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+    user_id = _verify_auth(authorization)
+
+    try:
+        opportunity_resp = (
+            supa.table("opportunities")
+            .select("id,max_bid")
+            .eq("id", payload.opportunity_id)
+            .limit(1)
+            .execute()
+        )
+        if not (opportunity_resp.data or []):
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        import json as _json
+        notes_blob = _json.dumps({
+            "type": "bid_outcome",
+            "bid": payload.bid,
+            "won": payload.won,
+            "purchase_price": payload.purchase_price,
+            "user_notes": payload.notes or "",
+        })
+
+        update_payload: dict = {
+            "outcome_notes": notes_blob,
+            "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Also persist purchase price in outcome_sale_price so analytics can avg it
+        if payload.won and payload.purchase_price is not None:
+            update_payload["outcome_sale_price"] = payload.purchase_price
+
+        supa.table("opportunities").update(update_payload).eq("id", payload.opportunity_id).execute()
+
+        logger.info(
+            "[OUTCOMES/BID] recorded bid=%s won=%s opp=%s user=%s",
+            payload.bid, payload.won, payload.opportunity_id, user_id,
+        )
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[OUTCOMES/BID] Insert failed: {exc}")
         raise HTTPException(status_code=500, detail="Internal server error")
