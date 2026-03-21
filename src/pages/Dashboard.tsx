@@ -1055,13 +1055,161 @@ interface AnalyticsSummary {
   wins_by_source: { source: string; count: number }[];
   top_makes: { make: string; avg_dos_score: number; count: number }[];
   alerts_sent_last_30d: number;
+  total_bids: number;
+  total_wins: number;
+  win_rate: number | null;
+  avg_purchase_price: number | null;
+  avg_max_bid: number | null;
 }
+
+interface LogOutcomeForm {
+  bid: boolean;
+  won: boolean;
+  purchase_price: string;
+  notes: string;
+}
+
+const LogOutcomeModal = ({
+  deal,
+  onClose,
+  onSaved,
+}: {
+  deal: DashboardOpportunity;
+  onClose: () => void;
+  onSaved: () => void;
+}) => {
+  const [form, setForm] = React.useState<LogOutcomeForm>({ bid: false, won: false, purchase_price: '', notes: '' });
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await api.logBidOutcome({
+        opportunity_id: deal.id!,
+        bid: form.bid,
+        won: form.won,
+        purchase_price: form.won && form.purchase_price ? parseFloat(form.purchase_price) : undefined,
+        notes: form.notes || undefined,
+      });
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+        <h3 className="text-white font-semibold text-base mb-1">Log Outcome</h3>
+        <p className="text-gray-400 text-xs mb-5">{deal.year} {deal.make} {deal.model} — Max Bid {fmt$(deal.max_bid)}</p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Bid toggle */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-300">Did you bid?</span>
+            <div className="flex gap-2">
+              {([true, false] as const).map(v => (
+                <button key={String(v)} type="button"
+                  onClick={() => setForm(f => ({ ...f, bid: v, won: v ? f.won : false }))}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                    form.bid === v
+                      ? v ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-red-600/80 border-red-500 text-white'
+                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                  }`}>
+                  {v ? 'Yes' : 'No'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Won toggle — only shown if bid */}
+          {form.bid && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-300">Did you win?</span>
+              <div className="flex gap-2">
+                {([true, false] as const).map(v => (
+                  <button key={String(v)} type="button"
+                    onClick={() => setForm(f => ({ ...f, won: v }))}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                      form.won === v
+                        ? v ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-red-600/80 border-red-500 text-white'
+                        : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                    }`}>
+                    {v ? 'Yes' : 'No'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Purchase price — only shown if won */}
+          {form.bid && form.won && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Final Purchase Price</label>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                placeholder="e.g. 14500"
+                value={form.purchase_price}
+                onChange={e => setForm(f => ({ ...f, purchase_price: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          )}
+
+          {/* Notes */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Notes (optional)</label>
+            <textarea
+              rows={2}
+              placeholder="Any context..."
+              value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-emerald-500 resize-none"
+            />
+          </div>
+
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-400 text-sm hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 
 const AnalyticsTab = () => {
   const [allDeals, setAllDeals] = useState<DashboardOpportunity[]>([]);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [logDeal, setLogDeal] = useState<DashboardOpportunity | null>(null);
+
+  const fetchSummary = useCallback(async () => {
+    try {
+      const data = await api.getAnalyticsSummary();
+      setSummary(data);
+    } catch (e) {
+      console.error('[Analytics] summary fetch error:', e);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -1076,18 +1224,7 @@ const AnalyticsTab = () => {
     })();
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await api.getAnalyticsSummary();
-        setSummary(data);
-      } catch (e) {
-        console.error('[Analytics] summary fetch error:', e);
-      } finally {
-        setSummaryLoading(false);
-      }
-    })();
-  }, []);
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
   if (loading) return <div className="p-6 text-center text-gray-500">Loading analytics...</div>;
 
@@ -1114,6 +1251,32 @@ const AnalyticsTab = () => {
             sub="All-time pipeline"
           />
           <StatCard
+            label="Bids Placed"
+            value={summary.total_bids.toLocaleString()}
+            sub={`${summary.total_wins} win${summary.total_wins !== 1 ? 's' : ''}`}
+            accent={summary.total_bids > 0}
+          />
+          <StatCard
+            label="Win Rate"
+            value={summary.win_rate != null ? `${summary.win_rate}%` : '—'}
+            sub={summary.total_bids > 0 ? `${summary.total_wins} / ${summary.total_bids} bids` : 'No bids logged'}
+            accent={summary.win_rate != null && summary.win_rate > 0}
+          />
+          <StatCard
+            label="Avg Purchase vs Ceiling"
+            value={summary.avg_purchase_price != null ? fmt$(summary.avg_purchase_price) : '—'}
+            sub={summary.avg_max_bid != null ? `ceiling ${fmt$(summary.avg_max_bid)}` : 'No wins logged'}
+            accent={
+              summary.avg_purchase_price != null &&
+              summary.avg_max_bid != null &&
+              summary.avg_purchase_price <= summary.avg_max_bid
+            }
+          />
+        </div>
+
+        {/* Second KPI row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
             label="Recorded Outcomes"
             value={summary.total_outcomes.toLocaleString()}
             sub="Closed deals tracked"
@@ -1131,17 +1294,15 @@ const AnalyticsTab = () => {
             sub="From closed outcomes"
             accent={summary.avg_roi_pct != null && summary.avg_roi_pct > 0}
           />
+          <StatCard
+            label="Alerts (30d)"
+            value={summary.alerts_sent_last_30d.toLocaleString()}
+            sub="Hot deal notifications"
+          />
         </div>
 
-        {/* Second row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Alerts */}
-          <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Alerts Sent (30d)</p>
-            <p className="text-2xl font-bold mt-1 text-emerald-400">{summary.alerts_sent_last_30d.toLocaleString()}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Hot deal notifications</p>
-          </div>
-
+        {/* Third row — source breakdown + top makes */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Wins by source */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source</p>
@@ -1324,6 +1485,53 @@ const AnalyticsTab = () => {
           </tbody>
         </table>
       </div>
+
+      {/* ── Deal cards with Log Outcome ── */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-300 mb-3">Active Deals — Log Your Bid Results</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {allDeals.slice(0, 30).map(deal => (
+            <div key={deal.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col gap-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">
+                    {deal.year} {deal.make} {deal.model}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {deal.mileage ? `${deal.mileage.toLocaleString()} mi · ` : ''}{deal.source_site}
+                  </p>
+                </div>
+                <span className={`text-xs font-bold px-2 py-1 rounded-md shrink-0 ${dosColor(deal.score)}`}>
+                  {deal.score ?? '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-gray-400">
+                <span>Bid: <span className="text-white font-medium">{fmt$(deal.current_bid)}</span></span>
+                <span>Max: <span className="text-emerald-400 font-medium">{fmt$(deal.max_bid)}</span></span>
+                <span>Margin: <span className={`font-medium ${(deal.profit_margin || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmt$(deal.profit_margin)}</span></span>
+              </div>
+              <button
+                onClick={() => deal.id ? setLogDeal(deal) : undefined}
+                className="mt-1 w-full py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-600/20 border border-gray-700 hover:border-emerald-500/50 text-xs font-medium text-gray-300 hover:text-emerald-400 transition-colors"
+              >
+                Log Outcome
+              </button>
+            </div>
+          ))}
+        </div>
+        {allDeals.length > 30 && (
+          <p className="text-xs text-gray-500 mt-3 text-center">Showing top 30 deals. Use filters in the Dashboard tab to narrow results.</p>
+        )}
+      </div>
+
+      {/* Modal */}
+      {logDeal && (
+        <LogOutcomeModal
+          deal={logDeal}
+          onClose={() => setLogDeal(null)}
+          onSaved={() => { fetchSummary(); }}
+        />
+      )}
     </div>
   );
 };

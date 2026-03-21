@@ -603,12 +603,38 @@ export const api = {
     wins_by_source: { source: string; count: number }[];
     top_makes: { make: string; avg_dos_score: number; count: number }[];
     alerts_sent_last_30d: number;
+    total_bids: number;
+    total_wins: number;
+    win_rate: number | null;
+    avg_purchase_price: number | null;
+    avg_max_bid: number | null;
   }> {
     const res = await fetch(`${API_BASE}/api/analytics/summary`, {
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
     return res.json();
+  },
+
+  // Log a bid/win outcome for an opportunity
+  async logBidOutcome(payload: {
+    opportunity_id: string;
+    bid: boolean;
+    won: boolean;
+    purchase_price?: number;
+    notes?: string;
+  }): Promise<void> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${API_BASE}/api/outcomes/bid`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Log bid outcome failed: ${res.status}`);
   },
 
   // Legacy health check

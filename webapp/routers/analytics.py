@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Optional
 import os
 import logging
+import json
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -61,6 +62,11 @@ async def analytics_summary():
             "wins_by_source": [],
             "top_makes": [],
             "alerts_sent_last_30d": 0,
+            "total_bids": 0,
+            "total_wins": 0,
+            "win_rate": None,
+            "avg_purchase_price": None,
+            "avg_max_bid": None,
         }
 
     try:
@@ -75,7 +81,7 @@ async def analytics_summary():
         # ── 2. Outcomes (rows with outcome_recorded_at set) ───────────────────
         outcomes_resp = (
             supa.table("opportunities")
-            .select("id,gross_margin,roi,source", count="exact")
+            .select("id,gross_margin,roi,source,outcome_notes,outcome_sale_price,max_bid", count="exact")
             .not_.is_("outcome_recorded_at", "null")
             .execute()
         )
@@ -84,15 +90,47 @@ async def analytics_summary():
         avg_gross_margin = _safe_avg(outcome_rows, "gross_margin")
         avg_roi_pct = _safe_avg(outcome_rows, "roi")
 
-        # ── 3. Wins by source ─────────────────────────────────────────────────
+        # ── 3. Wins by source + bid outcome stats ─────────────────────────────
         source_map: dict[str, int] = {}
+        total_bids = 0
+        total_wins = 0
+        purchase_prices: list[float] = []
+        max_bids_on_bid_rows: list[float] = []
+
         for row in outcome_rows:
-            src = row.get("source") or row.get("source_site") or "unknown"
-            source_map[src] = source_map.get(src, 0) + 1
+            notes_raw = row.get("outcome_notes") or ""
+            bid_data: dict = {}
+            try:
+                parsed = json.loads(notes_raw)
+                if isinstance(parsed, dict) and parsed.get("type") == "bid_outcome":
+                    bid_data = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            if bid_data:
+                # This is a bid outcome row
+                if bid_data.get("bid"):
+                    total_bids += 1
+                    mb = row.get("max_bid")
+                    if mb is not None:
+                        max_bids_on_bid_rows.append(float(mb))
+                if bid_data.get("won"):
+                    total_wins += 1
+                    pp = bid_data.get("purchase_price") or row.get("outcome_sale_price")
+                    if pp is not None:
+                        purchase_prices.append(float(pp))
+            else:
+                # Legacy sale-outcome row — count toward wins_by_source
+                src = row.get("source") or row.get("source_site") or "unknown"
+                source_map[src] = source_map.get(src, 0) + 1
+
         wins_by_source = [
             {"source": k, "count": v}
             for k, v in sorted(source_map.items(), key=lambda x: -x[1])
         ]
+        win_rate = round(total_wins / total_bids * 100, 1) if total_bids > 0 else None
+        avg_purchase_price = round(sum(purchase_prices) / len(purchase_prices), 2) if purchase_prices else None
+        avg_max_bid = round(sum(max_bids_on_bid_rows) / len(max_bids_on_bid_rows), 2) if max_bids_on_bid_rows else None
 
         # ── 4. Top makes by avg DOS score ─────────────────────────────────────
         makes_resp = (
@@ -133,6 +171,11 @@ async def analytics_summary():
             "wins_by_source": wins_by_source,
             "top_makes": top_makes,
             "alerts_sent_last_30d": alerts_sent_last_30d,
+            "total_bids": total_bids,
+            "total_wins": total_wins,
+            "win_rate": win_rate,
+            "avg_purchase_price": avg_purchase_price,
+            "avg_max_bid": avg_max_bid,
         }
 
     except Exception as exc:
