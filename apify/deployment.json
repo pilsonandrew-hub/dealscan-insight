@@ -12,12 +12,6 @@
       "webhookId": "8yqQfG35cyEAjQ0z1",
       "status": "enabled"
     },
-    "ds-hibid": {
-      "id": "e8UeyRvQ6QSnX5fhP",
-      "scheduleId": "LNhrCXrqdHMuzInc3",
-      "webhookId": "caMGRnk95hTAWmjcr",
-      "status": "enabled"
-    },
     "ds-municibid": {
       "id": "svmsItf3CRBZuIntp",
       "scheduleId": "YRrPwLatWXzJnOzeS",
@@ -34,18 +28,6 @@
       "id": "gYGIfHeYeN3EzmLnB",
       "scheduleId": "MBuO3CqsBprCha5fH",
       "webhookId": "fjxMgUc6GH6rJRISU",
-      "status": "enabled"
-    },
-    "ds-bidcal": {
-      "id": "DF1THdFOBSYlxyNjD",
-      "scheduleId": "ZmaJLeGu3klW8Yd2Z",
-      "webhookId": "pDMsSYxpqaFwC8s2Y",
-      "status": "enabled"
-    },
-    "ds-auctiontime": {
-      "id": "eb4oYXDf8qs1Ckbth",
-      "scheduleId": "ayw0gnoHxgezNswF6",
-      "webhookId": "IqLsgHfhiAT04sPtB",
       "status": "enabled"
     },
     "ds-govplanet": {
@@ -82,11 +64,41 @@
       "status": "enabled",
       "schedule": "0 */3 * * *",
       "notes": "JJ Kane Government Surplus (jjkane.com) — Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
+    },
+    "ds-hibid-v2": {
+      "id": "7s9e0eATTt1kuGGfE",
+      "scheduleId": "1tLdDDBUL2Kb6cBzl",
+      "status": "enabled",
+      "schedule": "0 */3 * * *",
+      "notes": "HiBid GraphQL API (pure fetch, no Playwright). Replaces lexis-solutions rented actor. Category 700006 = Cars & Vehicles. US-only via countryName filter. 24 vehicle make keywords. Test run confirmed working."
+    },
+    "ds-bidspotter": {
+      "id": "5Eu3hfCcBBdzp6I1u",
+      "scheduleId": "Vol9X7tsYEHKLSdIK",
+      "webhookId": "N699FBbtfzjjhHshJ",
+      "status": "enabled",
+      "schedule": "0 */3 * * *",
+      "notes": "BidSpotter.com — 3-level Playwright crawler (catalogue list → catalogue → lot). AWS WAF protected, uses Apify browser fingerprinting. US-only filter applied. Build 1.0.16."
+    },
+    "ds-hibid": {
+      "id": "e8UeyRvQ6QSnX5fhP",
+      "status": "RETIRED",
+      "notes": "Replaced by ds-hibid-v2 (GraphQL). Lexis-solutions rented actor — disable to eliminate rental cost."
+    },
+    "ds-bidcal": {
+      "id": "DF1THdFOBSYlxyNjD",
+      "status": "RETIRED",
+      "notes": "BidCal catalog lives on hibid.com — covered by ds-hibid-v2. No separate actor needed."
+    },
+    "ds-auctiontime": {
+      "id": "eb4oYXDf8qs1Ckbth",
+      "status": "RETIRED",
+      "notes": "Imperva-blocked + primarily farm equipment (<5% passenger vehicles). Not viable."
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
   "webhookSecret": "rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA",
   "scheduleInterval": "0 */3 * * *",
   "deployedAt": "2026-03-14T11:10:00.000Z",
-  "lastAudit": "2026-03-18"
+  "lastAudit": "2026-03-21"
 }
