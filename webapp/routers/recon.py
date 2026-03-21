@@ -237,6 +237,7 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         "verdict_reason": reason,
         "reliability_grade": grade,
         "comp_count": comp_count,
+        "pessimistic_sale": pessimistic,
         "pessimistic_sale_price": pessimistic,
         "condition_penalty": condition_penalty,
         "fleet_stigma_penalty": fleet_penalty,
