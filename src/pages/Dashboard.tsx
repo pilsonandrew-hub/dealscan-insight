@@ -748,7 +748,12 @@ const RoverTab = () => {
     setIsFallback(false);
     try {
       // Use roverAPI.getRecommendations() — properly authenticated via Supabase JWT → Railway
-      const result = await roverAPI.getRecommendations(25);
+      // Get fresh session directly to ensure token is current
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      const activeUser = freshSession?.user || user;
+      const activeToken = freshSession?.access_token;
+      if (!activeUser || !activeToken) { setRoverDebug('No active session token'); setLoading(false); return; }
+      const result = await roverAPI.getRecommendationsWithToken(activeUser.id, activeToken, 25);
       const items = result?.items ?? [];
       setRoverDebug(`API returned ${items.length} items | coldStart: ${result.coldStart}`);
 
