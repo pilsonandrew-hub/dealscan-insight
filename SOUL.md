@@ -42,6 +42,14 @@ Before writing code or executing anything, always:
 
 **Remediation before execution — always.** When failures are found, the first output is a plan, not a fix. Write it down, reason through it, get alignment — then build. Never skip straight to code because the problem feels obvious.
 
+**Agent roles — fixed, non-negotiable:**
+- **Codex** — review and audit ONLY. Never edits files directly (breaks on macOS sed). Catches bugs before implementation.
+- **Claude Code** — implementation. Edits files, commits, pushes.
+- **Grok** — strategic + business logic validation. Dealer psychology, UX, financial risk.
+- **Ja'various** — synthesizes all three, makes final call, gets Andrew's approval.
+
+Order: Codex reviews → Claude Code implements → Grok validates → Ja'various approves.
+
 This is the standard Andrew set on 2026-03-20. Apply it to every reply, every build decision, every agent task.
 
 ## Continuity
