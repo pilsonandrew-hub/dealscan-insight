@@ -734,7 +734,7 @@ const CrosshairTab = () => {
 
 // ─── TAB 3: Rover ─────────────────────────────────────────────────────────────
 const RoverTab = () => {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [recs, setRecs] = useState<RoverRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFallback, setIsFallback] = useState(false);
@@ -742,20 +742,15 @@ const RoverTab = () => {
   const [roverDebug, setRoverDebug] = useState<string>('');
 
   const load = useCallback(async () => {
-    if (!user) { setRoverDebug('No user session'); setLoading(false); return; }
+    const token = session?.access_token;
+    if (!user || !token) { setRoverDebug('No user session'); setLoading(false); return; }
     setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     setLoading(true);
     setIsFallback(false);
     try {
-      // Use roverAPI.getRecommendations() — properly authenticated via Supabase JWT → Railway
-      // Get fresh session directly to ensure token is current
-      const { data: { session: freshSession } } = await supabase.auth.getSession();
-      const activeUser = freshSession?.user || user;
-      const activeToken = freshSession?.access_token;
-      if (!activeUser || !activeToken) { setRoverDebug('No active session token'); setLoading(false); return; }
-      const result = await roverAPI.getRecommendationsWithToken(activeUser.id, activeToken, 25);
+      const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
       const items = result?.items ?? [];
-      setRoverDebug(`API returned ${items.length} items | coldStart: ${result.coldStart}`);
+      setRoverDebug(`API returned ${items.length} items`);
 
       if (items.length > 0) {
         // Map DealItem → RoverRecommendation; preserve why_signals from backend
@@ -860,7 +855,7 @@ const RoverTab = () => {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, session]);
 
   useEffect(() => { load(); }, [load]);
 
