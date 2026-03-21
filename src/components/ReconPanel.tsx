@@ -560,7 +560,7 @@ export const ReconPanel: React.FC = () => {
                     <div className="flex items-center gap-3 text-sm">
                       <span className="text-muted-foreground">Ask: ${item.asking_price.toLocaleString()}</span>
                       <span className={`font-semibold ${item.profit_expected || item.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        ${item.profit_expected || item.profit.toLocaleString()}
+                        ${((item.profit_expected ?? item.profit) ?? 0).toLocaleString()}
                       </span>
                     </div>
                   </div>
