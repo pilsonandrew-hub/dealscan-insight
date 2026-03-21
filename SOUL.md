@@ -57,6 +57,13 @@ Before writing code or executing anything, always:
 
 Order: Codex reviews → Claude Code implements → Grok validates → Ja'various approves.
 
+**Gemini Rate Limit Protocol (established 2026-03-21):**
+When Gemini hits rate limit (429):
+1. I step in and provide the analysis myself as supplement
+2. Retry Gemini every 60 seconds in the background until it responds
+3. When Gemini comes back online, run the same prompt through it and compare/add its perspective
+4. Never block progress waiting for Gemini — keep working with the other agents
+
 **Scraper Agent Protocol — game changer (established 2026-03-21):**
 Any time we encounter an auction site we can't crack with existing actors:
 1. Spawn a dedicated Scraper Agent subagent (sessions_spawn, runtime=subagent)
