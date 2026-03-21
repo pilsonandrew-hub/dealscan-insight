@@ -83,8 +83,8 @@ def _margin_score(bid: float, mmr_ca: float, total_cost: float) -> float:
     return 50.0 + (margin_pct / 20.0) * 50.0
 
 
-def _velocity_score(bid: float, year: int) -> float:
-    """Score based on price point and age (proxy for days-to-sell velocity)."""
+def _velocity_score(bid: float, year: int, mileage: float = None) -> float:
+    """Score based on price point, age, and mileage (proxy for days-to-sell velocity)."""
     score = 50.0
     if bid < 10000:
         score += 20
@@ -98,6 +98,15 @@ def _velocity_score(bid: float, year: int) -> float:
             score += 15
         elif age <= 7:
             score += 5
+    # Mileage proxy for velocity — lower mileage = faster wholesale movement
+    if mileage is not None:
+        if mileage < 30000:
+            score += 15
+        elif mileage < 60000:
+            score += 10
+        elif mileage < 100000:
+            score += 5
+        # > 100k miles: no bonus (slower moving)
     return min(100.0, score)
 
 
@@ -910,7 +919,7 @@ def score_deal(
     wholesale_margin = selected_mmr - projected_total_cost
     gross_margin = retail_asking_price_estimate - projected_total_cost
     m_score = _margin_score(acquisition_price_basis, selected_mmr, projected_total_cost)
-    v_score = _velocity_score(acquisition_price_basis, year)
+    v_score = _velocity_score(acquisition_price_basis, year, mileage=mileage)
     seg_score = _segment_score(model, make)
     mod_score = _model_score(model)
     src_score = _source_score(source_site)
