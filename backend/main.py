@@ -368,3 +368,22 @@ if __name__ == "__main__":
 
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
 # redeploy Fri Mar 20 23:09:14 PDT 2026
+
+@app.get("/debug/recon-test")
+async def debug_recon_test():
+    """Debug endpoint to test recon evaluate directly"""
+    import traceback
+    from webapp.routers.recon import EvaluateRequest, evaluate_vehicle
+    try:
+        req = EvaluateRequest(
+            year=2022, make="Toyota", model="Camry",
+            mileage=35000, condition="Good", condition_grade="Good",
+            source="GovDeals", state="CA", title_status="clean"
+        )
+        # Call internals directly without auth to see the error
+        from webapp.routers.recon import _supabase_client, _verify_auth
+        # Simulate post-auth flow
+        auction_mode = req.asking_price is None
+        return {"auction_mode": auction_mode, "asking_price": req.asking_price, "status": "model_ok"}
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()[-500:]}
