@@ -77,6 +77,31 @@ interface RoverRecommendation {
   listing_url?: string;
 }
 
+
+// ─── Deal Lifecycle ──────────────────────────────────────────────────────────
+function getAuctionStatus(auction_end?: string | null): 'live' | 'closing_soon' | 'closed' {
+  if (!auction_end) return 'live';
+  const end = new Date(auction_end).getTime();
+  const now = Date.now();
+  const fourHours = 4 * 60 * 60 * 1000;
+  if (end < now) return 'closed';
+  if (end - now < fourHours) return 'closing_soon';
+  return 'live';
+}
+
+function AuctionStatusBadge({ auction_end }: { auction_end?: string | null }) {
+  const status = getAuctionStatus(auction_end);
+  if (status === 'closed') return (
+    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400 font-medium">CLOSED</span>
+  );
+  if (status === 'closing_soon') return (
+    <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-300 font-medium animate-pulse">CLOSING SOON</span>
+  );
+  return (
+    <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-400 font-medium">LIVE</span>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function dosColor(score: number | null | undefined): string {
   const s = score ?? 0;
@@ -140,6 +165,15 @@ function timeAgo(s: string | null | undefined): string {
   return 'Just now';
 }
 
+function getAuctionStatus(auction_end: string | null | undefined): 'live' | 'closing_soon' | 'closed' {
+  if (!auction_end) return 'live';
+  const end = new Date(auction_end).getTime();
+  const now = Date.now();
+  if (end <= now) return 'closed';
+  if (end - now < 4 * 60 * 60 * 1000) return 'closing_soon';
+  return 'live';
+}
+
 function pricingSourceLabel(source: string | null | undefined): string {
   if (source === 'retail_market_cache') return 'Retail comps';
   if (source === 'dealer_sales_history') return 'Dealer sales';
@@ -167,8 +201,9 @@ const DealCard = ({
   whySignals?: string[];
 }) => {
   const [showWhy, setShowWhy] = React.useState(false);
+  const auctionStatus = getAuctionStatus(deal.auction_end);
   return (
-  <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors">
+  <div className={`bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors${auctionStatus === 'closed' ? ' opacity-60' : ''}`}>
     <div className="flex items-start justify-between mb-3">
       <div>
         <h3 className="font-semibold text-white text-sm">
@@ -179,6 +214,13 @@ const DealCard = ({
         )}
       </div>
       <div className="flex flex-col items-end gap-1">
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+          auctionStatus === 'live' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+          auctionStatus === 'closing_soon' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+          'bg-gray-600/30 text-gray-400 border-gray-600/30'
+        }`}>
+          {auctionStatus === 'live' ? 'LIVE' : auctionStatus === 'closing_soon' ? 'CLOSING SOON' : 'CLOSED'}
+        </span>
         <span className={`text-[11px] font-semibold px-2 py-1 rounded-md ${gradeColor(deal.investment_grade)}`}>
           {deal.investment_grade || 'Watch'}
         </span>
@@ -278,7 +320,9 @@ const DealCard = ({
       )}
     </div>
 
-    {deal.auction_end && (
+    {/* Auction Status Badge */}
+            <AuctionStatusBadge auction_end={deal.auction_end} />
+            {deal.auction_end && (
       <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
         <Clock className="h-3 w-3" />
         <span>Ends {fmtDate(deal.auction_end)}</span>
@@ -790,7 +834,7 @@ const RoverTab = () => {
           .from('opportunities')
           .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
           .gte('dos_score', 65)
-          .or(`auction_end_date.gt.${new Date().toISOString()},auction_end_date.is.null`)
+          .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
           .order('dos_score', { ascending: false })
           .limit(25);
 
@@ -845,7 +889,7 @@ const RoverTab = () => {
           .from('opportunities')
           .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
           .gte('dos_score', 65)
-          .or(`auction_end_date.gt.${new Date().toISOString()},auction_end_date.is.null`)
+          .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
           .order('dos_score', { ascending: false })
           .limit(25);
         if (fallbackDeals && fallbackDeals.length > 0) {
