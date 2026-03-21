@@ -171,7 +171,8 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     else:
         grade = "C"
         if auction_mode:
-            pessimistic = None
+            # Use Marketcheck retail data even in auction mode — gives a real max_bid ceiling
+            pessimistic = retail_value * 0.85 if retail_value is not None else None
         else:
             if retail_value is not None:
                 pessimistic = retail_value * 0.85  # wholesale = ~85% of retail
