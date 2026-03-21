@@ -52,7 +52,7 @@ class EvaluateRequest(BaseModel):
     year: int = Field(..., ge=1990, le=2030)
     make: str
     model: str
-    asking_price: float = Field(..., gt=0)
+    asking_price: Optional[float] = Field(None, gt=0)
     title_status: str
     condition: str
     condition_grade: Optional[str] = None  # Overrides condition for penalty lookup
@@ -83,6 +83,7 @@ async def vin_decode(vin: str = Path(..., description="VIN to decode"), authoriz
 async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = Header(None)):
     """Main evaluation endpoint — real scoring against dealer_sales comps"""
     user_id = _verify_auth(authorization)
+    auction_mode = req.asking_price is None
     reason = ""
 
     # Normalize inputs
@@ -128,11 +129,14 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         pessimistic = float(min(r["sale_price"] for r in comp_records))
     else:
         grade = "C"
-        pessimistic = req.asking_price * 0.70
+        if auction_mode:
+            pessimistic = None
+        else:
+            pessimistic = req.asking_price * 0.70
 
     # ── FIX 2b: Condition penalty ─────────────────────────────────────────────
     cg = req.condition_grade or req.condition
-    v = pessimistic
+    v = pessimistic if pessimistic is not None else 0
     penalties = {
         "Excellent": 0,
         "Good": 750 if v < 25000 else 1250,
@@ -150,7 +154,7 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         fleet_penalty = 0
 
     # ── FIX 2d: Manheim sell fee ──────────────────────────────────────────────
-    p = pessimistic
+    p = pessimistic if pessimistic is not None else 0
     if p < 15000:
         sell_fee = 275
     elif p < 25000:
@@ -165,8 +169,11 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     total_cost = condition_penalty + fleet_penalty + sell_fee + transport
 
     # ── FIX 2f: DOS ───────────────────────────────────────────────────────────
-    margin_pct = max(0.0, (pessimistic - req.asking_price) / pessimistic) if pessimistic > 0 else 0.0
-    margin_score = min(100.0, margin_pct * 300)
+    if auction_mode or pessimistic is None:
+        margin_score = 50.0
+    else:
+        margin_pct = max(0.0, (pessimistic - req.asking_price) / pessimistic) if pessimistic > 0 else 0.0
+        margin_score = min(100.0, margin_pct * 300)
     dos = margin_score * 0.41 + 50 * 0.27 + 50 * 0.20 + 50 * 0.12
 
     # ── FIX 2g: Multiplier ────────────────────────────────────────────────────
@@ -176,22 +183,35 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
 
     # ── FIX 2h: CTM, max_bid, profit ─────────────────────────────────────────
     ctm = 0.90 if adjusted_dos >= 80 else 0.88
-    max_bid = pessimistic * ctm - total_cost
-    profit = max_bid - req.asking_price
+    max_bid = (pessimistic * ctm - total_cost) if pessimistic is not None else None
+    profit = (max_bid - req.asking_price) if (not auction_mode and max_bid is not None) else None
 
     # ── FIX 2i: Verdict ───────────────────────────────────────────────────────
-    if adjusted_dos >= 80 and profit >= 3000 and comp_count >= 3:
-        verdict = "HOT BUY"
-    elif adjusted_dos >= 65 and profit >= 1500:
-        verdict = "BUY"
-    elif adjusted_dos >= 45 and profit >= 1000:
-        verdict = "WATCH"
+    if auction_mode:
+        if adjusted_dos >= 75:
+            verdict = "HOT BUY"
+        elif adjusted_dos >= 60:
+            verdict = "BUY"
+        elif adjusted_dos >= 45:
+            verdict = "WATCH"
+        else:
+            verdict = "PASS"
     else:
-        verdict = "PASS"
+        if req.asking_price is not None and max_bid is not None and req.asking_price > max_bid:
+            verdict = "PASS"
+            reason = "Asking price exceeds max bid"
+        elif adjusted_dos >= 80 and profit is not None and profit >= 3000 and comp_count >= 3:
+            verdict = "HOT BUY"
+        elif adjusted_dos >= 65 and profit is not None and profit >= 1500:
+            verdict = "BUY"
+        elif adjusted_dos >= 45 and profit is not None and profit >= 1000:
+            verdict = "WATCH"
+        else:
+            verdict = "PASS"
 
-    if comp_count < 3 and verdict in {"HOT BUY", "BUY"}:
-        verdict = "WATCH"
-        reason = "Insufficient comps (<3)"
+        if comp_count < 3 and verdict in {"HOT BUY", "BUY"}:
+            verdict = "WATCH"
+            reason = "Insufficient comps (<3)"
 
     # Save evaluation to Supabase
     eval_row = {
@@ -201,7 +221,6 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         "year": req.year,
         "make": req.make,
         "model": req.model,
-        "asking_price": req.asking_price,
         "title_status": req.title_status,
         "condition_grade": cg,
         "source": req.source,
@@ -216,14 +235,17 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         "total_all_in_cost": total_cost,
         "dos_score": round(dos, 2),
         "adjusted_dos": round(adjusted_dos, 2),
-        "max_bid": round(max_bid, 2),
-        "profit_expected": round(profit, 2),
-        "profit_pessimistic": round(profit, 2),
-        "profit_optimistic": round(profit, 2),
+        "max_bid": round(max_bid, 2) if max_bid is not None else None,
         "verdict": verdict,
         "verdict_reason": reason,
         "promoted_to_pipeline": False,
     }
+    if req.asking_price is not None:
+        eval_row["asking_price"] = req.asking_price
+    if profit is not None:
+        eval_row["profit_expected"] = round(profit, 2)
+        eval_row["profit_pessimistic"] = round(profit, 2)
+        eval_row["profit_optimistic"] = round(profit, 2)
 
     insert_res = _supabase_client.table("recon_evaluations").insert(eval_row).execute()
     if not insert_res.data:
@@ -233,6 +255,7 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
 
     return {
         "id": new_id,
+        "auction_mode": auction_mode,
         "verdict": verdict,
         "verdict_reason": reason,
         "reliability_grade": grade,
@@ -246,10 +269,10 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         "total_all_in_cost": total_cost,
         "dos": round(dos, 2),
         "adjusted_dos": round(adjusted_dos, 2),
-        "max_bid": round(max_bid, 2),
-        "profit_expected": round(profit, 2),
-        "profit_pessimistic": round(profit, 2),
-        "profit_optimistic": round(profit, 2),
+        "max_bid": round(max_bid, 2) if max_bid is not None else None,
+        "profit_expected": round(profit, 2) if profit is not None else None,
+        "profit_pessimistic": round(profit, 2) if profit is not None else None,
+        "profit_optimistic": round(profit, 2) if profit is not None else None,
         "asking_price": req.asking_price,
         "pricing_source": "Manheim" if comp_count >= 3 else "Estimated",
         "promoted_to_pipeline": False,
