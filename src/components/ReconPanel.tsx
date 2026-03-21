@@ -392,6 +392,25 @@ export const ReconPanel: React.FC = () => {
 
               <p className="text-sm text-muted-foreground mb-4">{result.verdict_reason || result.reason}</p>
 
+              {/* Risk flags — informational only, never blocks scoring */}
+              {(() => {
+                const flags: string[] = [];
+                const age = new Date().getFullYear() - parseInt(form.year || '0');
+                const miles = parseInt(form.mileage || '0');
+                if (age > 4) flags.push(`⚠️ ${age} yrs old — above 4yr institutional threshold`);
+                if (miles > 50000) flags.push(`⚠️ ${miles.toLocaleString()} miles — above 50k threshold`);
+                if (result.comp_count < 3) flags.push(`⚠️ Only ${result.comp_count} comp${result.comp_count === 1 ? '' : 's'} — score is estimated`);
+                return flags.length > 0 ? (
+                  <div className="flex flex-col gap-1 mb-4">
+                    {flags.map((f, i) => (
+                      <div key={i} className="text-xs text-yellow-400 bg-yellow-950/40 border border-yellow-800/50 rounded px-2 py-1">
+                        {f}
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+
               {/* Key numbers */}
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="bg-black/30 rounded-md p-3">
