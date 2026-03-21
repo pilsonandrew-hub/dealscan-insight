@@ -125,17 +125,20 @@ class RoverAPIService {
     }
   }
 
-  async getRecommendationsWithToken(userId: string, token: string, limit: number = 25): Promise<RoverRecommendations> {
+  async getRecommendationsWithToken(userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
     try {
       const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
       const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${userId}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
-      return await resp.json() as RoverRecommendations;
+      if (!resp.ok) {
+        const body = await resp.text();
+        return { precomputedAt: null, items: [], totalCount: 0, confidence: 0, _debug: `HTTP ${resp.status}: ${body.slice(0,80)}` };
+      }
+      const data = await resp.json() as RoverRecommendations;
+      return { ...data, _debug: `OK ${data.items?.length ?? 0} items` };
     } catch (error) {
-      logger.error("Rover recommendations (with token) failed", { message: String(error) });
-      return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
+      return { precomputedAt: null, items: [], totalCount: 0, confidence: 0, _debug: `Error: ${String(error).slice(0,80)}` };
     }
   }
 

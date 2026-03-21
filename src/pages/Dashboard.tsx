@@ -750,7 +750,7 @@ const RoverTab = () => {
     try {
       const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
       const items = result?.items ?? [];
-      setRoverDebug(`API returned ${items.length} items`);
+      setRoverDebug((result as any)._debug || `API returned ${items.length} items`);
 
       if (items.length > 0) {
         // Map DealItem → RoverRecommendation; preserve why_signals from backend
