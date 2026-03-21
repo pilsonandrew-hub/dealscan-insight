@@ -739,15 +739,18 @@ const RoverTab = () => {
   const [loading, setLoading] = useState(true);
   const [isFallback, setIsFallback] = useState(false);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
+  const [roverDebug, setRoverDebug] = useState<string>('');
 
   const load = useCallback(async () => {
-    if (!user) return; // Wait for auth to be ready
+    if (!user) { setRoverDebug('No user session'); setLoading(false); return; }
+    setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     setLoading(true);
     setIsFallback(false);
     try {
       // Use roverAPI.getRecommendations() — properly authenticated via Supabase JWT → Railway
       const result = await roverAPI.getRecommendations(25);
       const items = result?.items ?? [];
+      setRoverDebug(`API returned ${items.length} items | coldStart: ${result.coldStart}`);
 
       if (items.length > 0) {
         // Map DealItem → RoverRecommendation; preserve why_signals from backend
@@ -897,6 +900,7 @@ const RoverTab = () => {
           <p className="text-gray-400 text-sm">
             Browse deals in the Dashboard and Crosshair tabs to train Rover on your preferences.
           </p>
+          {roverDebug && <p className="text-yellow-500 text-xs mt-3 font-mono">{roverDebug}</p>}
         </div>
       ) : (
         (() => {
