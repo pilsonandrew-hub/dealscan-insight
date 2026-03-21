@@ -1,0 +1,49 @@
+name: GovDeals Scraper Health Check
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-apify-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check last 3 GovDeals actor runs
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          ACTOR_ID="CuKaIAcWyFS0EPrAz"
+
+          RUNS=$(curl -sf \
+            "https://api.apify.com/v2/acts/${ACTOR_ID}/runs?limit=3&desc=1" \
+            -H "Authorization: Bearer ${APIFY_TOKEN}")
+
+          if [ -z "$RUNS" ]; then
+            echo "Failed to fetch Apify runs — skipping alert"
+            exit 0
+          fi
+
+          BAD=$(echo "$RUNS" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          items = data.get('data', {}).get('items', [])
+          bad = sum(1 for r in items if r.get('status') in ('TIMED-OUT', 'FAILED'))
+          print(bad)
+          ")
+
+          echo "Bad runs in last 3: $BAD"
+
+          if [ "$BAD" -ge 2 ]; then
+            MESSAGE="⚠️ DealerScope: GovDeals scraper has timed out ${BAD} of last 3 runs. Data may be stale. Check Apify dashboard."
+            curl -sf \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=${MESSAGE}" \
+              -d "parse_mode=HTML"
+            echo "Alert sent."
+          else
+            echo "Scraper healthy — no alert needed."
+          fi
