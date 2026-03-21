@@ -21,6 +21,44 @@ try:
 except Exception as e:
     logging.warning(f"Supabase client init failed: {e}")
 
+async def get_retail_market_value(year: int, make: str, model: str, mileage: int) -> dict:
+    """Fetch real-time retail listings from Marketcheck. Returns median price and range."""
+    try:
+        miles_min = max(0, mileage - 15000)
+        miles_max = mileage + 15000
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                "https://mc-api.marketcheck.com/v2/search/car/active",
+                params={
+                    "api_key": os.getenv("MARKETCHECK_API_KEY", "Z56KBF2WRBWXcnPpbFBY8FEuRoUujiz4"),
+                    "year": year,
+                    "make": make.lower(),
+                    "model": model.lower(),
+                    "miles_min": miles_min,
+                    "miles_max": miles_max,
+                    "rows": 50,
+                    "fields": "price,miles"
+                }
+            )
+        if resp.status_code != 200:
+            return {"retail_value": None, "retail_low": None, "retail_high": None, "retail_count": 0, "retail_source": "unavailable"}
+        listings = resp.json().get("listings", [])
+        prices = sorted([l["price"] for l in listings if l.get("price") and l["price"] > 5000])
+        if not prices:
+            return {"retail_value": None, "retail_low": None, "retail_high": None, "retail_count": 0, "retail_source": "no_listings"}
+        median = prices[len(prices) // 2]
+        return {
+            "retail_value": median,
+            "retail_low": prices[0],
+            "retail_high": prices[-1],
+            "retail_count": len(prices),
+            "retail_source": "marketcheck"
+        }
+    except Exception as e:
+        logging.warning(f"Marketcheck lookup failed: {e}")
+        return {"retail_value": None, "retail_low": None, "retail_high": None, "retail_count": 0, "retail_source": "error"}
+
+
 router = APIRouter(prefix="/recon", tags=["recon"])
 
 def _verify_auth(authorization: Optional[str]) -> str:
@@ -124,6 +162,9 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     comp_count = len(comp_records)
     distinct_dates = len(set(r["sale_date_label"] for r in comp_records if r.get("sale_date_label")))
 
+    retail_data = await get_retail_market_value(req.year, req.make, req.model, req.mileage)
+    retail_value = retail_data.get("retail_value")
+
     if comp_count >= 3 and distinct_dates >= 2:
         grade = "A+"
         pessimistic = float(min(r["sale_price"] for r in comp_records))
@@ -132,7 +173,10 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         if auction_mode:
             pessimistic = None
         else:
-            pessimistic = req.asking_price * 0.70
+            if retail_value is not None:
+                pessimistic = retail_value * 0.85  # wholesale = ~85% of retail
+            else:
+                pessimistic = req.asking_price * 0.70
 
     # ── FIX 2b: Condition penalty ─────────────────────────────────────────────
     cg = req.condition_grade or req.condition
@@ -276,6 +320,11 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         "asking_price": req.asking_price,
         "pricing_source": "Manheim" if comp_count >= 3 else "Estimated",
         "promoted_to_pipeline": False,
+        "retail_market_value": retail_data.get("retail_value"),
+        "retail_low": retail_data.get("retail_low"),
+        "retail_high": retail_data.get("retail_high"),
+        "retail_count": retail_data.get("retail_count"),
+        "retail_source": retail_data.get("retail_source"),
     }
 
 @router.get("/history")
