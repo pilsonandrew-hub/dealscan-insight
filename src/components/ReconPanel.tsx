@@ -43,8 +43,6 @@ interface FormState {
   source: string;
   state: string;
   condition_grade: string;
-  is_fleet: boolean;
-  fleet_has_records: boolean;
 }
 
 const VERDICT_STYLES: Record<ReconResult['verdict'], string> = {
@@ -78,8 +76,6 @@ const defaultForm: FormState = {
   source: '',
   state: '',
   condition_grade: 'Good',
-  is_fleet: false,
-  fleet_has_records: false,
 };
 
 async function getAuthToken(): Promise<string | null> {
@@ -135,6 +131,15 @@ export const ReconPanel: React.FC = () => {
   };
 
   const evaluate = async () => {
+    // Client-side validation before hitting API
+    if (!form.make) { setError('Make is required'); return; }
+    if (!form.model) { setError('Model is required'); return; }
+    if (!form.year) { setError('Year is required'); return; }
+    if (!form.mileage) { setError('Mileage is required'); return; }
+    if (!form.asking_price) { setError('Asking price is required'); return; }
+    if (!form.source) { setError('Source is required — where did you find this vehicle?'); return; }
+    if (!form.state) { setError('State is required — enter the 2-letter state code (e.g. CA, TX)'); return; }
+
     setLoading(true);
     setError(null);
     setResult(null);
@@ -351,25 +356,6 @@ export const ReconPanel: React.FC = () => {
                 </Select>
               </div>
 
-              {/* Fleet toggles */}
-              <div className="flex items-center justify-between py-1">
-                <Label htmlFor="is_fleet" className="text-sm cursor-pointer">Fleet Vehicle</Label>
-                <Switch
-                  id="is_fleet"
-                  checked={form.is_fleet}
-                  onCheckedChange={v => setField('is_fleet', v)}
-                />
-              </div>
-              {form.is_fleet && (
-                <div className="flex items-center justify-between py-1 pl-4 border-l-2 border-muted">
-                  <Label htmlFor="fleet_records" className="text-sm cursor-pointer text-muted-foreground">Has Fleet Records</Label>
-                  <Switch
-                    id="fleet_records"
-                    checked={form.fleet_has_records}
-                    onCheckedChange={v => setField('fleet_has_records', v)}
-                  />
-                </div>
-              )}
 
               {error && (
                 <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-3">
