@@ -17,10 +17,11 @@ interface ReconResult {
   verdict: 'HOT BUY' | 'BUY' | 'WATCH' | 'PASS';
   verdict_reason: string;
   max_bid: number;
-  asking_price: number;
-  profit_expected: number;
-  profit_pessimistic: number;
-  profit_optimistic: number;
+  asking_price: number | null;
+  auction_mode?: boolean;
+  profit_expected: number | null;
+  profit_pessimistic: number | null;
+  profit_optimistic: number | null;
   adjusted_dos: number;
   reliability_grade: 'A+' | 'A' | 'B' | 'C';
   comp_count: number;
@@ -31,7 +32,7 @@ interface ReconResult {
   total_all_in_cost: number;
   promoted_to_pipeline: boolean;
   pricing_source: string;
-  pessimistic_sale?: number;
+  pessimistic_sale?: number | null;
 }
 
 interface FormState {
@@ -137,7 +138,6 @@ export const ReconPanel: React.FC = () => {
     if (!form.model) { setError('Model is required'); return; }
     if (!form.year) { setError('Year is required'); return; }
     if (!form.mileage) { setError('Mileage is required'); return; }
-    if (!form.asking_price) { setError('Asking price is required'); return; }
     if (!form.source) { setError('Source is required — where did you find this vehicle?'); return; }
     if (!form.state) { setError('State is required — enter the 2-letter state code (e.g. CA, TX)'); return; }
 
@@ -308,7 +308,7 @@ export const ReconPanel: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="asking_price" className="text-xs mb-1 block">Asking Price ($)</Label>
+                  <Label htmlFor="asking_price" className="text-xs mb-1 block">Asking / Reserve Price <span className="text-muted-foreground font-normal">(optional)</span></Label>
                   <Input
                     id="asking_price"
                     placeholder="18500"
@@ -425,36 +425,48 @@ export const ReconPanel: React.FC = () => {
                     </div>
                   </div>
                 )}
-                <div className="bg-black/30 rounded-md p-3">
+                {/* Max Bid — full width + prominent in auction mode */}
+                <div className={`${result.auction_mode ? 'col-span-2 bg-emerald-950/60 border border-emerald-700' : ''} bg-black/30 rounded-md p-3`}>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                     <TrendingUp className="h-3 w-3" />
-                    Max Bid
+                    {result.auction_mode ? 'MAX BID — Do not exceed' : 'Max Bid'}
                   </div>
-                  <div className="text-lg font-bold text-foreground">
+                  <div className={`font-bold text-foreground ${result.auction_mode ? 'text-3xl text-emerald-300' : 'text-lg'}`}>
                     ${result.max_bid.toLocaleString()}
                   </div>
+                  {result.auction_mode && (
+                    <div className="text-xs text-emerald-500 mt-1">Profit calculable after auction closes</div>
+                  )}
                 </div>
-                <div className="bg-black/30 rounded-md p-3">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                    <DollarSign className="h-3 w-3" />
-                    Expected Profit
+
+                {/* Profit — only show in reserve mode */}
+                {!result.auction_mode && result.profit_expected != null && (
+                  <div className="bg-black/30 rounded-md p-3">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                      <DollarSign className="h-3 w-3" />
+                      Expected Profit
+                    </div>
+                    <div className={`text-lg font-bold ${result.profit_expected >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      ${result.profit_expected.toLocaleString()}
+                    </div>
                   </div>
-                  <div className={`text-lg font-bold ${result.profit_expected >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    ${result.profit_expected.toLocaleString()}
+                )}
+                {!result.auction_mode && result.profit_pessimistic != null && (
+                  <div className="bg-black/30 rounded-md p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Pessimistic</div>
+                    <div className={`font-semibold ${result.profit_pessimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
+                      ${result.profit_pessimistic.toLocaleString()}
+                    </div>
                   </div>
-                </div>
-                <div className="bg-black/30 rounded-md p-3">
-                  <div className="text-xs text-muted-foreground mb-1">Pessimistic</div>
-                  <div className={`font-semibold ${result.profit_pessimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
-                    ${result.profit_pessimistic.toLocaleString()}
+                )}
+                {!result.auction_mode && result.profit_optimistic != null && (
+                  <div className="bg-black/30 rounded-md p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Optimistic</div>
+                    <div className={`font-semibold ${result.profit_optimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
+                      ${result.profit_optimistic.toLocaleString()}
+                    </div>
                   </div>
-                </div>
-                <div className="bg-black/30 rounded-md p-3">
-                  <div className="text-xs text-muted-foreground mb-1">Optimistic</div>
-                  <div className={`font-semibold ${result.profit_optimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
-                    ${result.profit_optimistic.toLocaleString()}
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Cost breakdown */}
