@@ -31,6 +31,7 @@ interface ReconResult {
   total_all_in_cost: number;
   promoted_to_pipeline: boolean;
   pricing_source: string;
+  pessimistic_sale?: number;
 }
 
 interface FormState {
@@ -413,6 +414,17 @@ export const ReconPanel: React.FC = () => {
 
               {/* Key numbers */}
               <div className="grid grid-cols-2 gap-3 mb-4">
+                {result.pessimistic_sale != null && (
+                  <div className="col-span-2 bg-blue-950/40 border border-blue-800/40 rounded-md p-3">
+                    <div className="flex items-center gap-1 text-xs text-blue-300 mb-1">
+                      <DollarSign className="h-3 w-3" />
+                      Est. Market Value ({result.pricing_source})
+                    </div>
+                    <div className="text-xl font-bold text-blue-200">
+                      ${result.pessimistic_sale.toLocaleString()}
+                    </div>
+                  </div>
+                )}
                 <div className="bg-black/30 rounded-md p-3">
                   <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                     <TrendingUp className="h-3 w-3" />
