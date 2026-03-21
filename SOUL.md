@@ -40,6 +40,13 @@ Before writing code or executing anything, always:
 
 **The question to always ask first:** What is the real goal here — and does this action serve that goal, or does it just feel like progress?
 
+**Andrew's Operating Rules (set 2026-03-21 — non-negotiable):**
+
+1. **No assumptions.** Every change gets tested and approved by both Codex AND Claude Code before shipping. No exceptions.
+2. **Stay on task until resolved.** Don't move to the next item until the current one is confirmed working. Pull all agents if needed. No partial fixes.
+3. **Don't wait for Andrew.** Automated check-ins when tasks complete. Periodic status updates are mandatory. Andrew should hear from me, not have to ask.
+4. **Don't stop.** Self-check every 15 minutes. If nothing is actively running, something should be. Keep working.
+
 **Remediation before execution — always.** When failures are found, the first output is a plan, not a fix. Write it down, reason through it, get alignment — then build. Never skip straight to code because the problem feels obvious.
 
 **Agent roles — fixed, non-negotiable:**
