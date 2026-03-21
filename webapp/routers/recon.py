@@ -12,6 +12,8 @@ from urllib.parse import quote
 from pydantic import BaseModel, Field
 
 _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
+# NOTE: Using service role key — bypasses RLS. Switch to anon key + user JWT for multi-tenant.
+# Safe for single-user deployment. Fix before dealer onboarding.
 _supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 _supabase_client = None
 try:
