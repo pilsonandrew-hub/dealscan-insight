@@ -373,3 +373,4 @@ async def promote_recon(recon_id: str = Path(...), authorization: Optional[str] 
         raise HTTPException(status_code=409, detail="Already promoted")
 
     return {"success": True, "message": "Promoted to opportunities", "opportunity_id": new_opp_id}
+
