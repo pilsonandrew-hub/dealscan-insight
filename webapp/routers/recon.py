@@ -21,8 +21,28 @@ try:
 except Exception as e:
     logging.warning(f"Supabase client init failed: {e}")
 
+_mc_redis = None
+try:
+    from backend.rover.redis_affinity import get_redis_client
+    _mc_redis = get_redis_client()
+except Exception:
+    pass
+
 async def get_retail_market_value(year: int, make: str, model: str, mileage: int) -> dict:
     """Fetch real-time retail listings from Marketcheck. Returns median price and range."""
+    import json
+
+    cache_key = f"mc:{year}:{make.lower()}:{model.lower()}:{(mileage // 10000) * 10000}"
+
+    # Check Redis cache first
+    if _mc_redis is not None:
+        try:
+            cached = _mc_redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
     try:
         miles_min = max(0, mileage - 15000)
         miles_max = mileage + 15000
@@ -47,13 +67,22 @@ async def get_retail_market_value(year: int, make: str, model: str, mileage: int
         if not prices:
             return {"retail_value": None, "retail_low": None, "retail_high": None, "retail_count": 0, "retail_source": "no_listings"}
         median = prices[len(prices) // 2]
-        return {
+        result = {
             "retail_value": median,
             "retail_low": prices[0],
             "retail_high": prices[-1],
             "retail_count": len(prices),
             "retail_source": "marketcheck"
         }
+
+        # Store in Redis cache (non-fatal on failure)
+        if _mc_redis is not None:
+            try:
+                _mc_redis.setex(cache_key, 14400, json.dumps(result))
+            except Exception:
+                pass
+
+        return result
     except Exception as e:
         logging.warning(f"Marketcheck lookup failed: {e}")
         return {"retail_value": None, "retail_low": None, "retail_high": None, "retail_count": 0, "retail_source": "error"}
