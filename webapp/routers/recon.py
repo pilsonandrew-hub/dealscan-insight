@@ -240,8 +240,8 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         "verdict_reason": reason,
         "promoted_to_pipeline": False,
     }
-    if req.asking_price is not None:
-        eval_row["asking_price"] = req.asking_price
+    # asking_price — use actual value or 0 as sentinel (DB column is NOT NULL)
+    eval_row["asking_price"] = req.asking_price if req.asking_price is not None else 0.0
     if profit is not None:
         eval_row["profit_expected"] = round(profit, 2)
         eval_row["profit_pessimistic"] = round(profit, 2)
