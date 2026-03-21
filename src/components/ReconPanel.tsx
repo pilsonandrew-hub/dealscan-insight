@@ -432,6 +432,9 @@ export const ReconPanel: React.FC = () => {
                     <div className="text-xs text-green-400 mt-1">
                       Range: ${(result.retail_low ?? 0).toLocaleString()} — ${(result.retail_high ?? 0).toLocaleString()} · {result.retail_count} listings
                     </div>
+                    {(result.retail_count ?? 0) < 5 && (
+                      <div className="text-xs text-yellow-500 mt-1">⚠️ Low sample — verify manually</div>
+                    )}
                     {result.max_bid != null && result.retail_market_value != null && (
                       <div className={`text-sm font-semibold mt-2 ${(result.retail_market_value - result.max_bid) > 0 ? 'text-green-300' : 'text-red-400'}`}>
                         Spread: ${((result.retail_market_value ?? 0) - (result.max_bid ?? 0)).toLocaleString()}
