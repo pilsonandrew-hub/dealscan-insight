@@ -47,7 +47,7 @@ VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{1,17}$")
 # Data models
 
 class EvaluateRequest(BaseModel):
-    vin: str = Field(..., description="VIN sanitized")
+    vin: Optional[str] = Field(None, description="VIN — optional, provide for more accurate comp matching")
     mileage: int = Field(..., ge=1, le=300000)
     year: int = Field(..., ge=1990, le=2030)
     make: str
