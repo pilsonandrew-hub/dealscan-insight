@@ -734,7 +734,7 @@ const CrosshairTab = () => {
 
 // ─── TAB 3: Rover ─────────────────────────────────────────────────────────────
 const RoverTab = () => {
-  const { user, session } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const [recs, setRecs] = useState<RoverRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFallback, setIsFallback] = useState(false);
@@ -855,9 +855,12 @@ const RoverTab = () => {
     } finally {
       setLoading(false);
     }
-  }, [user, session]);
+  }, [user, session, authLoading]);
 
-  useEffect(() => { load(); }, [load]);
+  // Only fire after auth has fully initialized
+  useEffect(() => {
+    if (!authLoading) { load(); }
+  }, [load, authLoading]);
 
   const handleAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
     await api.trackRoverEvent(deal, action);
