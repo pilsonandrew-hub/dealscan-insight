@@ -142,13 +142,36 @@ def _model_score(model: str) -> float:
 
 
 def _source_score(source_site: str) -> float:
-    """Score based on auction source reliability."""
-    return {
-        "GovDeals": 100.0,
-        "PublicSurplus": 90.0,
-        "IAA": 70.0,
-        "Copart": 65.0,
-    }.get(source_site, 60.0)
+    """Score based on auction source — government fleet sources rank highest."""
+    source_lower = (source_site or "").lower().strip()
+    scores = {
+        # Government fleet — highest quality, clean title, maintained
+        "govdeals": 100.0,
+        "publicsurplus": 95.0,
+        "govplanet": 95.0,
+        "gsaauctions": 93.0,
+        "municibid": 88.0,
+        "usgovbid": 85.0,
+        # Government-adjacent — reliable but mixed quality
+        "jjkane": 82.0,
+        "ritchiebros": 80.0,
+        "ironplanet": 80.0,
+        # Commercial aggregators — variable quality
+        "allsurplus": 75.0,
+        "proxibid": 72.0,
+        "bidspotter": 70.0,
+        "hibid": 68.0,
+        "hibid-bidcal": 68.0,
+        "hibid-v2": 68.0,
+        # Salvage/insurance — lower quality
+        "iaa": 55.0,
+        "copart": 50.0,
+    }
+    # Check for partial matches
+    for key, score in scores.items():
+        if key in source_lower:
+            return score
+    return 60.0  # default
 
 
 _SEGMENT_TIER_1_MODELS = {
