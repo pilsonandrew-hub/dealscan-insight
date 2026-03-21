@@ -186,6 +186,9 @@ function buildOpportunityQuery(filters?: CrosshairSearchFilters) {
   if (filters?.minScore != null) query = query.gte('dos_score', filters.minScore);
   if (filters?.maxMileage != null) query = query.lte('mileage', filters.maxMileage);
 
+  const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  query = query.or(`auction_end_date.gt.${cutoff48h},auction_end_date.is.null`);
+
   return query;
 }
 
