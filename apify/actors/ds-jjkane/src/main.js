@@ -124,6 +124,8 @@ function median(arr) {
 
 // Cache to avoid re-querying same make/model/year/mileage band
 const marketcheckCache = new Map();
+const MAX_MARKETCHECK_CALLS_PER_RUN = 50; // Protect 500/month quota
+let marketcheckCallsThisRun = 0;
 
 async function getMarketcheckPrice(year, make, model, odometer) {
     if (!year || !make || !model) return null;
@@ -152,7 +154,10 @@ async function getMarketcheckPrice(year, make, model, odometer) {
     // Round to nearest 5000 for cache key
     const milesKey = odometer ? Math.round(odometer / 5000) * 5000 : 0;
     const cacheKey = `${year}|${makeLower}|${modelNormalized}|${milesKey}`;
-    if (marketcheckCache.has(cacheKey)) {
+    if (marketcheckCallsThisRun >= MAX_MARKETCHECK_CALLS_PER_RUN) {
+            return { estimated_auction_price: 0, pricing_source: 'quota_exceeded' };
+        }
+        if (marketcheckCache.has(cacheKey)) {
         return marketcheckCache.get(cacheKey);
     }
 
@@ -176,7 +181,8 @@ async function getMarketcheckPrice(year, make, model, odometer) {
 
         if (!resp.ok) {
             console.warn(`[MC] HTTP ${resp.status} for ${year} ${make} ${model}`);
-            marketcheckCache.set(cacheKey, null);
+            marketcheckCallsThisRun++;
+        marketcheckCache.set(cacheKey, null);
             return null;
         }
 
