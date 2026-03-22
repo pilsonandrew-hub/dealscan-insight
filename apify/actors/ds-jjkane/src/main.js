@@ -129,7 +129,17 @@ async function getMarketcheckPrice(year, make, model, odometer) {
     if (!year || !make || !model) return null;
 
     const makeLower = make.toLowerCase().trim();
-    const modelLower = model.toLowerCase().trim();
+    const modelRaw = model.toLowerCase().trim();
+
+    // Normalize model name for Marketcheck API
+    const modelNormalized = modelRaw
+        .replace(/\s*(police|interceptor|package|special|fleet|pursuit|4x4|4wd|awd|rwd|fwd|diesel|hybrid|hev|phev|turbo|sport|limited|xl|xlt|lariat|stx|slt|lt|ltz|ls|le|se|sel|ex|exl|touring|platinum|king\s*ranch|raptor|rebel|laramie|tradesman|big\s*horn|lone\s*star).*$/i, '')
+        .replace(/\bf(\d{3})\b/g, 'f-$1')   // f150 → f-150, f250 → f-250, f350 → f-350
+        .replace(/\be(\d{3})\b/g, 'e-$1')   // e250 → e-250, e350 → e-350
+        .replace(/\bram\b\s+(\d{3,4})/g, '$1') // "ram 1500" → "1500" (Dodge/Ram model)
+        .replace(/\bsierr?a\b\s+(\d{3,4})/g, 'sierra $1')
+        .replace(/\bsilverado\b\s+(\d{3,4})/g, 'silverado $1')
+        .trim();
 
     // Miles band: ±20% of odometer (or 0–999999 if no odometer)
     let milesMin = 0;
@@ -141,7 +151,7 @@ async function getMarketcheckPrice(year, make, model, odometer) {
 
     // Round to nearest 5000 for cache key
     const milesKey = odometer ? Math.round(odometer / 5000) * 5000 : 0;
-    const cacheKey = `${year}|${makeLower}|${modelLower}|${milesKey}`;
+    const cacheKey = `${year}|${makeLower}|${modelNormalized}|${milesKey}`;
     if (marketcheckCache.has(cacheKey)) {
         return marketcheckCache.get(cacheKey);
     }
@@ -150,7 +160,7 @@ async function getMarketcheckPrice(year, make, model, odometer) {
         api_key: MARKETCHECK_KEY,
         year: String(year),
         make: makeLower,
-        model: modelLower,
+        model: modelNormalized,
         miles_min: String(milesMin),
         miles_max: String(milesMax),
         rows: '20',
