@@ -44,11 +44,18 @@ SEGMENT_SCORES = {
 TIER_1_MODELS = [
     "F-150", "Silverado 1500", "Ram 1500", "Tacoma", "RAV4",
     "CR-V", "Rogue", "Camry", "Accord", "Tesla Model Y", "Tesla Model 3",
+    # High-demand gov fleet trucks
+    "F-250", "F-350", "Silverado 2500", "Silverado 3500", "Ram 2500", "Ram 3500",
+    "Tundra", "Sierra 1500", "Sierra 2500", "Sierra 3500",
 ]
 
 TIER_2_MODELS = [
     "Highlander", "Pilot", "Explorer", "Equinox", "Corolla",
-    "Civic", "Altima", "Escape", "Tundra", "Colorado", "Frontier",
+    "Civic", "Altima", "Escape", "Colorado", "Frontier",
+    # Common gov fleet vehicles
+    "Tahoe", "Suburban", "Yukon", "Expedition", "Durango",
+    "Charger", "Impala", "Fusion", "Malibu", "Patrol",
+    "Transit", "Express Van", "Savana",
 ]
 
 # Model → segment classification
