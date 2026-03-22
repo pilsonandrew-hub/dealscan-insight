@@ -524,7 +524,7 @@ export const api = {
   async passOpportunity(opportunityId: string): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/opportunities/${opportunityId}/pass`, {
+    const res = await fetch(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
       method: 'POST',
       headers: {
         'Authorization': token ? `Bearer ${token}` : '',
