@@ -458,19 +458,61 @@ export const api = {
     }
   },
 
+  // Get Apify actor last run times for green dot status
+  async getApifyActorStatus(): Promise<Map<string, string>> {
+    const ACTOR_IDS: Record<string, string> = {
+      govdeals: "CuKaIAcWyFS0EPrAz",
+      publicsurplus: "9xxQLlRsROnSgA42i",
+      govplanet: "pO2t5UDoSVmO1gvKJ",
+      allsurplus: "gYGIfHeYeN3EzmLnB",
+      proxibid: "bxhncvtHEP712WX2e",
+      "hibid-v2": "7s9e0eATTt1kuGGfE",
+      hibid: "7s9e0eATTt1kuGGfE",
+      municibid: "svmsItf3CRBZuIntp",
+      gsaauctions: "fvDnYmGuFBCrwpEi9",
+      jjkane: "lvb7T6VMFfNUQpqlq",
+      bidspotter: "5Eu3hfCcBBdzp6I1u",
+    };
+    const APIFY_TOKEN = import.meta.env.VITE_APIFY_TOKEN;
+
+    const results = new Map<string, string>();
+    const fetches = Object.entries(ACTOR_IDS).map(async ([source, actorId]) => {
+      try {
+        const res = await fetch(
+          `https://api.apify.com/v2/acts/${actorId}/runs?limit=1&desc=1`,
+          { headers: { Authorization: `Bearer ${APIFY_TOKEN}` } }
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        const lastRun = json?.data?.items?.[0]?.finishedAt;
+        if (lastRun) results.set(source, lastRun);
+      } catch {
+        // Silently ignore individual fetch failures
+      }
+    });
+    await Promise.all(fetches);
+    return results;
+  },
+
   // Get scraper sources with last-run info
   async getScraperSources(): Promise<Array<{ name: string; last_run: string | null; count: number }>> {
-    try {
-      const { data, error } = await supabase
-        .from('opportunities')
-        .select('source, processed_at, created_at')
-        .order('processed_at', { ascending: false })
-        .limit(2000);
+    const RETIRED_SOURCES = new Set(["hibid-bidcal", "equipmentfacts"]);
 
-      if (error) throw error;
+    try {
+      // Fetch DB data and Apify status in parallel
+      const [dbResult, apifyStatus] = await Promise.all([
+        supabase
+          .from('opportunities')
+          .select('source, processed_at, created_at')
+          .order('processed_at', { ascending: false })
+          .limit(2000),
+        this.getApifyActorStatus()
+      ]);
+
+      if (dbResult.error) throw dbResult.error;
 
       const sourceMap = new Map<string, { last_run: string; count: number }>();
-      for (const row of data || []) {
+      for (const row of dbResult.data || []) {
         const src = row.source;
         if (!sourceMap.has(src)) {
           sourceMap.set(src, { last_run: row.processed_at || row.created_at, count: 1 });
@@ -479,11 +521,14 @@ export const api = {
         }
       }
 
-      return Array.from(sourceMap.entries()).map(([name, v]) => ({
-        name,
-        last_run: v.last_run,
-        count: v.count
-      }));
+      // Filter out retired sources and merge with Apify last_run times
+      return Array.from(sourceMap.entries())
+        .filter(([name]) => !RETIRED_SOURCES.has(name))
+        .map(([name, v]) => ({
+          name,
+          last_run: apifyStatus.get(name) || v.last_run,
+          count: v.count
+        }));
     } catch {
       return [];
     }
