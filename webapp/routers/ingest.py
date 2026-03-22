@@ -1600,6 +1600,13 @@ def passes_basic_gates(vehicle: dict) -> dict:
     mileage = vehicle.get("mileage")
     source = (vehicle.get("source_site") or "").lower()
 
+    # Normalize source name variants to canonical form for gate lookups
+    _source_aliases = {
+        "hibid-v2": "hibid", "hibid-bidcal": "hibid", "hibid_v2": "hibid",
+        "jj kane": "jjkane", "jj_kane": "jjkane", "jjkane.com": "jjkane",
+    }
+    source = _source_aliases.get(source, source)
+
     # Government/auction sources: lower min bid, higher age/mileage tolerance
     gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter", "hibid"}
     is_gov = source in gov_sources_bid
