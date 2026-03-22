@@ -1998,7 +1998,12 @@ async def sync_to_notion(vehicle: dict) -> bool:
 async def send_telegram_alert(deal: dict) -> Optional[str]:
     """Send a single Telegram alert, log the receipt, and return the Telegram message_id."""
     run_id = deal.get("run_id") or "unknown"
-    listing_url = deal.get("listing_url") or ""
+    raw_listing_url = deal.get("listing_url") or ""
+    # Strip query params from GovPlanet URLs — they trigger geo-redirects to European content
+    if "govplanet.com" in raw_listing_url:
+        listing_url = raw_listing_url.split("?")[0]
+    else:
+        listing_url = raw_listing_url
     listing_id = deal.get("listing_id") or _compute_listing_id(deal.get("source_site") or "", listing_url)
     existing_delivery = _delivery_log_lookup(run_id, listing_id, "telegram_alert")
     if existing_delivery and existing_delivery.get("status") == "sent":
@@ -2099,7 +2104,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"Basis: {acquisition_basis_source}\n"
                 f"{truth_note}"
                 f"State: {deal.get('state', '?')}\n"
-                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({deal.get('listing_url', '')})"
+                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({listing_url})"
             )
         else:
             msg = (
@@ -2113,7 +2118,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 f"{truth_note}"
                 f"State: {deal.get('state', '?')}\n"
                 f"Gross: ${score_breakdown.get('gross_margin', 0):,.0f}\n"
-                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({deal.get('listing_url', '')})"
+                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({listing_url})"
             )
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -2122,7 +2127,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                     "chat_id": TELEGRAM_CHAT_ID,
                     "text": msg,
                     "parse_mode": "Markdown",
-                    "disable_web_page_preview": False,
+                    "link_preview_options": {"is_disabled": True},
                     "reply_markup": reply_markup,
                 },
             )
