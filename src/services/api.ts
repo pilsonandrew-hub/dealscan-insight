@@ -459,7 +459,7 @@ export const api = {
   },
 
   // Get Apify actor last run times for green dot status
-  async getApifyActorStatus(): Promise<Map<string, string>> {
+  async getApifyActorStatus(): Promise<Map<string, { last_run: string; succeeded: boolean }>> {
     const ACTOR_IDS: Record<string, string> = {
       govdeals: "CuKaIAcWyFS0EPrAz",
       publicsurplus: "9xxQLlRsROnSgA42i",
@@ -473,9 +473,9 @@ export const api = {
       jjkane: "lvb7T6VMFfNUQpqlq",
       bidspotter: "5Eu3hfCcBBdzp6I1u",
     };
-    const APIFY_TOKEN = import.meta.env.VITE_APIFY_TOKEN;
+    const APIFY_TOKEN = import.meta.env.VITE_APIFY_TOKEN || "";
 
-    const results = new Map<string, string>();
+    const results = new Map<string, { last_run: string; succeeded: boolean }>();
     const fetches = Object.entries(ACTOR_IDS).map(async ([source, actorId]) => {
       try {
         const res = await fetch(
@@ -484,8 +484,10 @@ export const api = {
         );
         if (!res.ok) return;
         const json = await res.json();
-        const lastRun = json?.data?.items?.[0]?.finishedAt;
-        if (lastRun) results.set(source, lastRun);
+        const run = json?.data?.items?.[0];
+        const lastRun = run?.finishedAt;
+        const succeeded = run?.status === 'SUCCEEDED';
+        if (lastRun) results.set(source, { last_run: lastRun, succeeded });
       } catch {
         // Silently ignore individual fetch failures
       }
