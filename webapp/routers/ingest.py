@@ -14,7 +14,7 @@ Fixes applied (2026-03-11):
 - Telegram hot deal alerts wired
 - Dataset ID format validated before fetch
 """
-from fastapi import APIRouter, Request, HTTPException, Header
+from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks
 from typing import Any, Optional
 import hmac
 import hashlib
@@ -808,9 +808,380 @@ def _record_pre_save_skip(
     )
 
 
+async def _process_webhook_items(
+    payload: dict,
+    metadata: dict,
+    apify_run_id: str,
+    audit_state: dict,
+    webhook_log_id: Any,
+) -> None:
+    """Background task: fetch Apify dataset and process all items."""
+    try:
+        if supabase_client is not None:
+            try:
+                existing = (
+                    supabase_client.table("opportunities")
+                    .select("id")
+                    .eq("run_id", apify_run_id)
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    logger.warning(
+                        "[IDEMPOTENCY] run_id=%s has existing rows; replaying batch to avoid partial-run data loss",
+                        apify_run_id,
+                    )
+            except Exception as e:
+                logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
+
+        dataset_id = metadata.get("dataset_id") or ""
+
+        apify_token = _apify_api_token()
+        if not dataset_id and apify_run_id and apify_token:
+            import httpx
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    run_resp = await client.get(
+                        f"https://api.apify.com/v2/actor-runs/{apify_run_id}",
+                        headers={"Authorization": f"Bearer {apify_token}"},
+                    )
+                    run_resp.raise_for_status()
+                    run_data = run_resp.json().get("data", {})
+                    dataset_id = run_data.get("defaultDatasetId", "") or ""
+                    if dataset_id:
+                        logger.info(
+                            f"[INGEST] Resolved missing dataset_id via actor run lookup for run_id={apify_run_id}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"[INGEST] Unable to resolve dataset_id from actor run {apify_run_id}: {e}"
+                )
+
+        if not dataset_id:
+            update_webhook_log(
+                webhook_log_id,
+                "processed",
+                item_count=metadata["item_count"],
+                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            return
+
+        if not re.match(r'^[a-zA-Z0-9_-]{5,50}$', dataset_id):
+            logger.warning(f"[INGEST] Suspicious dataset_id rejected: {dataset_id}")
+            update_webhook_log(
+                webhook_log_id,
+                "error",
+                error_message=_merge_audit_error_message("invalid_dataset_id", _audit_fallbacks(audit_state)),
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            return
+
+        import httpx
+        apify_token = _apify_api_token()
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                resp = await client.get(
+                    f"https://api.apify.com/v2/datasets/{dataset_id}/items",
+                    params={"format": "json"},
+                    headers={"Authorization": f"Bearer {apify_token}"},
+                )
+                resp.raise_for_status()
+                items = resp.json()
+        except Exception as e:
+            logger.error(f"[INGEST] Failed to fetch Apify dataset {dataset_id}: {e}")
+            update_webhook_log(
+                webhook_log_id,
+                "error",
+                error_message=_merge_audit_error_message(f"fetch_failed: {e}", _audit_fallbacks(audit_state)),
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            return
+
+        if not isinstance(items, list):
+            update_webhook_log(
+                webhook_log_id,
+                "processed",
+                item_count=metadata["item_count"],
+                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
+                require_durable=True,
+                audit_state=audit_state,
+            )
+            return
+
+        processed = 0
+        evaluated = 0
+        saved_count = 0
+        failed_save_count = 0
+        skipped = 0
+        hot_deals = []
+        dataset_item_count = len(items)
+        skip_reasons: dict[str, int] = {}
+        save_outcomes: dict[str, int] = {}
+        duplicate_count = 0
+        notion_sync_count = 0
+
+        logger.info(
+            "[INGEST_RUN] start | run_id=%s | dataset_id=%s | items=%s",
+            apify_run_id,
+            dataset_id,
+            dataset_item_count,
+        )
+
+        for item_index, item in enumerate(items):
+            vehicle = normalize_apify_vehicle(
+                item,
+                apify_run_id,
+                default_time_anchor=metadata.get("created_at"),
+            )
+            if vehicle is None:
+                skipped += 1
+                _increment_reason_counter(skip_reasons, "normalize_rejected")
+                _record_pre_save_skip(
+                    item=item,
+                    run_id=apify_run_id,
+                    item_index=item_index,
+                    status="skipped_norm",
+                    error_message="normalize_rejected",
+                    audit_state=audit_state,
+                )
+                continue
+
+            gate_result = passes_basic_gates(vehicle)
+            if not gate_result["pass"]:
+                logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
+                skipped += 1
+                _increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_gate",
+                    error_message=gate_result["reason"],
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+                continue
+
+            score_result = score_vehicle(vehicle)
+            vehicle["dos_score"] = score_result["dos_score"]
+            vehicle["score_breakdown"] = score_result
+            vehicle["ingested_at"] = datetime.utcnow().isoformat()
+            evaluated += 1
+
+            if score_result.get("wholesale_margin", 0) < 1500:
+                logger.info(
+                    f"[MARGIN] below $1500 wholesale floor (${score_result.get('wholesale_margin', 0):,.0f}): "
+                    f"{vehicle.get('title','?')[:60]}"
+                )
+                skipped += 1
+                _increment_reason_counter(skip_reasons, "margin_below_floor")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_margin",
+                    error_message="margin_below_floor",
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+                continue
+
+            if score_result.get("investment_grade") == "Bronze":
+                logger.info(f"[CEILING] bronze reject: {vehicle.get('title','?')[:60]}")
+                skipped += 1
+                _increment_reason_counter(skip_reasons, "bronze_reject")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_bronze",
+                    error_message="bronze_reject",
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+                continue
+
+            if not score_result.get("ceiling_pass", True):
+                logger.info(
+                    f"[CEILING] rejected — {score_result.get('ceiling_reason')} | "
+                    f"headroom=${score_result.get('bid_headroom', 0):,.0f}: {vehicle.get('title','?')[:60]}"
+                )
+                skipped += 1
+                _increment_reason_counter(
+                    skip_reasons,
+                    f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
+                )
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_ceiling",
+                    error_message=score_result.get("ceiling_reason") or "ceiling_reject",
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+                continue
+
+            dedup = {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
+            if vehicle["dos_score"] >= 50:
+                dedup = check_and_handle_duplicate(supabase_client, vehicle)
+            is_dup = dedup["is_duplicate"]
+            if is_dup:
+                vehicle["is_duplicate"] = True
+                vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+                duplicate_count += 1
+                logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
+
+            saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
+            save_status = vehicle.get("_save_status", "unknown")
+            _increment_reason_counter(save_outcomes, save_status)
+            if saved_opportunity_id:
+                vehicle["opportunity_id"] = saved_opportunity_id
+
+            if vehicle.get("is_duplicate") and not is_dup:
+                is_dup = True
+                duplicate_count += 1
+                logger.info(
+                    "[DEDUP] canonical conflict recovered for %s: %s",
+                    vehicle.get("canonical_record_id"),
+                    vehicle.get("title", "?")[:50],
+                )
+
+            _record_delivery_log(
+                run_id=vehicle.get("run_id") or apify_run_id,
+                listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                listing_url=vehicle.get("listing_url"),
+                opportunity_id=saved_opportunity_id,
+                channel="db_save",
+                status=save_status,
+                error_message=None if save_status not in {"supabase_error", "direct_pg_error", "duplicate_unresolved", "direct_pg_unavailable"} else save_status,
+                require_durable=True,
+                audit_state=audit_state,
+            )
+
+            inserted_success = save_status in {
+                "saved_supabase",
+                "saved_supabase_duplicate",
+                "saved_direct_pg",
+                "saved_direct_pg_duplicate",
+            }
+            existing_success = save_status == "duplicate_existing"
+            save_succeeded = inserted_success or existing_success
+            is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved"} or is_dup
+            if save_succeeded:
+                processed += 1
+                if inserted_success:
+                    saved_count += 1
+            else:
+                failed_save_count += 1
+
+            if save_succeeded and is_dup and dedup.get("canonical_update"):
+                if _apply_canonical_update(dedup.get("canonical_update")):
+                    logger.info("[DEDUP] canonical source update applied for %s", dedup.get("canonical_record_id"))
+
+            if save_succeeded and not is_dup and vehicle["dos_score"] >= 65:
+                notion_synced = await sync_to_notion(vehicle)
+                if notion_synced:
+                    notion_sync_count += 1
+
+            logger.info(
+                f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
+                f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
+                f"| Gross=${score_result.get('gross_margin',0):,.0f} "
+                f"| Headroom=${score_result.get('bid_headroom',0):,.0f} | {vehicle.get('state')}"
+                + (" [DUP]" if is_dup else "")
+                + f" | save={save_status}"
+            )
+
+            if not is_existing_listing and save_status in {"saved_supabase", "saved_direct_pg"}:
+                alert_gate = _alert_gate_for_vehicle(vehicle)
+                if alert_gate.get("eligible"):
+                    logger.info(
+                        "[ALERT_GATE] eligible | %s | %s",
+                        alert_gate.get("summary"),
+                        vehicle.get("title", "?")[:80],
+                    )
+                    hot_deals.append(vehicle)
+                elif (
+                    vehicle["dos_score"] >= _env_float("HOT_DEAL_MIN_SCORE", 80.0)
+                    or score_result.get("investment_grade") in {"Gold", "Platinum"}
+                ):
+                    logger.info(
+                        "[ALERT_GATE] blocked | %s | reasons=%s | %s",
+                        alert_gate.get("summary"),
+                        ",".join(alert_gate.get("blocking_reasons") or ["unknown"]),
+                        vehicle.get("title", "?")[:80],
+                    )
+
+        if hot_deals:
+            await send_telegram_alerts(hot_deals)
+
+        logger.info(
+            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | inserted=%s | existing=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
+            apify_run_id,
+            dataset_id,
+            dataset_item_count,
+            evaluated,
+            saved_count,
+            save_outcomes.get("duplicate_existing", 0),
+            failed_save_count,
+            skipped,
+            duplicate_count,
+            notion_sync_count,
+            len(hot_deals),
+            save_outcomes,
+            skip_reasons,
+        )
+
+        update_webhook_log(
+            webhook_log_id,
+            "processed" if failed_save_count == 0 else "degraded",
+            item_count=dataset_item_count,
+            error_message=_merge_audit_error_message(
+                (
+                    None
+                    if failed_save_count == 0
+                    and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
+                    else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
+                ),
+                _audit_fallbacks(audit_state),
+            ),
+            require_durable=True,
+            audit_state=audit_state,
+        )
+    except CriticalAuditWriteError as e:
+        logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, e)
+    except Exception as e:
+        logger.error("[INGEST] Background processing failed for run_id=%s: %s", apify_run_id, e)
+        if webhook_log_id:
+            try:
+                update_webhook_log(
+                    webhook_log_id,
+                    "error",
+                    error_message=_merge_audit_error_message(str(e), _audit_fallbacks(audit_state)),
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+            except CriticalAuditWriteError as audit_error:
+                logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, audit_error)
+
+
 @router.post("/apify")
 async def apify_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_apify_webhook_secret: Optional[str] = Header(None)
 ):
     # Verify webhook secret
@@ -891,381 +1262,15 @@ async def apify_webhook(
             audit_state=audit_state,
         )
 
-        if supabase_client is not None:
-            try:
-                existing = (
-                    supabase_client.table("opportunities")
-                    .select("id")
-                    .eq("run_id", apify_run_id)
-                    .limit(1)
-                    .execute()
-                )
-                if existing.data:
-                    logger.warning(
-                        "[IDEMPOTENCY] run_id=%s has existing rows; replaying batch to avoid partial-run data loss",
-                        apify_run_id,
-                    )
-            except Exception as e:
-                logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
-
-        # Extract and validate dataset ID. Some Apify webhook payloads omit
-        # resource.defaultDatasetId even though the run itself has it, so fall
-        # back to resolving the run details directly from Apify before giving up.
-        resource = payload.get("resource", {}) if isinstance(payload.get("resource"), dict) else {}
-        dataset_id = (
-            metadata.get("dataset_id")
-            or ""
-        )
-
-        apify_token = _apify_api_token()
-        if not dataset_id and apify_run_id and apify_token:
-            import httpx
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    run_resp = await client.get(
-                        f"https://api.apify.com/v2/actor-runs/{apify_run_id}",
-                        headers={"Authorization": f"Bearer {apify_token}"},
-                    )
-                    run_resp.raise_for_status()
-                    run_data = run_resp.json().get("data", {})
-                    dataset_id = run_data.get("defaultDatasetId", "") or ""
-                    if dataset_id:
-                        logger.info(
-                            f"[INGEST] Resolved missing dataset_id via actor run lookup for run_id={apify_run_id}"
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"[INGEST] Unable to resolve dataset_id from actor run {apify_run_id}: {e}"
-                )
-
-        if not dataset_id:
-            response = {"status": "ok", "message": "No dataset to process"}
-            update_webhook_log(
-                webhook_log_id,
-                "processed",
-                item_count=metadata["item_count"],
-                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
-                require_durable=True,
-                audit_state=audit_state,
-            )
-            _attach_audit_state(response, audit_state)
-            return response
-
-        # Validate dataset ID format (alphanumeric, no path traversal)
-        if not re.match(r'^[a-zA-Z0-9_-]{5,50}$', dataset_id):
-            logger.warning(f"[INGEST] Suspicious dataset_id rejected: {dataset_id}")
-            raise HTTPException(status_code=400, detail="Invalid dataset ID")
-
-        # Fetch dataset items from Apify API using Authorization header (not query param)
-        import httpx
-        apify_token = _apify_api_token()
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(
-                    f"https://api.apify.com/v2/datasets/{dataset_id}/items",
-                    params={"format": "json"},
-                    headers={"Authorization": f"Bearer {apify_token}"},
-                )
-                resp.raise_for_status()
-                items = resp.json()
-        except Exception as e:
-            logger.error(f"[INGEST] Failed to fetch Apify dataset {dataset_id}: {e}")
-            raise HTTPException(status_code=502, detail="Failed to fetch dataset")
-
-        if not isinstance(items, list):
-            response = {"status": "ok", "message": "No items in dataset"}
-            update_webhook_log(
-                webhook_log_id,
-                "processed",
-                item_count=metadata["item_count"],
-                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
-                require_durable=True,
-                audit_state=audit_state,
-            )
-            _attach_audit_state(response, audit_state)
-            return response
-
-        processed = 0
-        evaluated = 0
-        saved_count = 0
-        failed_save_count = 0
-        skipped = 0
-        hot_deals = []
-        dataset_item_count = len(items)
-        skip_reasons: dict[str, int] = {}
-        save_outcomes: dict[str, int] = {}
-        duplicate_count = 0
-        notion_sync_count = 0
-
-        logger.info(
-            "[INGEST_RUN] start | run_id=%s | dataset_id=%s | items=%s",
+        background_tasks.add_task(
+            _process_webhook_items,
+            payload,
+            metadata,
             apify_run_id,
-            dataset_id,
-            dataset_item_count,
-        )
-
-        for item_index, item in enumerate(items):
-            vehicle = normalize_apify_vehicle(
-                item,
-                apify_run_id,
-                default_time_anchor=metadata.get("created_at"),
-            )
-            if vehicle is None:
-                skipped += 1
-                _increment_reason_counter(skip_reasons, "normalize_rejected")
-                _record_pre_save_skip(
-                    item=item,
-                    run_id=apify_run_id,
-                    item_index=item_index,
-                    status="skipped_norm",
-                    error_message="normalize_rejected",
-                    audit_state=audit_state,
-                )
-                continue
-
-            gate_result = passes_basic_gates(vehicle)
-            if not gate_result["pass"]:
-                logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
-                skipped += 1
-                _increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
-                _record_delivery_log(
-                    run_id=vehicle.get("run_id") or apify_run_id,
-                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
-                    listing_url=vehicle.get("listing_url"),
-                    opportunity_id=None,
-                    channel="db_save",
-                    status="skipped_gate",
-                    error_message=gate_result["reason"],
-                    require_durable=True,
-                    audit_state=audit_state,
-                )
-                continue
-
-            # Score using real DOS formula
-            score_result = score_vehicle(vehicle)
-            vehicle["dos_score"] = score_result["dos_score"]
-            vehicle["score_breakdown"] = score_result
-            vehicle["ingested_at"] = datetime.utcnow().isoformat()
-            evaluated += 1
-
-            # $1500 wholesale margin floor — capital protection
-            if score_result.get("wholesale_margin", 0) < 1500:
-                logger.info(
-                    f"[MARGIN] below $1500 wholesale floor (${score_result.get('wholesale_margin', 0):,.0f}): "
-                    f"{vehicle.get('title','?')[:60]}"
-                )
-                skipped += 1
-                _increment_reason_counter(skip_reasons, "margin_below_floor")
-                _record_delivery_log(
-                    run_id=vehicle.get("run_id") or apify_run_id,
-                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
-                    listing_url=vehicle.get("listing_url"),
-                    opportunity_id=None,
-                    channel="db_save",
-                    status="skipped_margin",
-                    error_message="margin_below_floor",
-                    require_durable=True,
-                    audit_state=audit_state,
-                )
-                continue
-
-            if score_result.get("investment_grade") == "Bronze":
-                logger.info(f"[CEILING] bronze reject: {vehicle.get('title','?')[:60]}")
-                skipped += 1
-                _increment_reason_counter(skip_reasons, "bronze_reject")
-                _record_delivery_log(
-                    run_id=vehicle.get("run_id") or apify_run_id,
-                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
-                    listing_url=vehicle.get("listing_url"),
-                    opportunity_id=None,
-                    channel="db_save",
-                    status="skipped_bronze",
-                    error_message="bronze_reject",
-                    require_durable=True,
-                    audit_state=audit_state,
-                )
-                continue
-
-            if not score_result.get("ceiling_pass", True):
-                logger.info(
-                    f"[CEILING] rejected — {score_result.get('ceiling_reason')} | "
-                    f"headroom=${score_result.get('bid_headroom', 0):,.0f}: {vehicle.get('title','?')[:60]}"
-                )
-                skipped += 1
-                _increment_reason_counter(
-                    skip_reasons,
-                    f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
-                )
-                _record_delivery_log(
-                    run_id=vehicle.get("run_id") or apify_run_id,
-                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
-                    listing_url=vehicle.get("listing_url"),
-                    opportunity_id=None,
-                    channel="db_save",
-                    status="skipped_ceiling",
-                    error_message=score_result.get("ceiling_reason") or "ceiling_reject",
-                    require_durable=True,
-                    audit_state=audit_state,
-                )
-                continue
-
-            # Deduplication check
-            dedup = {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
-            if vehicle["dos_score"] >= 50:
-                dedup = check_and_handle_duplicate(supabase_client, vehicle)
-            is_dup = dedup["is_duplicate"]
-            if is_dup:
-                vehicle["is_duplicate"] = True
-                vehicle["canonical_record_id"] = dedup["canonical_record_id"]
-                duplicate_count += 1
-                logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
-
-            # Save to Supabase always (audit trail)
-            saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
-            save_status = vehicle.get("_save_status", "unknown")
-            _increment_reason_counter(save_outcomes, save_status)
-            if saved_opportunity_id:
-                vehicle["opportunity_id"] = saved_opportunity_id
-
-            if vehicle.get("is_duplicate") and not is_dup:
-                is_dup = True
-                duplicate_count += 1
-                logger.info(
-                    "[DEDUP] canonical conflict recovered for %s: %s",
-                    vehicle.get("canonical_record_id"),
-                    vehicle.get("title", "?")[:50],
-                )
-
-            _record_delivery_log(
-                run_id=vehicle.get("run_id") or apify_run_id,
-                listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
-                listing_url=vehicle.get("listing_url"),
-                opportunity_id=saved_opportunity_id,
-                channel="db_save",
-                status=save_status,
-                error_message=None if save_status not in {"supabase_error", "direct_pg_error", "duplicate_unresolved", "direct_pg_unavailable"} else save_status,
-                require_durable=True,
-                audit_state=audit_state,
-            )
-
-            inserted_success = save_status in {
-                "saved_supabase",
-                "saved_supabase_duplicate",
-                "saved_direct_pg",
-                "saved_direct_pg_duplicate",
-            }
-            existing_success = save_status == "duplicate_existing"
-            save_succeeded = inserted_success or existing_success
-            is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved"} or is_dup
-            if save_succeeded:
-                processed += 1
-                if inserted_success:
-                    saved_count += 1
-            else:
-                failed_save_count += 1
-
-            # Replay-safe side effects for canonical records; downstream sinks dedupe independently.
-            if save_succeeded and is_dup and dedup.get("canonical_update"):
-                if _apply_canonical_update(dedup.get("canonical_update")):
-                    logger.info("[DEDUP] canonical source update applied for %s", dedup.get("canonical_record_id"))
-
-            if save_succeeded and not is_dup and vehicle["dos_score"] >= 65:
-                notion_synced = await sync_to_notion(vehicle)
-                if notion_synced:
-                    notion_sync_count += 1
-
-            logger.info(
-                f"[INGEST] {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} "
-                f"| DOS={vehicle['dos_score']} | Bid=${vehicle.get('current_bid'):,.0f} "
-                f"| Gross=${score_result.get('gross_margin',0):,.0f} "
-                f"| Headroom=${score_result.get('bid_headroom',0):,.0f} | {vehicle.get('state')}"
-                + (" [DUP]" if is_dup else "")
-                + f" | save={save_status}"
-            )
-
-            if not is_existing_listing and save_status in {"saved_supabase", "saved_direct_pg"}:
-                alert_gate = _alert_gate_for_vehicle(vehicle)
-                if alert_gate.get("eligible"):
-                    logger.info(
-                        "[ALERT_GATE] eligible | %s | %s",
-                        alert_gate.get("summary"),
-                        vehicle.get("title", "?")[:80],
-                    )
-                    hot_deals.append(vehicle)
-                elif (
-                    vehicle["dos_score"] >= _env_float("HOT_DEAL_MIN_SCORE", 80.0)
-                    or score_result.get("investment_grade") in {"Gold", "Platinum"}
-                ):
-                    logger.info(
-                        "[ALERT_GATE] blocked | %s | reasons=%s | %s",
-                        alert_gate.get("summary"),
-                        ",".join(alert_gate.get("blocking_reasons") or ["unknown"]),
-                        vehicle.get("title", "?")[:80],
-                    )
-
-        # Fire Telegram alerts for hot deals
-        if hot_deals:
-            await send_telegram_alerts(hot_deals)
-
-        logger.info(
-            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | inserted=%s | existing=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
-            apify_run_id,
-            dataset_id,
-            dataset_item_count,
-            evaluated,
-            saved_count,
-            save_outcomes.get("duplicate_existing", 0),
-            failed_save_count,
-            skipped,
-            duplicate_count,
-            notion_sync_count,
-            len(hot_deals),
-            save_outcomes,
-            skip_reasons,
-        )
-
-        response_status = "degraded" if failed_save_count else "ok"
-        response = {
-            "status": response_status,
-            "run_id": apify_run_id,
-            "dataset_id": dataset_id,
-            "evaluated": evaluated,
-            "processed": processed,
-            "inserted": saved_count,
-            "existing": save_outcomes.get("duplicate_existing", 0),
-            "saved": saved_count,
-            "failed_save": failed_save_count,
-            "skipped": skipped,
-            "duplicates": duplicate_count,
-            "notion_sync": notion_sync_count,
-            "save_outcomes": save_outcomes,
-            "skip_reasons": skip_reasons,
-            "hot_deals": len(hot_deals),
-            "hot_deal_vehicles": [
-                f"{v.get('year')} {v.get('make')} {v.get('model')} | "
-                f"{v.get('score_breakdown', {}).get('investment_grade', 'Watch')} | "
-                f"Score={v['dos_score']} | ${v.get('current_bid'):,.0f}"
-                for v in hot_deals
-            ],
-        }
-        update_webhook_log(
+            audit_state,
             webhook_log_id,
-            "processed" if failed_save_count == 0 else "degraded",
-            item_count=dataset_item_count,
-            error_message=_merge_audit_error_message(
-                (
-                    None
-                    if failed_save_count == 0
-                    and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
-                    else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
-                ),
-                _audit_fallbacks(audit_state),
-            ),
-            require_durable=True,
-            audit_state=audit_state,
         )
-        _attach_audit_state(response, audit_state)
-        return response
+        return {"status": "ok", "run_id": apify_run_id, "message": "Processing in background"}
     except CriticalAuditWriteError as e:
         logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, e)
         raise HTTPException(status_code=503, detail="Critical ingest audit write failed") from e
