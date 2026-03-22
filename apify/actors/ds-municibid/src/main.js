@@ -1,9 +1,14 @@
 /**
  * ds-municibid — Municibid Automotive Scraper
  *
- * STATUS: WORKING — Cheerio (no browser needed)
+ * STATUS: FIXED 2026-03-21 — Selectors updated to match current site structure
  * Municibid has zero bot protection on /Browse/C160883/Automotive
- * Cards: h3.grid-card-title, .grid-card-location, .grid-card-price-value
+ * Cards use: [data-listingid] containers with:
+ *   .card-title a  → title + href
+ *   .card-subtitle → "City, STATE | Agency Name"
+ *   .NumberPart    → price digits
+ *   img.card-img-top → photo
+ * No pagination — all items load on single page.
  *
  * Categories scraped:
  *   C169048 = Cars, C11965711 = SUV, C169052 = Trucks, C169053 = Vans
@@ -13,7 +18,9 @@ import { Actor } from 'apify';
 import { CheerioCrawler } from 'crawlee';
 
 const SOURCE = 'municibid';
-const BASE = 'https://www.municibid.com';
+// NOTE: www.municibid.com 301-redirects to municibid.com (no-www).
+// CheerioCrawler must follow the redirect — use non-www base URL.
+const BASE = 'https://municibid.com';
 
 // Passenger vehicle categories only (no buses, motorcycles, heavy trucks)
 const CATEGORY_URLS = [
@@ -58,7 +65,7 @@ const MAKES = [
 ];
 
 await Actor.init();
-const { maxPages = 5, minBid = 500, maxBid = 35000 } = (await Actor.getInput()) ?? {};
+const { minBid = 200, maxBid = 35000 } = (await Actor.getInput()) ?? {};
 
 let found = 0, passed = 0;
 const sampleLocations = [];
@@ -122,78 +129,93 @@ function isPassengerVehicle(title = '') {
 }
 
 const crawler = new CheerioCrawler({
-    maxRequestsPerCrawl: CATEGORY_URLS.length * maxPages + CATEGORY_URLS.length,
+    maxRequestsPerCrawl: CATEGORY_URLS.length + 5,  // all items on single page, no pagination
     requestHandlerTimeoutSecs: 30,
     async requestHandler({ $, request, log }) {
         const url = request.url;
 
-        // Category / list page
-        const cards = $('.grid-card-body');
-        if (cards.length) {
-            log.info(`${url} → ${cards.length} cards`);
+        // Municibid uses [data-listingid] containers for each listing.
+        // Structure (as of 2026-03-21):
+        //   .card-title a        → title text + href="/Listing/Details/{id}/..."
+        //   .card-subtitle       → "City , STATE | Agency Name"
+        //   .NumberPart          → price digits (e.g. "1,000.00")
+        //   img.card-img-top     → photo src
+        // All listings load on a single page — no pagination.
+        const cards = $('[data-listingid]');
+        log.info(`${url} → ${cards.length} listings`);
 
-            cards.each((_, el) => {
-                const title = $(el).find('.grid-card-title').text().trim();
-                const location = $(el).find('.grid-card-location').text().trim();
-                recordLocationSample(location);
-                const priceText = $(el).find('.grid-card-price-value').text().replace(/[^0-9.]/g, '');
-                const bid = parseFloat(priceText) || 0;
-                const linkEl = $(el).closest('.grid-card').find('a[href*="/Listing/Details/"]').first();
-                const relHref = linkEl.attr('href') || '';
-                const listingUrl = relHref ? `${BASE}${relHref}` : '';
-
-                found++;
-
-                const state = parseState(location);
-                const year = parseYear(title);
-                const make = parseMake(title);
-
-                // Filters
-                if (!year || !make) return;
-                if (!isPassengerVehicle(title)) return;
-                if (bid < minBid || bid > maxBid) return;
-                const currentYear = new Date().getFullYear();
-                if (state) {
-                    if (!US_STATES.has(state)) return;
-                    if (HIGH_RUST.has(state)) {
-                        if (!(year >= currentYear - 2)) return;
-                        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
-                    }
-                }
-                const age = currentYear - year;
-                if (age > 12 || age < 0) return;
-
-                passed++;
-                const model = parseModel(title, make);
-
-                Actor.pushData({
-                    title: title,
-                    year,
-                    make,
-                    model,
-                    current_bid: bid,
-                    state,
-                    location,
-                    listing_url: listingUrl,
-                    photo_url: $(el).closest('.grid-card').find('img').attr('src') || null,
-                    source_site: SOURCE,
-                    scraped_at: new Date().toISOString(),
-                });
-            });
-
-            // Pagination: find next page link
-            const nextLink = $('a[rel="next"], .pagination a:contains("Next"), a:contains(">")').attr('href');
-            if (nextLink) {
-                const nextUrl = nextLink.startsWith('http') ? nextLink : `${BASE}${nextLink}`;
-                const pageNum = parseInt(new URL(nextUrl).searchParams.get('page') || '0');
-                if (pageNum < maxPages) {
-                    await crawler.addRequests([{ url: nextUrl }]);
-                }
-            }
+        if (!cards.length) {
+            log.warning(`No [data-listingid] cards found on: ${url}`);
+            // Debug: dump first 500 chars of body
+            log.warning(`Body preview: ${$('body').text().slice(0, 500)}`);
             return;
         }
 
-        log.warning(`No cards found on: ${url}`);
+        const batch = [];
+        cards.each((_, el) => {
+            // Use the mobile card (.d-md-none) which is always rendered server-side.
+            // If both mobile and desktop variants exist, jQuery will pick the first.
+            const titleEl = $(el).find('.card-title a').first();
+            const title = titleEl.text().trim();
+            const relHref = titleEl.attr('href') || '';
+            const listingUrl = relHref ? `${BASE}${relHref}` : '';
+
+            // Location: "Pelham , NY | Village of Pelham Department of Public Works"
+            const locationRaw = $(el).find('.card-subtitle').first().text().trim();
+            // Normalize double spaces around comma
+            const location = locationRaw.replace(/\s*,\s*/g, ', ').replace(/\s+\|\s+.*$/, '').trim();
+
+            recordLocationSample(location);
+
+            // Price: first .NumberPart inside this card
+            const priceText = $(el).find('.NumberPart').first().text().replace(/[^0-9.]/g, '');
+            const bid = parseFloat(priceText) || 0;
+
+            // Photo
+            const photoUrl = $(el).find('img').first().attr('src') || null;
+
+            found++;
+
+            const state = parseState(location);
+            const year = parseYear(title);
+            const make = parseMake(title);
+
+            // Filters
+            if (!year || !make) return;
+            if (!isPassengerVehicle(title)) return;
+            if (bid < minBid || bid > maxBid) return;
+            const currentYear = new Date().getFullYear();
+            if (state) {
+                if (!US_STATES.has(state)) return;
+                if (HIGH_RUST.has(state)) {
+                    if (!(year >= currentYear - 8)) return;
+                    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤8yr old)`);
+                }
+            }
+            const age = currentYear - year;
+            if (age > 15 || age < 0) return;
+
+            passed++;
+            const model = parseModel(title, make);
+
+            batch.push({
+                title,
+                year,
+                make,
+                model,
+                current_bid: bid,
+                state,
+                location,
+                listing_url: listingUrl,
+                photo_url: photoUrl,
+                source_site: SOURCE,
+                scraped_at: new Date().toISOString(),
+            });
+        });
+
+        if (batch.length > 0) {
+            await Actor.pushData(batch);
+        }
     },
 });
 
