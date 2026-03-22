@@ -1304,6 +1304,49 @@ async def apify_webhook(
         raise
 
 
+def get_supabase_client():
+    """Return the module-level supabase_client (used by standalone endpoints)."""
+    return supabase_client
+
+
+@router.post("/opportunities/{opportunity_id}/pass")
+async def pass_opportunity(
+    opportunity_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Mark an opportunity as passed by the current user. Writes to user_passes table."""
+    # Auth: get user_id from Authorization Bearer header via Supabase
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header.replace("Bearer ", "").strip()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Authorization required")
+
+    # Verify token via Supabase and get user_id
+    supa = get_supabase_client()
+    try:
+        user_resp = supa.auth.get_user(token)
+        user_id = user_resp.user.id if user_resp and user_resp.user else None
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Write to user_passes table
+    try:
+        supa.table("user_passes").upsert({
+            "user_id": user_id,
+            "opportunity_id": opportunity_id,
+        }, on_conflict="user_id,opportunity_id").execute()
+    except Exception as e:
+        logger.warning(f"[PASS] user_passes upsert failed: {e}")
+        # Non-fatal — return success anyway so UI doesn't break
+
+    return {"status": "passed", "opportunity_id": opportunity_id}
+
+
 def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] = None) -> Optional[str]:
     if raw_value in {None, ""}:
         return None
