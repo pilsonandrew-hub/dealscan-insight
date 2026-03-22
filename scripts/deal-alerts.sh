@@ -75,7 +75,7 @@ def supabase_post(table, row):
 
 
 def send_telegram(text):
-    payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}).encode()
+    payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}).encode()
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         data=payload,
