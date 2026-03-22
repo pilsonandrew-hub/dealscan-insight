@@ -100,3 +100,4 @@ async function initializeApplication() {
 // Start the application
 console.log('🔥 main.tsx: Launching DealerScope...')
 initializeApplication()// force redeploy Fri Mar 20 18:48:02 PDT 2026
+// force vercel redeploy Sun Mar 22 01:12:01 PDT 2026
