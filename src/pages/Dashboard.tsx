@@ -810,13 +810,56 @@ const RoverTab = () => {
   const [isFallback, setIsFallback] = useState(false);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
   const [roverDebug, setRoverDebug] = useState<string>('');
+  const [roverMode, setRoverMode] = useState<'ai' | 'manual'>(() =>
+    (localStorage.getItem('rover_mode') as 'ai' | 'manual') || 'ai'
+  );
 
   const load = useCallback(async () => {
     const token = session?.access_token;
     if (!user || !token) { setRoverDebug('No user session'); setLoading(false); return; }
-    setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     setLoading(true);
     setIsFallback(false);
+
+    // ── Manual mode: skip AI, query Supabase directly ────────────────────────
+    if (roverMode === 'manual') {
+      try {
+        const { data: manualDeals } = await supabase
+          .from('opportunities')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
+          .gte('dos_score', 65)
+          .order('dos_score', { ascending: false })
+          .limit(25);
+        if (manualDeals && manualDeals.length > 0) {
+          const mapped: RoverRecommendation[] = manualDeals.map((d: any) => ({
+            id: d.id, make: d.make, model: d.model, year: d.year, mileage: d.mileage,
+            current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
+            score: d.dos_score, dos_score: d.dos_score, gross_margin: d.gross_margin,
+            potential_profit: d.potential_profit, profit_margin: d.profit_margin,
+            state: d.state, source_site: d.source_site, auction_end: d.auction_end,
+            listing_url: d.listing_url, vin: d.vin, total_cost: d.total_cost,
+            risk_score: d.risk_score, transportation_cost: d.transportation_cost,
+            fees_cost: d.fees_cost, roi: d.roi, roi_percentage: d.roi_percentage,
+            confidence_score: d.confidence_score, roi_per_day: d.roi_per_day,
+            retail_ctm_pct: d.retail_ctm_pct, estimated_days_to_sale: d.estimated_days_to_sale,
+            max_bid: d.max_bid, pricing_source: d.pricing_source,
+            manheim_mmr_mid: d.manheim_mmr_mid, manheim_mmr_low: d.manheim_mmr_low,
+            manheim_mmr_high: d.manheim_mmr_high, pricing_updated_at: d.pricing_updated_at,
+            investment_grade: d.investment_grade,
+          }));
+          setRecs(mapped);
+        } else {
+          setRecs([]);
+        }
+      } catch (e) {
+        console.error('RoverTab manual load error:', e);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // ── AI mode ──────────────────────────────────────────────────────────────
+    setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     try {
       const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
       const items = result?.items ?? [];
@@ -928,7 +971,7 @@ const RoverTab = () => {
     } finally {
       setLoading(false);
     }
-  }, [user, session, authLoading]);
+  }, [user, session, authLoading, roverMode]);
 
   // Only fire after auth has fully initialized
   useEffect(() => {
@@ -944,13 +987,20 @@ const RoverTab = () => {
     }
   };
 
+  const handleModeChange = (mode: 'ai' | 'manual') => {
+    localStorage.setItem('rover_mode', mode);
+    setRoverMode(mode);
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white">Rover</h2>
           <p className="text-sm text-gray-400">
-            {isFallback
+            {roverMode === 'manual'
+              ? 'Sorted by DOS Score'
+              : isFallback
               ? 'Top Deals — Training Rover — interact with deals to personalize'
               : 'Personalized recommendations based on your activity'}
           </p>
@@ -960,7 +1010,31 @@ const RoverTab = () => {
         </button>
       </div>
 
-      {isFallback && (
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => handleModeChange('ai')}
+          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            roverMode === 'ai'
+              ? 'bg-emerald-600 text-white'
+              : 'text-gray-400 hover:text-white'
+          }`}
+        >
+          🤖 AI Personalized
+        </button>
+        <button
+          onClick={() => handleModeChange('manual')}
+          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            roverMode === 'manual'
+              ? 'bg-emerald-600 text-white'
+              : 'text-gray-400 hover:text-white'
+          }`}
+        >
+          📊 Manual (DOS Sorted)
+        </button>
+      </div>
+
+      {roverMode === 'ai' && isFallback && (
         <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
           <Navigation className="h-4 w-4 flex-shrink-0" />
           <span>Training Rover — interact with deals to personalize your recommendations over time.</span>
@@ -1017,6 +1091,25 @@ const RoverTab = () => {
             investment_grade: rec.investment_grade as Opportunity['investment_grade'],
             vehicle: { make: rec.make || '', model: rec.model || '', year: rec.year || 0, vin: rec.vin || '', mileage: rec.mileage || 0 },
           });
+
+          // Manual mode: flat grid sorted by DOS score, no why-signals
+          if (roverMode === 'manual') {
+            return (
+              <div className="space-y-4">
+                <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">📊 Sorted by DOS Score</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {recs.map(rec => {
+                    const id = rec.id || rec.opportunity_id || Math.random().toString();
+                    return (
+                      <div key={id}>
+                        <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
 
           // Infer body type from model name for cold-start categorization
           const inferType = (model = ''): 'truck' | 'suv' | 'other' => {
@@ -1234,12 +1327,52 @@ const LogOutcomeModal = ({
   );
 };
 
+interface ReconActivity {
+  totalEvaluated: number;
+  avgMaxBid: number | null;
+  tightestDeal: { year?: number; make?: string; model?: string; max_bid?: number } | null;
+  topSegment: string | null;
+}
+
 const AnalyticsTab = () => {
+  const { session } = useAuth();
   const [allDeals, setAllDeals] = useState<DashboardOpportunity[]>([]);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [logDeal, setLogDeal] = useState<DashboardOpportunity | null>(null);
+  const [reconActivity, setReconActivity] = useState<ReconActivity | null>(null);
+  const [reconLoading, setReconLoading] = useState(true);
+
+  const fetchReconActivity = useCallback(async () => {
+    const userId = session?.user?.id;
+    if (!userId) { setReconLoading(false); return; }
+    try {
+      const { data } = await supabase
+        .from('recon_evaluations')
+        .select('id, make, model, year, max_bid, verdict')
+        .eq('user_id', userId);
+      if (!data || data.length === 0) {
+        setReconActivity({ totalEvaluated: 0, avgMaxBid: null, tightestDeal: null, topSegment: null });
+        return;
+      }
+      const totalEvaluated = data.length;
+      const bids = data.map((d: any) => d.max_bid).filter((b: any) => b != null) as number[];
+      const avgMaxBid = bids.length > 0 ? bids.reduce((a: number, b: number) => a + b, 0) / bids.length : null;
+      const nonPass = data.filter((d: any) => d.verdict !== 'PASS' && d.max_bid != null);
+      const tightestDeal = nonPass.length > 0
+        ? nonPass.sort((a: any, b: any) => (b.max_bid || 0) - (a.max_bid || 0))[0]
+        : null;
+      const makeCount: Record<string, number> = {};
+      data.forEach((d: any) => { if (d.make) makeCount[d.make] = (makeCount[d.make] || 0) + 1; });
+      const topSegment = Object.entries(makeCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      setReconActivity({ totalEvaluated, avgMaxBid, tightestDeal, topSegment });
+    } catch (e) {
+      console.error('[Analytics] recon activity fetch error:', e);
+    } finally {
+      setReconLoading(false);
+    }
+  }, [session]);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -1266,6 +1399,7 @@ const AnalyticsTab = () => {
   }, []);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
+  useEffect(() => { fetchReconActivity(); }, [fetchReconActivity]);
 
   if (loading) return <div className="p-6 text-center text-gray-500">Loading analytics...</div>;
 
@@ -1437,6 +1571,49 @@ const AnalyticsTab = () => {
       <div>
         <h2 className="text-xl font-bold text-white">Analytics</h2>
         <p className="text-sm text-gray-400">{allDeals.length} active deals analyzed</p>
+      </div>
+
+      {/* ── Recon Activity layer ── */}
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Recon Activity</p>
+        {reconLoading ? (
+          <div className="grid grid-cols-2 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse">
+                <div className="h-3 w-24 bg-gray-700 rounded mb-3" />
+                <div className="h-7 w-16 bg-gray-700 rounded" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            <StatCard
+              label="Vehicles Evaluated"
+              value={(reconActivity?.totalEvaluated ?? 0).toLocaleString()}
+              sub="All-time recon runs"
+              accent={(reconActivity?.totalEvaluated ?? 0) > 0}
+            />
+            <StatCard
+              label="Avg Max Bid"
+              value={reconActivity?.avgMaxBid != null ? fmt$(reconActivity.avgMaxBid) : '—'}
+              sub="Across all evaluations"
+              accent={reconActivity?.avgMaxBid != null}
+            />
+            <StatCard
+              label="Tightest Deal"
+              value={reconActivity?.tightestDeal
+                ? `${reconActivity.tightestDeal.year ?? ''} ${reconActivity.tightestDeal.make ?? ''} ${reconActivity.tightestDeal.model ?? ''}`.trim()
+                : '—'}
+              sub={reconActivity?.tightestDeal?.max_bid != null ? `Max bid ${fmt$(reconActivity.tightestDeal.max_bid)}` : 'Highest non-pass bid'}
+            />
+            <StatCard
+              label="Top Segment"
+              value={reconActivity?.topSegment ?? '—'}
+              sub="Most evaluated make"
+              accent={!!reconActivity?.topSegment}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Real outcome KPIs from dealer_sales / alert_log ── */}
