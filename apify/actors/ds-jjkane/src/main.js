@@ -18,7 +18,7 @@
  *
  * Marketcheck API:
  *   https://mc-api.marketcheck.com/v2/search/car/active
- *   api_key=Z56KBF2WRBWXcnPpbFBY8FEuRoUujiz4
+ *   api_key=cwOBTpHcggdsdrDjQVtXPe5tsWsrU5aD
  *   params: year, make, model, miles_min, miles_max (±20% of odometer)
  */
 
@@ -30,7 +30,7 @@ const ALGOLIA_SEARCH_KEY = '9d3241f7a3ee8947997deaa33cb0b249';
 const ALGOLIA_INDEX = 'api_items';
 const ALGOLIA_URL = `https://${ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/${ALGOLIA_INDEX}/query`;
 
-const MARKETCHECK_KEY = 'Z56KBF2WRBWXcnPpbFBY8FEuRoUujiz4';
+const MARKETCHECK_KEY = 'cwOBTpHcggdsdrDjQVtXPe5tsWsrU5aD';
 const MARKETCHECK_URL = 'https://mc-api.marketcheck.com/v2/search/car/active';
 
 // Auction-to-retail discount factor (government surplus clears at 60-75% retail)
