@@ -4,7 +4,7 @@ Opportunities API endpoints
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, and_
+from sqlalchemy import desc, and_, text
 from pydantic import BaseModel
 
 from webapp.database import get_db
@@ -223,6 +223,24 @@ async def save_opportunity(
     db.commit()
     
     return {"message": "Opportunity saved"}
+
+@router.post("/{opportunity_id}/pass")
+async def pass_opportunity(
+    opportunity_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Mark opportunity as passed (dismissed) for the current user"""
+    db.execute(
+        text(
+            "INSERT INTO user_passes (user_id, opportunity_id) "
+            "VALUES (:user_id, :opportunity_id::uuid) ON CONFLICT DO NOTHING"
+        ),
+        {"user_id": str(current_user.id), "opportunity_id": opportunity_id}
+    )
+    db.commit()
+    return {"success": True}
+
 
 @router.post("/{opportunity_id}/ignore")
 async def ignore_opportunity(

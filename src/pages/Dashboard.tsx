@@ -399,6 +399,7 @@ const StatCard = ({ label, value, sub, accent }: { label: string; value: string;
 
 // ─── TAB 1: Dashboard ─────────────────────────────────────────────────────────
 const DashboardTab = () => {
+  const { session } = useAuth();
   const [metrics, setMetrics] = useState({
     total_today: 0,
     hot_deals: 0,
@@ -410,6 +411,8 @@ const DashboardTab = () => {
   const [hotDeals, setHotDeals] = useState<Opportunity[]>([]);
   const [sources, setSources] = useState<ScraperSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [passedIds, setPassedIds] = useState<Set<string>>(new Set());
+  const [fadingIds, setFadingIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -420,16 +423,47 @@ const DashboardTab = () => {
         api.getScraperSources()
       ]);
       setMetrics(m);
-      setHotDeals(h);
+
+      // Filter out already-passed deals on reload
+      const userId = session?.user?.id;
+      if (userId && h.length > 0) {
+        const { data: passes } = await supabase
+          .from('user_passes')
+          .select('opportunity_id')
+          .eq('user_id', userId);
+        if (passes && passes.length > 0) {
+          const passed = new Set(passes.map((p: { opportunity_id: string }) => p.opportunity_id));
+          setPassedIds(passed);
+          setHotDeals(h.filter(d => !passed.has(d.id!)));
+        } else {
+          setHotDeals(h);
+        }
+      } else {
+        setHotDeals(h);
+      }
+
       setSources(s);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleDashboardAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
+    if (action !== 'pass' || !deal.id) return;
+    // Animate out immediately
+    setFadingIds(prev => new Set([...prev, deal.id!]));
+    // Remove card after fade
+    setTimeout(() => {
+      setHotDeals(prev => prev.filter(d => d.id !== deal.id));
+      setPassedIds(prev => new Set([...prev, deal.id!]));
+    }, 300);
+    // Persist to backend (non-blocking)
+    api.passOpportunity(deal.id).catch(console.error);
+  };
 
   const isPipelineLive = sources.some(s => {
     if (!s.last_run) return false;
@@ -480,7 +514,14 @@ const DashboardTab = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {hotDeals.map(deal => <DealCard key={deal.id} deal={deal} />)}
+            {hotDeals.filter(d => !passedIds.has(d.id!)).map(deal => (
+              <div
+                key={deal.id}
+                className={`transition-all duration-300 ${fadingIds.has(deal.id!) ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
+              >
+                <DealCard deal={deal} onAction={handleDashboardAction} />
+              </div>
+            ))}
           </div>
         )}
       </div>
