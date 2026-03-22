@@ -950,6 +950,32 @@ async def _process_webhook_items(
                 )
                 continue
 
+            # Handle completed auction sources — write to dealer_sales for DOS calibration
+            source_site = (vehicle.get("source_site") or "").lower()
+            if source_site == "govdeals-sold":
+                try:
+                    sold_row = {
+                        "vin": vehicle.get("vin"),
+                        "make": vehicle.get("make") or "Unknown",
+                        "model": vehicle.get("model") or "Unknown",
+                        "year": vehicle.get("year") or 0,
+                        "mileage": vehicle.get("mileage"),
+                        "sale_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
+                        "sold_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
+                        "state": vehicle.get("state"),
+                        "source_type": "govdeals_sold",
+                        "source": "govdeals_sold",
+                        "metadata": {"listing_url": vehicle.get("listing_url"), "run_id": apify_run_id},
+                    }
+                    supabase_client.table("dealer_sales").insert(sold_row).execute()
+                    processed += 1
+                    saved_count += 1
+                    logger.info(f"[DEALER_SALES] Saved: {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} @ ${sold_row['sold_price']:,.0f}")
+                except Exception as exc:
+                    logger.warning(f"[DEALER_SALES] Insert failed: {exc}")
+                    failed_save_count += 1
+                continue
+
             gate_result = passes_basic_gates(vehicle)
             if not gate_result["pass"]:
                 logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
