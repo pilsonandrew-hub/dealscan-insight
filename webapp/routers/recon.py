@@ -3,6 +3,19 @@ Recon manual vehicle evaluation router for DealerScope.
 """
 
 import os
+import itertools
+
+# Marketcheck API key rotation — 500 calls/day each = 1500/day total
+_MC_KEYS = [
+    os.getenv("MARKETCHECK_API_KEY", "Sz8lARVIncBbenoWc9gjR2sa43r7zEOn"),  # Market Bot Key
+    "I2xYCoFZnHjrdDuSPQIluuTXWLm6XxdL",  # Dealerscope Ja
+    "aLOs3jW8yrImN77m375dj6phYEeGrH9p",  # Ja Dealer
+]
+_mc_key_cycle = itertools.cycle(_MC_KEYS)
+
+def _get_marketcheck_key():
+    return next(_mc_key_cycle)
+
 import re
 import httpx
 import logging
@@ -53,7 +66,7 @@ async def get_retail_market_value(year: int, make: str, model: str, mileage: int
             resp = await client.get(
                 "https://mc-api.marketcheck.com/v2/search/car/active",
                 params={
-                    "api_key": os.getenv("MARKETCHECK_API_KEY", "cwOBTpHcggdsdrDjQVtXPe5tsWsrU5aD"),
+                    "api_key": _get_marketcheck_key(),
                     "year": year,
                     "make": make.lower(),
                     "model": model.lower(),
