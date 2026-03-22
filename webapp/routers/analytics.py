@@ -181,3 +181,134 @@ async def analytics_summary():
     except Exception as exc:
         logger.error(f"[ANALYTICS] summary error: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail="Analytics query failed")
+
+
+@router.get("/dos-calibration")
+async def dos_calibration():
+    """
+    Return DOS scoring calibration status:
+      - Current weight breakdown
+      - Data availability (recon count, dealer_sales count)
+      - Which components are estimated vs data-driven
+      - Recommendations for calibration when real data arrives
+    """
+    # Base DOS formula weights
+    base_weights = {
+        "margin": 0.35,
+        "velocity": 0.25,
+        "segment": 0.20,
+        "model": 0.12,
+        "source": 0.08,  # baseline, now dynamic
+    }
+
+    # Dynamic source weights by tier
+    source_weight_tiers = {
+        "proven_gov": {"weight": 0.10, "sources": ["govplanet", "govdeals", "municibid", "publicsurplus", "gsaauctions", "usgovbid", "jjkane"]},
+        "mid_tier": {"weight": 0.08, "sources": ["ritchiebros", "ironplanet"]},
+        "less_reliable": {"weight": 0.06, "sources": ["proxibid", "bidspotter"]},
+        "lowest_confidence": {"weight": 0.04, "sources": ["hibid", "allsurplus"]},
+        "salvage": {"weight": 0.03, "sources": ["iaa", "copart"]},
+    }
+
+    # Component estimation status
+    component_status = {
+        "margin": {
+            "data_driven": False,
+            "source": "Marketcheck retail comps or proxy multiplier",
+            "confidence": "medium",
+            "notes": "Uses retail comp prices when available, otherwise proxy estimate from MMR",
+        },
+        "velocity": {
+            "data_driven": False,
+            "source": "Hardcoded heuristics based on price/age/mileage",
+            "confidence": "low",
+            "notes": "No actual days-to-sale data — uses segment tier estimates (25-70 days)",
+        },
+        "segment": {
+            "data_driven": True,
+            "source": "Static model→segment mapping",
+            "confidence": "high",
+            "notes": "Segment demand patterns are stable; scoring is appropriate",
+        },
+        "model": {
+            "data_driven": True,
+            "source": "TIER_1/TIER_2 model lists",
+            "confidence": "high",
+            "notes": "Model desirability is well-understood",
+        },
+        "source": {
+            "data_driven": True,
+            "source": "Dynamic weight by source tier (0.03-0.10)",
+            "confidence": "high",
+            "notes": "Source reliability is known from government fleet patterns",
+        },
+    }
+
+    # Query data availability
+    recon_count = 0
+    dealer_sales_count = 0
+    outcomes_with_bids = 0
+
+    if supa is not None:
+        try:
+            # Count recon evaluations (opportunities with dos_score)
+            recon_resp = supa.table("opportunities").select("id", count="exact").not_.is_("dos_score", "null").execute()
+            recon_count = recon_resp.count or 0
+
+            # Count dealer_sales comps
+            ds_resp = supa.table("dealer_sales").select("id", count="exact").execute()
+            dealer_sales_count = ds_resp.count or 0
+
+            # Count bid outcomes
+            outcomes_resp = supa.table("opportunities").select("outcome_notes", count="exact").not_.is_("outcome_recorded_at", "null").execute()
+            for row in (outcomes_resp.data or []):
+                notes = row.get("outcome_notes") or ""
+                if '"type": "bid_outcome"' in notes or '"bid":' in notes:
+                    outcomes_with_bids += 1
+        except Exception as e:
+            logger.warning(f"[DOS-CALIBRATION] Data query failed: {e}")
+
+    # Calibration recommendations
+    recommendations = []
+    if dealer_sales_count < 50:
+        recommendations.append({
+            "priority": 1,
+            "component": "margin",
+            "action": "Collect more dealer_sales comps to improve margin accuracy",
+            "threshold": "50+ comps enables data-driven margin scoring",
+        })
+    if outcomes_with_bids < 10:
+        recommendations.append({
+            "priority": 2,
+            "component": "velocity",
+            "action": "Log bid outcomes with actual days-to-sale to calibrate velocity",
+            "threshold": "10+ bid outcomes enables real velocity measurement",
+        })
+    if outcomes_with_bids >= 10:
+        recommendations.append({
+            "priority": 1,
+            "component": "velocity",
+            "action": "Replace heuristic velocity with actual days-to-sale from outcomes",
+            "threshold": "Ready for calibration — sufficient bid data exists",
+        })
+    if not recommendations:
+        recommendations.append({
+            "priority": 0,
+            "component": "all",
+            "action": "DOS scoring is appropriately calibrated for current data volume",
+            "threshold": "n/a",
+        })
+
+    return {
+        "formula": "DOS = Margin×W1 + Velocity×W2 + Segment×W3 + Model×W4 + Source×W_src",
+        "base_weights": base_weights,
+        "source_weight_tiers": source_weight_tiers,
+        "component_status": component_status,
+        "data_availability": {
+            "recon_evaluations": recon_count,
+            "dealer_sales_comps": dealer_sales_count,
+            "bid_outcomes": outcomes_with_bids,
+        },
+        "recommendations": recommendations,
+        "next_calibration_target": "velocity" if outcomes_with_bids < 10 else "margin",
+    }

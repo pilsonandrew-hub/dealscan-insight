@@ -148,6 +148,43 @@ def _model_score(model: str) -> float:
     return 50.0
 
 
+# Dynamic source weights for DOS calculation (replaces flat 0.08)
+# Higher weight = source has more impact on final DOS score
+SOURCE_WEIGHTS = {
+    # Proven government sources — highest confidence, most weight
+    "govplanet": 0.10,
+    "govdeals": 0.10,
+    "municibid": 0.10,
+    "publicsurplus": 0.10,
+    "gsaauctions": 0.10,
+    "usgovbid": 0.10,
+    "jjkane": 0.10,
+    # Mid-tier reliability
+    "ritchiebros": 0.08,
+    "ironplanet": 0.08,
+    "proxibid": 0.06,
+    "bidspotter": 0.06,
+    # Lowest confidence — minimal weight
+    "hibid": 0.04,
+    "hibid-bidcal": 0.04,
+    "hibid-v2": 0.04,
+    "allsurplus": 0.04,
+    # Salvage sources — very low confidence
+    "iaa": 0.03,
+    "copart": 0.03,
+}
+DEFAULT_SOURCE_WEIGHT = 0.05
+
+
+def _source_weight(source_site: str) -> float:
+    """Return dynamic DOS weight for source (replaces flat 0.08)."""
+    source_lower = (source_site or "").lower().strip()
+    for key, weight in SOURCE_WEIGHTS.items():
+        if key in source_lower:
+            return weight
+    return DEFAULT_SOURCE_WEIGHT
+
+
 def _source_score(source_site: str) -> float:
     """Score based on auction source — government fleet sources rank highest."""
     source_lower = (source_site or "").lower().strip()
@@ -970,12 +1007,16 @@ def score_deal(
     if rust_state_bypass:
         print(f'[BYPASS] Rust state {state.upper()} allowed — vehicle is {year} (≤3yr old)')
 
+    # Dynamic source weight (replaces flat 0.08)
+    src_weight = _source_weight(source_site)
+    # Normalize other weights: they sum to 0.92 at flat 0.08, scale to (1 - src_weight)
+    other_weight_scale = (1.0 - src_weight) / 0.92
     legacy_dos_score = (
-        m_score * 0.35
-        + v_score * 0.25
-        + seg_score * 0.20
-        + mod_score * 0.12
-        + src_score * 0.08
+        m_score * (0.35 * other_weight_scale)
+        + v_score * (0.25 * other_weight_scale)
+        + seg_score * (0.20 * other_weight_scale)
+        + mod_score * (0.12 * other_weight_scale)
+        + src_score * src_weight
     )
     weighted_score = _weighted_score(
         investment_grade=investment_grade,
@@ -1006,6 +1047,7 @@ def score_deal(
         "segment_score": round(seg_score, 2),
         "model_score": round(mod_score, 2),
         "source_score": round(src_score, 2),
+        "source_weight": round(src_weight, 4),
         "retail_proxy_multiplier": retail_proxy_multiplier,
         "retail_asking_price_estimate": round(retail_asking_price_estimate, 2),
         "retail_comp_price_estimate": round(float(retail_comp_price_estimate), 2) if retail_comp_price_estimate is not None else None,
