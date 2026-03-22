@@ -1,0 +1,8 @@
+{
+  "actorSpecification": 1,
+  "name": "ds-govdeals-sold",
+  "title": "DealerScope GovDeals Completed Auctions",
+  "description": "GovDeals completed auctions — clearance price data for DOS calibration",
+  "version": "1.0",
+  "input": "./input_schema.json"
+}
