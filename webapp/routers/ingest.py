@@ -1358,12 +1358,17 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
         year_raw = item.get("modelYear") or item.get("year")
         year = int(year_raw) if year_raw and str(year_raw).isdigit() else extract_year(title)
 
-        # Skip high rust states at normalize time — bypass allowed for ≤3yr old vehicles
+        # Skip high rust states at normalize time — bypass allowed for ≤8yr old vehicles
+        # (Consistent with MEMORY.md rule: vehicles ≤3yr bypass rust rejection, but
+        #  government fleet sources can be older — use 8yr to match gov source max age)
         if state in HIGH_RUST_STATES:
             current_year = datetime.now().year
-            if not year or year < current_year - 2:
+            source_check = (item.get("source_site") or item.get("source") or "").lower()
+            gov_rust_bypass = {"govplanet", "municibid", "usgovbid", "jjkane", "publicsurplus", "govdeals", "gsaauctions"}
+            max_rust_age = 8 if source_check in gov_rust_bypass else 2
+            if not year or year < current_year - max_rust_age:
                 return None
-            logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤3yr old)')
+            logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤{max_rust_age}yr old)')
 
         # Bid: parseforge uses currentBid, ours uses current_bid
         current_bid = float(item.get("currentBid") or item.get("current_bid") or 0)
@@ -1547,7 +1552,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
     mileage = vehicle.get("mileage")
 
     # Government sources often have lower opening bids on older fleet vehicles
-    gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions"}
+    gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter"}
     source_bid = (vehicle.get("source_site") or "").lower()
     min_bid = 500 if source_bid in gov_sources_bid else 3000
     if bid < min_bid or bid > 35000:
@@ -1578,7 +1583,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
     current_year = datetime.now().year
     age = current_year - year
     # Government/public auction sources run older fleet vehicles — allow up to 12 years
-    gov_sources = {"publicsurplus", "govdeals", "gsaauctions"}
+    gov_sources = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane"}
     source = (vehicle.get("source_site") or "").lower()
     max_age = 12 if source in gov_sources else 4
     if age > max_age or age < 0:
