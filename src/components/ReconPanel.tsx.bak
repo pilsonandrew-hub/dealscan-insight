@@ -1,0 +1,1178 @@
+import React, { useState, useEffect } from 'react';
+  auction_mode?: boolean;
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+  auction_mode?: boolean;
+import { Button } from '@/components/ui/button';
+  auction_mode?: boolean;
+import { Badge } from '@/components/ui/badge';
+  auction_mode?: boolean;
+import { Input } from '@/components/ui/input';
+  auction_mode?: boolean;
+import { Label } from '@/components/ui/label';
+  auction_mode?: boolean;
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+  auction_mode?: boolean;
+import { Switch } from '@/components/ui/switch';
+  auction_mode?: boolean;
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+  auction_mode?: boolean;
+import { DollarSign, TrendingUp, AlertTriangle, CheckCircle, Search, Clock, ChevronRight } from 'lucide-react';
+  auction_mode?: boolean;
+import { supabase } from '@/integrations/supabase/client';
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+interface ReconResult {
+  auction_mode?: boolean;
+  id: string;
+  auction_mode?: boolean;
+  verdict: 'HOT BUY' | 'BUY' | 'WATCH' | 'PASS';
+  auction_mode?: boolean;
+  verdict_reason: string;
+  auction_mode?: boolean;
+  max_bid: number;
+  auction_mode?: boolean;
+  asking_price: number | null;
+  auction_mode?: boolean;
+  profit_expected: number | null;
+  auction_mode?: boolean;
+  profit_pessimistic: number | null;
+  auction_mode?: boolean;
+  profit_optimistic: number | null;
+  auction_mode?: boolean;
+  adjusted_dos: number;
+  auction_mode?: boolean;
+  reliability_grade: 'A+' | 'A' | 'B' | 'C';
+  auction_mode?: boolean;
+  comp_count: number;
+  auction_mode?: boolean;
+  condition_penalty: number;
+  auction_mode?: boolean;
+  fleet_stigma_penalty: number;
+  auction_mode?: boolean;
+  manheim_sell_fee: number;
+  auction_mode?: boolean;
+  transport_cost: number;
+  auction_mode?: boolean;
+  total_all_in_cost: number;
+  auction_mode?: boolean;
+  promoted_to_pipeline: boolean;
+  auction_mode?: boolean;
+  pricing_source: string;
+  auction_mode?: boolean;
+  pessimistic_sale?: number;
+  auction_mode?: boolean;
+}
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+interface FormState {
+  auction_mode?: boolean;
+  vin: string;
+  auction_mode?: boolean;
+  year: string;
+  auction_mode?: boolean;
+  make: string;
+  auction_mode?: boolean;
+  model: string;
+  auction_mode?: boolean;
+  mileage: string;
+  auction_mode?: boolean;
+  asking_price: string;
+  auction_mode?: boolean;
+  source: string;
+  auction_mode?: boolean;
+  state: string;
+  auction_mode?: boolean;
+  condition_grade: string;
+  auction_mode?: boolean;
+}
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+const VERDICT_STYLES: Record<ReconResult['verdict'], string> = {
+  auction_mode?: boolean;
+  'HOT BUY': 'border-orange-500 bg-orange-950',
+  auction_mode?: boolean;
+  'BUY':     'border-green-500 bg-green-950',
+  auction_mode?: boolean;
+  'WATCH':   'border-yellow-500 bg-yellow-950',
+  auction_mode?: boolean;
+  'PASS':    'border-gray-500 bg-gray-900',
+  auction_mode?: boolean;
+};
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+const VERDICT_BADGE: Record<ReconResult['verdict'], string> = {
+  auction_mode?: boolean;
+  'HOT BUY': 'bg-orange-500 text-white',
+  auction_mode?: boolean;
+  'BUY':     'bg-green-500 text-white',
+  auction_mode?: boolean;
+  'WATCH':   'bg-yellow-500 text-black',
+  auction_mode?: boolean;
+  'PASS':    'bg-gray-500 text-white',
+  auction_mode?: boolean;
+};
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+const GRADE_COLORS: Record<ReconResult['reliability_grade'], string> = {
+  auction_mode?: boolean;
+  'A+': 'text-yellow-400',
+  auction_mode?: boolean;
+  'A':  'text-green-400',
+  auction_mode?: boolean;
+  'B':  'text-blue-400',
+  auction_mode?: boolean;
+  'C':  'text-orange-400',
+  auction_mode?: boolean;
+};
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+const defaultForm: FormState = {
+  auction_mode?: boolean;
+  vin: '',
+  auction_mode?: boolean;
+  year: '',
+  auction_mode?: boolean;
+  make: '',
+  auction_mode?: boolean;
+  model: '',
+  auction_mode?: boolean;
+  mileage: '',
+  auction_mode?: boolean;
+  asking_price: '',
+  auction_mode?: boolean;
+  source: '',
+  auction_mode?: boolean;
+  state: '',
+  auction_mode?: boolean;
+  condition_grade: 'Good',
+  auction_mode?: boolean;
+};
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+async function getAuthToken(): Promise<string | null> {
+  auction_mode?: boolean;
+  const { data } = await supabase.auth.getSession();
+  auction_mode?: boolean;
+  return data.session?.access_token ?? null;
+  auction_mode?: boolean;
+}
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+export const ReconPanel: React.FC = () => {
+  auction_mode?: boolean;
+  const [form, setForm] = useState<FormState>(defaultForm);
+  auction_mode?: boolean;
+  const [result, setResult] = useState<ReconResult | null>(null);
+  auction_mode?: boolean;
+  const [history, setHistory] = useState<ReconResult[]>([]);
+  auction_mode?: boolean;
+  const [loading, setLoading] = useState(false);
+  auction_mode?: boolean;
+  const [vinLoading, setVinLoading] = useState(false);
+  auction_mode?: boolean;
+  const [activeTab, setActiveTab] = useState<'evaluate' | 'history'>('evaluate');
+  auction_mode?: boolean;
+  const [error, setError] = useState<string | null>(null);
+  auction_mode?: boolean;
+  const [promoted, setPromoted] = useState<Set<string>>(new Set());
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  useEffect(() => {
+  auction_mode?: boolean;
+    if (activeTab === 'history') loadHistory();
+  auction_mode?: boolean;
+  }, [activeTab]);
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  const setField = (key: keyof FormState, value: string | boolean) => {
+  auction_mode?: boolean;
+    setForm(prev => ({ ...prev, [key]: value }));
+  auction_mode?: boolean;
+  };
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  const decodeVIN = async () => {
+  auction_mode?: boolean;
+    if (!form.vin.trim()) return;
+  auction_mode?: boolean;
+    setVinLoading(true);
+  auction_mode?: boolean;
+    setError(null);
+  auction_mode?: boolean;
+    try {
+  auction_mode?: boolean;
+      const token = await getAuthToken();
+  auction_mode?: boolean;
+      const res = await fetch(`${API_BASE}/api/recon/vin/${form.vin.trim()}`, {
+  auction_mode?: boolean;
+        headers: { Authorization: `Bearer ${token}` },
+  auction_mode?: boolean;
+      });
+  auction_mode?: boolean;
+      if (!res.ok) throw new Error(`VIN decode failed: ${res.status}`);
+  auction_mode?: boolean;
+      const data = await res.json();
+  auction_mode?: boolean;
+      const results = data.Results || [];
+  auction_mode?: boolean;
+      const get = (variable: string) => results.find((r: { Variable: string; Value: string }) => r.Variable === variable)?.Value || '';
+  auction_mode?: boolean;
+      const make = get('Make');
+  auction_mode?: boolean;
+      const model = get('Model');
+  auction_mode?: boolean;
+      const year = get('Model Year') || get('ModelYear');
+  auction_mode?: boolean;
+      setForm(prev => ({
+  auction_mode?: boolean;
+        ...prev,
+  auction_mode?: boolean;
+        make: make || prev.make,
+  auction_mode?: boolean;
+        model: model || prev.model,
+  auction_mode?: boolean;
+        year: year ? String(year) : prev.year,
+  auction_mode?: boolean;
+      }));
+  auction_mode?: boolean;
+    } catch (e: unknown) {
+  auction_mode?: boolean;
+      setError(e instanceof Error ? e.message : 'VIN decode failed');
+  auction_mode?: boolean;
+    } finally {
+  auction_mode?: boolean;
+      setVinLoading(false);
+  auction_mode?: boolean;
+    }
+  auction_mode?: boolean;
+  };
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  const evaluate = async () => {
+  auction_mode?: boolean;
+    // Client-side validation before hitting API
+  auction_mode?: boolean;
+    if (!form.make) { setError('Make is required'); return; }
+  auction_mode?: boolean;
+    if (!form.model) { setError('Model is required'); return; }
+  auction_mode?: boolean;
+    if (!form.year) { setError('Year is required'); return; }
+  auction_mode?: boolean;
+    if (!form.mileage) { setError('Mileage is required'); return; }
+  auction_mode?: boolean;
+    if (!form.asking_price) { setError('Asking price is required'); return; }
+  auction_mode?: boolean;
+    if (!form.source) { setError('Source is required — where did you find this vehicle?'); return; }
+  auction_mode?: boolean;
+    if (!form.state) { setError('State is required — enter the 2-letter state code (e.g. CA, TX)'); return; }
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+    setLoading(true);
+  auction_mode?: boolean;
+    setError(null);
+  auction_mode?: boolean;
+    setResult(null);
+  auction_mode?: boolean;
+    try {
+  auction_mode?: boolean;
+      const token = await getAuthToken();
+  auction_mode?: boolean;
+      const payload = {
+  auction_mode?: boolean;
+        vin: form.vin || undefined,
+  auction_mode?: boolean;
+        year: form.year ? parseInt(form.year) : undefined,
+  auction_mode?: boolean;
+        make: form.make || undefined,
+  auction_mode?: boolean;
+        model: form.model || undefined,
+  auction_mode?: boolean;
+        mileage: form.mileage ? parseInt(form.mileage) : undefined,
+  auction_mode?: boolean;
+        asking_price: form.asking_price ? parseFloat(form.asking_price) : undefined,
+  auction_mode?: boolean;
+        source: form.source || undefined,
+  auction_mode?: boolean;
+        state: form.state || undefined,
+  auction_mode?: boolean;
+        condition: form.condition_grade,
+  auction_mode?: boolean;
+        condition_grade: form.condition_grade,
+  auction_mode?: boolean;
+        title_status: "clean",
+  auction_mode?: boolean;
+        fleet: form.is_fleet,
+  auction_mode?: boolean;
+        fleet_has_records: form.fleet_has_records,
+  auction_mode?: boolean;
+      };
+  auction_mode?: boolean;
+      const res = await fetch(`${API_BASE}/api/recon/evaluate`, {
+  auction_mode?: boolean;
+        method: 'POST',
+  auction_mode?: boolean;
+        headers: {
+  auction_mode?: boolean;
+          'Content-Type': 'application/json',
+  auction_mode?: boolean;
+          Authorization: `Bearer ${token}`,
+  auction_mode?: boolean;
+        },
+  auction_mode?: boolean;
+        body: JSON.stringify(payload),
+  auction_mode?: boolean;
+      });
+  auction_mode?: boolean;
+      if (!res.ok) {
+  auction_mode?: boolean;
+        const errBody = await res.text();
+  auction_mode?: boolean;
+        throw new Error(errBody || `Evaluate failed: ${res.status}`);
+  auction_mode?: boolean;
+      }
+  auction_mode?: boolean;
+      const data: ReconResult = await res.json();
+  auction_mode?: boolean;
+      setResult(data);
+  auction_mode?: boolean;
+    } catch (e: unknown) {
+  auction_mode?: boolean;
+      setError(e instanceof Error ? e.message : 'Evaluation failed');
+  auction_mode?: boolean;
+    } finally {
+  auction_mode?: boolean;
+      setLoading(false);
+  auction_mode?: boolean;
+    }
+  auction_mode?: boolean;
+  };
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  const loadHistory = async () => {
+  auction_mode?: boolean;
+    setLoading(true);
+  auction_mode?: boolean;
+    setError(null);
+  auction_mode?: boolean;
+    try {
+  auction_mode?: boolean;
+      const token = await getAuthToken();
+  auction_mode?: boolean;
+      const res = await fetch(`${API_BASE}/api/recon/history`, {
+  auction_mode?: boolean;
+        headers: { Authorization: `Bearer ${token}` },
+  auction_mode?: boolean;
+      });
+  auction_mode?: boolean;
+      if (!res.ok) throw new Error(`History failed: ${res.status}`);
+  auction_mode?: boolean;
+      const data: ReconResult[] = await res.json();
+  auction_mode?: boolean;
+      setHistory((data || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+  auction_mode?: boolean;
+    } catch (e: unknown) {
+  auction_mode?: boolean;
+      setError(e instanceof Error ? e.message : 'Failed to load history');
+  auction_mode?: boolean;
+    } finally {
+  auction_mode?: boolean;
+      setLoading(false);
+  auction_mode?: boolean;
+    }
+  auction_mode?: boolean;
+  };
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  const promote = async (recon_id: string) => {
+  auction_mode?: boolean;
+    try {
+  auction_mode?: boolean;
+      const token = await getAuthToken();
+  auction_mode?: boolean;
+      const res = await fetch(`${API_BASE}/api/recon/promote/${recon_id}`, {
+  auction_mode?: boolean;
+        method: 'POST',
+  auction_mode?: boolean;
+        headers: { Authorization: `Bearer ${token}` },
+  auction_mode?: boolean;
+      });
+  auction_mode?: boolean;
+      if (res.status === 409) { setPromoted(prev => new Set([...prev, recon_id])); setResult(prev => prev ? { ...prev, promoted_to_pipeline: true } : prev); return; }
+  auction_mode?: boolean;
+      if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
+  auction_mode?: boolean;
+      setPromoted(prev => new Set([...prev, recon_id]));
+  auction_mode?: boolean;
+      if (result?.id === recon_id) {
+  auction_mode?: boolean;
+        setResult(prev => prev ? { ...prev, promoted_to_pipeline: true } : prev);
+  auction_mode?: boolean;
+      }
+  auction_mode?: boolean;
+    } catch (e: unknown) {
+  auction_mode?: boolean;
+      setError(e instanceof Error ? e.message : 'Promote failed');
+  auction_mode?: boolean;
+    }
+  auction_mode?: boolean;
+  };
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  const isPromoted = (r: ReconResult) => r.promoted_to_pipeline || promoted.has(r.id);
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+  return (
+  auction_mode?: boolean;
+    <div className="w-full max-w-2xl mx-auto p-4">
+  auction_mode?: boolean;
+      <div className="mb-4">
+  auction_mode?: boolean;
+        <h2 className="text-2xl font-bold text-foreground">Recon Evaluator</h2>
+  auction_mode?: boolean;
+        <p className="text-sm text-muted-foreground">Evaluate a vehicle deal before you bid</p>
+  auction_mode?: boolean;
+      </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'evaluate' | 'history')}>
+  auction_mode?: boolean;
+        <TabsList className="w-full mb-4">
+  auction_mode?: boolean;
+          <TabsTrigger value="evaluate" className="flex-1">Evaluate</TabsTrigger>
+  auction_mode?: boolean;
+          <TabsTrigger value="history" className="flex-1">History</TabsTrigger>
+  auction_mode?: boolean;
+        </TabsList>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+        {/* ── EVALUATE TAB ── */}
+  auction_mode?: boolean;
+        <TabsContent value="evaluate">
+  auction_mode?: boolean;
+          <Card>
+  auction_mode?: boolean;
+            <CardHeader className="pb-3">
+  auction_mode?: boolean;
+              <CardTitle className="text-base">Vehicle Details</CardTitle>
+  auction_mode?: boolean;
+            </CardHeader>
+  auction_mode?: boolean;
+            <CardContent className="space-y-4">
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* VIN row */}
+  auction_mode?: boolean;
+              <div className="flex gap-2 items-end">
+  auction_mode?: boolean;
+                <div className="flex-1">
+  auction_mode?: boolean;
+                  <Label htmlFor="vin" className="text-xs mb-1 block">VIN (optional)</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="vin"
+  auction_mode?: boolean;
+                    placeholder="1HGBH41JXMN109186"
+  auction_mode?: boolean;
+                    value={form.vin}
+  auction_mode?: boolean;
+                    onChange={e => setField('vin', e.target.value)}
+  auction_mode?: boolean;
+                    className="font-mono text-sm"
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <Button
+  auction_mode?: boolean;
+                  variant="outline"
+  auction_mode?: boolean;
+                  size="sm"
+  auction_mode?: boolean;
+                  onClick={decodeVIN}
+  auction_mode?: boolean;
+                  disabled={vinLoading || !form.vin.trim()}
+  auction_mode?: boolean;
+                  className="shrink-0"
+  auction_mode?: boolean;
+                >
+  auction_mode?: boolean;
+                  <Search className="h-4 w-4 mr-1" />
+  auction_mode?: boolean;
+                  {vinLoading ? 'Decoding…' : 'Decode'}
+  auction_mode?: boolean;
+                </Button>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Year / Make / Model */}
+  auction_mode?: boolean;
+              <div className="grid grid-cols-3 gap-2">
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="year" className="text-xs mb-1 block">Year</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="year"
+  auction_mode?: boolean;
+                    placeholder="2020"
+  auction_mode?: boolean;
+                    value={form.year}
+  auction_mode?: boolean;
+                    onChange={e => setField('year', e.target.value)}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="make" className="text-xs mb-1 block">Make</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="make"
+  auction_mode?: boolean;
+                    placeholder="Toyota"
+  auction_mode?: boolean;
+                    value={form.make}
+  auction_mode?: boolean;
+                    onChange={e => setField('make', e.target.value)}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="model" className="text-xs mb-1 block">Model</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="model"
+  auction_mode?: boolean;
+                    placeholder="Camry"
+  auction_mode?: boolean;
+                    value={form.model}
+  auction_mode?: boolean;
+                    onChange={e => setField('model', e.target.value)}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Mileage / Asking Price */}
+  auction_mode?: boolean;
+              <div className="grid grid-cols-2 gap-2">
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="mileage" className="text-xs mb-1 block">Mileage</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="mileage"
+  auction_mode?: boolean;
+                    placeholder="45000"
+  auction_mode?: boolean;
+                    value={form.mileage}
+  auction_mode?: boolean;
+                    onChange={e => setField('mileage', e.target.value)}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="asking_price" className="text-xs mb-1 block">Asking Price / Reserve (optional)</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="asking_price"
+  auction_mode?: boolean;
+                    placeholder="18500"
+  auction_mode?: boolean;
+                    value={form.asking_price}
+  auction_mode?: boolean;
+                    onChange={e => setField('asking_price', e.target.value)}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Source / State */}
+  auction_mode?: boolean;
+              <div className="grid grid-cols-2 gap-2">
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="source" className="text-xs mb-1 block">Source</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="source"
+  auction_mode?: boolean;
+                    placeholder="Manheim, ADESA…"
+  auction_mode?: boolean;
+                    value={form.source}
+  auction_mode?: boolean;
+                    onChange={e => setField('source', e.target.value)}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div>
+  auction_mode?: boolean;
+                  <Label htmlFor="state" className="text-xs mb-1 block">State</Label>
+  auction_mode?: boolean;
+                  <Input
+  auction_mode?: boolean;
+                    id="state"
+  auction_mode?: boolean;
+                    placeholder="TX"
+  auction_mode?: boolean;
+                    maxLength={2}
+  auction_mode?: boolean;
+                    value={form.state}
+  auction_mode?: boolean;
+                    onChange={e => setField('state', e.target.value.toUpperCase())}
+  auction_mode?: boolean;
+                  />
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Condition Grade */}
+  auction_mode?: boolean;
+              <div>
+  auction_mode?: boolean;
+                <Label className="text-xs mb-1 block">Condition Grade</Label>
+  auction_mode?: boolean;
+                <Select value={form.condition_grade} onValueChange={v => setField('condition_grade', v)}>
+  auction_mode?: boolean;
+                  <SelectTrigger>
+  auction_mode?: boolean;
+                    <SelectValue />
+  auction_mode?: boolean;
+                  </SelectTrigger>
+  auction_mode?: boolean;
+                  <SelectContent>
+  auction_mode?: boolean;
+                    <SelectItem value="Excellent">Excellent</SelectItem>
+  auction_mode?: boolean;
+                    <SelectItem value="Good">Good</SelectItem>
+  auction_mode?: boolean;
+                    <SelectItem value="Fair">Fair</SelectItem>
+  auction_mode?: boolean;
+                    <SelectItem value="Poor">Poor</SelectItem>
+  auction_mode?: boolean;
+                  </SelectContent>
+  auction_mode?: boolean;
+                </Select>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {error && (
+  auction_mode?: boolean;
+                <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-3">
+  auction_mode?: boolean;
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+  auction_mode?: boolean;
+                  <span>{error}</span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              )}
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              <Button
+  auction_mode?: boolean;
+                className="w-full"
+  auction_mode?: boolean;
+                onClick={evaluate}
+  auction_mode?: boolean;
+                disabled={loading}
+  auction_mode?: boolean;
+              >
+  auction_mode?: boolean;
+                {loading ? 'Evaluating…' : 'Evaluate Deal'}
+  auction_mode?: boolean;
+              </Button>
+  auction_mode?: boolean;
+            </CardContent>
+  auction_mode?: boolean;
+          </Card>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+          {/* Result Card */}
+  auction_mode?: boolean;
+          {result && (
+  auction_mode?: boolean;
+            <div className={`mt-4 rounded-lg border-2 p-4 ${VERDICT_STYLES[result.verdict]}`}>
+  auction_mode?: boolean;
+              {/* Verdict header */}
+  auction_mode?: boolean;
+              <div className="flex items-center justify-between mb-3">
+  auction_mode?: boolean;
+                <div className="flex items-center gap-3">
+  auction_mode?: boolean;
+                  <span className={`text-xs font-bold px-2 py-1 rounded ${VERDICT_BADGE[result.verdict]}`}>
+  auction_mode?: boolean;
+                    {result.verdict}
+  auction_mode?: boolean;
+                  </span>
+  auction_mode?: boolean;
+                  <span className={`text-lg font-bold ${GRADE_COLORS[result.reliability_grade]}`}>
+  auction_mode?: boolean;
+                    {result.reliability_grade}
+  auction_mode?: boolean;
+                  </span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <span className="text-xs text-muted-foreground">{result.comp_count} comps</span>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              <p className="text-sm text-muted-foreground mb-4">{result.verdict_reason || result.reason}</p>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Risk flags — informational only, never blocks scoring */}
+  auction_mode?: boolean;
+              {(() => {
+  auction_mode?: boolean;
+                const flags: string[] = [];
+  auction_mode?: boolean;
+                const age = new Date().getFullYear() - parseInt(form.year || '0');
+  auction_mode?: boolean;
+                const miles = parseInt(form.mileage || '0');
+  auction_mode?: boolean;
+                if (age > 4) flags.push(`⚠️ ${age} yrs old — above 4yr institutional threshold`);
+  auction_mode?: boolean;
+                if (miles > 50000) flags.push(`⚠️ ${miles.toLocaleString()} miles — above 50k threshold`);
+  auction_mode?: boolean;
+                if (result.comp_count < 3) flags.push(`⚠️ Only ${result.comp_count} comp${result.comp_count === 1 ? '' : 's'} — score is estimated`);
+  auction_mode?: boolean;
+                return flags.length > 0 ? (
+  auction_mode?: boolean;
+                  <div className="flex flex-col gap-1 mb-4">
+  auction_mode?: boolean;
+                    {flags.map((f, i) => (
+  auction_mode?: boolean;
+                      <div key={i} className="text-xs text-yellow-400 bg-yellow-950/40 border border-yellow-800/50 rounded px-2 py-1">
+  auction_mode?: boolean;
+                        {f}
+  auction_mode?: boolean;
+                      </div>
+  auction_mode?: boolean;
+                    ))}
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                ) : null;
+  auction_mode?: boolean;
+              })()}
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Key numbers */}
+  auction_mode?: boolean;
+              <div className="grid grid-cols-2 gap-3 mb-4">
+  auction_mode?: boolean;
+                {result.pessimistic_sale != null && (
+  auction_mode?: boolean;
+                  <div className="col-span-2 bg-blue-950/40 border border-blue-800/40 rounded-md p-3">
+  auction_mode?: boolean;
+                    <div className="flex items-center gap-1 text-xs text-blue-300 mb-1">
+  auction_mode?: boolean;
+                      <DollarSign className="h-3 w-3" />
+  auction_mode?: boolean;
+                      Est. Market Value ({result.pricing_source})
+  auction_mode?: boolean;
+                    </div>
+  auction_mode?: boolean;
+                    <div className="text-xl font-bold text-blue-200">
+  auction_mode?: boolean;
+                      ${result.pessimistic_sale.toLocaleString()}
+  auction_mode?: boolean;
+                    </div>
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                )}
+  auction_mode?: boolean;
+                <div className="bg-black/30 rounded-md p-3">
+  auction_mode?: boolean;
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+  auction_mode?: boolean;
+                    <TrendingUp className="h-3 w-3" />
+  auction_mode?: boolean;
+                    Max Bid
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                  <div className="text-lg font-bold text-foreground">
+  auction_mode?: boolean;
+                    ${result.max_bid.toLocaleString()}
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div className="bg-black/30 rounded-md p-3">
+  auction_mode?: boolean;
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+  auction_mode?: boolean;
+                    <DollarSign className="h-3 w-3" />
+  auction_mode?: boolean;
+                    Expected Profit
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                  <div className={`text-lg font-bold ${result.profit_expected >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+  auction_mode?: boolean;
+                    ${result.profit_expected.toLocaleString()}
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div className="bg-black/30 rounded-md p-3">
+  auction_mode?: boolean;
+                  <div className="text-xs text-muted-foreground mb-1">Pessimistic</div>
+  auction_mode?: boolean;
+                  <div className={`font-semibold ${result.profit_pessimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
+  auction_mode?: boolean;
+                    ${result.profit_pessimistic.toLocaleString()}
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div className="bg-black/30 rounded-md p-3">
+  auction_mode?: boolean;
+                  <div className="text-xs text-muted-foreground mb-1">Optimistic</div>
+  auction_mode?: boolean;
+                  <div className={`font-semibold ${result.profit_optimistic >= 0 ? 'text-green-300' : 'text-red-400'}`}>
+  auction_mode?: boolean;
+                    ${result.profit_optimistic.toLocaleString()}
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Cost breakdown */}
+  auction_mode?: boolean;
+              <div className="bg-black/20 rounded-md p-3 mb-4 space-y-1 text-sm">
+  auction_mode?: boolean;
+                <div className="flex justify-between text-muted-foreground">
+  auction_mode?: boolean;
+                  <span>All-in Cost</span>
+  auction_mode?: boolean;
+                  <span className="text-foreground font-medium">${result.total_all_in_cost.toLocaleString()}</span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div className="flex justify-between text-muted-foreground">
+  auction_mode?: boolean;
+                  <span>Transport</span>
+  auction_mode?: boolean;
+                  <span>${result.transport_cost.toLocaleString()}</span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div className="flex justify-between text-muted-foreground">
+  auction_mode?: boolean;
+                  <span>Manheim Fee</span>
+  auction_mode?: boolean;
+                  <span>${result.manheim_sell_fee.toLocaleString()}</span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                {result.condition_penalty > 0 && (
+  auction_mode?: boolean;
+                  <div className="flex justify-between text-muted-foreground">
+  auction_mode?: boolean;
+                    <span>Condition Penalty</span>
+  auction_mode?: boolean;
+                    <span className="text-orange-400">-${result.condition_penalty.toLocaleString()}</span>
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                )}
+  auction_mode?: boolean;
+                {result.fleet_stigma_penalty > 0 && (
+  auction_mode?: boolean;
+                  <div className="flex justify-between text-muted-foreground">
+  auction_mode?: boolean;
+                    <span>Fleet Penalty</span>
+  auction_mode?: boolean;
+                    <span className="text-orange-400">-${result.fleet_stigma_penalty.toLocaleString()}</span>
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                )}
+  auction_mode?: boolean;
+                <div className="flex justify-between text-muted-foreground">
+  auction_mode?: boolean;
+                  <span>Adj. Days on Lot</span>
+  auction_mode?: boolean;
+                  <span>{result.adjusted_dos}d</span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+                <div className="flex justify-between text-xs text-muted-foreground/60 pt-1 border-t border-muted/20">
+  auction_mode?: boolean;
+                  <span>Pricing Source</span>
+  auction_mode?: boolean;
+                  <span>{result.pricing_source}</span>
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+              {/* Promote button */}
+  auction_mode?: boolean;
+              {!isPromoted(result) ? (
+  auction_mode?: boolean;
+                <Button
+  auction_mode?: boolean;
+                  className="w-full"
+  auction_mode?: boolean;
+                  variant="outline"
+  auction_mode?: boolean;
+                  onClick={() => promote(result.id)}
+  auction_mode?: boolean;
+                >
+  auction_mode?: boolean;
+                  <ChevronRight className="h-4 w-4 mr-1" />
+  auction_mode?: boolean;
+                  Promote to Pipeline
+  auction_mode?: boolean;
+                </Button>
+  auction_mode?: boolean;
+              ) : (
+  auction_mode?: boolean;
+                <div className="flex items-center justify-center gap-2 text-sm text-green-400 py-2">
+  auction_mode?: boolean;
+                  <CheckCircle className="h-4 w-4" />
+  auction_mode?: boolean;
+                  Added to Pipeline
+  auction_mode?: boolean;
+                </div>
+  auction_mode?: boolean;
+              )}
+  auction_mode?: boolean;
+            </div>
+  auction_mode?: boolean;
+          )}
+  auction_mode?: boolean;
+        </TabsContent>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+        {/* ── HISTORY TAB ── */}
+  auction_mode?: boolean;
+        <TabsContent value="history">
+  auction_mode?: boolean;
+          <div className="space-y-3">
+  auction_mode?: boolean;
+            {loading && (
+  auction_mode?: boolean;
+              <div className="flex items-center justify-center py-10 text-muted-foreground">
+  auction_mode?: boolean;
+                <Clock className="h-4 w-4 mr-2 animate-spin" />
+  auction_mode?: boolean;
+                Loading history…
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+            )}
+  auction_mode?: boolean;
+            {!loading && error && (
+  auction_mode?: boolean;
+              <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-3">
+  auction_mode?: boolean;
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+  auction_mode?: boolean;
+                <span>{error}</span>
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+            )}
+  auction_mode?: boolean;
+            {!loading && history.length === 0 && !error && (
+  auction_mode?: boolean;
+              <div className="text-center py-10 text-muted-foreground text-sm">
+  auction_mode?: boolean;
+                No evaluations yet.
+  auction_mode?: boolean;
+              </div>
+  auction_mode?: boolean;
+            )}
+  auction_mode?: boolean;
+            {history.map(item => (
+  auction_mode?: boolean;
+              <Card key={item.id} className="hover:shadow-md transition-all duration-200">
+  auction_mode?: boolean;
+                <CardContent className="p-4">
+  auction_mode?: boolean;
+                  <div className="flex items-center justify-between mb-2">
+  auction_mode?: boolean;
+                    <div className="flex items-center gap-2">
+  auction_mode?: boolean;
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${VERDICT_BADGE[item.verdict]}`}>
+  auction_mode?: boolean;
+                        {item.verdict}
+  auction_mode?: boolean;
+                      </span>
+  auction_mode?: boolean;
+                      <span className={`text-sm font-bold ${GRADE_COLORS[item.reliability_grade || item.grade]}`}>
+  auction_mode?: boolean;
+                        {item.reliability_grade || item.grade}
+  auction_mode?: boolean;
+                      </span>
+  auction_mode?: boolean;
+                    </div>
+  auction_mode?: boolean;
+                    <div className="flex items-center gap-3 text-sm">
+  auction_mode?: boolean;
+                      <span className="text-muted-foreground">Ask: ${item.asking_price.toLocaleString()}</span>
+  auction_mode?: boolean;
+                      <span className={`font-semibold ${item.profit_expected || item.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+  auction_mode?: boolean;
+                        ${item.profit_expected || item.profit.toLocaleString()}
+  auction_mode?: boolean;
+                      </span>
+  auction_mode?: boolean;
+                    </div>
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+                  <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{item.verdict_reason || item.reason}</p>
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+                  <div className="flex items-center justify-between">
+  auction_mode?: boolean;
+                    <div className="flex gap-3 text-xs text-muted-foreground">
+  auction_mode?: boolean;
+                      <span>Max Bid: <span className="text-foreground font-medium">${item.max_bid.toLocaleString()}</span></span>
+  auction_mode?: boolean;
+                      <span>{item.comp_count} comps</span>
+  auction_mode?: boolean;
+                    </div>
+  auction_mode?: boolean;
+                    {!isPromoted(item) ? (
+  auction_mode?: boolean;
+                      <Button
+  auction_mode?: boolean;
+                        size="sm"
+  auction_mode?: boolean;
+                        variant="outline"
+  auction_mode?: boolean;
+                        className="text-xs h-7"
+  auction_mode?: boolean;
+                        onClick={() => promote(item.id)}
+  auction_mode?: boolean;
+                      >
+  auction_mode?: boolean;
+                        Promote
+  auction_mode?: boolean;
+                      </Button>
+  auction_mode?: boolean;
+                    ) : (
+  auction_mode?: boolean;
+                      <Badge variant="outline" className="text-green-400 border-green-800 text-xs">
+  auction_mode?: boolean;
+                        <CheckCircle className="h-3 w-3 mr-1" />
+  auction_mode?: boolean;
+                        In Pipeline
+  auction_mode?: boolean;
+                      </Badge>
+  auction_mode?: boolean;
+                    )}
+  auction_mode?: boolean;
+                  </div>
+  auction_mode?: boolean;
+                </CardContent>
+  auction_mode?: boolean;
+              </Card>
+  auction_mode?: boolean;
+            ))}
+  auction_mode?: boolean;
+          </div>
+  auction_mode?: boolean;
+        </TabsContent>
+  auction_mode?: boolean;
+      </Tabs>
+  auction_mode?: boolean;
+    </div>
+  auction_mode?: boolean;
+  );
+  auction_mode?: boolean;
+};
+  auction_mode?: boolean;
+
+  auction_mode?: boolean;
+export default ReconPanel;
+  auction_mode?: boolean;
