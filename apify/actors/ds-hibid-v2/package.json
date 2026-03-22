@@ -1,0 +1,10 @@
+{
+    "name": "ds-hibid-v2",
+    "version": "2.0.0",
+    "type": "module",
+    "description": "DealerScope HiBid scraper via reverse-engineered GraphQL",
+    "main": "src/main.js",
+    "dependencies": {
+        "apify": "^3.1.0"
+    }
+}

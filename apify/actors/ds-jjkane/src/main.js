@@ -1,38 +1,25 @@
 /**
  * ds-jjkane — JJ Kane Government Surplus Vehicle Auction Scraper
+ *                + Marketcheck Retail Pricing
  *
- * STATUS: NEW — API-based (Algolia), no Playwright needed
+ * STATUS: WORKING — Algolia API + Marketcheck price estimation
  *
  * Architecture:
- *   JJ Kane (jjkane.com) is a major government surplus auctioneer with sites
- *   across the US (NV, FL, CA, OH, TX, etc.). Nevada State Surplus uses JJ Kane
- *   as its primary auction platform. Florida also has significant JJ Kane presence.
+ *   JJ Kane (jjkane.com) is a major government surplus auctioneer.
+ *   Uses public Algolia search index.
  *
- *   JJ Kane exposes a public Algolia search index (discovered from their website):
- *     App ID: ICB6K32PD0
- *     Search API Key: 9d3241f7a3ee8947997deaa33cb0b249 (read-only)
- *     Index: api_items
+ *   After scraping each vehicle, calls Marketcheck to get retail price:
+ *     estimated_auction_price = marketcheck_median * 0.70
+ *   (Government auctions clear at ~60-75% of retail — 70% is conservative floor)
  *
- *   This is completely public (no auth needed, key is embedded in page JS).
+ * Key Algolia fields:
+ *   make, model, year, odometer (string like "046379"), offSitePhysicalState,
+ *   ringCloseOutDate, catalogDescription, category, webDescription
  *
- * Strategy:
- *   1. Query Algolia index for vehicle categories in target (non-rust) states
- *   2. Filter by year, make, category, and location
- *   3. Paginate using Algolia's page/hitsPerPage params
- *   4. Push normalized records to Apify dataset
- *
- * Vehicle categories on JJ Kane:
- *   - PICKUP TRUCK
- *   - SPORT UTILITY VEHICLE (SUV)
- *   - AUTOMOBILE
- *   - VAN - FULLSIZE
- *   - SERVICE TRUCK (1-TON AND UNDER)
- *   - VAN BODY/BOX TRUCK
- *   - DUMP TRUCK
- *   - FLATBED/SERVICE TRUCK
- *
- * Note: JJ Kane has ~5600 total items, ~420 vehicles in FL alone. High value target.
- * Nevada State Surplus auctions route through JJ Kane Las Vegas/Reno sites.
+ * Marketcheck API:
+ *   https://mc-api.marketcheck.com/v2/search/car/active
+ *   api_key=Z56KBF2WRBWXcnPpbFBY8FEuRoUujiz4
+ *   params: year, make, model, miles_min, miles_max (±20% of odometer)
  */
 
 import { Actor } from 'apify';
@@ -43,7 +30,13 @@ const ALGOLIA_SEARCH_KEY = '9d3241f7a3ee8947997deaa33cb0b249';
 const ALGOLIA_INDEX = 'api_items';
 const ALGOLIA_URL = `https://${ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/${ALGOLIA_INDEX}/query`;
 
-// Vehicle categories on JJ Kane (capitalized exactly as they appear)
+const MARKETCHECK_KEY = 'Z56KBF2WRBWXcnPpbFBY8FEuRoUujiz4';
+const MARKETCHECK_URL = 'https://mc-api.marketcheck.com/v2/search/car/active';
+
+// Auction-to-retail discount factor (government surplus clears at 60-75% retail)
+const AUCTION_DISCOUNT = 0.70;
+
+// Vehicle categories we want
 const VEHICLE_CATEGORIES = [
     'PICKUP TRUCK',
     'SPORT UTILITY VEHICLE (SUV)',
@@ -56,7 +49,6 @@ const VEHICLE_CATEGORIES = [
     'SEDAN',
 ];
 
-// States with real vehicle volume at JJ Kane (non-rust belt)
 const TARGET_STATES = [
     'FL', 'NV', 'CA', 'TX', 'AZ', 'CO', 'UT', 'OR', 'WA', 'GA',
     'NC', 'VA', 'TN', 'SC', 'AL', 'LA', 'OK', 'NM', 'ID', 'MT',
@@ -68,15 +60,23 @@ const HIGH_RUST_STATES = new Set([
     'WV', 'ME', 'NH', 'VT', 'MA', 'RI', 'CT', 'NJ', 'MD', 'DE',
 ]);
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function normalizeText(v) {
     return String(v ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function parseYear(v) {
-    const y = parseInt(v, 10);
+    const y = parseInt(String(v ?? '').replace(/\D/g, ''), 10);
     return (y >= 1980 && y <= new Date().getFullYear() + 1) ? y : null;
+}
+
+function parseOdometer(v) {
+    // e.g. "046379" or "46,379" or "46379 Miles"
+    if (!v) return null;
+    const clean = String(v).replace(/[^\d]/g, '');
+    const miles = parseInt(clean, 10);
+    return (!isNaN(miles) && miles > 0 && miles < 1000000) ? miles : null;
 }
 
 function parseBid(v) {
@@ -87,13 +87,20 @@ function parseBid(v) {
 
 function parseDate(v) {
     if (!v) return null;
-    // JJ Kane format: "MM/DD/YYYY"
+    // "MM/DD/YYYY" or "YYYY-MM-DD" or Unix timestamp
+    const asNum = Number(v);
+    if (!isNaN(asNum) && asNum > 1000000000) {
+        return new Date(asNum * 1000).toISOString();
+    }
     const m = String(v).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (m) {
         const d = new Date(`${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}T23:59:00-05:00`);
         return isNaN(d.getTime()) ? null : d.toISOString();
     }
-    return null;
+    try {
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+    } catch { return null; }
 }
 
 function buildListingUrl(itemId) {
@@ -104,7 +111,101 @@ function buildImageUrl(itemId) {
     return `https://prod.cdn.jjkane.com/${itemId}-1?template=Medium`;
 }
 
-// ── Algolia Query ──────────────────────────────────────────────────────────────
+function median(arr) {
+    if (!arr || arr.length === 0) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2
+        : sorted[mid];
+}
+
+// ── Marketcheck API ───────────────────────────────────────────────────────────
+
+// Cache to avoid re-querying same make/model/year/mileage band
+const marketcheckCache = new Map();
+
+async function getMarketcheckPrice(year, make, model, odometer) {
+    if (!year || !make || !model) return null;
+
+    const makeLower = make.toLowerCase().trim();
+    const modelLower = model.toLowerCase().trim();
+
+    // Miles band: ±20% of odometer (or 0–999999 if no odometer)
+    let milesMin = 0;
+    let milesMax = 999999;
+    if (odometer && odometer > 0) {
+        milesMin = Math.max(0, Math.floor(odometer * 0.80));
+        milesMax = Math.ceil(odometer * 1.20);
+    }
+
+    // Round to nearest 5000 for cache key
+    const milesKey = odometer ? Math.round(odometer / 5000) * 5000 : 0;
+    const cacheKey = `${year}|${makeLower}|${modelLower}|${milesKey}`;
+    if (marketcheckCache.has(cacheKey)) {
+        return marketcheckCache.get(cacheKey);
+    }
+
+    const params = new URLSearchParams({
+        api_key: MARKETCHECK_KEY,
+        year: String(year),
+        make: makeLower,
+        model: modelLower,
+        miles_min: String(milesMin),
+        miles_max: String(milesMax),
+        rows: '20',
+        start: '0',
+        fields: 'price,miles',
+    });
+
+    try {
+        const resp = await fetch(`${MARKETCHECK_URL}?${params}`, {
+            signal: AbortSignal.timeout(10000),
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!resp.ok) {
+            console.warn(`[MC] HTTP ${resp.status} for ${year} ${make} ${model}`);
+            marketcheckCache.set(cacheKey, null);
+            return null;
+        }
+
+        const data = await resp.json();
+        const listings = data?.listings ?? [];
+
+        if (listings.length === 0) {
+            marketcheckCache.set(cacheKey, null);
+            return null;
+        }
+
+        // Extract valid prices
+        const prices = listings
+            .map(l => parseFloat(String(l.price ?? '0').replace(/,/g, '')))
+            .filter(p => p > 500 && p < 500000);
+
+        if (prices.length === 0) {
+            marketcheckCache.set(cacheKey, null);
+            return null;
+        }
+
+        const medianPrice = median(prices);
+        const result = {
+            retail_median: Math.round(medianPrice),
+            estimated_auction_price: Math.round(medianPrice * AUCTION_DISCOUNT),
+            sample_count: prices.length,
+        };
+
+        marketcheckCache.set(cacheKey, result);
+        return result;
+
+    } catch (err) {
+        console.warn(`[MC] Error for ${year} ${make} ${model}: ${err.message}`);
+        marketcheckCache.set(cacheKey, null);
+        return null;
+    }
+}
+
+// ── Algolia Query ─────────────────────────────────────────────────────────────
 
 async function queryAlgolia({ categoryFilter, stateFilter, page = 0, hitsPerPage = 100 }) {
     const filters = [categoryFilter, stateFilter].filter(Boolean).join(' AND ');
@@ -115,10 +216,11 @@ async function queryAlgolia({ categoryFilter, stateFilter, page = 0, hitsPerPage
         page,
         hitsPerPage,
         attributesToRetrieve: [
-            'id', 'kp_title', 'make', 'model', 'year', 'category',
+            'id', 'kp_title', 'webDescription', 'make', 'model', 'year',
+            'category', 'odometer', 'catalogDescription',
             'offSitePhysicalCity', 'offSitePhysicalState',
             'ringCloseOutDate', 'currentBid', 'shortDescription',
-            'lotNumber', 'auctionId',
+            'lotNumber', 'auctionId', 'vin',
         ],
     });
 
@@ -130,6 +232,7 @@ async function queryAlgolia({ categoryFilter, stateFilter, page = 0, hitsPerPage
             'Content-Type': 'application/json',
         },
         body,
+        signal: AbortSignal.timeout(15000),
     });
 
     if (!resp.ok) {
@@ -146,21 +249,23 @@ const input = await Actor.getInput() ?? {};
 const {
     targetStates = TARGET_STATES,
     minBid = 0,
-    maxBid = 35000,
+    maxBid = 75000,
     maxYearAge = 15,
     maxItemsPerState = 500,
+    enableMarketcheck = true,
+    webhookUrl = null,
+    webhookSecret = null,
 } = input;
 
 const currentYear = new Date().getFullYear();
 let totalFound = 0;
 let totalPassed = 0;
+let totalMarketcheck = 0;
 
-// Build Algolia filter string for vehicle categories
+// Build Algolia filter for vehicle categories
 const categoryFilter = `(${VEHICLE_CATEGORIES.map(c => `category:"${c}"`).join(' OR ')})`;
 
 for (const state of targetStates) {
-    // HIGH_RUST pre-filter removed — bypass handled per-item below (year needed)
-
     const stateFilter = `offSitePhysicalState:${state}`;
     let page = 0;
     let statePassed = 0;
@@ -168,7 +273,6 @@ for (const state of targetStates) {
     console.log(`[JJKANE] Querying state: ${state}`);
 
     try {
-        // Get first page to check nbHits
         const firstPage = await queryAlgolia({ categoryFilter, stateFilter, page: 0, hitsPerPage: 100 });
         const nbHits = firstPage.nbHits ?? 0;
         const nbPages = firstPage.nbPages ?? 1;
@@ -177,9 +281,8 @@ for (const state of targetStates) {
 
         const allPages = [firstPage];
 
-        // Fetch remaining pages (up to limit)
         for (let p = 1; p < nbPages && statePassed < maxItemsPerState; p++) {
-            await new Promise(r => setTimeout(r, 250)); // polite delay
+            await new Promise(r => setTimeout(r, 250));
             const pageData = await queryAlgolia({ categoryFilter, stateFilter, page: p, hitsPerPage: 100 });
             allPages.push(pageData);
         }
@@ -189,46 +292,81 @@ for (const state of targetStates) {
                 totalFound++;
 
                 const itemId = hit.id;
-                const title = normalizeText(hit.kp_title || hit.shortDescription || '');
+                const title = normalizeText(
+                    hit.webDescription || hit.kp_title || hit.shortDescription || ''
+                );
                 const make = normalizeText(hit.make || '');
                 const model = normalizeText(hit.model || '');
                 const year = parseYear(hit.year);
-                const state_code = hit.offSitePhysicalState || state;
+                const odometer = parseOdometer(hit.odometer);
+                const state_code = normalizeText(hit.offSitePhysicalState || state);
                 const city = normalizeText(hit.offSitePhysicalCity || '');
-                const location = [city, state_code].filter(Boolean).join(', ');
-                const current_bid = parseBid(hit.currentBid);
-                const auction_end_time = parseDate(hit.ringCloseOutDate);
-                const listing_url = buildListingUrl(itemId);
-                const photo_url = buildImageUrl(itemId);
+                const catalogDescription = normalizeText(hit.catalogDescription || '');
+                const vin = normalizeText(hit.vin || '');
 
-                // Filter: rust states — bypass allowed for ≤3yr old vehicles
+                // ── Filters ──────────────────────────────────────────────────
+                // Rust state — bypass for ≤3yr old
                 if (HIGH_RUST_STATES.has(state_code)) {
                     if (!(year && year >= currentYear - 2)) continue;
-                    console.log(`[BYPASS] Rust state ${state_code} allowed — vehicle is ${year} (≤3yr old)`);
+                    console.log(`[BYPASS] Rust ${state_code} — year ${year}`);
                 }
 
-                // Filter: year age
+                // Year age
                 if (year && (currentYear - year) > maxYearAge) continue;
 
-                // Filter: bid range (skip items with no bid yet — they're still valuable at $0)
-                if (current_bid > 0 && current_bid > maxBid) continue;
-                if (current_bid > 0 && current_bid < minBid) continue;
+                // ── Marketcheck pricing ───────────────────────────────────────
+                let marketcheckMedian = null;
+                let estimatedAuctionPrice = 0;
+                let pricingSource = 'jjkane_no_bid';
+
+                if (enableMarketcheck && make && model && year) {
+                    const mcResult = await getMarketcheckPrice(year, make, model, odometer);
+                    if (mcResult) {
+                        marketcheckMedian = mcResult.retail_median;
+                        estimatedAuctionPrice = mcResult.estimated_auction_price;
+                        pricingSource = `marketcheck_jjkane_estimated_${mcResult.sample_count}samples`;
+                        totalMarketcheck++;
+                    }
+                    // Polite delay after Marketcheck call
+                    await new Promise(r => setTimeout(r, 300));
+                }
+
+                // Existing currentBid from Algolia (may be 0 early in auction)
+                const currentBid = parseBid(hit.currentBid);
+
+                // Use whichever is higher: actual current bid or estimated floor
+                const effectiveBid = currentBid > 0 ? currentBid : estimatedAuctionPrice;
+
+                // Bid range filter (only applies if we have a real bid or estimate)
+                if (effectiveBid > 0 && effectiveBid > maxBid) continue;
+                if (effectiveBid > 0 && effectiveBid < minBid && currentBid > 0) continue;
 
                 const record = {
+                    listing_id: `jjkane-${itemId}`,
                     title,
                     make,
                     model,
                     year,
-                    current_bid,
+                    odometer,
+                    vin: vin || null,
+                    // Pricing fields
+                    current_bid: effectiveBid,
+                    actual_current_bid: currentBid,
+                    mmr: marketcheckMedian,               // retail reference price
+                    estimated_auction_price: estimatedAuctionPrice,
+                    pricing_source: pricingSource,
+                    // Location
                     state: state_code,
-                    location,
                     city,
-                    auction_end_time,
-                    listing_url,
-                    photo_url,
+                    location: [city, state_code].filter(Boolean).join(', '),
+                    // Auction info
+                    auction_end_date: parseDate(hit.ringCloseOutDate),
+                    listing_url: buildListingUrl(itemId),
+                    image_url: buildImageUrl(itemId),
                     lot_number: String(hit.lotNumber || ''),
                     auction_id: String(hit.auctionId || ''),
                     category: normalizeText(hit.category || ''),
+                    description: catalogDescription,
                     agency_name: 'JJ Kane Government Surplus',
                     source_site: SOURCE,
                     scraped_at: new Date().toISOString(),
@@ -237,6 +375,7 @@ for (const state of targetStates) {
                 await Actor.pushData(record);
                 totalPassed++;
                 statePassed++;
+                console.log(`[PASS] ${title || `${year} ${make} ${model}`} | bid=$${effectiveBid} mmr=$${marketcheckMedian ?? 'N/A'} | ${state_code}`);
             }
         }
 
@@ -246,10 +385,40 @@ for (const state of targetStates) {
         console.error(`[JJKANE] Error querying state ${state}: ${err.message}`);
     }
 
-    // Pause between states
     await new Promise(r => setTimeout(r, 500));
 }
 
-console.log(`[JJKANE] Scrape complete. Found: ${totalFound} | Passed filters: ${totalPassed}`);
+// ── Webhook notification ──────────────────────────────────────────────────────
+
+const effectiveWebhookUrl = webhookUrl
+    || process.env.WEBHOOK_URL
+    || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
+const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || '';
+
+if (effectiveWebhookUrl && totalPassed > 0) {
+    try {
+        const resp = await fetch(effectiveWebhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-webhook-secret': effectiveWebhookSecret,
+            },
+            body: JSON.stringify({
+                source: SOURCE,
+                actorRunId: process.env.APIFY_ACTOR_RUN_ID ?? 'local',
+                itemCount: totalPassed,
+                totalScraped: totalFound,
+                marketcheckPriced: totalMarketcheck,
+                timestamp: new Date().toISOString(),
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        console.log(`[WEBHOOK] Notified ingest: HTTP ${resp.status}`);
+    } catch (err) {
+        console.warn(`[WEBHOOK] Failed: ${err.message}`);
+    }
+}
+
+console.log(`[JJKANE COMPLETE] Found: ${totalFound} | Passed: ${totalPassed} | Marketcheck priced: ${totalMarketcheck}`);
 
 await Actor.exit();

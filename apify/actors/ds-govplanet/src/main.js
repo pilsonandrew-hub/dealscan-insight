@@ -1,496 +1,320 @@
+/**
+ * ds-govplanet — GovPlanet Government Surplus Vehicle Scraper
+ *
+ * Strategy: CheerioCrawler (pure HTTP, no browser) against public category pages.
+ * Each listing page renders vehicle data in quickviews.push({...}) JS blocks.
+ * All needed fields (description, price, location, mileage, equipId, timeLeft)
+ * are in those blocks — zero detail-page visits required.
+ *
+ * Sources scraped:
+ *   - /Pickup+Trucks?ct=3         → 491 vehicles
+ *   - /Automobiles?ct=3           → 268 vehicles
+ *   - /Vans?ct=3                  → 165 vehicles
+ *   - /Compact+Sport+Utility+Vehicles → 56 vehicles
+ *   Total: ~980 unique live vehicles per run
+ *
+ * Pagination: pstart=0,60,120,... (60 items/page)
+ */
+
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
+import { CheerioCrawler, RequestQueue } from 'crawlee';
 
 const SOURCE = 'govplanet';
-const BASE = 'https://www.govplanet.com';
-const VEHICLES_URL = `${BASE}/jsp/s/search.ips?ct=13`;
+const BASE   = 'https://www.govplanet.com';
+
+// Vehicle category URLs — l2=USA filters to US listings at source (no client-side country filter needed)
+// Priority order: highest DOS score first
+const CATEGORY_URLS = [
+    { url: `${BASE}/Pickup+Trucks?ct=3&l2=USA`,                    label: 'pickup_trucks' },  // 367
+    { url: `${BASE}/Van+Trucks?ct=3&l2=USA`,                       label: 'van_trucks' },     // 230
+    { url: `${BASE}/Service+and+Utility+Trucks?ct=3&l2=USA`,       label: 'service_trucks' }, // 182
+    { url: `${BASE}/Vans?ct=3&l2=USA`,                             label: 'vans' },           // 89
+    { url: `${BASE}/Automobiles?ct=3&l2=USA`,                      label: 'automobiles' },    // 40
+    { url: `${BASE}/Full+Size+Sport+Utility+Vehicles?l2=USA`,      label: 'full_suv' },       // 37
+    { url: `${BASE}/Compact+Sport+Utility+Vehicles?l2=USA`,        label: 'compact_suv' },    // 37
+];
 
 const HIGH_RUST = new Set([
-    'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
-    'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
-    'CT', 'NJ', 'MD', 'DE',
+    'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA',
+    'ND','SD','NE','KS','WV','ME','NH','VT','MA','RI',
+    'CT','NJ','MD','DE',
 ]);
 
 const US_STATES = new Set([
-    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
-    'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
-    'VA', 'WA', 'WV', 'WI', 'WY', 'DC',
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC',
 ]);
+
+const STATE_NAMES = {
+    ALABAMA:'AL', ALASKA:'AK', ARIZONA:'AZ', ARKANSAS:'AR', CALIFORNIA:'CA',
+    COLORADO:'CO', CONNECTICUT:'CT', DELAWARE:'DE', FLORIDA:'FL', GEORGIA:'GA',
+    HAWAII:'HI', IDAHO:'ID', ILLINOIS:'IL', INDIANA:'IN', IOWA:'IA',
+    KANSAS:'KS', KENTUCKY:'KY', LOUISIANA:'LA', MAINE:'ME', MARYLAND:'MD',
+    MASSACHUSETTS:'MA', MICHIGAN:'MI', MINNESOTA:'MN', MISSISSIPPI:'MS', MISSOURI:'MO',
+    MONTANA:'MT', NEBRASKA:'NE', NEVADA:'NV', 'NEW HAMPSHIRE':'NH', 'NEW JERSEY':'NJ',
+    'NEW MEXICO':'NM', 'NEW YORK':'NY', 'NORTH CAROLINA':'NC', 'NORTH DAKOTA':'ND',
+    OHIO:'OH', OKLAHOMA:'OK', OREGON:'OR', PENNSYLVANIA:'PA', 'RHODE ISLAND':'RI',
+    'SOUTH CAROLINA':'SC', 'SOUTH DAKOTA':'SD', TENNESSEE:'TN', TEXAS:'TX',
+    UTAH:'UT', VERMONT:'VT', VIRGINIA:'VA', WASHINGTON:'WA', 'WEST VIRGINIA':'WV',
+    WISCONSIN:'WI', WYOMING:'WY', 'DISTRICT OF COLUMBIA':'DC',
+};
+
+const COMMERCIAL_PATTERN = /\b(dump truck|flatbed|refuse|crane|utility body|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper|spreader|mixer|tank|tanker)\b/i;
 
 const MAKES = new Set([
-    'ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', 'honda', 'nissan', 'jeep', 'gmc',
-    'chrysler', 'hyundai', 'kia', 'subaru', 'mazda', 'volkswagen', 'vw', 'bmw', 'mercedes',
-    'audi', 'lexus', 'acura', 'infiniti', 'cadillac', 'lincoln', 'buick', 'pontiac',
-    'mitsubishi', 'volvo', 'tesla', 'saturn', 'isuzu', 'hummer', 'land rover', 'mini',
+    'ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc',
+    'chrysler','hyundai','kia','subaru','mazda','volkswagen','vw','bmw','mercedes',
+    'audi','lexus','acura','infiniti','cadillac','lincoln','buick','pontiac',
+    'mitsubishi','volvo','tesla','saturn','isuzu','hummer','land rover','mini',
+    'suzuki','fiat','scion','mercury','oldsmobile',
 ]);
 
-const PASSENGER_KEYWORDS = [
-    'passenger', 'sedan', 'coupe', 'hatchback', 'wagon', 'convertible', 'crossover', 'suv',
-    'sport utility', 'crew cab', 'pickup', 'truck', 'car', '4x4', 'awd', 'minivan', 'van',
-];
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-const COMMERCIAL_PATTERN = /\b(cargo van|cargo truck|cutaway|chassis cab|box truck|stake bed|dump truck|flatbed|refuse|crane truck|utility body|work van|sprinter cargo|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper)\b/i;
+function extractState(locationText = '') {
+    const upper = locationText.toUpperCase().trim();
+    if (!upper) return '';
+    // "California" → CA
+    for (const [name, code] of Object.entries(STATE_NAMES)) {
+        if (upper.includes(name)) return code;
+    }
+    // Two-letter match at end "..., TX"
+    const m = upper.match(/,\s*([A-Z]{2})\b/) ?? upper.match(/\b([A-Z]{2})$/);
+    const abbrev = m?.[1] ?? '';
+    return US_STATES.has(abbrev) ? abbrev : '';
+}
+
+function parseMileage(usageStr = '') {
+    // "127,717 mi" → 127717  |  "13,886 hrs" → null (hours, not miles)
+    const clean = usageStr.replace(/,/g, '');
+    const m = clean.match(/([\d]+(?:\.\d+)?)\s*(mi|miles?)\b/i);
+    if (m) return parseInt(m[1], 10);
+    // km → convert
+    const km = clean.match(/([\d]+(?:\.\d+)?)\s*(km|kilometers?)\b/i);
+    if (km) return Math.round(parseFloat(km[1]) * 0.621371);
+    return null;
+}
+
+function parsePrice(priceStr = '') {
+    const m = priceStr.replace(/,/g, '').match(/[\d]+(?:\.\d+)?/);
+    return m ? parseFloat(m[0]) : 0;
+}
+
+function extractYear(desc = '') {
+    const m = desc.match(/\b(19[89]\d|20[0-3]\d)\b/);
+    return m ? parseInt(m[1], 10) : null;
+}
+
+function extractMake(desc = '') {
+    const lower = desc.toLowerCase();
+    for (const make of MAKES) {
+        if (new RegExp(`\\b${make.replace(/\s+/g,'\\s+')}\\b`, 'i').test(lower)) {
+            if (make === 'chevy') return 'Chevrolet';
+            if (make === 'vw')    return 'Volkswagen';
+            return make.replace(/\b\w/g, c => c.toUpperCase());
+        }
+    }
+    return null;
+}
+
+function extractModel(desc = '', make = '') {
+    if (!make) return null;
+    const m = desc.match(new RegExp(`\\b${make}\\b(.+)`, 'i'));
+    if (!m) return null;
+    const after = m[1].replace(/^[\s\-:]+/, '').trim();
+    const model = after.match(/^([A-Za-z0-9][A-Za-z0-9\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9\-]*){0,2})/);
+    return model ? model[1].trim() : null;
+}
+
+function isVehicle(desc = '') {
+    // l2=USA already filters to US at source — no flagPath check needed
+    if (COMMERCIAL_PATTERN.test(desc)) return false; // skip heavy equipment
+    return true;
+}
+
+// DC location fix — "Dist. of Columbia" doesn't match standard state names
+const DC_PATTERN = /dist.*columbia|washington.*d\.?c\.?/i;
+
+function passesFilters({ year, price, state, locationText = '' }) {
+    // Accept DC regardless of state extraction
+    const isDC = DC_PATTERN.test(locationText);
+    if (!isDC && (!state || !US_STATES.has(state))) return false;
+    const currentYear = new Date().getFullYear();
+    // Government vehicles are kept longer — allow up to 25 years old
+    if (year && (currentYear - year) > 25) return false;
+    if (year && year < 1970) return false;
+    // Rust-state: allow up to 18 years in high-rust states (gov vehicles, not retail)
+    if (state && HIGH_RUST.has(state)) {
+        if (year && (currentYear - year) > 18) return false;
+    }
+    if (price > 0 && price > 55000) return false;
+    return true;
+}
+
+// ── Parse quickviews from a page ──────────────────────────────────────────────
+
+function parseQuickviews(html) {
+    const results = [];
+    const pattern = /quickviews\.push\((\{.+?\})\);/gs;
+    let m;
+    while ((m = pattern.exec(html)) !== null) {
+        try {
+            const item = JSON.parse(m[1]);
+            results.push(item);
+        } catch (_) {
+            // skip malformed
+        }
+    }
+    return results;
+}
+
+// ── Actor ─────────────────────────────────────────────────────────────────────
 
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxPages = 3,
-    minBid = 500,
-    maxBid = 35000,
+    maxItemsPerCategory = 500,   // safety cap per category (override to 0 for unlimited)
+    minBid = 200,
+    maxBid = 40000,
+    webhookUrl = null,
+    webhookSecret = null,
 } = input;
 
-const seenListingUrls = new Set();
-const enqueuedListingUrls = new Set();
-const discoveredCategoryUrls = new Set();
-const sampleLocations = [];
+let totalPushed = 0;
+let totalSkipped = 0;
+const seenEquipIds = new Set();
+const pendingPages  = new Map(); // categoryLabel → Set of pstart values already queued
 
-let totalFound = 0;
-let totalPassed = 0;
+const queue = await RequestQueue.open();
 
-function normalizeText(value) {
-    return String(value ?? '').replace(/\s+/g, ' ').trim();
+// Seed initial pages
+for (const cat of CATEGORY_URLS) {
+    await queue.addRequest({
+        url: cat.url,
+        uniqueKey: `${cat.label}:pstart=0`,
+        userData: { label: cat.label, baseUrl: cat.url, pstart: 0 },
+    });
 }
 
-function recordLocationSample(locationText) {
-    const normalized = normalizeText(locationText);
-    if (!normalized || sampleLocations.includes(normalized) || sampleLocations.length >= 5) return;
-    sampleLocations.push(normalized);
-}
+const crawler = new CheerioCrawler({
+    requestQueue: queue,
+    maxConcurrency: 3,
+    requestHandlerTimeoutSecs: 60,
+    maxRequestRetries: 2,
+    additionalMimeTypes: ['text/html'],
 
-function toAbsoluteUrl(href) {
-    if (!href) return '';
-    try {
-        return new URL(href, BASE).toString();
-    } catch {
-        return '';
-    }
-}
+    async requestHandler({ request, body, log }) {
+        const { label, baseUrl, pstart } = request.userData;
+        const html = typeof body === 'string' ? body : body.toString('utf-8');
 
-function parseBid(value) {
-    if (typeof value === 'number') return value;
-    const text = normalizeText(value).replace(/,/g, '');
-    const match = text.match(/\$?\s*([\d]+(?:\.\d+)?)/);
-    return match ? parseFloat(match[1]) : 0;
-}
+        // ── Parse total items ──
+        const totalMatch = html.match(/sr_total_results.*?value="(\d+)"/);
+        const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
 
-function parseDate(value) {
-    const text = normalizeText(value)
-        .replace(/^(closing time|close time|auction end|ends?|end date|time remaining)\s*:?\s*/i, '');
-    if (!text) return null;
+        // ── Extract quickviews ──
+        const items = parseQuickviews(html);
+        log.info(`[${label}] pstart=${pstart} → ${items.length} items (total=${total})`);
 
-    const monthMatch = text.match(/([A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*[AP]M)?)\b/);
-    const numericMatch = text.match(/(\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M?)?)/i);
-    const candidate = monthMatch?.[1] ?? numericMatch?.[1] ?? text;
-    const parsed = new Date(candidate);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
+        // ── Process items ──
+        const records = [];
+        for (const item of items) {
+            const equipId = String(item.equipId || '');
+            if (!equipId || seenEquipIds.has(equipId)) continue;
+            seenEquipIds.add(equipId);
 
-const STATE_NAME_TO_ABBREV = {
-    ALABAMA: 'AL', ALASKA: 'AK', ARIZONA: 'AZ', ARKANSAS: 'AR', CALIFORNIA: 'CA',
-    COLORADO: 'CO', CONNECTICUT: 'CT', DELAWARE: 'DE', FLORIDA: 'FL', GEORGIA: 'GA',
-    HAWAII: 'HI', IDAHO: 'ID', ILLINOIS: 'IL', INDIANA: 'IN', IOWA: 'IA',
-    KANSAS: 'KS', KENTUCKY: 'KY', LOUISIANA: 'LA', MAINE: 'ME', MARYLAND: 'MD',
-    MASSACHUSETTS: 'MA', MICHIGAN: 'MI', MINNESOTA: 'MN', MISSISSIPPI: 'MS', MISSOURI: 'MO',
-    MONTANA: 'MT', NEBRASKA: 'NE', NEVADA: 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
-    'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND',
-    OHIO: 'OH', OKLAHOMA: 'OK', OREGON: 'OR', PENNSYLVANIA: 'PA', 'RHODE ISLAND': 'RI',
-    'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', TENNESSEE: 'TN', TEXAS: 'TX',
-    UTAH: 'UT', VERMONT: 'VT', VIRGINIA: 'VA', WASHINGTON: 'WA', 'WEST VIRGINIA': 'WV',
-    WISCONSIN: 'WI', WYOMING: 'WY', 'DISTRICT OF COLUMBIA': 'DC',
-};
+            const desc     = (item.description || '').trim();
+            const flagPath = (item.flagPath || '');
+            const price    = parsePrice(item.convPrice || '');
+            const state    = extractState(item.eumeLocation || '');
+            const year     = extractYear(desc);
+            const make     = extractMake(desc);
+            const model    = extractModel(desc, make || '');
+            const mileage  = parseMileage(item.usage || '');
+            const listingUrl = item.itemPageUri
+                ? `${BASE}${item.itemPageUri.split('?')[0]}`
+                : null;
 
-function extractState(value) {
-    const text = normalizeText(value).toUpperCase();
-    if (!text) return '';
+            if (!isVehicle(desc)) { totalSkipped++; continue; }
+            if (!passesFilters({ year, price, state, locationText: item.eumeLocation || '' })) { totalSkipped++; continue; }
+            if (price < minBid || (maxBid > 0 && price > maxBid)) { totalSkipped++; continue; }
 
-    const match = text.match(/,\s*([A-Z]{2})(?:\s+\d{5})?\b/)
-        ?? text.match(/\b([A-Z]{2})\s+\d{5}\b/)
-        ?? text.match(/\b([A-Z]{2})\b$/);
-    const abbrev = match?.[1] ?? '';
-    if (US_STATES.has(abbrev)) return abbrev;
+            records.push({
+                title:            desc,
+                year,
+                make,
+                model,
+                current_bid:      price,
+                state,
+                city:             (item.eumeLocation || '').split(',')[0].trim() || null,
+                mileage,
+                auction_end_time: item.timeLeft || null,
+                listing_url:      listingUrl,
+                photo_url:        item.photo || item.photoThumb || null,
+                vin:              null,
+                source_site:      SOURCE,
+                equip_id:         equipId,
+                scraped_at:       new Date().toISOString(),
+            });
+        }
 
-    for (const [name, code] of Object.entries(STATE_NAME_TO_ABBREV)) {
-        if (text.includes(name)) return code;
-    }
-    return '';
-}
+        if (records.length > 0) {
+            await Actor.pushData(records);
+            totalPushed += records.length;
+            log.info(`[${label}] Pushed ${records.length} records (total so far: ${totalPushed})`);
+        }
 
-function extractCity(value) {
-    const text = normalizeText(value);
-    const match = text.match(/^([^,]+),\s*[A-Z]{2}\b/);
-    return match ? normalizeText(match[1]) : '';
-}
+        // ── Enqueue next pages ──
+        if (items.length === 0 || total === 0) return;
+        if (maxItemsPerCategory > 0 && pstart + 60 >= maxItemsPerCategory) return;
 
-function extractYear(text = '') {
-    const match = normalizeText(text).match(/\b(19[89]\d|20[0-3]\d)\b/);
-    return match ? parseInt(match[1], 10) : null;
-}
+        const nextPstart = pstart + 60;
+        if (nextPstart >= total) return;
 
-function extractMake(title = '') {
-    const lowerTitle = normalizeText(title).toLowerCase();
-    for (const make of MAKES) {
-        const pattern = new RegExp(`\\b${make.replace(/\s+/g, '\\s+')}\\b`, 'i');
-        if (!pattern.test(lowerTitle)) continue;
-        return make === 'chevy'
-            ? 'Chevrolet'
-            : make === 'vw'
-                ? 'Volkswagen'
-                : make.replace(/\b\w/g, (char) => char.toUpperCase());
-    }
-    return null;
-}
+        const pendingKey = `${label}:pstart=${nextPstart}`;
+        const sep = baseUrl.includes('?') ? '&' : '?';
+        const nextUrl = `${baseUrl}${sep}pstart=${nextPstart}`;
 
-function extractModel(title = '', make = '') {
-    if (!make) return null;
-
-    const normalizedTitle = normalizeText(title);
-    const pattern = new RegExp(`\\b${make.replace(/\s+/g, '\\s+')}\\b`, 'i');
-    const match = normalizedTitle.match(pattern);
-    if (!match) return null;
-
-    const afterMake = normalizedTitle.slice(match.index + match[0].length)
-        .replace(/^[\s\-:]+/, '')
-        .replace(/\b(4x4|awd|fwd|rwd|vin|odometer)\b.*$/i, '')
-        .trim();
-    const modelMatch = afterMake.match(/^([A-Za-z0-9][A-Za-z0-9\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9\-]*)?)/);
-    return modelMatch ? modelMatch[1] : null;
-}
-
-function isPassengerVehicle(title = '') {
-    const normalizedTitle = normalizeText(title).toLowerCase();
-    if (!normalizedTitle) return false;
-    if (COMMERCIAL_PATTERN.test(normalizedTitle)) return false;
-
-    return MAKES.has(normalizedTitle.split(' ')[1] ?? '')
-        || [...MAKES].some((make) => normalizedTitle.includes(make))
-        || PASSENGER_KEYWORDS.some((keyword) => normalizedTitle.includes(keyword));
-}
-
-function passesFilters({ title, year, bid, state }) {
-    if (!title || !isPassengerVehicle(title)) return false;
-    if (!state || !US_STATES.has(state)) return false;
-    const currentYear = new Date().getFullYear();
-    if (HIGH_RUST.has(state)) {
-        if (!(year && year >= currentYear - 2)) return false;
-        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
-    }
-    if (year && year < 1980) return false;
-    if (year && (currentYear - year) > 12) return false;
-    if (bid < minBid || bid > maxBid) return false;
-    return true;
-}
-
-function buildRecord(detail, partial) {
-    const title = normalizeText(detail.title || partial.title);
-    const year = detail.year ?? extractYear(title);
-    const make = detail.make || extractMake(title);
-    const model = detail.model || extractModel(title, make || '');
-    const currentBid = detail.current_bid || partial.current_bid || 0;
-    const locationText = detail.location || `${partial.city ? `${partial.city}, ` : ''}${partial.state || ''}`;
-    const state = detail.state || partial.state || extractState(locationText);
-    const city = detail.city || partial.city || extractCity(locationText);
-
-    return {
-        title,
-        year,
-        make,
-        model,
-        current_bid: currentBid,
-        state,
-        city,
-        auction_end_time: detail.auction_end_time || partial.auction_end_time || null,
-        listing_url: partial.listing_url,
-        photo_url: detail.photo_url || partial.photo_url || null,
-        vin: detail.vin || null,
-        mileage: detail.mileage || null,
-        source_site: SOURCE,
-        scraped_at: new Date().toISOString(),
-    };
-}
-
-const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 30,
-    maxConcurrency: 1,
-    minConcurrency: 1,
-    requestHandlerTimeoutSecs: 180,
-    launchContext: {
-        launchOptions: {
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        },
+        await queue.addRequest({
+            url: nextUrl,
+            uniqueKey: pendingKey,
+            userData: { label, baseUrl, pstart: nextPstart },
+        });
     },
 
-    async requestHandler({ page, request, log }) {
-        const label = request.userData.label || 'LIST';
-
-        await page.waitForLoadState('domcontentloaded');
-        await page.waitForTimeout(3000);
-
-        if (label === 'DETAIL') {
-            const partial = request.userData.partial || {};
-
-            const rawDetail = await page.evaluate(() => {
-                const findLabelValue = (labels) => {
-                    const cells = [...document.querySelectorAll('th, td, dt, label, .label, [class*="label"], strong')];
-                    for (const cell of cells) {
-                        const text = (cell.textContent || '').trim().toLowerCase();
-                        if (!labels.some((l) => text.includes(l))) continue;
-                        const adj = cell.nextElementSibling;
-                        if (adj?.textContent?.trim()) return adj.textContent.trim();
-                        const parent = cell.parentElement;
-                        const parentText = (parent?.textContent || '').trim();
-                        if (parentText && parentText.toLowerCase() !== text) return parentText;
-                    }
-                    return '';
-                };
-
-                const bodyText = document.body?.innerText || '';
-                const title = document.querySelector('h1, .itemTitle, [class*="hero-title"]')?.textContent?.trim()
-                    || document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
-
-                const currentBidMatch = bodyText.match(/Current Bid[^$]*\$[\d,]+(?:\.\d+)?/i);
-                const closingMatch = bodyText.match(/(Closing Time|Auction End|Ends)[^A-Z0-9]{0,8}[A-Za-z]{3,9}[^.|\n]+\d{4}(?:[^.|\n]+(?:AM|PM))?/i);
-                const locationMatch = bodyText.match(/(Item Location|Located in|Location)[^A-Z0-9]{0,8}[^.|\n]+,\s*[A-Z]{2}(?:\s+\d{5})?/i);
-                const vinMatch = bodyText.match(/\bVIN[:\s#-]*([A-HJ-NPR-Z0-9]{17})\b/i);
-                const mileageMatch = bodyText.match(/(\d[\d,]+)\s*(miles?|mi\.?|odometer)\b/i);
-
-                return {
-                    title,
-                    bodyText: bodyText.slice(0, 5000),
-                    currentBidText: findLabelValue(['current bid']) || currentBidMatch?.[0] || '',
-                    closingText: findLabelValue(['closing time', 'close time', 'auction end', 'ends']) || closingMatch?.[0] || '',
-                    locationText: findLabelValue(['item location', 'located in', 'location']) || locationMatch?.[0] || '',
-                    imageUrl: document.querySelector('meta[property="og:image"]')?.getAttribute('content')
-                        || document.querySelector('img[src]')?.src || '',
-                    vin: vinMatch?.[1] || null,
-                    mileageStr: mileageMatch?.[1] || null,
-                };
-            });
-
-            const detail = {
-                title: rawDetail.title || partial.title,
-                year: extractYear(rawDetail.title || partial.title || ''),
-                make: extractMake(rawDetail.title || partial.title || ''),
-                model: null,
-                current_bid: parseBid(rawDetail.currentBidText),
-                auction_end_time: parseDate(rawDetail.closingText),
-                location: rawDetail.locationText,
-                state: extractState(rawDetail.locationText),
-                city: extractCity(rawDetail.locationText),
-                photo_url: toAbsoluteUrl(rawDetail.imageUrl) || null,
-                vin: rawDetail.vin || null,
-                mileage: rawDetail.mileageStr ? parseInt(rawDetail.mileageStr.replace(/,/g, ''), 10) : null,
-            };
-
-            const record = buildRecord(detail, partial);
-            totalFound += 1;
-
-            if (!passesFilters({
-                title: record.title,
-                year: record.year,
-                bid: record.current_bid,
-                state: record.state,
-            })) {
-                return;
-            }
-
-            totalPassed += 1;
-            await Actor.pushData(record);
-            return;
-        }
-
-        log.info(`[GOVPLANET] Parsing search page ${request.url}`);
-
-        // Extract category URLs (page 1 only)
-        if (request.userData.pageNum === 1) {
-            const categoryLinks = await page.evaluate(() => {
-                return Array.from(document.querySelectorAll('a[href*="/jsp/s/search.ips?"]'))
-                    .map((a) => ({ href: a.href, text: (a.textContent || '').trim() }));
-            });
-
-            const categoryRequests = [];
-            for (const { href, text } of categoryLinks) {
-                const url = href;
-                if (!url || discoveredCategoryUrls.has(url)) continue;
-                const haystack = `${text} ${url}`.toLowerCase();
-                if (!haystack.includes('ct=13')) continue;
-                if (!/(passenger|sedan|car|suv|sport utility|crossover|pickup|crew cab)/.test(haystack)) continue;
-                if (COMMERCIAL_PATTERN.test(haystack)) continue;
-
-                discoveredCategoryUrls.add(url);
-                categoryRequests.push({
-                    url,
-                    uniqueKey: `govplanet-category:${url}`,
-                    userData: {
-                        label: 'LIST',
-                        pageNum: 1,
-                        category: text || 'discovered',
-                        discoveredFromRoot: true,
-                    },
-                });
-            }
-
-            if (categoryRequests.length > 0) {
-                await crawler.addRequests(categoryRequests);
-                log.info(`[GOVPLANET] Discovered ${categoryRequests.length} passenger category URLs`);
-            }
-        }
-
-        // Extract listing cards using multiple selectors
-        const rawListings = await page.evaluate(() => {
-            const SELECTORS = [
-                '.sr_grid_tile', '.sr_item', '.sr_list_item', '.featured-item',
-                '.lot-card', '.item-card', '.search-result-item', '.listing-item',
-                '.product-card', '[data-testid="lot"]',
-                '.searchResults .searchResult', '.searchResults li', '.searchResults article',
-            ];
-
-            let cards = [];
-            let usedSelector = '';
-            for (const sel of SELECTORS) {
-                const found = document.querySelectorAll(sel);
-                if (found.length > 0) {
-                    cards = Array.from(found);
-                    usedSelector = sel;
-                    break;
-                }
-            }
-
-            // Fallback: find all /for-sale/ links and climb to card parent
-            if (cards.length === 0) {
-                const links = document.querySelectorAll('a[href*="/for-sale/"]');
-                const seen = new Set();
-                for (const link of links) {
-                    const parent = link.closest('li, article, [class*="item"], [class*="tile"], [class*="card"]') || link.parentElement;
-                    if (parent && !seen.has(parent)) {
-                        seen.add(parent);
-                        cards.push(parent);
-                    }
-                }
-                usedSelector = 'fallback-for-sale-links';
-            }
-
-            const results = [];
-            const seenUrls = new Set();
-
-            for (const card of cards) {
-                const link = card.querySelector('a[href*="/for-sale/"]');
-                if (!link) continue;
-                const href = link.href;
-                if (!href || seenUrls.has(href)) continue;
-                seenUrls.add(href);
-
-                const title = (link.textContent || '').trim()
-                    || card.querySelector('h1, h2, h3, h4, [class*="title"]')?.textContent?.trim() || '';
-
-                const priceEl = card.querySelector(
-                    '.sr_price, .pdprice, .price, [class*="price"], [class*="Price"], [class*="bid"], [class*="Bid"]',
-                );
-                const locationEl = card.querySelector(
-                    '.sr_location, .sr_current_location, .itemLocation, .location, [class*="location"], [class*="Location"]',
-                );
-                const timeEl = card.querySelector(
-                    '.timeLeft, .timeRemaining, [class*="time"], [class*="Time"], [class*="close"], [class*="Close"]',
-                );
-                const imgEl = card.querySelector('img');
-
-                results.push({
-                    title,
-                    bidText: priceEl?.textContent?.trim() || '',
-                    locationText: locationEl?.textContent?.trim() || '',
-                    endText: timeEl?.textContent?.trim() || '',
-                    imageUrl: imgEl?.src || imgEl?.dataset?.src || '',
-                    listingUrl: href,
-                });
-            }
-
-            return { results, usedSelector, totalCards: cards.length };
-        });
-
-        log.info(`[GOVPLANET] Found ${rawListings.results.length} listing cards (selector: ${rawListings.usedSelector}, total card nodes: ${rawListings.totalCards}) on ${request.url}`);
-
-        const detailRequests = [];
-        for (const raw of rawListings.results) {
-            const partial = {
-                title: raw.title,
-                current_bid: parseBid(raw.bidText),
-                state: extractState(raw.locationText),
-                city: extractCity(raw.locationText),
-                auction_end_time: parseDate(raw.endText),
-                listing_url: raw.listingUrl,
-                photo_url: toAbsoluteUrl(raw.imageUrl) || null,
-            };
-            recordLocationSample(raw.locationText);
-
-            if (!partial.listing_url || enqueuedListingUrls.has(partial.listing_url)) continue;
-            enqueuedListingUrls.add(partial.listing_url);
-
-            detailRequests.push({
-                url: partial.listing_url,
-                uniqueKey: `govplanet-detail:${partial.listing_url}`,
-                userData: {
-                    label: 'DETAIL',
-                    partial,
-                },
-            });
-        }
-
-        if (detailRequests.length > 0) {
-            await crawler.addRequests(detailRequests);
-        }
-
-        const currentPage = request.userData.pageNum || 1;
-        if (currentPage >= maxPages) return;
-
-        // Find next page URL
-        const nextUrl = await page.evaluate((currentUrl) => {
-            const nextLink = document.querySelector('a[rel="next"]')
-                ?? [...document.querySelectorAll('a')].find((a) => /^\s*next\s*$/i.test(a.textContent || ''));
-            if (nextLink?.href) return nextLink.href;
-
-            try {
-                const current = new URL(currentUrl);
-                const currentStart = parseInt(current.searchParams.get('pstart') || '0', 10);
-                for (const a of document.querySelectorAll('a[href*="pstart="]')) {
-                    try {
-                        const url = new URL(a.href);
-                        const start = parseInt(url.searchParams.get('pstart') || '0', 10);
-                        if (start > currentStart) return a.href;
-                    } catch { /* skip */ }
-                }
-            } catch { /* skip */ }
-            return '';
-        }, request.url);
-
-        if (!nextUrl) return;
-
-        const nextPageKey = `govplanet-list:${request.userData.category || 'root'}:${nextUrl}`;
-        if (seenListingUrls.has(nextPageKey)) return;
-        seenListingUrls.add(nextPageKey);
-
-        await crawler.addRequests([{
-            url: nextUrl,
-            uniqueKey: nextPageKey,
-            userData: {
-                label: 'LIST',
-                pageNum: currentPage + 1,
-                category: request.userData.category || 'vehicles',
-            },
-        }]);
+    failedRequestHandler({ request, log }) {
+        log.error(`Request failed: ${request.url}`);
     },
 });
 
-await crawler.run([{
-    url: VEHICLES_URL,
-    uniqueKey: 'govplanet-root-vehicles',
-    userData: {
-        label: 'LIST',
-        pageNum: 1,
-        category: 'vehicles',
-    },
-}]);
+await crawler.run();
 
-console.log('[GOVPLANET] Sample locations:', sampleLocations);
-console.log(`[GOVPLANET] Found: ${totalFound} | Passed: ${totalPassed}`);
+console.log(`[GOVPLANET] Done. Pushed: ${totalPushed} | Skipped: ${totalSkipped} | Unique equipIds: ${seenEquipIds.size}`);
+
+// ── Webhook notification ──────────────────────────────────────────────────────
+if (webhookUrl && totalPushed > 0) {
+    try {
+        const runInfo = Actor.getEnv();
+        const res = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(webhookSecret ? { 'x-apify-webhook-secret': webhookSecret } : {}),
+            },
+            body: JSON.stringify({
+                source: SOURCE,
+                actorRunId: runInfo.actorRunId,
+                datasetId:  runInfo.defaultDatasetId,
+                itemCount:  totalPushed,
+                skipped:    totalSkipped,
+            }),
+        });
+        console.log(`[GOVPLANET] Webhook → ${res.status}`);
+    } catch (err) {
+        console.warn(`[GOVPLANET] Webhook failed: ${err.message}`);
+    }
+}
+
 await Actor.exit();
