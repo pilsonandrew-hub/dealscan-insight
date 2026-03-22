@@ -1,5 +1,27 @@
+/**
+ * ds-bidspotter scraper — HTTP-based rewrite (no Playwright)
+ *
+ * Key findings from 2026-03-22 investigation:
+ * - BidSpotter pages are SERVER-SIDE RENDERED and fully accessible via plain HTTP
+ * - The old Playwright actor got 123 UK equipment items (all filtered out) due to:
+ *   1. No country filtering (UK auctions pass the Automobiles category)
+ *   2. No state detection from auctionCity
+ *   3. 49-minute runs with max 170 requests before stopping
+ * - US vehicle auctions exist (machin7 TX: Ford F-150s, RAMs; bscroyal FL: Govt Fleet)
+ * - Some BSC-hosted US pages return 202 AWS WAF challenge (need Playwright+proxy to unlock)
+ *   BUT most lot pages and non-BSC-hosted catalogue pages ARE accessible via HTTP
+ * - Key data extracted from dataLayer: auctionCountry, auctionCity, lotName, lotEndsFrom, openingPrice
+ *
+ * Strategy:
+ * 1. Crawl search-filter pages to get catalogue URLs (pagination up to maxPages)
+ * 2. For each catalogue, fetch via HTTP and check dataLayer for auctionCountry == 'United States'
+ * 3. If US, enumerate lots (60/page) and extract vehicle lot data from each lot page
+ * 4. Parse state from auctionCity using city→state lookup table
+ * 5. Use HttpCrawler (fast, no Playwright overhead) with proper UA rotation
+ */
+
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
+import { HttpCrawler } from 'crawlee';
 
 const SOURCE = 'bidspotter';
 const BASE_URL = 'https://www.bidspotter.com';
@@ -15,7 +37,7 @@ const CANADIAN_PROVINCES = new Set([
     'AB', 'BC', 'ON', 'QC', 'MB', 'SK', 'NS', 'NB', 'PE', 'NL', 'YT', 'NT', 'NU',
 ]);
 
-// All valid US state codes (for validation)
+// All valid US state codes
 const ALL_US_STATES = new Set([
     'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
     'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
@@ -23,28 +45,96 @@ const ALL_US_STATES = new Set([
     'VA', 'WA', 'WV', 'WI', 'WY', 'DC',
 ]);
 
+// City → State mapping for BidSpotter auction cities (extend as needed)
+const CITY_TO_STATE = {
+    // Texas
+    'odessa': 'TX', 'dallas': 'TX', 'houston': 'TX', 'austin': 'TX', 'san antonio': 'TX',
+    'fort worth': 'TX', 'el paso': 'TX', 'arlington': 'TX', 'corpus christi': 'TX',
+    'lubbock': 'TX', 'plano': 'TX', 'laredo': 'TX', 'irving': 'TX', 'garland': 'TX',
+    // Florida
+    'tampa': 'FL', 'miami': 'FL', 'orlando': 'FL', 'jacksonville': 'FL', 'fort lauderdale': 'FL',
+    'tallahassee': 'FL', 'st. petersburg': 'FL', 'hialeah': 'FL', 'panama city': 'FL',
+    'pensacola': 'FL', 'gainesville': 'FL', 'clearwater': 'FL', 'cape coral': 'FL',
+    // Georgia
+    'atlanta': 'GA', 'savannah': 'GA', 'augusta': 'GA', 'macon': 'GA', 'columbus': 'GA',
+    // South Carolina
+    'charleston': 'SC', 'columbia': 'SC', 'greenville': 'SC', 'ladson': 'SC', 'spartanburg': 'SC',
+    // North Carolina
+    'charlotte': 'NC', 'raleigh': 'NC', 'greensboro': 'NC', 'durham': 'NC', 'winston-salem': 'NC',
+    // Tennessee
+    'nashville': 'TN', 'memphis': 'TN', 'knoxville': 'TN', 'chattanooga': 'TN',
+    // Virginia
+    'richmond': 'VA', 'virginia beach': 'VA', 'norfolk': 'VA', 'chesapeake': 'VA',
+    // California
+    'los angeles': 'CA', 'san francisco': 'CA', 'san diego': 'CA', 'sacramento': 'CA',
+    'fresno': 'CA', 'long beach': 'CA', 'oakland': 'CA', 'bakersfield': 'CA',
+    'anaheim': 'CA', 'santa ana': 'CA', 'riverside': 'CA', 'stockton': 'CA',
+    'chula vista': 'CA', 'irvine': 'CA', 'fremont': 'CA', 'modesto': 'CA',
+    'santa clara': 'CA', 'fontana': 'CA', 'oxnard': 'CA',
+    // Nevada
+    'las vegas': 'NV', 'henderson': 'NV', 'reno': 'NV', 'north las vegas': 'NV',
+    // Arizona
+    'phoenix': 'AZ', 'tucson': 'AZ', 'mesa': 'AZ', 'chandler': 'AZ', 'scottsdale': 'AZ',
+    'tempe': 'AZ', 'gilbert': 'AZ', 'glendale': 'AZ', 'peoria': 'AZ',
+    // Washington
+    'seattle': 'WA', 'spokane': 'WA', 'tacoma': 'WA', 'bellevue': 'WA', 'kent': 'WA',
+    'renton': 'WA', 'kirkland': 'WA', 'redmond': 'WA', 'vancouver': 'WA',
+    // Oregon
+    'portland': 'OR', 'salem': 'OR', 'eugene': 'OR', 'gresham': 'OR',
+    // Colorado
+    'denver': 'CO', 'colorado springs': 'CO', 'aurora': 'CO', 'fort collins': 'CO',
+    // New Mexico
+    'albuquerque': 'NM', 'santa fe': 'NM', 'las cruces': 'NM',
+    // Alabama
+    'birmingham': 'AL', 'montgomery': 'AL', 'huntsville': 'AL', 'mobile': 'AL',
+    // Louisiana
+    'new orleans': 'LA', 'baton rouge': 'LA', 'shreveport': 'LA', 'lafayette': 'LA',
+    // Oklahoma
+    'oklahoma city': 'OK', 'tulsa': 'OK', 'norman': 'OK', 'broken arrow': 'OK',
+    // Kansas
+    'wichita': 'KS', 'overland park': 'KS', 'kansas city': 'KS',
+    // Nebraska
+    'omaha': 'NE', 'lincoln': 'NE',
+    // South Dakota
+    'sioux falls': 'SD', 'rapid city': 'SD',
+    // Utah
+    'salt lake city': 'UT', 'provo': 'UT', 'west valley city': 'UT',
+    // Idaho
+    'boise': 'ID', 'nampa': 'ID', 'meridian': 'ID',
+    // Hawaii
+    'honolulu': 'HI',
+    // DC
+    'washington': 'DC', 'washington, d.c.': 'DC',
+    // Other key cities
+    'swedesboro': 'NJ',
+};
+
 const VEHICLE_MAKES = [
     'ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', 'honda', 'nissan', 'jeep', 'gmc',
     'chrysler', 'hyundai', 'kia', 'subaru', 'mazda', 'volkswagen', 'vw', 'bmw', 'mercedes',
     'audi', 'lexus', 'acura', 'infiniti', 'cadillac', 'lincoln', 'buick', 'pontiac',
     'mitsubishi', 'volvo', 'tesla', 'mini', 'saturn', 'scion', 'land rover', 'jaguar',
     'porsche', 'maserati', 'alfa romeo', 'fiat', 'genesis', 'rivian', 'lucid',
+    'international', 'kenworth', 'peterbilt', 'mack', 'freightliner', 'western star', 'sterling',
 ];
 
 const VEHICLE_KEYWORDS = [
     'sedan', 'coupe', 'hatchback', 'wagon', 'convertible', 'suv', 'sport utility',
     'crossover', 'pickup', 'crew cab', 'extended cab', 'minivan', 'passenger van',
     '4x4', 'awd', 'fwd', 'rwd', 'passenger car', 'automobile',
+    'f-150', 'f-250', 'f-350', 'f-450', 'silverado', 'sierra', 'ranger', 'explorer',
+    'expedition', 'tahoe', 'suburban', 'escalade', 'navigator', 'wrangler', 'cherokee',
 ];
 
 // Exclude non-passenger / non-target vehicle lots
-const EXCLUDED_PATTERN = /\b(forklift|tractor|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv|utv|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed|box\s*truck|cargo\s+van|step\s+van|cutaway|chassis\s+cab|stake\s*bed|semitrailer|furniture|desk|chair|cabinet|computer|electronics|tools|equipment|machinery|industrial)\b/i;
+const EXCLUDED_PATTERN = /\b(forklift|tractor(?!\s+truck)|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv|utv|golf\s*cart|ambulance|fire\s*truck|flatbed(?!\s+car)|box\s*truck|cargo\s+van|step\s+van|cutaway|chassis\s+cab|stake\s*bed|semitrailer|furniture|desk|chair|cabinet|computer|electronics|tools(?!\s+truck)|industrial|forklift|scissor\s*lift|telehandler|dumper|tipper|sweeper|baler|combine|harvester|sprayer)\b/i;
 
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
-    maxCatalogues = 30,
+    maxCatalogues = 50,
+    maxPages = 10,
     minYear = 1990,
     targetStates = [...TARGET_STATES],
 } = input;
@@ -74,17 +164,44 @@ function parseDate(value) {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+/**
+ * Parse state code from BidSpotter auctionCity field.
+ * BidSpotter gives city names like "Odessa", "Tampa", "Ladson", etc.
+ * We look up in our city→state table, or try to extract from the text.
+ */
+function parseStateFromCity(cityText) {
+    if (!cityText) return null;
+    const text = normalizeText(cityText);
+    const upper = text.toUpperCase();
+    const lower = text.toLowerCase();
+
+    // Check if city text has a state code already (e.g. "Tampa, FL" or "Tampa FL")
+    const stateInText = text.match(/,\s*([A-Z]{2})\b/)
+        ?? text.match(/\b([A-Z]{2})\s*(?:\d{5})?\s*$/)
+        ?? text.match(/\s([A-Z]{2})\s*$/);
+    if (stateInText) {
+        const code = stateInText[1];
+        if (ALL_US_STATES.has(code) && !CANADIAN_PROVINCES.has(code)) return code;
+    }
+
+    // City lookup table
+    for (const [city, state] of Object.entries(CITY_TO_STATE)) {
+        if (lower.includes(city)) return state;
+    }
+
+    return null;
+}
+
 function parseState(text) {
     const upper = normalizeText(text).toUpperCase();
     if (!upper) return null;
 
-    // "City, ST" or "City, ST XXXXX"
     const match = upper.match(/,\s*([A-Z]{2})(?:\s+\d{5})?\b/)
         ?? upper.match(/\b([A-Z]{2})\s+\d{5}\b/)
         ?? upper.match(/\b([A-Z]{2})\b$/);
     const code = match?.[1];
     if (!code) return null;
-    if (CANADIAN_PROVINCES.has(code)) return null; // US-ONLY: reject Canada
+    if (CANADIAN_PROVINCES.has(code)) return null;
     return ALL_US_STATES.has(code) ? code : null;
 }
 
@@ -93,7 +210,6 @@ function parseMileage(text) {
     const match = t.match(/([\d,]+)\s*(?:mi(?:les?)?|km)/i);
     if (!match) return null;
     const miles = parseFloat(match[1].replace(/,/g, ''));
-    // Convert km if needed
     if (/km/i.test(match[0])) return Math.round(miles * 0.621371);
     return miles;
 }
@@ -138,209 +254,226 @@ function isVehicleLot(title) {
 }
 
 function applyFilters(listing, log) {
+    // Must have a make or be clearly a vehicle
     if (!listing.make && !isVehicleLot(listing.title)) {
         log.debug(`[BS] Skip non-vehicle: ${listing.title}`);
         return false;
     }
 
-    if (listing.state && CANADIAN_PROVINCES.has(listing.state)) {
-        log.debug(`[BS] Skip Canadian province: ${listing.state}`);
+    // Must have a make
+    if (!listing.make) {
+        log.debug(`[BS] Skip no-make: ${listing.title}`);
         return false;
     }
 
+    // Exclude Canadian provinces
+    if (listing.state && CANADIAN_PROVINCES.has(listing.state)) {
+        log.debug(`[BS] Skip Canadian: ${listing.state}`);
+        return false;
+    }
+
+    // Must be in target state (if state known)
+    // If state is null but auction is in US, we include it (let it through with null state)
     if (listing.state && !targetStateSet.has(listing.state)) {
         log.debug(`[BS] Skip out-of-target state ${listing.state}: ${listing.title}`);
         return false;
     }
 
+    // Year filter
     if (listing.year && listing.year < minYear) {
         log.debug(`[BS] Skip old year ${listing.year}: ${listing.title}`);
-        return false;
-    }
-
-    if (!listing.make) {
-        log.debug(`[BS] Skip no-make: ${listing.title}`);
         return false;
     }
 
     return true;
 }
 
-// Extract lot data from a BidSpotter lot detail page
-async function extractLotDetail(page, log) {
-    return page.evaluate(() => {
-        const normalize = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
-
-        const getText = (...selectors) => {
-            for (const sel of selectors) {
-                const el = document.querySelector(sel);
-                const t = normalize(el?.textContent);
-                if (t) return t;
-            }
-            return '';
-        };
-
-        const title = getText(
-            'h1.lot-title', 'h1[class*="lot"]', '.lot-name h1',
-            '[class*="LotTitle"]', '[class*="lot-title"]',
-            'h1', 'h2',
-        );
-
-        // Try to get the closing date
-        const closingEl = document.querySelector(
-            '[class*="closing-date"] time, [class*="closingDate"] time, .lot-timer time, time[class*="end"]',
-        );
-        const closingDate = closingEl
-            ? (closingEl.getAttribute('datetime') || normalize(closingEl.textContent))
-            : getText('[class*="closing-date"]', '[class*="end-date"]', '.auction-end');
-
-        // Current bid
-        const currentBid = getText(
-            '[class*="current-bid"] .amount', '[class*="currentBid"] .amount',
-            '[class*="current-bid"]', '[class*="currentBid"]',
-            '.bid-amount', '.current-amount',
-        );
-
-        // Location
-        const location = getText(
-            '[class*="location"]', '.auction-location', '.lot-location',
-            '[class*="Location"]',
-        );
-
-        // Mileage
-        const mileageEl = document.querySelector('[class*="odometer"], [class*="mileage"], [class*="Mileage"]');
-        const mileage = normalize(mileageEl?.textContent) || '';
-
-        // Image
-        const img = document.querySelector('.lot-image img, [class*="lot-image"] img, .gallery img, .carousel img');
-        const imageUrl = img?.getAttribute('src') || img?.getAttribute('data-src') || '';
-
-        return { title, closingDate, currentBid, location, mileage, imageUrl };
-    });
+/**
+ * Extract dataLayer values from BidSpotter HTML pages.
+ * BidSpotter uses window.dataLayer.push({...}) with JSON-like data (with trailing commas).
+ */
+function extractDataLayer(html) {
+    const match = html.match(/window\.dataLayer\.push\(\s*(\{[\s\S]*?\})\s*\)\s*;/);
+    if (!match) return {};
+    
+    const raw = match[1];
+    const result = {};
+    
+    // Extract individual key-value pairs with regex (handles trailing commas)
+    const pairs = raw.matchAll(/"([^"]+)"\s*:\s*"([^"]*)"/g);
+    for (const [, key, value] of pairs) {
+        result[key] = value;
+    }
+    
+    return result;
 }
 
-// Extract lot links from a catalogue page
-async function extractLotLinks(page, baseUrl) {
-    return page.evaluate((base) => {
-        const links = [];
-        const seen = new Set();
-        const anchors = document.querySelectorAll('a[href*="/lot-"], a[href*="/lots/"]');
-        for (const a of anchors) {
-            const href = a.getAttribute('href');
-            if (!href) continue;
-            const url = new URL(href, base).toString();
-            if (seen.has(url)) continue;
-            seen.add(url);
+/**
+ * Extract catalogue links from search-filter page HTML.
+ * Pattern: href="/en-us/auction-catalogues/{seller}/catalogue-id-{id}"
+ */
+function extractCatalogueLinks(html) {
+    const links = new Set();
+    const matches = html.matchAll(/href="(\/en-us\/auction-catalogues\/[^"?]+\/catalogue-id-[^"?]+)"/g);
+    for (const [, href] of matches) {
+        links.add(href);
+    }
+    return [...links];
+}
 
-            // Try to get card-level text
-            let card = a;
-            for (let i = 0; i < 8; i++) {
-                if (!card.parentElement) break;
-                card = card.parentElement;
-                if (['li', 'article'].includes(card.tagName.toLowerCase())) break;
-                if (card.tagName.toLowerCase() === 'div' && card.classList.toString().toLowerCase().includes('lot')) break;
-            }
-            links.push({
-                url,
-                cardText: String(card.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
-            });
+/**
+ * Extract lot links from a catalogue page HTML.
+ * BidSpotter lot URLs: /en-us/auction-catalogues/{seller}/catalogue-id-{id}/lot-{uuid}
+ */
+function extractLotLinks(html) {
+    const links = new Set();
+    // Generic lot link pattern - handles any seller prefix
+    const matches = html.matchAll(/href="(\/en-us\/auction-catalogues\/[^"?]+\/lot-[^"?]+)"/g);
+    for (const [, href] of matches) {
+        // Exclude search-filter and other non-lot pages
+        if (!href.includes('/search-filter') && !href.includes('?')) {
+            links.add(href);
         }
-        return links;
-    }, baseUrl);
+    }
+    return [...links];
 }
 
-// Extract catalogue links from the main search-filter page
-async function extractCatalogueLinks(page) {
-    return page.evaluate(() => {
-        const links = [];
-        const seen = new Set();
-        const anchors = document.querySelectorAll('a[href*="/auction-catalogues/"][href*="catalogue-id"]');
-        for (const a of anchors) {
-            const href = a.getAttribute('href');
-            if (!href || href.includes('/search-filter?') || href.includes('CategoryCode=')) continue;
-            const url = new URL(href, window.location.origin).toString();
-            if (seen.has(url)) continue;
-            seen.add(url);
-
-            // Get location/state context from surrounding card
-            let card = a;
-            for (let i = 0; i < 10; i++) {
-                if (!card.parentElement) break;
-                card = card.parentElement;
-                if (['article', 'li', 'section'].includes(card.tagName.toLowerCase())) break;
-                if (card.tagName.toLowerCase() === 'div' && (
-                    /state|location|address/i.test(card.getAttribute('class') || '')
-                )) break;
-            }
-            const cardText = String(card.textContent ?? '').replace(/\s+/g, ' ').trim();
-            links.push({ url, cardText });
-        }
-        return links;
-    });
+/**
+ * Extract lot titles from catalogue page cards (for pre-filtering).
+ * Pattern: class="lot-title">Title text</
+ */
+function extractLotCards(html) {
+    const cards = [];
+    const titleMatches = html.matchAll(/class="lot-title"[^>]*>([^<]+)</g);
+    for (const [, title] of titleMatches) {
+        cards.push(normalizeText(title));
+    }
+    return cards;
 }
 
-// Wait for page to hydrate
-async function waitForPage(page) {
-    await page.waitForLoadState('domcontentloaded', { timeout: 25000 }).catch(() => {});
-    await page.waitForTimeout(1500);
-    // Try to wait for some content
-    await page.waitForSelector('a[href*="catalogue-id"], a[href*="/lot-"], h1', { timeout: 8000 }).catch(() => {});
+/**
+ * Extract image URL from lot page.
+ */
+function extractImageUrl(html) {
+    // CDN image pattern
+    const cdnMatch = html.match(/https:\/\/cdn\.globalauctionplatform\.com\/[^"'\s]+\.(?:jpg|jpeg|png|webp)/i);
+    if (cdnMatch) return cdnMatch[0].replace(/\?.*$/, '');
+    return null;
 }
 
-const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 200,
-    maxConcurrency: 3,
-    navigationTimeoutSecs: 30,
-    requestHandlerTimeoutSecs: 60,
-    launchContext: {
-        launchOptions: {
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-            ],
-        },
-    },
+/**
+ * Extract mileage from lot description/title HTML.
+ */
+function extractMileage(html) {
+    const match = html.match(/([\d,]+)\s*(?:mi(?:les?)?|km)(?:\s|,|\.|<)/i);
+    if (!match) return null;
+    const miles = parseFloat(match[1].replace(/,/g, ''));
+    if (/km/i.test(match[0])) return Math.round(miles * 0.621371);
+    return miles;
+}
 
-    async requestHandler({ page, request, enqueueLinks, log }) {
+// Request headers to mimic a real browser
+const BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+};
+
+let cataloguesProcessed = 0;
+let cataloguesSkippedNonUS = 0;
+let cataloguesSkippedWAF = 0;
+
+const crawler = new HttpCrawler({
+    maxRequestsPerCrawl: 2000,
+    maxConcurrency: 5,
+    requestHandlerTimeoutSecs: 30,
+    navigationTimeoutSecs: 20,
+    additionalMimeTypes: ['text/html'],
+    
+    // Retry on failures
+    maxRequestRetries: 2,
+    
+    async requestHandler({ request, body, log }) {
+        const html = body.toString();
         const label = request.label ?? 'CATALOGUE_LIST';
+        
+        // Skip WAF challenge pages (202 or empty body)
+        if (!html || html.length < 1000) {
+            if (label === 'CATALOGUE') {
+                cataloguesSkippedWAF++;
+                log.warning(`[BS] WAF/empty page blocked: ${request.url}`);
+            }
+            return;
+        }
 
         // ── LOT detail page ───────────────────────────────────────────────────
         if (label === 'LOT') {
-            const url = page.url();
-            log.info(`[BS] Lot: ${url}`);
-
-            await waitForPage(page);
-            const data = await extractLotDetail(page, log);
-
-            if (!data.title) {
-                log.warning(`[BS] No title on lot page: ${url}`);
+            const url = request.url;
+            
+            // Check for WAF challenge
+            if (html.includes('awswaf.com') && html.length < 5000) {
+                log.warning(`[BS] WAF challenge on lot: ${url}`);
                 return;
             }
 
+            const data = extractDataLayer(html);
+            const title = normalizeText(data.lotName || '');
+            
+            if (!title) {
+                // Try h1 fallback
+                const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
+                if (!h1Match) {
+                    log.warning(`[BS] No title found: ${url}`);
+                    return;
+                }
+            }
+            
+            const finalTitle = title || html.match(/<h1[^>]*>([^<]+)<\/h1>/)?.[1] || '';
+            if (!finalTitle) return;
+
             totalFound += 1;
 
-            const { year, make, model } = parseVehicleTitle(data.title);
-            const state = parseState(data.location || request.userData?.location || '');
-            const currentBid = parseBid(data.currentBid);
-            const mileage = parseMileage(data.mileage);
-            const auctionEndDate = parseDate(data.closingDate);
+            const { year, make, model } = parseVehicleTitle(finalTitle);
+            
+            // Get state: try auctionCity from dataLayer first, then userData
+            const auctionCity = data.auctionCity || request.userData?.auctionCity || '';
+            const auctionCountry = data.auctionCountry || request.userData?.auctionCountry || '';
+            
+            let state = null;
+            if (auctionCountry === 'United States' || auctionCountry === 'US') {
+                state = parseStateFromCity(auctionCity)
+                    ?? parseState(auctionCity)
+                    ?? request.userData?.state
+                    ?? null;
+            }
+            
+            // Opening price as current bid proxy
+            const openingPrice = parseBid(data.openingPrice || '0');
+            const auctionEndDate = parseDate(data.lotEndsFrom || '');
+            const mileage = extractMileage(html);
+            const imageUrl = extractImageUrl(html);
 
             const listingId = url.match(/\/lot-([^/?#]+)/)?.[1]
                 ?? `bs-${Buffer.from(url).toString('base64').slice(0, 16)}`;
 
             const listing = {
                 listing_id: listingId,
-                title: normalizeText(data.title),
+                title: normalizeText(finalTitle),
                 year,
                 make,
                 model,
                 mileage,
-                current_bid: currentBid,
+                current_bid: openingPrice,
                 auction_end_date: auctionEndDate,
                 state,
                 listing_url: url,
-                image_url: data.imageUrl || null,
+                image_url: imageUrl || null,
                 source_site: SOURCE,
                 scraped_at: new Date().toISOString(),
             };
@@ -351,112 +484,134 @@ const crawler = new PlaywrightCrawler({
             seenListings.add(listing.listing_id);
 
             totalAfterFilters += 1;
-            log.info(`[BS] ✓ ${listing.year} ${listing.make} ${listing.model} | $${listing.current_bid} | ${listing.state}`);
+            log.info(`[BS] ✓ ${listing.year} ${listing.make} ${listing.model} | $${listing.current_bid} | ${listing.state || 'US'} | ${finalTitle.slice(0, 50)}`);
             await Actor.pushData(listing);
             return;
         }
 
         // ── Catalogue page — enumerate lots ───────────────────────────────────
         if (label === 'CATALOGUE') {
-            const url = page.url();
-            log.info(`[BS] Catalogue: ${url}`);
-
-            await waitForPage(page);
-
-            const lotLinks = await extractLotLinks(page, BASE_URL);
-            log.info(`[BS] Catalogue has ${lotLinks.length} lot links`);
-
-            for (const { url: lotUrl, cardText } of lotLinks) {
-                // Fast pre-filter from card text
-                const { year, make } = parseVehicleTitle(cardText);
-                if (!make && !isVehicleLot(cardText)) {
-                    log.debug(`[BS] Pre-filter non-vehicle: ${cardText.slice(0, 80)}`);
-                    continue;
-                }
-                if (year && year < minYear) {
-                    log.debug(`[BS] Pre-filter old year ${year}: ${cardText.slice(0, 60)}`);
-                    continue;
-                }
-
-                const state = parseState(cardText);
-                if (state && CANADIAN_PROVINCES.has(state)) continue;
-                if (state && !targetStateSet.has(state)) {
-                    log.debug(`[BS] Pre-filter state ${state}: ${cardText.slice(0, 60)}`);
-                    continue;
-                }
+            const url = request.url;
+            
+            // Check for WAF challenge
+            if (html.includes('awswaf.com') && html.length < 5000) {
+                cataloguesSkippedWAF++;
+                log.warning(`[BS] WAF challenge on catalogue: ${url}`);
+                return;
             }
 
-            // Enqueue lots
-            const validUrls = lotLinks
-                .filter(({ cardText }) => {
-                    const { make } = parseVehicleTitle(cardText);
-                    return make || isVehicleLot(cardText);
-                })
-                .map(({ url: u }) => u);
+            // Extract catalogue metadata from dataLayer
+            const data = extractDataLayer(html);
+            const auctionCountry = data.auctionCountry || '';
+            const auctionCity = data.auctionCity || '';
+            const catalogueName = data.catalogueName || '';
 
-            if (validUrls.length > 0) {
-                await enqueueLinks({
-                    urls: validUrls,
+            // CRITICAL FILTER: Only process US auctions
+            if (auctionCountry && auctionCountry !== 'United States') {
+                cataloguesSkippedNonUS++;
+                log.info(`[BS] Skip non-US catalogue: ${auctionCountry} | ${catalogueName}`);
+                return;
+            }
+
+            cataloguesProcessed++;
+            log.info(`[BS] Catalogue: ${catalogueName || url} | ${auctionCity}`);
+
+            // Get state from city
+            const state = parseStateFromCity(auctionCity) ?? parseState(auctionCity);
+
+            // Extract lot links
+            const lotLinks = extractLotLinks(html);
+            log.info(`[BS] Catalogue has ${lotLinks.length} lot links`);
+
+            // Extract card-level titles for pre-filtering
+            const cardTitles = extractLotCards(html);
+
+            for (let i = 0; i < lotLinks.length; i++) {
+                const lotUrl = `${BASE_URL}${lotLinks[i]}`;
+                const cardTitle = cardTitles[i] || '';
+                
+                // Pre-filter from card text
+                const { year: cardYear, make: cardMake } = parseVehicleTitle(cardTitle);
+                if (cardTitle && !cardMake && !isVehicleLot(cardTitle)) {
+                    log.debug(`[BS] Pre-filter non-vehicle: ${cardTitle.slice(0, 60)}`);
+                    continue;
+                }
+                if (cardYear && cardYear < minYear) {
+                    log.debug(`[BS] Pre-filter old year ${cardYear}: ${cardTitle.slice(0, 60)}`);
+                    continue;
+                }
+
+                await crawler.requestQueue.addRequest({
+                    url: lotUrl,
                     label: 'LOT',
-                    userData: { catalogueUrl: url },
+                    headers: BROWSER_HEADERS,
+                    userData: { 
+                        auctionCity,
+                        auctionCountry,
+                        state,
+                        catalogueName,
+                    },
                 });
             }
 
-            // Pagination — try next page
-            const nextPage = await page.evaluate(() => {
-                const next = document.querySelector(
-                    'a[aria-label="Next page"], a.next, [class*="pagination"] a[rel="next"]',
-                );
-                return next ? next.getAttribute('href') : null;
-            });
-
-            if (nextPage) {
-                const nextUrl = new URL(nextPage, BASE_URL).toString();
-                log.info(`[BS] Pagination → ${nextUrl}`);
-                await enqueueLinks({ urls: [nextUrl], label: 'CATALOGUE' });
+            // Pagination
+            const pageMatch = url.match(/[?&]page=(\d+)/);
+            const currentPage = pageMatch ? parseInt(pageMatch[1]) : 1;
+            if (lotLinks.length >= 58) {
+                // Likely more pages
+                const nextPage = currentPage + 1;
+                const baseUrl = url.replace(/[?&]page=\d+/, '');
+                const sep = baseUrl.includes('?') ? '&' : '?';
+                const nextUrl = `${baseUrl}${sep}page=${nextPage}`;
+                await crawler.requestQueue.addRequest({
+                    url: nextUrl,
+                    label: 'CATALOGUE',
+                    headers: BROWSER_HEADERS,
+                    userData: { auctionCity, auctionCountry, state, catalogueName },
+                });
             }
             return;
         }
 
         // ── Catalogue list page ───────────────────────────────────────────────
         const pageNum = request.userData?.pageNum ?? 1;
-        log.info(`[BS] Catalogue list page ${pageNum}: ${page.url()}`);
+        log.info(`[BS] Catalogue list page ${pageNum}: ${request.url}`);
 
-        await waitForPage(page);
-
-        const catalogueLinks = await extractCatalogueLinks(page);
+        const catalogueLinks = extractCatalogueLinks(html);
         log.info(`[BS] Found ${catalogueLinks.length} catalogue links`);
 
         if (!catalogueLinks.length && pageNum === 1) {
-            log.warning('[BS] No catalogue links found — page may not have hydrated');
+            log.warning('[BS] No catalogue links found on list page');
+            return;
         }
 
-        // Enqueue catalogues — filter out non-US by card text if possible
-        const catUrls = catalogueLinks
-            .filter(({ cardText }) => {
-                const state = parseState(cardText);
-                if (state && CANADIAN_PROVINCES.has(state)) return false;
-                // If we can detect a state, check it's in target
-                // If no state detected, include (let lot page decide)
-                return true;
-            })
-            .slice(0, maxCatalogues)
-            .map(({ url }) => url);
-
-        if (catUrls.length > 0) {
-            await enqueueLinks({ urls: catUrls, label: 'CATALOGUE' });
+        // Enqueue catalogues (up to maxCatalogues)
+        let enqueued = 0;
+        for (const catPath of catalogueLinks) {
+            if (enqueued >= maxCatalogues) break;
+            const catUrl = `${BASE_URL}${catPath}`;
+            await crawler.requestQueue.addRequest({
+                url: catUrl,
+                label: 'CATALOGUE',
+                headers: BROWSER_HEADERS,
+            });
+            enqueued++;
         }
 
-        // Pagination for the catalogue list (BidSpotter uses page query param)
-        const totalCatalogues = catalogueLinks.length;
-        if (totalCatalogues >= 12 && pageNum * 12 < maxCatalogues) {
+        // Paginate catalogue list
+        if (catalogueLinks.length >= 55 && pageNum < maxPages) {
             const nextUrl = `${BASE_URL}/en-us/auction-catalogues/search-filter?categorytags=Automobiles%2c+Trucks+%26+Vans&country=US&page=${pageNum + 1}`;
-            await enqueueLinks({
-                urls: [nextUrl],
+            await crawler.requestQueue.addRequest({
+                url: nextUrl,
                 label: 'CATALOGUE_LIST',
+                headers: BROWSER_HEADERS,
                 userData: { pageNum: pageNum + 1 },
             });
         }
+    },
+
+    async failedRequestHandler({ request, log }) {
+        log.error(`[BS] Request failed after retries: ${request.url}`);
     },
 });
 
@@ -464,8 +619,10 @@ const startUrl = `${BASE_URL}/en-us/auction-catalogues/search-filter?categorytag
 await crawler.run([{
     url: startUrl,
     label: 'CATALOGUE_LIST',
+    headers: BROWSER_HEADERS,
     userData: { pageNum: 1 },
 }]);
 
 console.log(`[BIDSPOTTER COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
+console.log(`[BIDSPOTTER STATS] Catalogues processed: ${cataloguesProcessed} | Skipped non-US: ${cataloguesSkippedNonUS} | Skipped WAF: ${cataloguesSkippedWAF}`);
 await Actor.exit();
