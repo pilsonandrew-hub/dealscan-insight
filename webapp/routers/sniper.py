@@ -162,6 +162,22 @@ def _build_alert_5min(opp: dict, target: dict) -> str:
     )
 
 
+def _build_alert_close(opp: dict, target: dict) -> str:
+    """Auction closed — prompt user to log outcome."""
+    title = f"{opp.get('year','')} {opp.get('make','')} {opp.get('model','')}".strip()
+    mileage = opp.get("mileage") or 0
+    state = opp.get("state", "?")
+    ceiling = float(target.get("max_bid") or 0)
+    opp_id = opp.get("id", "")
+    deal_url = f"https://dealscan-insight.vercel.app/deal/{opp_id}"
+    return (
+        f"🔔 *Auction Closed*\n\n"
+        f"{title} • {mileage:,.0f} mi • {state}\n"
+        f"Max Bid: ${ceiling:,.0f}\n\n"
+        f"Did you bid? Log the outcome:\n{deal_url}"
+    )
+
+
 def _build_alert_ceiling_exceeded(opp: dict, target: dict) -> str:
     title = f"{opp.get('year','')} {opp.get('make','')} {opp.get('model','')}".strip()
     current = opp.get("current_bid") or 0
@@ -500,6 +516,18 @@ async def sniper_check(
             except Exception as exc:
                 logger.error("[SNIPER_CHECK] Expiry update failed for %s: %s", target_id, exc)
                 stats["errors"] += 1
+
+            # ── Auction close alert — send once if chat_id exists ────────────
+            if chat_id and not target.get("alert_close_sent"):
+                try:
+                    supa.table("sniper_targets").update({"alert_close_sent": True}).eq("id", target_id).execute()
+                except Exception:
+                    pass  # column may not exist yet — non-fatal
+                msg = _build_alert_close(opp, target)
+                alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
+                stats["alerts_sent"] += 1
+                logger.info("[SNIPER_CHECK] Close alert queued for target %s", target_id)
+
             continue
 
         # ── T-60 alert — atomic CAS: only update if flag is still False ─────────
