@@ -1373,8 +1373,8 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
         # Bid: parseforge uses currentBid, ours uses current_bid
         current_bid = float(item.get("currentBid") or item.get("current_bid") or 0)
 
-        # Mileage: parseforge puts in meterCount when type is odometer
-        mileage = item.get("mileage") or item.get("meterCount")
+        # Mileage: parseforge puts in meterCount when type is odometer; jjkane uses odometer
+        mileage = item.get("mileage") or item.get("meterCount") or item.get("odometer")
 
         # End time: parseforge uses auctionEndUtc
         time_anchor = (
@@ -1550,12 +1550,14 @@ def passes_basic_gates(vehicle: dict) -> dict:
     state = vehicle.get("state", "")
     year = vehicle.get("year")
     mileage = vehicle.get("mileage")
+    source = (vehicle.get("source_site") or "").lower()
 
-    # Government sources often have lower opening bids on older fleet vehicles
-    gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter"}
-    source_bid = (vehicle.get("source_site") or "").lower()
-    min_bid = 500 if source_bid in gov_sources_bid else 3000
-    if bid < min_bid or bid > 35000:
+    # Government/auction sources: lower min bid, higher age/mileage tolerance
+    gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter", "hibid"}
+    is_gov = source in gov_sources_bid
+    min_bid = 500 if is_gov else 3000
+    # Allow bid=0 for gov sources (auction not yet open — e.g. JJKane pre-auction lots)
+    if (bid > 0 and bid < min_bid) or bid > 35000:
         return {"pass": False, "reason": f"bid_out_of_range (${bid:,.0f})"}
 
     # Reject non-US states (Canadian provinces, garbage codes)
@@ -1564,9 +1566,11 @@ def passes_basic_gates(vehicle: dict) -> dict:
 
     if state in HIGH_RUST_STATES:
         current_year = datetime.now().year
-        if not year or year < current_year - 2:
+        # Gov fleet sources run older vehicles — allow up to 8yr in rust states
+        max_rust_age = 8 if is_gov else 2
+        if not year or year < current_year - max_rust_age:
             return {"pass": False, "reason": f"high_rust_state ({state})"}
-        logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤3yr old)')
+        logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤{max_rust_age}yr old)')
 
     title_brand_issue = _find_title_brand_issue(vehicle)
     if title_brand_issue:
@@ -1582,16 +1586,17 @@ def passes_basic_gates(vehicle: dict) -> dict:
 
     current_year = datetime.now().year
     age = current_year - year
-    # Government/public auction sources run older fleet vehicles — allow up to 12 years
-    gov_sources = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane"}
-    source = (vehicle.get("source_site") or "").lower()
-    max_age = 12 if source in gov_sources else 4
+    # Government/public auction sources run older fleet vehicles — allow up to 20 years
+    gov_sources = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "hibid"}
+    max_age = 20 if source in gov_sources else 4
     if age > max_age or age < 0:
         return {"pass": False, "reason": f"age_exceeded ({age} years, max {max_age} for {source})"}
 
     if mileage is not None:
         try:
-            if float(mileage) > 50000:  # SOP: max 50k miles
+            # Gov fleet vehicles run 100k–200k miles routinely — higher cap for gov sources
+            max_mileage = 200000 if is_gov else 50000
+            if float(mileage) > max_mileage:
                 return {"pass": False, "reason": f"mileage_exceeded ({mileage:,} mi)"}
         except (ValueError, TypeError):
             pass  # No mileage data is OK at this stage
