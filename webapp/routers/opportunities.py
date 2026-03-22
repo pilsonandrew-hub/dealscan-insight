@@ -2,7 +2,7 @@
 Opportunities API endpoints
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
+from fastapi import Header, APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_, text
 from pydantic import BaseModel
@@ -227,18 +227,25 @@ async def save_opportunity(
 @router.post("/{opportunity_id}/pass")
 async def pass_opportunity(
     opportunity_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    authorization: Optional[str] = Header(None)
 ):
-    """Mark opportunity as passed (dismissed) for the current user"""
-    db.execute(
-        text(
-            "INSERT INTO user_passes (user_id, opportunity_id) "
-            "VALUES (:user_id, :opportunity_id::uuid) ON CONFLICT DO NOTHING"
-        ),
-        {"user_id": str(current_user.id), "opportunity_id": opportunity_id}
-    )
-    db.commit()
+    """Mark opportunity as passed — Supabase-only"""
+    import os
+    from supabase import create_client as _sc
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1]
+    supa = _sc(os.getenv("SUPABASE_URL",""), os.getenv("SUPABASE_SERVICE_ROLE_KEY",""))
+    user = supa.auth.get_user(token)
+    if not user or not user.user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    try:
+        supa.table("user_passes").upsert(
+            {"user_id": user.user.id, "opportunity_id": opportunity_id},
+            on_conflict="user_id,opportunity_id"
+        ).execute()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to record pass")
     return {"success": True}
 
 
