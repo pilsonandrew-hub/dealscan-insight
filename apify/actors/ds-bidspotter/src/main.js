@@ -281,15 +281,16 @@ async function extractCatalogueLinks(page) {
 
 // Wait for page to hydrate
 async function waitForPage(page) {
-    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(4000);
+    await page.waitForLoadState('domcontentloaded', { timeout: 25000 }).catch(() => {});
+    await page.waitForTimeout(1500);
     // Try to wait for some content
     await page.waitForSelector('a[href*="catalogue-id"], a[href*="/lot-"], h1', { timeout: 8000 }).catch(() => {});
 }
 
 const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: maxCatalogues * 5 + 20, // catalogues + lot pages + buffer
-    maxConcurrency: 1,
+    maxRequestsPerCrawl: 200,
+    maxConcurrency: 3,
+    navigationTimeoutSecs: 30,
     requestHandlerTimeoutSecs: 60,
     launchContext: {
         launchOptions: {
