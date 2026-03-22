@@ -465,7 +465,7 @@ export const api = {
         .from('opportunities')
         .select('source, processed_at, created_at')
         .order('processed_at', { ascending: false })
-        .limit(500);
+        .limit(2000);
 
       if (error) throw error;
 
