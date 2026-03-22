@@ -520,6 +520,20 @@ export const api = {
     }
   },
 
+  // Pass (permanently dismiss) an opportunity for the current user
+  async passOpportunity(opportunityId: string): Promise<void> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${API_BASE}/api/opportunities/${opportunityId}/pass`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) throw new Error(`passOpportunity failed: HTTP ${res.status}`);
+  },
+
   // Track rover event (view/save/pass)
   async trackRoverEvent(
     opportunity: Pick<Opportunity, 'id' | 'make' | 'model' | 'year' | 'source_site' | 'current_bid' | 'state' | 'mileage'>,
