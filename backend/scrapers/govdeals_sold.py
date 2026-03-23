@@ -46,19 +46,22 @@ def extract_vin_from_lot(lot: dict) -> str | None:
     return match.group(1).upper() if match else None
 
 
-def normalize_lot(lot: dict) -> dict:
-    """Normalize API lot to dealer_sales schema."""
+def normalize_lot(lot: dict) -> dict | None:
+    """Normalize API lot to dealer_sales schema. Returns None if required data missing."""
     sold_price = (
         lot.get("winningBid")
         or lot.get("soldPrice")
         or lot.get("assetWinningBid")
         or lot.get("closingBid")
-        or lot.get("finalBid")
         or lot.get("awardAmount")
-        or lot.get("currentBid")
-        or lot.get("assetBidPrice")
-        or 0
+        or None
     )
+    if sold_price is None:
+        return None  # Skip records without sold price
+
+    year = lot.get("modelYear") or lot.get("year")
+    if not year or int(year) == 0:
+        return None  # Skip records without valid year
 
     asset_id = lot.get("assetId", "")
     account_id = lot.get("accountId", "")
@@ -66,7 +69,7 @@ def normalize_lot(lot: dict) -> dict:
     return {
         "make": lot.get("makebrand") or lot.get("make") or "",
         "model": lot.get("model") or "",
-        "year": lot.get("modelYear") or lot.get("year"),
+        "year": int(year),
         "mileage": lot.get("meterCount"),
         "state": lot.get("locationState") or lot.get("state") or "",
         "city": lot.get("locationCity") or lot.get("city") or "",
@@ -240,7 +243,7 @@ async def run_govdeals_sold_scraper():
             if not lots:
                 return 0
 
-            records = [normalize_lot(lot) for lot in lots]
+            records = [r for r in (normalize_lot(lot) for lot in lots) if r is not None]
             inserted = await write_to_supabase(records)
 
             logger.info(f"[GOVDEALS-SOLD] Complete: {inserted} records written to dealer_sales")

@@ -54,7 +54,10 @@ except ImportError:
     def _compute_condition_grade(**kwargs):  # type: ignore[misc]
         return None
 
-alerts_this_run: dict = {}
+import time as _time
+
+alerts_this_run: dict[str, int] = {}
+alerts_this_run_ts: dict[str, float] = {}
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 
 
@@ -858,11 +861,12 @@ async def _process_webhook_items(
                 )
 
         if not dataset_id:
+            logger.warning("[INGEST] dataset_id missing after all lookups — marking error")
             update_webhook_log(
                 webhook_log_id,
-                "processed",
+                "error",
                 item_count=metadata["item_count"],
-                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
+                error_message=_merge_audit_error_message("dataset_id_missing", _audit_fallbacks(audit_state)),
                 require_durable=True,
                 audit_state=audit_state,
             )
@@ -932,11 +936,17 @@ async def _process_webhook_items(
         )
 
         for item_index, item in enumerate(items):
-            vehicle = normalize_apify_vehicle(
-                item,
-                apify_run_id,
-                default_time_anchor=metadata.get("created_at"),
-            )
+            try:
+                vehicle = normalize_apify_vehicle(
+                    item,
+                    apify_run_id,
+                    default_time_anchor=metadata.get("created_at"),
+                )
+            except Exception as norm_err:
+                logger.warning(f"[INGEST] item {item_index} normalize error: {norm_err}")
+                skipped += 1
+                _increment_reason_counter(skip_reasons, "normalize_exception")
+                continue
             if vehicle is None:
                 skipped += 1
                 _increment_reason_counter(skip_reasons, "normalize_rejected")
@@ -952,7 +962,14 @@ async def _process_webhook_items(
 
             # Handle completed auction sources — write to dealer_sales for DOS calibration
             source_site = (vehicle.get("source_site") or "").lower()
+            _SOURCE_ALIASES = {"hibid-v2": "hibid", "jjkane.com": "jjkane", "govdeals.com": "govdeals", "publicsurplus.com": "publicsurplus"}
+            source_site = _SOURCE_ALIASES.get(source_site, source_site)
+            vehicle["source_site"] = source_site  # persist normalized value
             if source_site == "govdeals-sold":
+                if supabase_client is None:
+                    logger.error("[INGEST] dealer_sales write skipped — supabase_client is None")
+                    skipped += 1
+                    continue
                 try:
                     sold_row = {
                         "vin": vehicle.get("vin"),
@@ -1868,6 +1885,9 @@ async def sync_to_notion(vehicle: dict) -> bool:
         return False
 
     listing_url = vehicle.get("listing_url") or ""
+    if not listing_url:
+        logger.info("[NOTION] Skipping — empty listing_url")
+        return False
     run_id = vehicle.get("run_id") or "unknown"
     listing_id = vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", listing_url)
     existing_delivery = _delivery_log_lookup(run_id, listing_id, "notion_sync")
@@ -2063,11 +2083,16 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         except Exception as e:
             logger.warning(f"[SUPPRESSION CHECK] failed: {e}")
 
-    # Per-run alert cap (max 5)
+    # Per-run alert cap (max 5) with 1-hour TTL reset
+    _now = _time.time()
+    if _now - alerts_this_run_ts.get(run_id, 0) > 3600:
+        alerts_this_run.pop(run_id, None)
+        alerts_this_run_ts.pop(run_id, None)
     if alerts_this_run.get(run_id, 0) >= 5:
         logger.info(f"[ALERT CAP] max alerts reached for run {run_id}")
         return None
     alerts_this_run[run_id] = alerts_this_run.get(run_id, 0) + 1
+    alerts_this_run_ts[run_id] = alerts_this_run_ts.get(run_id) or _time.time()
 
     try:
         import httpx
