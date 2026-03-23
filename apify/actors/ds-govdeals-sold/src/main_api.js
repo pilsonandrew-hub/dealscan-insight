@@ -1,42 +1,25 @@
 /**
- * GovDeals Free Replacement Scraper — Token Capture + Direct API
- *
- * STATUS: Phase 5 recon wired in. See REVERSE_ENGINEER.md for captured traffic.
+ * GovDeals COMPLETED Auctions Scraper — Sold prices for DOS calibration
  *
  * Strategy:
- * 1. Load GovDeals homepage in Playwright
- * 2. Intercept ALL requests to maestro.lqdt1.com (not just responses)
- * 3. Capture the x-api-key header and POST payload shape from /search/list
- * 4. Use those values to call the search API directly for all pages
- * 5. No DOM scraping — pure JSON API calls after auth capture
+ * 1. Load GovDeals with ?timing=completed in Playwright
+ * 2. Intercept requests to maestro.lqdt1.com to capture x-api-key
+ * 3. Call search API with timing: 'completed' to get closed auctions
+ * 4. Capture ALL completed sales (no filtering) for dealer_sales DOS calibration
  *
- * Phase 5 captured:
- * - POST https://maestro.lqdt1.com/search/list
- * - x-api-key auth header
- * - assetSearchResults response shape
- *
- * VIN extraction strategy:
- * 1. Check lot.vin field from API response
- * 2. Extract VIN regex from lot description/notes fields
- * 3. Fallback: visit GovDeals detail page via Playwright (up to 200/run, 1 req/sec)
+ * Key API parameter: timing: 'completed' in POST payload
  */
 
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
-const HIGH_RUST_STATES = new Set([
-    'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA',
-    'ND','SD','NE','KS','WV','ME','NH','VT','MA','RI',
-    'CT','NJ','MD','DE',
-]);
-
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
-const MAX_DETAIL_PAGES = 200;
+const MAX_DETAIL_PAGES = 100;  // Reduced for sold auctions
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = 10, minBid = 500, maxBid = 35000 } = input;
+const { maxPages = 10, maxItems = 500 } = input;
 
 let totalFound = 0, totalPassed = 0;
 const capturedApi = {
@@ -63,20 +46,6 @@ function extractLots(json) {
     if (candidates.length) return candidates[0];
     if (Array.isArray(json)) return json;
     return [];
-}
-
-function passes(item) {
-    const state = (item.locationState || item.state || '').toUpperCase();
-    const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
-    if (bid < minBid || bid > maxBid) return false;
-    const year = parseInt(item.modelYear || item.year || 0);
-    const currentYear = new Date().getFullYear();
-    if (year && (currentYear - year) > 12) return false;
-    if (HIGH_RUST_STATES.has(state)) {
-        if (!(year && year >= currentYear - 2)) return false;
-        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
-    }
-    return true;
 }
 
 /**
@@ -200,11 +169,12 @@ const crawler = new PlaywrightCrawler({
                     // No filtering for sold actor — capture ALL completed sales for DOS calibration
                     totalPassed++;
                     passingLots.push(normalizeLot(lot));
+                    if (passingLots.length >= maxItems) break;
                 }
             }
 
             // Step 2: Attempt direct API pagination for pages 2+ (Node.js fetch, no CORS)
-            if (capturedApi.searchPayload) {
+            if (capturedApi.searchPayload && passingLots.length < maxItems) {
                 await paginateWithAuth(page, log, seenIds);
             }
 
@@ -223,13 +193,17 @@ const crawler = new PlaywrightCrawler({
 });
 
 function normalizeLot(lot) {
+    // For completed auctions, sold_price is the key field — try multiple API field names
+    const soldPrice = lot.winningBid || lot.soldPrice || lot.assetWinningBid ||
+                      lot.closingBid || lot.finalBid || lot.awardAmount ||
+                      lot.currentBid || lot.assetBidPrice || 0;
     return {
         title:         lot.assetShortDescription || lot.title || '',
         make:          lot.makebrand || lot.make || '',
         model:         lot.model || '',
         year:          lot.modelYear || lot.year || null,
         current_bid:   lot.currentBid || lot.current_bid || lot.assetBidPrice || 0,
-        sold_price:    lot.winningBid || lot.soldPrice || lot.assetWinningBid || lot.currentBid || 0,
+        sold_price:    soldPrice,
         state:         lot.locationState || lot.state || '',
         city:          lot.locationCity || lot.city || '',
         auction_end_time: lot.assetAuctionEndDateUtc || lot.auctionEndUtc || lot.auctionEnd || null,
@@ -339,6 +313,10 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
                 // No filtering for sold actor — capture ALL completed sales for DOS calibration
                 totalPassed++;
                 passingLots.push(normalizeLot(lot));
+                if (passingLots.length >= maxItems) {
+                    log.info(`Reached maxItems limit (${maxItems}) — stopping pagination`);
+                    return;
+                }
             }
         } catch (err) {
             log.warning(`Page ${pageNum} failed: ${err.message}`);
@@ -349,7 +327,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
 }
 
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
-console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
+console.log(`[GOVDEALS-SOLD] Found: ${totalFound} | Collected: ${totalPassed}`);
 console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
-console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} passing lots`);
+console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} lots`);
 await Actor.exit();
