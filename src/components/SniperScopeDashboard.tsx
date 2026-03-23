@@ -485,7 +485,7 @@ export default function SniperScopeDashboard() {
         throw new Error('You must be signed in to log a sale outcome.');
       }
 
-      const response = await fetch('/api/outcomes', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/outcomes`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

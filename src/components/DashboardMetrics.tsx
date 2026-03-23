@@ -80,7 +80,7 @@ export const DashboardMetrics = ({ metrics, pipelineStatus, isRealtime = false }
     },
     {
       title: "Potential Revenue",
-      value: `$${(metrics?.potential_revenue || 423850).toLocaleString()}`,
+      value: `$${(metrics?.potential_revenue || 0).toLocaleString()}`,
       change: "+18% from last month",
       changeType: "positive" as const,
       icon: <DollarSign className="h-4 w-4" />,
@@ -98,12 +98,7 @@ export const DashboardMetrics = ({ metrics, pipelineStatus, isRealtime = false }
     }
   ];
 
-  const recentActivity = [
-    { action: "New opportunity", details: "2021 Ford F-150 in Phoenix", time: "2 minutes ago", type: "opportunity" },
-    { action: "Price update", details: "2020 Silverado bid increased", time: "15 minutes ago", type: "update" },
-    { action: "Auction ending", details: "2019 RAM 1500 in Dallas", time: "1 hour ago", type: "warning" },
-    { action: "Deal won", details: "2020 Tacoma for $28,500", time: "3 hours ago", type: "success" }
-  ];
+  const recentActivity: { action: string; details: string; time: string; type: string }[] = [];
 
   return (
     <div className="space-y-6">
@@ -204,22 +199,26 @@ export const DashboardMetrics = ({ metrics, pipelineStatus, isRealtime = false }
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentActivity.map((item, index) => (
-                <div key={index} className="flex items-start space-x-3">
-                  <div className={`
-                    mt-1 h-2 w-2 rounded-full
-                    ${item.type === "opportunity" ? "bg-primary" : ""}
-                    ${item.type === "update" ? "bg-warning" : ""}
-                    ${item.type === "warning" ? "bg-destructive" : ""}
-                    ${item.type === "success" ? "bg-success" : ""}
-                  `} />
-                  <div className="flex-1 space-y-1">
-                    <p className="text-sm font-medium">{item.action}</p>
-                    <p className="text-xs text-muted-foreground">{item.details}</p>
-                    <p className="text-xs text-muted-foreground">{item.time}</p>
+              {recentActivity.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No recent activity</p>
+              ) : (
+                recentActivity.map((item, index) => (
+                  <div key={index} className="flex items-start space-x-3">
+                    <div className={`
+                      mt-1 h-2 w-2 rounded-full
+                      ${item.type === "opportunity" ? "bg-primary" : ""}
+                      ${item.type === "update" ? "bg-warning" : ""}
+                      ${item.type === "warning" ? "bg-destructive" : ""}
+                      ${item.type === "success" ? "bg-success" : ""}
+                    `} />
+                    <div className="flex-1 space-y-1">
+                      <p className="text-sm font-medium">{item.action}</p>
+                      <p className="text-xs text-muted-foreground">{item.details}</p>
+                      <p className="text-xs text-muted-foreground">{item.time}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

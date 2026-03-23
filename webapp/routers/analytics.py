@@ -5,8 +5,10 @@ GET /api/analytics/summary — aggregates KPIs from Supabase.
 Uses the opportunities table which now carries outcome_* columns,
 and the alert_log table for alert delivery stats.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from typing import Optional
+
+from webapp.routers.outcomes import _verify_auth
 import os
 import logging
 import json
@@ -41,7 +43,7 @@ def _safe_avg(values: list, field: str) -> Optional[float]:
 
 
 @router.get("/summary")
-async def analytics_summary():
+async def analytics_summary(authorization: Optional[str] = Header(None)):
     """
     Return high-level KPIs:
       - total_opportunities      (from opportunities table)
@@ -52,6 +54,7 @@ async def analytics_summary():
       - top_makes                (top 5 makes by avg dos_score)
       - alerts_sent_last_30d     (count from alert_log where sent_at > now()-30d)
     """
+    user_id = _verify_auth(authorization)
     if supa is None:
         # Return zeroed structure so the UI still renders
         return {
@@ -184,7 +187,7 @@ async def analytics_summary():
 
 
 @router.get("/dos-calibration")
-async def dos_calibration():
+async def dos_calibration(authorization: Optional[str] = Header(None)):
     """
     Return DOS scoring calibration status:
       - Current weight breakdown
@@ -192,6 +195,7 @@ async def dos_calibration():
       - Which components are estimated vs data-driven
       - Recommendations for calibration when real data arrives
     """
+    user_id = _verify_auth(authorization)
     # Base DOS formula weights
     base_weights = {
         "margin": 0.35,
