@@ -174,6 +174,7 @@ async function getMarketcheckPrice(year, make, model, odometer) {
     });
 
     try {
+        marketcheckCallsThisRun++; // count every actual API call (success or error)
         const resp = await fetch(`${MARKETCHECK_URL}?${params}`, {
             signal: AbortSignal.timeout(10000),
             headers: { 'Accept': 'application/json' },
@@ -181,8 +182,7 @@ async function getMarketcheckPrice(year, make, model, odometer) {
 
         if (!resp.ok) {
             console.warn(`[MC] HTTP ${resp.status} for ${year} ${make} ${model}`);
-            marketcheckCallsThisRun++;
-        marketcheckCache.set(cacheKey, null);
+            marketcheckCache.set(cacheKey, null);
             return null;
         }
 

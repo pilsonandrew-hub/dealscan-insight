@@ -133,10 +133,10 @@ export function useDataIntegration() {
                   total_cost: listing.salePrice * 1.15, // Add fees
                   potential_profit: profit,
                   roi_percentage: roi,
-                  risk_score: 30, // Calculate based on condition
+                  risk_score: null, // Do not hardcode — calculate from real data
                   confidence_score: 80, // Manheim data is reliable
-                  transportation_cost: 1000, // Estimate
-                  fees_cost: listing.salePrice * 0.15,
+                  transportation_cost: null, // Do not hardcode — use real estimate
+                  fees_cost: null, // Do not hardcode — use real fees data
                   profit_margin: (profit / marketData.mmr) * 100,
                   source_site: 'Manheim',
                   location: listing.location,

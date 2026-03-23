@@ -121,7 +121,7 @@ const crawler = new PlaywrightCrawler({
                     'content-type': headers['content-type'] || 'application/json',
                     'x-api-key': headers['x-api-key'],
                 };
-                log.info(`[API KEY CAPTURED] ${headers['x-api-key']} via ${url}`);
+                log.info(`[API KEY CAPTURED] [REDACTED] via ${url}`);
             }
 
             if (url.includes('/search/list') && request.method() === 'POST') {
@@ -351,8 +351,13 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
     }
 }
 
-await crawler.run([{ url: 'https://www.govdeals.com/' }]);
-console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
-console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
-console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} passing lots`);
-await Actor.exit();
+try {
+    await crawler.run([{ url: 'https://www.govdeals.com/' }]);
+    console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
+    console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
+    console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} passing lots`);
+} catch (err) {
+    console.error(`[GOVDEALS] Fatal error: ${err.message}`);
+} finally {
+    await Actor.exit();
+}

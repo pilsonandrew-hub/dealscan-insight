@@ -189,7 +189,7 @@ async def write_to_supabase(records: list[dict]) -> int:
     valid_records = [
         r
         for r in records
-        if r.get("make") or r.get("model") or r.get("vin")
+        if r.get("make") or r.get("model") or r.get("vin") or r.get("listing_url")
     ]
 
     if not valid_records:
