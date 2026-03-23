@@ -4,5 +4,9 @@
   "title": "DealerScope GovDeals Completed Auctions",
   "description": "GovDeals completed auctions — clearance price data for DOS calibration",
   "version": "1.0",
-  "input": "./input_schema.json"
+  "input": "./input_schema.json",
+  "defaultRunOptions": {
+    "timeoutSecs": 600,
+    "memoryMbytes": 1024
+  }
 }

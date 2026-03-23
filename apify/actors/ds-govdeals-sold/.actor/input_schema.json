@@ -1,5 +1,5 @@
 {
-  "title": "GovDeals Scraper Input",
+  "title": "GovDeals Sold Scraper Input",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
@@ -9,35 +9,16 @@
       "description": "Max pages to scrape",
       "default": 10,
       "minimum": 1,
-      "maximum": 100
+      "maximum": 100,
+      "editor": "number"
     },
-    "minBid": {
-      "title": "Minimum Bid",
+    "maxItems": {
+      "title": "Max Items",
       "type": "integer",
-      "description": "Minimum current bid in USD",
+      "description": "Maximum number of completed auctions to collect",
       "default": 500,
-      "minimum": 0
-    },
-    "maxBid": {
-      "title": "Maximum Bid",
-      "type": "integer",
-      "description": "Maximum current bid in USD",
-      "default": 35000,
-      "minimum": 0
-    },
-    "targetStates": {
-      "title": "Target States",
-      "type": "array",
-      "description": "Low rust states to target",
-      "default": ["AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"],
-      "items": { "type": "string" }
-    },
-    "vehicleCategories": {
-      "title": "Vehicle Categories",
-      "type": "array",
-      "description": "Categories to scrape",
-      "default": ["Automobiles & Trucks"],
-      "items": { "type": "string" }
+      "minimum": 1,
+      "editor": "number"
     }
   }
 }
