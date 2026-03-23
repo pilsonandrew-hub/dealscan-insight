@@ -268,16 +268,27 @@ async def run_scoring(records: list[dict], supabase_client) -> int:
             year = record.get("year")
             mileage = record.get("mileage")
 
+            # Get MMR from vehicle data (estimated_sale_price or manheim_mmr_mid)
+            mmr = float(
+                record.get("manheim_mmr_mid") or
+                record.get("estimated_sale_price") or
+                record.get("mmr_mid") or
+                0
+            )
+            auction_end = record.get("auction_end_date") or record.get("auction_end_time") or record.get("auction_end")
+
             # score_deal returns a dict with dos_score and breakdown
             result = score_deal(
                 bid=bid,
-                mmr_ca=0,  # No MMR lookup yet
+                mmr_ca=mmr,
                 state=state,
                 source_site="govdeals",
                 model=model,
                 make=make,
                 year=year,
                 mileage=mileage,
+                auction_end=auction_end,
+                manheim_mmr_mid=record.get("manheim_mmr_mid"),
             )
 
             dos_score = result.get("dos_score") if result else None
