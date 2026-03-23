@@ -1,0 +1,12 @@
+{
+  "actorSpecification": 1,
+  "name": "ds-proxibid",
+  "title": "DealerScope Proxibid Scraper",
+  "description": "Scrapes Proxibid vehicle auctions for DealerScope",
+  "version": "0.1",
+  "input": "./input_schema.json",
+  "defaultRunOptions": {
+    "timeoutSecs": 300,
+    "memoryMbytes": 512
+  }
+}

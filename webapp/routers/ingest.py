@@ -1455,7 +1455,7 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
         if state in HIGH_RUST_STATES:
             current_year = datetime.now().year
             source_check = (item.get("source_site") or item.get("source") or "").lower()
-            gov_rust_bypass = {"govplanet", "municibid", "usgovbid", "jjkane", "publicsurplus", "govdeals", "gsaauctions"}
+            gov_rust_bypass = {"govplanet", "municibid", "usgovbid", "jjkane", "publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions"}
             max_rust_age = 8 if source_check in gov_rust_bypass else 2
             if not year or year < current_year - max_rust_age:
                 return None
@@ -1651,7 +1651,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
     source = _source_aliases.get(source, source)
 
     # Government/auction sources: lower min bid, higher age/mileage tolerance
-    gov_sources_bid = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter", "hibid"}
+    gov_sources_bid = {"publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter", "hibid"}
     is_gov = source in gov_sources_bid
     min_bid = 500 if is_gov else 3000
     # Allow bid=0 for gov sources (auction not yet open — e.g. JJKane pre-auction lots)
@@ -1685,7 +1685,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
     current_year = datetime.now().year
     age = current_year - year
     # Government/public auction sources run older fleet vehicles — allow up to 20 years
-    gov_sources = {"publicsurplus", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "hibid"}
+    gov_sources = {"publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "hibid"}
     max_age = 20 if source in gov_sources else 4
     if age > max_age or age < 0:
         return {"pass": False, "reason": f"age_exceeded ({age} years, max {max_age} for {source})"}
