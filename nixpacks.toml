@@ -30,7 +30,24 @@ nixPkgs = [
   "freetype",
   "libdrm",
   "mesa",
-  "alsa-lib"
+  "alsa-lib",
+  "libxshmfence",
+  "pciutils",
+  "libvpx",
+  "ffmpeg",
+  "libwebp",
+  "libjpeg",
+  "libpng",
+  "opus",
+  "libvorbis",
+  "libavcodec",
+  "libavformat",
+  "libavutil",
+  "libevent",
+  "lz4",
+  "snappy",
+  "harfbuzz",
+  "libexpat"
 ]
 
 [phases.install]
