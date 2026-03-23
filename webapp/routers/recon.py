@@ -7,9 +7,11 @@ import itertools
 
 # Marketcheck API key rotation — 500 calls/day each = 1500/day total
 _MC_KEYS = [
-    os.getenv("MARKETCHECK_API_KEY", "Sz8lARVIncBbenoWc9gjR2sa43r7zEOn"),  # Market Bot Key
-    "I2xYCoFZnHjrdDuSPQIluuTXWLm6XxdL",  # Dealerscope Ja
-    "aLOs3jW8yrImN77m375dj6phYEeGrH9p",  # Ja Dealer
+    k for k in [
+        os.getenv("MARKETCHECK_KEY_1", ""),
+        os.getenv("MARKETCHECK_KEY_2", ""),
+        os.getenv("MARKETCHECK_KEY_3", ""),
+    ] if k  # filter out empty strings
 ]
 _mc_key_cycle = itertools.cycle(_MC_KEYS)
 
@@ -63,20 +65,30 @@ async def get_retail_market_value(year: int, make: str, model: str, mileage: int
         miles_min = max(0, mileage - window)
         miles_max = mileage + window
         async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(
-                "https://mc-api.marketcheck.com/v2/search/car/active",
-                params={
-                    "api_key": _get_marketcheck_key(),
-                    "year": year,
-                    "make": make.lower(),
-                    "model": model.lower(),
-                    "miles_min": miles_min,
-                    "miles_max": miles_max,
-                    "rows": 50,
-                    "fields": "price,miles"
-                }
-            )
-        if resp.status_code != 200:
+            last_status = None
+            resp = None
+            for _ in range(max(len(_MC_KEYS), 1)):
+                api_key = _get_marketcheck_key()
+                if not api_key:
+                    break
+                resp = await client.get(
+                    "https://mc-api.marketcheck.com/v2/search/car/active",
+                    params={
+                        "api_key": api_key,
+                        "year": year,
+                        "make": make.lower(),
+                        "model": model.lower(),
+                        "miles_min": miles_min,
+                        "miles_max": miles_max,
+                        "rows": 50,
+                        "fields": "price,miles"
+                    }
+                )
+                if resp.status_code == 200:
+                    break
+                last_status = resp.status_code
+
+        if not resp or resp.status_code != 200:
             return {"retail_value": None, "retail_low": None, "retail_high": None, "retail_count": 0, "retail_source": "unavailable"}
         listings = resp.json().get("listings", [])
         prices = sorted([l["price"] for l in listings if l.get("price") and l["price"] > 5000])
