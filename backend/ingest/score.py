@@ -1211,8 +1211,13 @@ def score_deal(
     _v2_dos = _compute_dos_v2(vehicle_for_dos_v2, _v2_gross_margin) if _v2_passed else 0.0
     _v2_grade = _investment_grade_v2(_v2_dos, _v2_gross_margin) if _v2_passed else "rejected"
 
-    # Also run legacy gate check for comparison
+    # Also run legacy gate check for comparison — log divergence when legacy rejects but v2 passes
     gate_passed, gate_reason = _apply_hard_gates(vehicle_for_gates)
+    if not gate_passed and _v2_passed:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "[GATE_DIVERGENCE] Legacy gate rejected (%s) but v2 passed — review gate logic", gate_reason
+        )
     if not _v2_passed:
         # Return early with dos_score=0 and rejection reason (using v2 values)
         return {
@@ -1449,6 +1454,8 @@ def score_deal(
         "score": round(_v2_dos, 2),
         "max_bid": round(_v2_max_bid, 2) if _v2_max_bid > 0 else ceiling_metrics.get("max_bid"),
         "spec_gross_margin": round(spec_gross_margin, 2),
+        "spec_dos_score": round(spec_dos_score, 2),
+        "spec_investment_grade": spec_investment_grade,
         "score_version": SCORE_VERSION,
         "gate_passed": True,
         "rejection_reason": _v2_rejection_reason,
