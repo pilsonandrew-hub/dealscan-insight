@@ -71,6 +71,13 @@ except Exception as e:
     setup_monitoring = None
     logging.warning(f"monitoring unavailable: {e}")
 
+try:
+    from webapp.scheduler import start_scheduler, stop_scheduler
+    _scheduler_available = True
+except Exception as _e:
+    _scheduler_available = False
+    logging.warning(f"scheduler unavailable: {_e}")
+
 logging.basicConfig(
     level=logging.INFO,
     format='{"timestamp":"%(asctime)s","level":"%(levelname)s","module":"%(name)s","message":"%(message)s"}',
@@ -189,8 +196,14 @@ async def lifespan(app: FastAPI):
         setup_monitoring(app)
     except Exception as e:
         logger.warning(f"Monitoring setup failed (non-fatal): {e}")
+    if _scheduler_available:
+        start_scheduler()
+        logger.info("[SCHEDULER] Started")
     yield
     logger.info("Shutting down DealerScope unified backend")
+    if _scheduler_available:
+        stop_scheduler()
+        logger.info("[SCHEDULER] Stopped")
 
 
 # ---------------------------------------------------------------------------
