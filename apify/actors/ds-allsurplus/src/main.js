@@ -381,4 +381,28 @@ for (const searchText of searchTerms) {
 
 console.log(`[ALLSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed} | Unique: ${seenIds.size}`);
 
+// ── Webhook notification ──────────────────────────────────────────────────────
+if (totalPassed > 0) {
+    try {
+        const webhookResp = await fetch('https://dealscan-insight-production.up.railway.app/api/ingest/apify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Apify-Webhook-Secret': 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA',
+            },
+            body: JSON.stringify({
+                source: 'allsurplus',
+                actorRunId: process.env.APIFY_ACTOR_RUN_ID ?? 'local',
+                itemCount: totalPassed,
+                totalScraped: totalFound,
+                timestamp: new Date().toISOString(),
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        console.log(`[WEBHOOK] Notified ingest: HTTP ${webhookResp.status}`);
+    } catch (err) {
+        console.warn(`[WEBHOOK] Failed: ${err.message}`);
+    }
+}
+
 await Actor.exit();

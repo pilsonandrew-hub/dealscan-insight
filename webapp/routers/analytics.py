@@ -77,6 +77,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         opp_resp = (
             supa.table("opportunities")
             .select("id", count="exact")
+            .eq("user_id", user_id)
             .execute()
         )
         total_opportunities = opp_resp.count or 0
@@ -85,6 +86,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         outcomes_resp = (
             supa.table("opportunities")
             .select("id,gross_margin,roi,source,outcome_notes,outcome_sale_price,max_bid", count="exact")
+            .eq("user_id", user_id)
             .not_.is_("outcome_recorded_at", "null")
             .execute()
         )
@@ -139,6 +141,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         makes_resp = (
             supa.table("opportunities")
             .select("make,dos_score")
+            .eq("user_id", user_id)
             .not_.is_("make", "null")
             .not_.is_("dos_score", "null")
             .execute()
@@ -161,6 +164,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         alerts_resp = (
             supa.table("alert_log")
             .select("id", count="exact")
+            .eq("user_id", user_id)
             .gte("sent_at", cutoff)
             .execute()
         )
@@ -256,15 +260,15 @@ async def dos_calibration(authorization: Optional[str] = Header(None)):
     if supa is not None:
         try:
             # Count recon evaluations (opportunities with dos_score)
-            recon_resp = supa.table("opportunities").select("id", count="exact").not_.is_("dos_score", "null").execute()
+            recon_resp = supa.table("opportunities").select("id", count="exact").eq("user_id", user_id).not_.is_("dos_score", "null").execute()
             recon_count = recon_resp.count or 0
 
             # Count dealer_sales comps
-            ds_resp = supa.table("dealer_sales").select("id", count="exact").execute()
+            ds_resp = supa.table("dealer_sales").select("id", count="exact").eq("user_id", user_id).execute()
             dealer_sales_count = ds_resp.count or 0
 
             # Count bid outcomes
-            outcomes_resp = supa.table("opportunities").select("outcome_notes", count="exact").not_.is_("outcome_recorded_at", "null").execute()
+            outcomes_resp = supa.table("opportunities").select("outcome_notes", count="exact").eq("user_id", user_id).not_.is_("outcome_recorded_at", "null").execute()
             for row in (outcomes_resp.data or []):
                 notes = row.get("outcome_notes") or ""
                 if '"type": "bid_outcome"' in notes or '"bid":' in notes:

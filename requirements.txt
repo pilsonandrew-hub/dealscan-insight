@@ -9,7 +9,7 @@ pydantic==2.8.0
 pydantic-settings==2.6.0
 
 # Auth & security
-python-jose[cryptography]==3.3.0
+PyJWT>=2.8.0
 passlib[bcrypt]==1.7.0
 python-multipart==0.0.9
 
@@ -39,14 +39,14 @@ joblib==1.4.0
 celery==5.3.4
 
 # Scheduler
-apscheduler>=3.10.0
+apscheduler>=3.10.0,<4.0.0
 
 # Data processing
 pandas==2.1.2
 numpy==1.26.4
 
 # Browser automation
-playwright>=1.40.0
+playwright>=1.40.0,<2.0.0
 
 # Utilities
 python-dotenv==1.0.0
