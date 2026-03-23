@@ -386,7 +386,7 @@ async def pipeline_status(_: None = Depends(require_pipeline_auth)):
 async def health():
     return {
         "status": "ok",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 

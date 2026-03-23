@@ -13,7 +13,7 @@ Redis affinity vectors added (2026-03-14):
 """
 from fastapi import APIRouter, HTTPException, Header
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import os
 import logging
@@ -171,7 +171,7 @@ async def get_recommendations(
         effective_limit = max(1, min(limit, 20))
         # Fetch a wider pool so affinity re-ranking has room to surface better matches
         fetch_limit = min(effective_limit * 3, 60)
-        now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         opps_resp = supa.table("opportunities")\
             .select("*")\
             .gte("dos_score", 65)\
