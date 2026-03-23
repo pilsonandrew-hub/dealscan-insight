@@ -109,6 +109,7 @@ def normalize_lot(lot: dict) -> dict:
         "current_bid": current_bid,
         "state": lot.get("locationState") or lot.get("state") or "",
         "city": lot.get("locationCity") or lot.get("city") or "",
+        "auction_end_date": lot.get("assetAuctionEndDateUtc") or lot.get("auctionEndUtc"),
         "auction_end_time": lot.get("assetAuctionEndDateUtc") or lot.get("auctionEndUtc"),
         "listing_url": lot.get("url") or f"https://www.govdeals.com/asset/{asset_id}/{account_id}",
         "photo_url": lot.get("imageUrl") or "",

@@ -583,6 +583,7 @@ const CrosshairTab = () => {
     minPrice: filters.minBid ? parseInt(filters.minBid) : undefined,
     maxPrice: filters.maxBid ? parseInt(filters.maxBid) : undefined,
     limit: lim,
+    offset,
   });
 
   const search = async () => {
