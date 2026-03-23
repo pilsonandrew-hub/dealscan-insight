@@ -401,21 +401,16 @@ async def cancel_sniper_target(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# ─── POST /api/sniper/check (internal cron endpoint) ─────────────────────────
+# ─── Internal sniper check logic (called by scheduler + HTTP endpoint) ───────
 
-@router.post("/check")
-async def sniper_check(
-    authorization: Optional[str] = Header(None),
-):
+async def _run_sniper_check_internal() -> dict:
     """
-    Internal scheduler endpoint — called by GitHub Actions every 5 minutes.
+    Core sniper check logic — called directly by APScheduler and /api/sniper/check.
     Checks all active sniper targets and fires Telegram alerts at T-60, T-15, T-5.
     Also marks expired and ceiling-exceeded targets.
 
-    Auth: Bearer {SNIPER_CHECK_SECRET}
+    Returns stats dict with targets_checked, alerts_sent, expired, ceiling_exceeded, errors.
     """
-    _verify_check_secret(authorization)
-
     if not supa:
         logger.error("[SNIPER_CHECK] Supabase unavailable")
         return {"ok": False, "error": "Supabase unavailable"}
@@ -606,4 +601,18 @@ async def sniper_check(
         stats["errors"],
     )
     return {"ok": True, **stats}
+
+
+# ─── POST /api/sniper/check (HTTP endpoint wrapper) ──────────────────────────
+
+@router.post("/check")
+async def sniper_check(
+    authorization: Optional[str] = Header(None),
+):
+    """
+    HTTP endpoint for sniper check — supports manual trigger and legacy GitHub Actions.
+    Auth: Bearer {SNIPER_CHECK_SECRET}
+    """
+    _verify_check_secret(authorization)
+    return await _run_sniper_check_internal()
 # codex_write_test

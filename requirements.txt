@@ -38,6 +38,9 @@ joblib==1.4.0
 # Task queue
 celery==5.3.4
 
+# Scheduler
+apscheduler>=3.10.0
+
 # Data processing
 pandas==2.1.2
 numpy==1.26.4
