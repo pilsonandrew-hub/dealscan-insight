@@ -197,7 +197,10 @@ async def fetch_active_auctions(api_key: str, headers: dict) -> list[dict]:
 
 
 async def write_to_supabase(records: list[dict]) -> int:
-    """Write records to opportunities table via Supabase, then score each."""
+    """Write records to opportunities table via Supabase, then score each.
+
+    Returns the count of records that passed DOS scoring (>= 50).
+    """
     from supabase import create_client
 
     url = os.environ.get("SUPABASE_URL")
@@ -224,28 +227,39 @@ async def write_to_supabase(records: list[dict]) -> int:
             on_conflict="listing_url",
             ignore_duplicates=False,
         ).execute()
-        inserted = len(result.data) if result.data else 0
-        logger.info(f"[GOVDEALS-ACTIVE] Upserted {inserted} records to opportunities")
+        upserted = len(result.data) if result.data else 0
+        logger.info(f"[GOVDEALS-ACTIVE] Upserted {upserted} records to opportunities")
 
-        # Run DOS scoring on inserted records
-        await run_scoring(result.data or [])
+        # Run DOS scoring on inserted records — updates DB with scores,
+        # deletes records with DOS < 50, alerts for DOS >= 80
+        kept = await run_scoring(result.data or [], client)
 
-        return inserted
+        return kept
     except Exception as e:
         logger.error(f"[GOVDEALS-ACTIVE] Supabase upsert failed: {e}")
         return 0
 
 
-async def run_scoring(records: list[dict]):
-    """Run DOS scoring on inserted records."""
+async def run_scoring(records: list[dict], supabase_client) -> int:
+    """Run DOS scoring on inserted records, update DB, filter low scores, alert hot deals.
+
+    Returns the count of records that passed the DOS threshold (>= 50).
+    """
     try:
         from backend.ingest.score import score_deal
     except ImportError:
         logger.warning("[GOVDEALS-ACTIVE] Could not import score_deal — skipping scoring")
-        return
+        return len(records)
+
+    MIN_DOS_THRESHOLD = 50
+    HOT_DEAL_THRESHOLD = 80
 
     scored = 0
+    kept = 0
+    hot_deals = []
+
     for record in records:
+        listing_url = record.get("listing_url")
         try:
             bid = record.get("current_bid") or 0
             state = record.get("state") or ""
@@ -266,14 +280,71 @@ async def run_scoring(records: list[dict]):
                 mileage=mileage,
             )
 
-            if result and result.get("dos_score"):
-                scored += 1
-                logger.debug(f"[GOVDEALS-ACTIVE] Scored {record.get('listing_url')}: DOS={result['dos_score']}")
+            dos_score = result.get("dos_score") if result else None
+
+            if dos_score is None:
+                logger.warning(f"[GOVDEALS-ACTIVE] No dos_score for {listing_url}")
+                continue
+
+            scored += 1
+            logger.debug(f"[GOVDEALS-ACTIVE] Scored {listing_url}: DOS={dos_score}")
+
+            if dos_score < MIN_DOS_THRESHOLD:
+                # Delete low-scoring records
+                try:
+                    supabase_client.table("opportunities").delete().eq(
+                        "listing_url", listing_url
+                    ).execute()
+                    logger.info(f"[GOVDEALS-ACTIVE] Deleted low-score record DOS={dos_score}: {listing_url}")
+                except Exception as del_err:
+                    logger.warning(f"[GOVDEALS-ACTIVE] Failed to delete low-score record: {del_err}")
+                continue
+
+            # Update the record with dos_score
+            try:
+                supabase_client.table("opportunities").update({
+                    "dos_score": dos_score,
+                    "total_cost": result.get("total_cost"),
+                    "gross_margin": result.get("gross_margin"),
+                    "investment_grade": result.get("investment_grade"),
+                }).eq("listing_url", listing_url).execute()
+                kept += 1
+            except Exception as upd_err:
+                logger.warning(f"[GOVDEALS-ACTIVE] Failed to update dos_score for {listing_url}: {upd_err}")
+                continue
+
+            # Collect hot deals for alerting
+            if dos_score >= HOT_DEAL_THRESHOLD:
+                record["dos_score"] = dos_score
+                record["total_cost"] = result.get("total_cost")
+                record["gross_margin"] = result.get("gross_margin")
+                record["investment_grade"] = result.get("investment_grade")
+                hot_deals.append(record)
 
         except Exception as e:
-            logger.warning(f"[GOVDEALS-ACTIVE] Scoring failed for {record.get('listing_url')}: {e}")
+            logger.warning(f"[GOVDEALS-ACTIVE] Scoring failed for {listing_url}: {e}")
 
-    logger.info(f"[GOVDEALS-ACTIVE] Scored {scored}/{len(records)} records")
+    logger.info(f"[GOVDEALS-ACTIVE] Scored {scored}/{len(records)}, kept {kept} (DOS>={MIN_DOS_THRESHOLD})")
+
+    # Send alerts for hot deals
+    if hot_deals:
+        await send_hot_deal_alerts(hot_deals)
+
+    return kept
+
+
+async def send_hot_deal_alerts(hot_deals: list[dict]):
+    """Send Telegram alerts for hot deals (DOS >= 80)."""
+    try:
+        from webapp.routers.ingest import send_telegram_alert
+        for deal in hot_deals:
+            try:
+                await send_telegram_alert(deal)
+                logger.info(f"[GOVDEALS-ACTIVE] Alert sent for DOS={deal.get('dos_score')}: {deal.get('listing_url')}")
+            except Exception as alert_err:
+                logger.warning(f"[GOVDEALS-ACTIVE] Alert failed for {deal.get('listing_url')}: {alert_err}")
+    except ImportError:
+        logger.warning("[GOVDEALS-ACTIVE] Could not import send_telegram_alert — skipping alerts")
 
 
 async def run_govdeals_active_scraper():
