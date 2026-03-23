@@ -47,7 +47,8 @@ nixPkgs = [
   "lz4",
   "snappy",
   "harfbuzz",
-  "libexpat"
+  "libexpat",
+  "libxkbcommon"
 ]
 
 [phases.install]
