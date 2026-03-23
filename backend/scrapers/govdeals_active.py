@@ -92,6 +92,15 @@ def normalize_lot(lot: dict) -> dict:
     asset_id = lot.get("assetId", "")
     account_id = lot.get("accountId", "")
 
+    # Resolve MMR from available fields
+    mmr = float(
+        lot.get("estimated_sale_price") or
+        lot.get("manheim_mmr_mid") or
+        lot.get("retail_value") or
+        lot.get("mmr_mid") or
+        0
+    )
+
     return {
         "title": lot.get("assetShortDescription") or lot.get("title") or "",
         "make": lot.get("makebrand") or lot.get("make") or "",
@@ -107,6 +116,10 @@ def normalize_lot(lot: dict) -> dict:
         "mileage": lot.get("meterCount"),
         "source_site": "govdeals",
         "scraped_at": datetime.now(timezone.utc).isoformat(),
+        # Preserve MMR fields for scoring
+        "estimated_sale_price": mmr if mmr > 0 else None,
+        "manheim_mmr_mid": lot.get("manheim_mmr_mid"),
+        "retail_value": lot.get("retail_value"),
     }
 
 
@@ -268,10 +281,11 @@ async def run_scoring(records: list[dict], supabase_client) -> int:
             year = record.get("year")
             mileage = record.get("mileage")
 
-            # Get MMR from vehicle data (estimated_sale_price or manheim_mmr_mid)
+            # Get MMR from vehicle data (estimated_sale_price first, then manheim, then retail)
             mmr = float(
-                record.get("manheim_mmr_mid") or
                 record.get("estimated_sale_price") or
+                record.get("manheim_mmr_mid") or
+                record.get("retail_value") or
                 record.get("mmr_mid") or
                 0
             )
