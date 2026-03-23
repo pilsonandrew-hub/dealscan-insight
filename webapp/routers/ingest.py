@@ -215,15 +215,40 @@ TARGET_STATES = {
 }
 
 # Commercial/fleet vehicle patterns to reject — not passenger cars
+# NOTE: \b2500\b and \b3500\b removed — they incorrectly blocked Ram 2500, Silverado 2500,
+# Sierra 2500, Ram 3500 etc. (desirable HD pickup trucks). Use _is_commercial_hd_tonnage()
+# below to detect cargo-truck context for those numerals instead.
 _COMMERCIAL_PATTERNS = [
     r"\bEconoline\b", r"\bExpress\s*Cargo\b", r"\bProMaster\s*Cargo\b",
     r"\bSprinter\s*Cargo\b", r"\bTransit\s*Cargo\b", r"\bSavana\s*Cargo\b",
-    r"\bE-250\b", r"\bE-350\b", r"\b2500\b", r"\b3500\b", r"\b4500\b", r"\b5500\b",
+    r"\bE-250\b", r"\bE-350\b", r"\b4500\b", r"\b5500\b",
     r"\bCutaway\b", r"\bChassis\s*Cab\b",
     r"\bDump\s*Truck\b", r"\bBox\s*Truck\b", r"\bBucket\s*Truck\b",
     r"\bStake\s*Bed\b", r"\bFlatbed\b", r"\bStep\s*Van\b", r"\bShuttle\b",
     r"\bUtility\s*Bed\b", r"\bRefrigerator\s*Truck\b",
 ]
+
+# HD pickup truck makes — 2500/3500 suffixes on these are valid pickup trucks
+_HD_PICKUP_MAKES = re.compile(
+    r"\b(Ram|Chevy|Chevrolet|Silverado|GMC|Sierra|Ford|F-250|F-350)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_commercial_hd_tonnage(title: str) -> bool:
+    """Return True only if title contains a cargo/commercial 2500 or 3500 (not a pickup truck).
+
+    Blocks: "G2500 Cargo Van", "G3500 Express Cargo" etc.
+    Allows: "Ram 2500 Big Horn", "Silverado 2500 HD", "Sierra 3500 Crew Cab", "F-350 XLT"
+    """
+    has_hd_numeral = bool(re.search(r"\b[23]500\b", title, re.IGNORECASE))
+    if not has_hd_numeral:
+        return False
+    # If the title also mentions a known HD pickup make/model, it's a pickup — allow it
+    if _HD_PICKUP_MAKES.search(title):
+        return False
+    # No pickup make context → likely a cargo/commercial van or cab-chassis → block it
+    return True
 
 _TITLE_BRAND_PATTERNS = [
     ("salvage", r"\bsalvage\b"),
@@ -831,9 +856,10 @@ async def _process_webhook_items(
                 )
                 if existing.data:
                     logger.warning(
-                        "[IDEMPOTENCY] run_id=%s has existing rows; replaying batch to avoid partial-run data loss",
+                        "[IDEMPOTENCY] run_id=%s already has existing rows — skipping duplicate batch processing",
                         apify_run_id,
                     )
+                    return
             except Exception as e:
                 logger.warning(f"[IDEMPOTENCY] lookup failed for run_id={apify_run_id}: {e}")
 
@@ -1678,6 +1704,8 @@ def passes_basic_gates(vehicle: dict) -> dict:
     title = (vehicle.get("title") or "").strip()
     if any(re.search(p, title, re.IGNORECASE) for p in _COMMERCIAL_PATTERNS):
         return {"pass": False, "reason": f"commercial_vehicle ({title[:50]})"}
+    if _is_commercial_hd_tonnage(title):
+        return {"pass": False, "reason": f"commercial_hd_tonnage ({title[:50]})"}
 
     if not year:
         return {"pass": False, "reason": "no_year"}

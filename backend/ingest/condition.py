@@ -2,6 +2,7 @@
 
 import re
 import threading
+from datetime import datetime
 from typing import Optional
 
 # -------------------------------------------------------------------
@@ -246,7 +247,7 @@ def score_condition(
     # 1. Base score from age heuristic
     # ------------------------------------------------------------------
     if year and year > 1900:
-        age = 2026 - year
+        age = datetime.now().year - year
         if age <= 0:
             base_score = 85
         elif age <= 1:
