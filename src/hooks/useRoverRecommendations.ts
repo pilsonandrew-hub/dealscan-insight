@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { roverAPI, RoverRecommendations, DealItem } from '@/services/roverAPI';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from "@/contexts/ModernAuthContext";
 
 interface UseRoverRecommendationsProps {
   enabled: boolean;
@@ -18,6 +19,7 @@ export const useRoverRecommendations = ({
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const fetchRecommendations = useCallback(async (silent = false) => {
     if (!enabled) return;
@@ -54,9 +56,10 @@ export const useRoverRecommendations = ({
 
   // Track item interactions
   const trackInteraction = useCallback(async (item: DealItem, eventType: 'view' | 'click' | 'save' | 'bid') => {
+    if (!user?.id) return;
     try {
       await roverAPI.trackEvent({
-        userId: 'current_user',
+        userId: user.id,
         event: eventType,
         item
       });

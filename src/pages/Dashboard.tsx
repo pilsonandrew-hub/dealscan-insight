@@ -602,11 +602,10 @@ const CrosshairTab = () => {
 
   const loadMore = async () => {
     setLoadingMore(true);
-    const nextPage = page + 1;
     try {
-      const { data } = await api.searchCrosshairOpportunities(buildFilters(50 * nextPage));
-      setResults(data);
-      setPage(nextPage);
+      const offset = results.length;
+      const { data } = await api.searchCrosshairOpportunities(buildFilters(50, offset));
+      setResults(prev => [...prev, ...data]);
     } catch (e) {
       console.error(e);
     } finally {
