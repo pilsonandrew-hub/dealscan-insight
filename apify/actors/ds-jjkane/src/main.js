@@ -350,6 +350,12 @@ for (const state of targetStates) {
                 // Existing currentBid from Algolia (may be 0 early in auction)
                 const currentBid = parseBid(hit.currentBid);
 
+                // Skip pre-auction items with no pricing — cannot be scored
+                if (estimatedAuctionPrice === 0 || currentBid === 0) {
+                    console.log(`[SKIP-ZERO-BID] ${title || `${year} ${make} ${model}`} | estimatedAuctionPrice=$${estimatedAuctionPrice} currentBid=$${currentBid}`);
+                    continue;
+                }
+
                 // Use whichever is higher: actual current bid or estimated floor
                 const effectiveBid = currentBid > 0 ? currentBid : estimatedAuctionPrice;
 
@@ -388,9 +394,13 @@ for (const state of targetStates) {
                     scraped_at: new Date().toISOString(),
                 };
 
-                await Actor.pushData(record);
-                totalPassed++;
                 statePassed++;
+                totalPassed++;
+                if (statePassed > maxItemsPerState) {
+                    console.log(`[JJKANE] ${state}: maxItemsPerState (${maxItemsPerState}) reached, stopping`);
+                    break;
+                }
+                await Actor.pushData(record);
                 console.log(`[PASS] ${title || `${year} ${make} ${model}`} | bid=$${effectiveBid} mmr=$${marketcheckMedian ?? 'N/A'} | ${state_code}`);
             }
         }

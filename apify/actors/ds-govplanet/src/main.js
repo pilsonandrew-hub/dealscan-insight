@@ -250,7 +250,15 @@ const crawler = new CheerioCrawler({
                 state,
                 city:             (item.eumeLocation || '').split(',')[0].trim() || null,
                 mileage,
-                auction_end_time: item.timeLeft || null,
+                auction_end_time: (() => {
+                    const tl = item.timeLeft || '';
+                    const daysMatch = tl.match(/(\d+)\s*day/i);
+                    const hoursMatch = tl.match(/(\d+)\s*hour/i);
+                    const days = daysMatch ? parseInt(daysMatch[1], 10) : 0;
+                    const hours = hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
+                    const ms = days * 86400000 + hours * 3600000;
+                    return ms > 0 ? new Date(Date.now() + ms).toISOString() : null;
+                })(),
                 listing_url:      listingUrl,
                 photo_url:        item.photo || item.photoThumb || null,
                 vin:              (() => { const m = (item.vin || item.vehicleVin || item.vinNumber || item.title || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i); return m ? m[1].toUpperCase() : null; })(),
