@@ -19,6 +19,7 @@ export interface CrosshairSearchFilters {
   minScore?: number;
   maxMileage?: number;
   limit?: number;
+  offset?: number;
 }
 
 export interface OpportunityDetail {
@@ -152,8 +153,10 @@ function normalizeROI(value: number): number {
   return value > 1 ? value / 100 : value;
 }
 
-function getRowGrossMargin(row: OpportunityRow): number {
-  return row.gross_margin ?? row.potential_profit ?? row.profit ?? row.profit_margin ?? 0;
+function getRowGrossMargin(row: OpportunityRow): number | null {
+  const val = row.gross_margin ?? row.potential_profit ?? row.profit;
+  if (val == null) return null;
+  return val as number;
 }
 
 function getRowROI(row: OpportunityRow): number {
@@ -342,9 +345,10 @@ export const api = {
   async searchCrosshairOpportunities(filters: CrosshairSearchFilters): Promise<{ data: Opportunity[]; total: number }> {
     try {
       const limit = filters.limit ?? 50;
+      const offset = filters.offset ?? 0;
       const { data, error, count } = await buildOpportunityQuery(filters)
         .order('dos_score', { ascending: false, nullsFirst: false })
-        .limit(limit);
+        .range(offset, offset + limit - 1);
 
       if (error) throw error;
 

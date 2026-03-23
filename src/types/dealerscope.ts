@@ -117,7 +117,7 @@ export interface Opportunity {
   transportation_cost: number;
   fees_cost: number;
   estimated_sale_price: number;
-  profit_margin: number;
+  profit_margin: number | null;
   source_site: string;
   current_bid: number;
   acquisition_price_basis?: number;
