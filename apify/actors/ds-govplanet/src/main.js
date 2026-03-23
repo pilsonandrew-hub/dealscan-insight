@@ -253,7 +253,7 @@ const crawler = new CheerioCrawler({
                 auction_end_time: item.timeLeft || null,
                 listing_url:      listingUrl,
                 photo_url:        item.photo || item.photoThumb || null,
-                vin:              null,
+                vin:              (() => { const m = (item.vin || item.vehicleVin || item.vinNumber || item.title || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i); return m ? m[1].toUpperCase() : null; })(),
                 source_site:      SOURCE,
                 equip_id:         equipId,
                 scraped_at:       new Date().toISOString(),
