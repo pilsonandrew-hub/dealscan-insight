@@ -144,6 +144,49 @@ async def list_opportunities(
         items=opportunities
     )
 
+@router.get("/saved/list")
+async def list_saved_opportunities(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100)
+):
+    """List user's saved opportunities"""
+    
+    query = db.query(Opportunity, Vehicle).join(
+        Vehicle, Vehicle.id == Opportunity.vehicle_id
+    ).filter(
+        Opportunity.user_id == current_user.id,
+        Opportunity.user_action == "saved",
+        Opportunity.is_active == True
+    ).order_by(desc(Opportunity.updated_at))
+    
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    
+    opportunities = []
+    for opp, vehicle in items:
+        opportunities.append({
+            "id": opp.id,
+            "vehicle_info": {
+                "make": vehicle.make,
+                "model": vehicle.model,
+                "year": vehicle.year,
+                "current_bid": vehicle.current_bid,
+                "auction_end": vehicle.auction_end.isoformat() if vehicle.auction_end else None
+            },
+            "opportunity_score": opp.opportunity_score,
+            "potential_profit": opp.potential_profit,
+            "saved_at": opp.updated_at.isoformat()
+        })
+    
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": opportunities
+    }
+
 @router.get("/{opportunity_id}", response_model=OpportunityResponse)
 async def get_opportunity(
     opportunity_id: int,
