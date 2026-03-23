@@ -315,7 +315,10 @@ async def run_scoring(records: list[dict], supabase_client) -> int:
             logger.debug(f"[GOVDEALS-ACTIVE] Scored {listing_url}: DOS={dos_score}")
 
             if dos_score < MIN_DOS_THRESHOLD:
-                # Delete low-scoring records
+                # Delete low-scoring records — GUARD: never delete if listing_url is None
+                if not listing_url:
+                    logger.warning(f"[GOVDEALS-ACTIVE] Skipping delete — listing_url is None (would wipe table)")
+                    continue
                 try:
                     supabase_client.table("opportunities").delete().eq(
                         "listing_url", listing_url
