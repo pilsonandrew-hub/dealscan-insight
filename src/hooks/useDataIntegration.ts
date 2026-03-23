@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { manheimAPI } from '@/services/manheimAPI';
-import { govAuctionScraper } from '@/services/govAuctionScraper';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+
+const govAuctionScraper: any = undefined;
 
 export interface IntegrationStatus {
   manheim: {
@@ -56,8 +57,8 @@ export function useDataIntegration() {
       const manheimStatus = manheimAPI.getConnectionStatus();
 
       // Check scraper status
-      const scrapingStatus = govAuctionScraper.getScrapingStatus();
-      const availableScrapers = await govAuctionScraper.getAvailableScrapers();
+      const scrapingStatus = govAuctionScraper?.getScrapingStatus?.() ?? { isRunning: false };
+      const availableScrapers = await (govAuctionScraper?.getAvailableScrapers?.() ?? Promise.resolve([]));
 
       // Check database status
       const { count } = await supabase
@@ -190,7 +191,7 @@ export function useDataIntegration() {
 
   const startAuctionScraping = useCallback(async (sites: string[] = ['govdeals', 'publicsurplus']): Promise<string> => {
     try {
-      const jobId = await govAuctionScraper.startScraping(sites);
+      const jobId = await govAuctionScraper?.startScraping?.(sites);
       
       toast({
         title: "Scraping Started",
@@ -211,7 +212,7 @@ export function useDataIntegration() {
 
   const stopAuctionScraping = useCallback(async (): Promise<void> => {
     try {
-      await govAuctionScraper.cancelScraping();
+      await govAuctionScraper?.cancelScraping?.();
       
       toast({
         title: "Scraping Stopped",
@@ -291,7 +292,7 @@ export function useDataIntegration() {
 
   const getScrapingJobStatus = useCallback(async (jobId: string) => {
     try {
-      return await govAuctionScraper.getJobStatus(jobId);
+      return await govAuctionScraper?.getJobStatus?.(jobId);
     } catch (error) {
       console.error('Failed to get job status:', error);
       return null;

@@ -50,6 +50,8 @@ interface FormState {
   source: string;
   state: string;
   condition_grade: string;
+  is_fleet: boolean;
+  fleet_has_records: boolean;
 }
 
 const VERDICT_STYLES: Record<ReconResult['verdict'], string> = {
@@ -83,6 +85,8 @@ const defaultForm: FormState = {
   source: '',
   state: '',
   condition_grade: 'Good',
+  is_fleet: false,
+  fleet_has_records: false,
 };
 
 async function getAuthToken(): Promise<string | null> {

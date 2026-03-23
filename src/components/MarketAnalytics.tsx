@@ -36,7 +36,7 @@ export function MarketAnalytics({ opportunities }: MarketAnalyticsProps) {
   // Market trends by make
   const marketTrends = useMemo((): MarketTrend[] => {
     const makeGroups = opportunities.reduce((acc, op) => {
-      const make = op.vehicle.make;
+      const make = op.vehicle?.make ?? op.make;
       if (!acc[make]) {
         acc[make] = [];
       }

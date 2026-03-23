@@ -528,7 +528,7 @@ export const api = {
         .filter(([name]) => !RETIRED_SOURCES.has(name))
         .map(([name, v]) => ({
           name,
-          last_run: apifyStatus.get(name) || v.last_run,
+          last_run: (apifyStatus.get(name)?.last_run) ?? v.last_run,
           count: v.count
         }));
     } catch {
