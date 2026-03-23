@@ -1014,7 +1014,7 @@ async def _process_webhook_items(
             score_result = score_vehicle(vehicle)
             vehicle["dos_score"] = score_result["dos_score"]
             vehicle["score_breakdown"] = score_result
-            vehicle["ingested_at"] = datetime.utcnow().isoformat()
+            vehicle["ingested_at"] = datetime.now(timezone.utc).isoformat()
             evaluated += 1
 
             if score_result.get("wholesale_margin", 0) < 1500:
@@ -1419,7 +1419,7 @@ def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] =
             total_delta += timedelta(**{unit: int(match.group(1))})
 
     if matched:
-        anchor = reference_dt or _parse_datetime_utc(datetime.utcnow())
+        anchor = reference_dt or _parse_datetime_utc(datetime.now(timezone.utc))
         if anchor is None:
             return None
         return (anchor + total_delta).astimezone(timezone.utc).isoformat()
@@ -2069,7 +2069,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
     # 6-hour suppression check
     if supabase_client is not None and opp_id:
         try:
-            alert_suppression_cutoff = (datetime.utcnow() - timedelta(hours=6)).isoformat()
+            alert_suppression_cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
             recent = (
                 supabase_client.table("alert_log")
                 .select("id")
@@ -2265,7 +2265,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
         "message_id": message_id,
         "channel": "telegram",
         "delivery_state": "sent",
-        "sent_at": datetime.utcnow().isoformat(),
+        "sent_at": datetime.now(timezone.utc).isoformat(),
         "dos_score": vehicle.get("dos_score"),
         "vehicle_title": (
             f"{vehicle.get('year', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip()
@@ -2464,7 +2464,7 @@ def _record_delivery_log(
                 "critical ingest_delivery_log write missing run_id, listing_id, or channel"
             )
         return False
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     row = {
         "run_id": run_id,
         "listing_id": listing_id,
@@ -2809,7 +2809,7 @@ def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str],
     if supabase_client is None:
         return None, False
     try:
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         result = (
             supabase_client.table("opportunities")
             .select("id, listing_url, dos_score")
@@ -2855,7 +2855,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                         update_payload = {
                             "dos_score": row.get("dos_score"),
                             "current_bid": row.get("current_bid"),
-                            "updated_at": datetime.utcnow().isoformat(),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
                         }
                         supabase_client.table("opportunities").update(update_payload).eq("id", existing_id).execute()
                         logger.info(
@@ -3046,5 +3046,5 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "source_run_id": vehicle.get("source_run_id"),
         "pipeline_step": "saved",
         "step_status": "complete",
-        "processed_at": vehicle.get("processed_at") or datetime.utcnow().isoformat(),
+        "processed_at": vehicle.get("processed_at") or datetime.now(timezone.utc).isoformat(),
     }
