@@ -18,7 +18,8 @@ from webapp.middleware.request_id import RequestIDMiddleware
 from webapp.middleware.rate_limit import RateLimitMiddleware
 from webapp.middleware.security import SecurityMiddleware
 from webapp.middleware.error_handler import ErrorHandlerMiddleware
-from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest
+from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest, sniper
+from webapp.scheduler import start_scheduler, stop_scheduler
 recon_module = None
 _recon_load_error = ""
 try:
@@ -44,8 +45,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting DealerScope API")
     await init_db()
     setup_monitoring(app)
+    start_scheduler()
     yield
-    # Shutdown  
+    # Shutdown
+    stop_scheduler()
     logger.info("Shutting down DealerScope API")
 
 # Create FastAPI app
@@ -97,6 +100,7 @@ app.include_router(upload.router, prefix="/upload", tags=["Data Upload"])
 app.include_router(ml.router, prefix="/ml", tags=["Machine Learning"])
 app.include_router(admin.router, prefix="/admin", tags=["Administration"])
 app.include_router(ingest.router)
+app.include_router(sniper.router)
 if recon_module:
     app.include_router(recon_module.router, prefix="/api", tags=["Recon"])
 

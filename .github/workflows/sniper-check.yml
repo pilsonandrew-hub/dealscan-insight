@@ -1,10 +1,11 @@
 name: SniperScope Check
 
-# Runs every 5 minutes to fire auction close alerts at T-60, T-15, T-5.
+# DISABLED — Now runs via internal APScheduler on Railway (see webapp/scheduler.py).
+# Kept as backup for manual testing only.
 on:
-  schedule:
-    - cron: '*/5 * * * *'
-  # Allow manual trigger for testing
+  # schedule:
+  #   - cron: '*/5 * * * *'
+  # Allow manual trigger for testing/fallback
   workflow_dispatch:
 
 jobs:
