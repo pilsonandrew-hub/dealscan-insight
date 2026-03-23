@@ -22,7 +22,7 @@
       "title": "Maximum Bid",
       "type": "integer",
       "description": "Maximum current bid in USD",
-      "default": 35000,
+      "default": 75000,
       "minimum": 0
     },
     "targetStates": {
@@ -30,6 +30,7 @@
       "type": "array",
       "description": "Low rust states to target",
       "default": ["AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"],
+      "editor": "stringList",
       "items": { "type": "string" }
     },
     "vehicleCategories": {
@@ -37,6 +38,7 @@
       "type": "array",
       "description": "Categories to scrape",
       "default": ["Automobiles & Trucks"],
+      "editor": "stringList",
       "items": { "type": "string" }
     }
   }

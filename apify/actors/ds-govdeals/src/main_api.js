@@ -36,7 +36,7 @@ const MAX_DETAIL_PAGES = 200;
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = 10, minBid = 500, maxBid = 35000 } = input;
+const { maxPages = 10, minBid = 500, maxBid = 75000 } = input;
 
 let totalFound = 0, totalPassed = 0;
 const capturedApi = {
@@ -290,14 +290,19 @@ async function scrapeDetailPagesForVin(page, lots, log) {
 async function paginateWithAuth(page, log, seenIds = new Set()) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
 
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+    // Start at page 2 — page 1 was already intercepted from the initial page load
+    for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
         const payload = {
             ...searchPayload,
-            page: pageNum,
-            displayRows: searchPayload.displayRows || 24,
+            pageNumber: pageNum,           // maestro API uses pageNumber, not page
+            pageSize: 50,                  // request 50 per page for efficiency
+            timing: 'current',             // active listings only (not completed)
             requestType: searchPayload.requestType || 'search',
             responseStyle: searchPayload.responseStyle || 'productsOnly',
         };
+        // Remove old/conflicting fields if present
+        delete payload.page;
+        delete payload.displayRows;
 
         log.info(`Fetching page ${pageNum} via Node fetch: ${searchUrl}`);
 
