@@ -122,6 +122,7 @@ async def create_outcome(
     user_id = _verify_auth(authorization)
 
     try:
+        # ── verify ownership ────────────────────────────────────────────
         opportunity_resp = (
             supa.table("opportunities")
             .select("*")
@@ -129,11 +130,17 @@ async def create_outcome(
             .limit(1)
             .execute()
         )
+
         opportunities = opportunity_resp.data or []
         if not opportunities:
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
         opportunity = opportunities[0]
+
+        # B7-1: ensure the opportunity belongs to the requesting user
+        opp_user_id = opportunity.get("user_id") or opportunity.get("dealer_id")
+        if opp_user_id and opp_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden: Not your opportunity")
         update_payload = {
             "outcome_sale_price": payload.sale_price,
             "outcome_sale_date": payload.sale_date,
