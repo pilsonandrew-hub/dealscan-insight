@@ -37,21 +37,15 @@ async def decode_vin(req: VinDecodeRequest):
 
 @router.post("/score")
 def score_vin(req: VinScoreRequest):
-    vin_data = {
-        "year": req.year,
-        "make": req.make,
-        "model": req.model,
-        "body_type": req.body_type,
-        "engine": req.engine
-    }
-
-    scoring_input = {
-        "vin_data": vin_data,
-        "asking_price": req.asking_price,
-        "location_state": req.location_state
-    }
-
-    # Placeholder: invoke existing scoring logic here
-    result = score.run_score(scoring_input)  # Adjust call to actual API
+    # B7-4: Call score_deal with correct parameters
+    result = score.score_deal(
+        bid=req.asking_price,
+        mmr_ca=req.asking_price,  # Use asking_price as proxy when MMR unknown
+        state=req.location_state,
+        source_site="vin_decode",
+        make=req.make,
+        model=req.model,
+        year=req.year,
+    )
 
     return result

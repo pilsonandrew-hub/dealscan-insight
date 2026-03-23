@@ -42,7 +42,7 @@ class OpportunityListResponse(BaseModel):
 @router.get("", response_model=OpportunityListResponse)
 async def list_opportunities(
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),  # B7-2: require authentication
     min_score: float = Query(0.0, ge=0.0, le=1.0),
     max_risk: float = Query(1.0, ge=0.0, le=1.0),
     min_profit: Optional[float] = Query(None, gt=0),
