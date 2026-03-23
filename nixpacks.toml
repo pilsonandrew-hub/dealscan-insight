@@ -1,5 +1,37 @@
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = [
+  "python311",
+  "chromium",
+  "nss",
+  "nspr",
+  "atk",
+  "at-spi2-atk",
+  "xorg.libX11",
+  "xorg.libxcb",
+  "xorg.libXcomposite",
+  "xorg.libXcursor",
+  "xorg.libXdamage",
+  "xorg.libXext",
+  "xorg.libXfixes",
+  "xorg.libXi",
+  "xorg.libXrandr",
+  "xorg.libXrender",
+  "xorg.libXtst",
+  "xorg.libXScrnSaver",
+  "glib",
+  "gtk3",
+  "pango",
+  "cairo",
+  "gdk-pixbuf",
+  "cups",
+  "dbus",
+  "expat",
+  "fontconfig",
+  "freetype",
+  "libdrm",
+  "mesa",
+  "alsa-lib"
+]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
