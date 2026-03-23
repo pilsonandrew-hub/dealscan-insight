@@ -252,5 +252,28 @@ try {
 } catch (err) {
     console.error(`[PROXIBID] Fatal error: ${err.message}`);
 } finally {
+    // Webhook notification to Railway ingest endpoint
+    try {
+        const dataset = await Actor.openDataset();
+        const env = Actor.getEnv();
+        await fetch('https://dealscan-insight-production.up.railway.app/api/ingest/apify', {
+            method: 'POST',
+            headers: {
+                'X-Apify-Webhook-Secret': 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                eventType: 'ACTOR.RUN.SUCCEEDED',
+                eventData: {
+                    actorId: env.actorId,
+                    defaultDatasetId: dataset.id,
+                },
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        console.log('[PROXIBID] Webhook sent to Railway ingest');
+    } catch (webhookErr) {
+        console.warn(`[PROXIBID] Webhook failed (non-blocking): ${webhookErr.message}`);
+    }
     await Actor.exit();
 }

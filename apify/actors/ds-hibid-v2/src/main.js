@@ -231,6 +231,10 @@ function passesFilters(listing, log) {
 
     // Bid range
     const bid = listing.current_bid;
+    if (bid === 0) {
+        log.debug(`[SKIP-ZERO-BID] Pre-auction item with no pricing: ${listing.title?.slice(0, 60)}`);
+        return false;
+    }
     if (bid > 0 && bid < minBid) {
         log.debug(`[SKIP-BID-LOW] $${bid}`);
         return false;
