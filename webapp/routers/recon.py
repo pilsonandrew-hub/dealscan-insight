@@ -295,19 +295,22 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     transport = 800  # default
     total_cost = condition_penalty + fleet_penalty + sell_fee + transport
 
-    # ── FIX 2f: DOS (using spec-compliant scoring) ────────────────────────────
-    # Import spec scoring components
+    # ── FIX 2f: DOS (using v2 scoring engine) ────────────────────────────
+    # Import v2 scoring components
     try:
         from backend.ingest.score import (
-            _spec_margin_score, _spec_velocity_score, _spec_segment_score,
-            _spec_model_score, _spec_source_score
+            _compute_dos_v2, _compute_max_bid_v2, _compute_gross_margin_v2
         )
-        gross_margin = (pessimistic - req.asking_price) if pessimistic and req.asking_price else 0
-        margin_score = _spec_margin_score(gross_margin)
-        velocity_score = 50.0  # recon doesn't have auction_end, default to 50
-        segment_score = _spec_segment_score(req.make or "", req.model or "")
-        model_score = _spec_model_score(req.make or "", req.model or "")
-        source_score = _spec_source_score(req.source or "")
+        # Use pessimistic as MMR proxy for recon evaluations
+        mmr_proxy = pessimistic if pessimistic else 0
+        gross_margin = _compute_gross_margin_v2(mmr_proxy, req.asking_price or 0, req.state) if mmr_proxy > 0 else 0
+        vehicle_dict = {
+            "make": req.make or "",
+            "model": req.model or "",
+            "source_site": req.source or "",
+            "auction_end": None,  # recon doesn't have auction_end
+        }
+        dos = _compute_dos_v2(vehicle_dict, gross_margin)
     except ImportError:
         # Fallback to old calculation if import fails
         if auction_mode or pessimistic is None:
@@ -319,8 +322,8 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         segment_score = 50.0
         model_score = 50.0
         source_score = 50.0
-    # DOS = Margin×0.35 + Velocity×0.25 + Segment×0.20 + Model×0.12 + Source×0.08
-    dos = margin_score * 0.35 + velocity_score * 0.25 + segment_score * 0.20 + model_score * 0.12 + source_score * 0.08
+        # DOS = Margin×0.35 + Velocity×0.25 + Segment×0.20 + Model×0.12 + Source×0.08
+        dos = margin_score * 0.35 + velocity_score * 0.25 + segment_score * 0.20 + model_score * 0.12 + source_score * 0.08
 
     # ── FIX 2g: Multiplier ────────────────────────────────────────────────────
     multiplier_map = {"A+": 1.0, "A": 1.0, "B": 0.90, "C": 0.80}

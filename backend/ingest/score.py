@@ -5,8 +5,19 @@ DOS = (Margin Score × 0.35) + (Velocity Score × 0.25) +
 """
 import functools
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone as _tz
 from typing import Optional
+
+# Alias for backward compat
+timezone = _tz
+
+_CURRENT_YEAR = datetime.now().year
+_HIGH_RUST = {"OH","MI","PA","NY","WI","MN","IL","IN","MO","IA","ND","SD","NE","KS","WV","ME","NH","VT","MA","RI","CT","NJ","MD","DE"}
+_TARGET_STATES = {"AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"}
+_HOT_MODELS = {("FORD","F-150"),("CHEVROLET","TAHOE"),("CHEVROLET","SILVERADO"),("GMC","SIERRA"),("TOYOTA","TACOMA"),("TOYOTA","4RUNNER"),("TOYOTA","RAV4"),("TOYOTA","CAMRY"),("HONDA","ACCORD"),("HONDA","CR-V"),("RAM","1500"),("FORD","EXPLORER"),("FORD","F-250")}
+_KNOWN_MAKES = {"FORD","CHEVROLET","GMC","TOYOTA","HONDA","RAM","DODGE","JEEP","NISSAN","HYUNDAI","KIA","SUBARU","VOLKSWAGEN","BMW","MERCEDES-BENZ","LEXUS","ACURA","INFINITI","CADILLAC","LINCOLN","BUICK","CHRYSLER","PONTIAC"}
+_TRUCKS = {"F-150","F-250","F-350","SILVERADO","SIERRA","RAM 1500","RAM 2500","RANGER","TACOMA","TUNDRA","COLORADO","CANYON","RIDGELINE","FRONTIER","TITAN"}
+_SUVS = {"TAHOE","SUBURBAN","YUKON","EXPEDITION","EXPLORER","PILOT","4RUNNER","HIGHLANDER","TRAVERSE","DURANGO","GRAND CHEROKEE","CHEROKEE","WRANGLER","NAVIGATOR","ESCALADE","SEQUOIA","ARMADA","PATHFINDER","MURANO","ACADIA","ENCLAVE","ATLAS","ASCENT","RAV4","CR-V","EQUINOX","ROGUE","ESCAPE","TUCSON","SPORTAGE","FORESTER","OUTBACK","TIGUAN","RX","MDX","QX60","GX"}
 
 try:
     import yaml
@@ -210,6 +221,98 @@ def _spec_investment_grade(dos: float, gross_margin: float, roi_pct: float = 0) 
     if dos >= 50 and gross_margin >= 1500:
         return "silver"
     return "watch"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# V2 SCORING HELPERS — Codex-designed architecture
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _margin_score_v2(gross_margin: float) -> float:
+    gm = float(gross_margin or 0)
+    if gm <= 0: return 0.0
+    if gm < 1500: return (gm / 1500.0) * 50.0
+    if gm < 10000: return 50.0 + ((gm - 1500) / 8500.0) * 50.0
+    return 100.0
+
+def _velocity_score_v2(auction_end) -> float:
+    try:
+        if not auction_end: return 50.0
+        end_str = str(auction_end).replace("Z", "+00:00")
+        end = datetime.fromisoformat(end_str)
+        if end.tzinfo is None: end = end.replace(tzinfo=_tz.utc)
+        days = (end - datetime.now(_tz.utc)).total_seconds() / 86400
+        if days <= 1: return 100.0
+        if days <= 3: return 85.0
+        if days <= 7: return 70.0
+        if days <= 14: return 50.0
+        return 25.0
+    except: return 50.0
+
+def _segment_score_v2(make: str, model: str) -> float:
+    m = (model or "").upper().strip()
+    if m in _TRUCKS: return 90.0
+    if m in _SUVS: return 80.0
+    if any(x in m for x in ["PICKUP","TRUCK"]): return 85.0
+    if any(x in m for x in ["VAN","MINIVAN"]): return 55.0
+    return 50.0
+
+def _model_score_v2(make: str, model: str) -> float:
+    key = ((make or "").upper().strip(), (model or "").upper().strip())
+    if key in _HOT_MODELS: return 90.0
+    if (make or "").upper().strip() in _KNOWN_MAKES: return 70.0
+    return 50.0
+
+def _source_score_v2(source_site: str) -> float:
+    s = (source_site or "").lower().strip()
+    if s in {"govplanet","jjkane","municibid","gsaauctions"}: return 80.0
+    if s in {"govdeals","publicsurplus","publicsurplus_tx"}: return 70.0
+    if s in {"proxibid","bidspotter","hibid-v2","hibid"}: return 60.0
+    if s in {"allsurplus"}: return 55.0
+    return 50.0
+
+def _compute_dos_v2(vehicle: dict, gross_margin: float) -> float:
+    margin = _margin_score_v2(gross_margin)
+    velocity = _velocity_score_v2(vehicle.get("auction_end_date") or vehicle.get("auction_end_time") or vehicle.get("auction_end"))
+    segment = _segment_score_v2(vehicle.get("make",""), vehicle.get("model",""))
+    model = _model_score_v2(vehicle.get("make",""), vehicle.get("model",""))
+    source = _source_score_v2(vehicle.get("source_site",""))
+    dos = margin*0.35 + velocity*0.25 + segment*0.20 + model*0.12 + source*0.08
+    return round(min(100.0, max(0.0, dos)), 1)
+
+def _compute_max_bid_v2(mmr: float, state: str) -> float:
+    transport = 500.0 if (state or "").upper() in _TARGET_STATES else 800.0
+    fees = 350.0
+    return round((mmr * 0.88) - transport - fees, 0)
+
+def _compute_gross_margin_v2(mmr: float, current_bid: float, state: str) -> float:
+    transport = 500.0 if (state or "").upper() in _TARGET_STATES else 800.0
+    fees = 350.0
+    return round(mmr - current_bid - transport - fees, 0)
+
+def _apply_hard_gates_v2(vehicle: dict, gross_margin: float, max_bid: float) -> tuple:
+    year = int(vehicle.get("year") or 0)
+    mileage = int(vehicle.get("mileage") or 0)
+    state = (vehicle.get("state") or "").upper()
+    current_bid = float(vehicle.get("current_bid") or 0)
+
+    if year > 0 and (_CURRENT_YEAR - year) > 4:
+        return False, f"age_rejected:{_CURRENT_YEAR - year}yr"
+    if mileage > 50000:
+        return False, f"mileage_rejected:{mileage}mi"
+    if state in _HIGH_RUST and year > 0 and (_CURRENT_YEAR - year) > 2:
+        return False, f"rust_state:{state}"
+    if gross_margin < 1500:
+        return False, f"margin_rejected:${gross_margin:.0f}"
+    if max_bid > 0 and current_bid > max_bid:
+        return False, f"ceiling_exceeded:bid${current_bid:.0f}>max${max_bid:.0f}"
+    return True, None
+
+def _investment_grade_v2(dos: float, gross_margin: float) -> str:
+    if dos >= 80 and gross_margin >= 3000: return "platinum"
+    if dos >= 65 and gross_margin >= 2000: return "gold"
+    if dos >= 50 and gross_margin >= 1500: return "silver"
+    return "watch"
+
 
 _CONFIGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
@@ -1079,7 +1182,13 @@ def score_deal(
     selected_mmr = float(manheim_mmr_mid) if manheim_mmr_mid is not None and float(manheim_mmr_mid) > 0 else float(mmr_ca or 0)
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # HARD GATES — reject before scoring
+    # V2 BID CEILING AND MARGIN — compute early for hard gates
+    # ═══════════════════════════════════════════════════════════════════════════
+    _v2_max_bid = _compute_max_bid_v2(selected_mmr, state) if selected_mmr > 0 else 0
+    _v2_gross_margin = _compute_gross_margin_v2(selected_mmr, raw_bid, state) if selected_mmr > 0 else -9999
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HARD GATES — reject before scoring (using v2 logic)
     # ═══════════════════════════════════════════════════════════════════════════
     vehicle_for_gates = {
         "year": year,
@@ -1089,13 +1198,27 @@ def score_deal(
         "mmr_mid": selected_mmr,
         "manheim_mmr_mid": manheim_mmr_mid,
     }
+    _v2_passed, _v2_rejection_reason = _apply_hard_gates_v2(vehicle_for_gates, _v2_gross_margin, _v2_max_bid)
+
+    # Compute v2 DOS and grade
+    vehicle_for_dos_v2 = {
+        "make": make,
+        "model": model,
+        "source_site": source_site,
+        "auction_end": auction_end,
+        "auction_end_date": auction_end,
+    }
+    _v2_dos = _compute_dos_v2(vehicle_for_dos_v2, _v2_gross_margin) if _v2_passed else 0.0
+    _v2_grade = _investment_grade_v2(_v2_dos, _v2_gross_margin) if _v2_passed else "rejected"
+
+    # Also run legacy gate check for comparison
     gate_passed, gate_reason = _apply_hard_gates(vehicle_for_gates)
-    if not gate_passed:
-        # Return early with dos_score=0 and rejection reason
+    if not _v2_passed:
+        # Return early with dos_score=0 and rejection reason (using v2 values)
         return {
             "dos_score": 0,
             "score": 0,
-            "rejection_reason": gate_reason,
+            "rejection_reason": _v2_rejection_reason,
             "gate_passed": False,
             "premium": round(raw_premium, 2),
             "buyer_premium_amount": round(raw_premium, 2),
@@ -1104,9 +1227,9 @@ def score_deal(
             "transport": round(transport, 2),
             "recon_reserve": round(recon_reserve, 2),
             "total_cost": round(raw_total_cost, 2),
-            "gross_margin": 0,
-            "margin": 0,
-            "max_bid": 0,
+            "gross_margin": round(_v2_gross_margin, 2) if selected_mmr > 0 else 0,
+            "margin": round(_v2_gross_margin, 2) if selected_mmr > 0 else 0,
+            "max_bid": round(_v2_max_bid, 2) if _v2_max_bid > 0 else 0,
             "investment_grade": "rejected",
             "score_version": SCORE_VERSION,
         }
@@ -1280,8 +1403,8 @@ def score_deal(
         "projected_total_cost": round(projected_total_cost, 2),
         "acquisition_price_basis": round(acquisition_price_basis, 2),
         "acquisition_basis_source": basis_result.get("acquisition_basis_source"),
-        "margin": round(gross_margin, 2),
-        "gross_margin": round(gross_margin, 2),
+        "margin": round(_v2_gross_margin, 2) if selected_mmr > 0 else round(gross_margin, 2),
+        "gross_margin": round(_v2_gross_margin, 2) if selected_mmr > 0 else round(gross_margin, 2),
         "wholesale_margin": round(wholesale_margin, 2),
         "margin_score": round(m_score, 2),
         "velocity_score": round(v_score, 2),
@@ -1318,17 +1441,17 @@ def score_deal(
         "roi_per_day": round(roi_per_day, 2),
         "mmr_lookup_basis": mmr_lookup_basis or "unknown",
         "mmr_confidence_proxy": round(confidence_proxy, 2),
-        "investment_grade": spec_investment_grade,
+        "investment_grade": _v2_grade,
         "legacy_investment_grade": investment_grade,
         "legacy_dos_score": round(legacy_dos_score, 2),
         "weighted_dos_score": round(weighted_score, 2),
-        "dos_score": round(spec_dos_score, 2),
-        "score": round(spec_dos_score, 2),
-        "max_bid": round(spec_max_bid, 2) if spec_max_bid > 0 else ceiling_metrics.get("max_bid"),
+        "dos_score": round(_v2_dos, 2),
+        "score": round(_v2_dos, 2),
+        "max_bid": round(_v2_max_bid, 2) if _v2_max_bid > 0 else ceiling_metrics.get("max_bid"),
         "spec_gross_margin": round(spec_gross_margin, 2),
         "score_version": SCORE_VERSION,
         "gate_passed": True,
-        "rejection_reason": None,
+        "rejection_reason": _v2_rejection_reason,
         "rust_state_bypass": rust_state_bypass,
         # Condition enrichment (from score_condition() in condition.py)
         "condition_grade": condition_grade,
