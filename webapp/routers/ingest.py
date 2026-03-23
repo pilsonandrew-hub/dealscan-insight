@@ -975,7 +975,7 @@ async def _process_webhook_items(
                         "vin": vehicle.get("vin"),
                         "make": vehicle.get("make") or "Unknown",
                         "model": vehicle.get("model") or "Unknown",
-                        "year": vehicle.get("year") or 0,
+                        "year": int(vehicle.get("year") or 0) or None,
                         "mileage": vehicle.get("mileage"),
                         "sale_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
                         "sold_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
