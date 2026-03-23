@@ -430,7 +430,7 @@ async def _run_sniper_check_internal() -> dict:
             supa.table("sniper_targets")
             .select(
                 "id, user_id, opportunity_id, max_bid, telegram_chat_id, "
-                "alert_60min_sent, alert_15min_sent, alert_5min_sent"
+                "alert_60min_sent, alert_15min_sent, alert_5min_sent, alert_close_sent"
             )
             .eq("status", "active")
             .execute()
@@ -512,16 +512,23 @@ async def _run_sniper_check_internal() -> dict:
                 logger.error("[SNIPER_CHECK] Expiry update failed for %s: %s", target_id, exc)
                 stats["errors"] += 1
 
-            # ── Auction close alert — send once if chat_id exists ────────────
+            # ── Auction close alert — atomic CAS: only update if flag is still False ─
             if chat_id and not target.get("alert_close_sent"):
                 try:
-                    supa.table("sniper_targets").update({"alert_close_sent": True}).eq("id", target_id).execute()
-                except Exception:
-                    pass  # column may not exist yet — non-fatal
-                msg = _build_alert_close(opp, target)
-                alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
-                stats["alerts_sent"] += 1
-                logger.info("[SNIPER_CHECK] Close alert queued for target %s", target_id)
+                    cas_result = (
+                        supa.table("sniper_targets")
+                        .update({"alert_close_sent": True})
+                        .eq("id", target_id)
+                        .eq("alert_close_sent", False)  # guard — only one concurrent writer wins
+                        .execute()
+                    )
+                    if cas_result.data:  # we won the race
+                        msg = _build_alert_close(opp, target)
+                        alert_tasks.append(asyncio.create_task(_send_telegram(chat_id, msg)))
+                        stats["alerts_sent"] += 1
+                        logger.info("[SNIPER_CHECK] Close alert queued for target %s", target_id)
+                except Exception as exc:
+                    logger.warning("[SNIPER_CHECK] Close alert CAS failed for %s: %s", target_id, exc)
 
             continue
 

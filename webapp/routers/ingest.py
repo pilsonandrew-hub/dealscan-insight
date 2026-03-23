@@ -2787,7 +2787,7 @@ def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str],
         now_iso = datetime.utcnow().isoformat()
         result = (
             supabase_client.table("opportunities")
-            .select("id, lot_url, dos_score")
+            .select("id, listing_url, dos_score")
             .eq("vin", vin)
             .gte("auction_end_date", now_iso)
             .limit(1)

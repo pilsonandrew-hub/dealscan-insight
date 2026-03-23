@@ -311,7 +311,7 @@ class RoverAPIService {
 
   async createIntent(params: { title: string; make?: string; model?: string; year?: number }): Promise<void> {
     const { error } = await supabase
-      .from("saved_intents")
+      .from("crosshair_intents")
       .insert({
         title: params.title,
         make: params.make,
