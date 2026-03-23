@@ -207,13 +207,14 @@ const crawler = new PlaywrightCrawler({
                 await paginateWithAuth(page, log, seenIds);
             }
 
-            // Step 3: VIN enrichment via detail page scraping for lots missing VIN
-            await scrapeDetailPagesForVin(page, passingLots, log);
-
-            // Step 4: Push all passing lots (now with VINs where found)
+            // Step 3: Push all passing lots immediately (before VIN scraping to prevent data loss on timeout)
             for (const lot of passingLots) {
                 await Actor.pushData(lot);
             }
+            log.info(`[GOVDEALS] Pushed ${passingLots.length} lots to dataset`);
+
+            // Step 4: VIN enrichment (best-effort, non-blocking)
+            await scrapeDetailPagesForVin(page, passingLots, log);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');
