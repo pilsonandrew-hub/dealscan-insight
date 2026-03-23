@@ -72,7 +72,7 @@ function extractVinFromLot(lot) {
 }
 
 const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 1,
+    maxRequestsPerCrawl: 3,
     requestHandlerTimeoutSecs: 360, // extended for detail page scraping
     async requestHandler({ page, log }) {
         log.info('Loading GovDeals and capturing maestro /search/list traffic...');
@@ -178,13 +178,11 @@ const crawler = new PlaywrightCrawler({
                 await paginateWithAuth(page, log, seenIds);
             }
 
-            // Step 3: VIN enrichment via detail page scraping for lots missing VIN
-            await scrapeDetailPagesForVin(page, passingLots, log);
-
-            // Step 4: Push all passing lots (now with VINs where found)
+            // Step 3: Push all lots immediately (before VIN scraping to avoid data loss)
             for (const lot of passingLots) {
                 await Actor.pushData(lot);
             }
+            log.info(`[GOVDEALS-SOLD] Pushed ${passingLots.length} completed auction records`);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');

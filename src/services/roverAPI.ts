@@ -151,7 +151,6 @@ class RoverAPIService {
       const { data: opportunities } = await supabase
         .from('opportunities')
         .select('*')
-        .eq('is_active', true)
         .order('created_at', { ascending: false })
         .limit(500);
 
@@ -317,6 +316,7 @@ class RoverAPIService {
         make: params.make,
         model: params.model,
         year: params.year,
+        user_id: supabase.auth.getUser().user.id,
         is_active: true,
         created_at: new Date().toISOString()
       });

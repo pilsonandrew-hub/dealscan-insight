@@ -245,9 +245,12 @@ const crawler = new PlaywrightCrawler({
     },
 });
 
-await crawler.run(CATEGORY_URLS.map(url => ({ url, userData: { label: 'LIST', page: 1 } })));
-
-console.log('[Proxibid] Sample locations:', sampleLocations);
-console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed}`);
-
-await Actor.exit();
+try {
+    await crawler.run(CATEGORY_URLS.map(url => ({ url, userData: { label: 'LIST', page: 1 } })));
+    console.log('[Proxibid] Sample locations:', sampleLocations);
+    console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed}`);
+} catch (err) {
+    console.error(`[PROXIBID] Fatal error: ${err.message}`);
+} finally {
+    await Actor.exit();
+}
