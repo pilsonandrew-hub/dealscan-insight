@@ -1,0 +1,15 @@
+{
+  "title": "Proxibid Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxItems": {
+      "title": "Max Items",
+      "type": "integer",
+      "description": "Maximum number of items to collect",
+      "default": 200,
+      "minimum": 1,
+      "editor": "number"
+    }
+  }
+}
