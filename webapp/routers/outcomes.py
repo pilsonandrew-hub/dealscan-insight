@@ -178,6 +178,10 @@ async def create_bid_outcome(
 
     user_id = _verify_auth(authorization)
 
+    # Check for null user ID
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="User ID cannot be null")
+
     try:
         opportunity_resp = (
             supa.table("opportunities")

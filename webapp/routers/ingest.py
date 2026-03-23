@@ -1113,7 +1113,13 @@ async def _process_webhook_items(
                 duplicate_count += 1
                 logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
 
-            saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
+            # Try/except around save operation to handle failures
+            try:
+                saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
+            except Exception as exc:
+                logger.error(f"[SAVE ERROR] failed to save vehicle {vehicle.get('title')} with error: {exc}")
+                _increment_reason_counter(skip_reasons, "save_exception")
+                continue
             save_status = vehicle.get("_save_status", "unknown")
             _increment_reason_counter(save_outcomes, save_status)
             if saved_opportunity_id:

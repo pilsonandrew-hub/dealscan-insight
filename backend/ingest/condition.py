@@ -72,8 +72,7 @@ _POSITIVE_SIGNALS: dict[str, int] = {
     "body/paint damage": -10,
     "frame damage": -20,
     "structural damage": -20,
-    "as is": -5,
-    "as-is": -5,
+
 }
 
 # Numeric grade-code patterns in descriptions ("Grade 5", "Condition 3", etc.)
@@ -188,6 +187,12 @@ def score_condition(
     damage_type: str = "",
     vin: str = "",
 ) -> dict:
+    # Add type coercion for mileage
+    if isinstance(mileage, str):
+        try:
+            mileage = float(re.sub(r'[^-9.]', '', mileage)) if mileage else None
+        except (ValueError, TypeError):
+            mileage = None
     """Full condition scoring.
 
     Returns a dict:
