@@ -14,6 +14,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cursor AI Code Review
+        if: github.event_name == 'pull_request'
+        uses: getcursor/cursor-review@v1
+        with:
+          api_key: ${{ secrets.CURSOR_API_KEY }}
+          instructions: |
+            You are reviewing DealerScope — a vehicle arbitrage platform.
+            Focus on: null safety, business rule enforcement (bid ceiling 0.88, max age 4yr, max mileage 50k, rust state filter),
+            webhook security, and scraper filter logic. Flag any issue that could cause 0-item output or silent failures.
+            Do NOT flag function names containing 'apify_api_' as hardcoded secrets.
+        continue-on-error: true
+
       - name: Validate Business Rules
         run: |
           echo "=== DEALERSCOPE BUSINESS RULE VALIDATION ==="
