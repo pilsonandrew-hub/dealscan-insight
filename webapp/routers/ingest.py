@@ -673,14 +673,15 @@ def update_webhook_log(
 
 
 def _configured_webhook_secret_entries() -> tuple[tuple[str, str], ...]:
-    active_secret = WEBHOOK_SECRET.strip()
-    if not active_secret:
-        return ()
+    def _split_secret_values(raw_secret: str) -> list[str]:
+        return [secret.strip() for secret in raw_secret.split(",") if secret.strip()]
 
-    entries: list[tuple[str, str]] = [("current", active_secret)]
-    previous_secret = WEBHOOK_SECRET_PREVIOUS.strip()
-    if previous_secret and previous_secret != active_secret:
-        entries.append(("previous", previous_secret))
+    entries: list[tuple[str, str]] = [
+        ("current", secret) for secret in _split_secret_values(WEBHOOK_SECRET)
+    ]
+    entries.extend(
+        ("previous", secret) for secret in _split_secret_values(WEBHOOK_SECRET_PREVIOUS)
+    )
     return tuple(entries)
 
 
@@ -690,11 +691,10 @@ def _webhook_secret_posture() -> dict[str, Any]:
 
 def _match_webhook_secret(presented_secret: Optional[str]) -> Optional[str]:
     presented = presented_secret or ""
-    matched_label: Optional[str] = None
     for label, configured_secret in _configured_webhook_secret_entries():
         if hmac.compare_digest(presented, configured_secret):
-            matched_label = matched_label or label
-    return matched_label
+            return label
+    return None
 
 
 def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
