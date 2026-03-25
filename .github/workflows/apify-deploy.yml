@@ -60,6 +60,9 @@ jobs:
                   print(f"HTTP {e.code}: {e.read().decode()[:200]}")
                   return {}
 
+          # NOTE: When manually triggering deploys, always use JS-safe comments:
+          # echo "// deploy $(date)" >> apify/actors/ds-xxx/src/main.js
+
           # Find changed actor dirs
           result = subprocess.run(
               ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
