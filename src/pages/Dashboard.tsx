@@ -9,6 +9,8 @@ import { useAuth } from '@/contexts/ModernAuthContext';
 import api from '@/services/api';
 import { Opportunity } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
+import { OutcomeModal } from '@/components/OutcomeModal';
+import { Button } from '@/components/ui/button';
 
 // ─── Icons (lucide-react is in package.json) ──────────────────────────────────
 import {
@@ -177,6 +179,7 @@ const DealCard = ({
   whySignals?: string[];
 }) => {
   const [showWhy, setShowWhy] = React.useState(false);
+  const [outcomeOpen, setOutcomeOpen] = React.useState(false);
   const auctionStatus = getAuctionStatus(deal.auction_end);
   return (
   <div className={`bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors${auctionStatus === 'closed' ? ' opacity-60' : ''}`}>
@@ -328,6 +331,17 @@ const DealCard = ({
           className="flex-1 min-w-[120px]"
         />
       )}
+      {deal.id && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 min-w-[120px]"
+          onClick={() => setOutcomeOpen(true)}
+        >
+          Record Outcome
+        </Button>
+      )}
       {deal.listing_url ? (
         <a
           href={deal.listing_url}
@@ -384,6 +398,13 @@ const DealCard = ({
         </>
       )}
     </div>
+    {deal.id && (
+      <OutcomeModal
+        open={outcomeOpen}
+        onOpenChange={setOutcomeOpen}
+        opportunity={{ id: deal.id, year: deal.year, make: deal.make, model: deal.model, current_bid: deal.current_bid }}
+      />
+    )}
   </div>
   );
 };
@@ -1196,6 +1217,12 @@ interface AnalyticsSummary {
   avg_max_bid: number | null;
 }
 
+interface BidOutcomeSummary {
+  count_by_outcome: Record<string, number>;
+  total_gross_margin: number;
+  avg_roi: number | null;
+}
+
 interface LogOutcomeForm {
   bid: boolean;
   won: boolean;
@@ -1338,8 +1365,10 @@ const AnalyticsTab = () => {
   const { session } = useAuth();
   const [allDeals, setAllDeals] = useState<DashboardOpportunity[]>([]);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [bidSummary, setBidSummary] = useState<BidOutcomeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [bidSummaryLoading, setBidSummaryLoading] = useState(true);
   const [logDeal, setLogDeal] = useState<DashboardOpportunity | null>(null);
   const [reconActivity, setReconActivity] = useState<ReconActivity | null>(null);
   const [reconLoading, setReconLoading] = useState(true);
@@ -1385,6 +1414,17 @@ const AnalyticsTab = () => {
     }
   }, []);
 
+  const fetchBidSummary = useCallback(async () => {
+    try {
+      const data = await api.getOutcomeSummary();
+      setBidSummary(data);
+    } catch (e) {
+      console.error('[Analytics] bid outcome summary fetch error:', e);
+    } finally {
+      setBidSummaryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -1399,6 +1439,7 @@ const AnalyticsTab = () => {
   }, []);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
+  useEffect(() => { fetchBidSummary(); }, [fetchBidSummary]);
   useEffect(() => { fetchReconActivity(); }, [fetchReconActivity]);
 
   if (loading) return <div className="p-6 text-center text-gray-500">Loading analytics...</div>;
@@ -1571,6 +1612,60 @@ const AnalyticsTab = () => {
       <div>
         <h2 className="text-xl font-bold text-white">Analytics</h2>
         <p className="text-sm text-gray-400">{allDeals.length} active deals analyzed</p>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Bid Outcomes</p>
+        {bidSummaryLoading ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse">
+                <div className="h-3 w-24 bg-gray-700 rounded mb-3" />
+                <div className="h-7 w-16 bg-gray-700 rounded" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard
+                label="Won"
+                value={(bidSummary?.count_by_outcome?.won ?? 0).toLocaleString()}
+                sub="Closed wins"
+                accent={(bidSummary?.count_by_outcome?.won ?? 0) > 0}
+              />
+              <StatCard
+                label="Lost"
+                value={(bidSummary?.count_by_outcome?.lost ?? 0).toLocaleString()}
+                sub="Lost bids"
+              />
+              <StatCard
+                label="Passed"
+                value={(bidSummary?.count_by_outcome?.passed ?? 0).toLocaleString()}
+                sub="Intentional passes"
+              />
+              <StatCard
+                label="Pending"
+                value={(bidSummary?.count_by_outcome?.pending ?? 0).toLocaleString()}
+                sub="Still open"
+              />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <StatCard
+                label="Total Gross Margin"
+                value={bidSummary ? fmt$(bidSummary.total_gross_margin) : '—'}
+                sub="From dealer_sales"
+                accent={!!bidSummary && bidSummary.total_gross_margin > 0}
+              />
+              <StatCard
+                label="Avg ROI"
+                value={bidSummary?.avg_roi != null ? fmtPct(bidSummary.avg_roi) : '—'}
+                sub="Across recorded outcomes"
+                accent={bidSummary?.avg_roi != null && bidSummary.avg_roi > 0}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Recon Activity layer ── */}

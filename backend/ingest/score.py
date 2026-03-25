@@ -6,7 +6,7 @@ def _compute_dos_v2(vehicle: dict, gross_margin: float, condition_grade: Optiona
     source = _source_score_v2(vehicle.get("source_site",""))
     condition_adjustments = {"A": 3, "B": 1, "C": 0, "D": -3, "F": -5}
     grade_adjustment = condition_adjustments.get(condition_grade, 0)
-    dos = (margin*0.35 + velocity*0.25 + (segment + grade_adjustment)*0.20 + model*0.12 + source*0.08)
+    dos = (margin * 0.35 + velocity * 0.25 + (segment + grade_adjustment) * 0.20 + model * 0.12 + source * 0.08)
     return round(min(100.0, max(0.0, dos)), 1)
 
 
