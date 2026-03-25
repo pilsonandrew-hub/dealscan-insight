@@ -130,7 +130,7 @@ const crawler = new PlaywrightCrawler({
                 try {
                     capturedApi.searchPayload = JSON.parse(postData);
                     capturedApi.searchUrl = url;
-                    log.info(`[SEARCH PAYLOAD CAPTURED] ${url}`);
+                    log.info(`[SEARCH PAYLOAD CAPTURED] ${url} payload=${JSON.stringify(capturedApi.searchPayload).slice(0,500)}`);
                 } catch (err) {
                     log.warning(`Failed to parse search payload: ${err.message}`);
                 }
