@@ -372,6 +372,96 @@ function extractMileage(html) {
     return miles;
 }
 
+function isBlockedResponse(statusCode, html) {
+    if (statusCode === 403 || statusCode === 429 || statusCode === 503) return true;
+    if (!html) return true;
+    const lower = html.toLowerCase();
+    return lower.includes('awswaf')
+        || lower.includes('access denied')
+        || lower.includes('request blocked')
+        || lower.includes('forbidden')
+        || html.length < 800;
+}
+
+function extractCatalogueBidByIndex(html) {
+    const bids = [];
+    const hrefMatches = [...html.matchAll(/href="(\/en-us\/auction-catalogues\/[^"?]+\/lot-[^"?]+)"/g)];
+
+    for (const match of hrefMatches) {
+        const index = match.index ?? 0;
+        const windowStart = Math.max(0, index - 900);
+        const windowEnd = Math.min(html.length, index + 1800);
+        const chunk = html.slice(windowStart, windowEnd);
+
+        const bidMatch = chunk.match(/(?:current\s*bid|opening\s*bid|starting\s*bid|bid(?:ding)?(?:\s*price)?|hammer\s*price)[^$]{0,80}\$\s*([\d,]+(?:\.\d{2})?)/i)
+            ?? chunk.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+        bids.push(bidMatch ? parseBid(bidMatch[1] || bidMatch[0]) : 0);
+    }
+
+    return bids;
+}
+
+function buildDetailHeaders(userAgent) {
+    return {
+        ...BROWSER_HEADERS,
+        'User-Agent': userAgent,
+    };
+}
+
+function buildFallbackListing(request, detailData = {}) {
+    const fallback = request.userData?.fallbackListing || {};
+    const url = request.url;
+    const listingId = url.match(/\/lot-([^/?#]+)/)?.[1]
+        ?? `bs-${Buffer.from(url).toString('base64').slice(0, 16)}`;
+
+    const finalTitle = normalizeText(
+        detailData.lotName
+        || fallback.title
+        || request.userData?.cardTitle
+        || ''
+    );
+    const parsed = parseVehicleTitle(finalTitle);
+    const cardBid = Number(request.userData?.cardBid || fallback.current_bid || 0);
+    const detailBid = parseBid(detailData.openingPrice || detailData.currentBid || '0');
+
+    return {
+        listing_id: listingId,
+        title: finalTitle,
+        year: parsed.year ?? fallback.year ?? null,
+        make: parsed.make ?? fallback.make ?? null,
+        model: parsed.model ?? fallback.model ?? null,
+        mileage: extractMileage(request.userData?.cardHtml || '') || fallback.mileage || null,
+        current_bid: detailBid || cardBid || 0,
+        auction_end_date: parseDate(detailData.lotEndsFrom || request.userData?.auctionEndDate || ''),
+        state: detailData.auctionCity
+            ? (parseStateFromCity(detailData.auctionCity) ?? parseState(detailData.auctionCity) ?? fallback.state ?? null)
+            : (fallback.state ?? null),
+        listing_url: url,
+        image_url: detailData.imageUrl || fallback.image_url || null,
+        source_site: SOURCE,
+        scraped_at: new Date().toISOString(),
+    };
+}
+
+async function enqueueDetailRetry(crawler, request, attempt, log) {
+    const nextAttempt = attempt + 1;
+    if (nextAttempt >= DETAIL_UA_ROTATION.length) return false;
+
+    const retryUrl = request.url;
+    await crawler.requestQueue.addRequest({
+        url: retryUrl,
+        uniqueKey: `${retryUrl}::retry-${nextAttempt}`,
+        label: 'LOT',
+        headers: buildDetailHeaders(DETAIL_UA_ROTATION[nextAttempt]),
+        userData: {
+            ...request.userData,
+            detailAttempt: nextAttempt,
+        },
+    });
+    log.warning(`[BS] Retrying blocked lot with UA ${nextAttempt + 1}/${DETAIL_UA_ROTATION.length}: ${retryUrl}`);
+    return true;
+}
+
 // Request headers to mimic a real browser
 const BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -385,9 +475,21 @@ const BROWSER_HEADERS = {
     'Sec-Fetch-Site': 'none',
 };
 
+const DETAIL_UA_ROTATION = [
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+];
+
 let cataloguesProcessed = 0;
 let cataloguesSkippedNonUS = 0;
 let cataloguesSkippedWAF = 0;
+
+const proxyConfiguration = await Actor.createProxyConfiguration({
+    useApifyProxy: true,
+    countryCode: 'US',
+});
 
 const crawler = new HttpCrawler({
     maxRequestsPerCrawl: 2000,
@@ -395,16 +497,19 @@ const crawler = new HttpCrawler({
     requestHandlerTimeoutSecs: 30,
     navigationTimeoutSecs: 20,
     additionalMimeTypes: ['text/html'],
+    proxyConfiguration,
     
     // Retry on failures
-    maxRequestRetries: 2,
+    maxRequestRetries: 1,
     
-    async requestHandler({ request, body, log }) {
+    async requestHandler({ request, response, body, log }) {
         const html = body.toString();
         const label = request.label ?? 'CATALOGUE_LIST';
+        const detailAttempt = request.userData?.detailAttempt ?? 0;
+        const responseStatus = response?.statusCode ?? response?.status ?? 200;
         
         // Skip WAF challenge pages (202 or empty body)
-        if (!html || html.length < 1000) {
+        if (label !== 'LOT' && (!html || html.length < 1000)) {
             if (label === 'CATALOGUE') {
                 cataloguesSkippedWAF++;
                 log.warning(`[BS] WAF/empty page blocked: ${request.url}`);
@@ -416,9 +521,23 @@ const crawler = new HttpCrawler({
         if (label === 'LOT') {
             const url = request.url;
             
-            // Check for WAF challenge
-            if (html.includes('awswaf.com') && html.length < 5000) {
-                log.warning(`[BS] WAF challenge on lot: ${url}`);
+            const blocked = isBlockedResponse(responseStatus, html);
+            if (blocked) {
+                const retried = await enqueueDetailRetry(crawler, request, detailAttempt, log);
+                if (retried) return;
+
+                const fallbackListing = buildFallbackListing(request, {});
+                if (!applyFilters(fallbackListing, log)) return;
+                if (seenListings.has(fallbackListing.listing_id)) return;
+                seenListings.add(fallbackListing.listing_id);
+
+                totalFound += 1;
+                totalAfterFilters += 1;
+                log.warning(`[BS] Lot detail blocked, keeping fallback listing at $0: ${fallbackListing.title}`);
+                await Actor.pushData({
+                    ...fallbackListing,
+                    current_bid: 0,
+                });
                 return;
             }
 
@@ -459,24 +578,21 @@ const crawler = new HttpCrawler({
             const mileage = extractMileage(html);
             const imageUrl = extractImageUrl(html);
 
-            const listingId = url.match(/\/lot-([^/?#]+)/)?.[1]
-                ?? `bs-${Buffer.from(url).toString('base64').slice(0, 16)}`;
-
-            const listing = {
-                listing_id: listingId,
-                title: normalizeText(finalTitle),
-                year,
-                make,
-                model,
-                mileage,
-                current_bid: openingPrice,
-                auction_end_date: auctionEndDate,
-                state,
-                listing_url: url,
-                image_url: imageUrl || null,
-                source_site: SOURCE,
-                scraped_at: new Date().toISOString(),
-            };
+            const listing = buildFallbackListing(request, {
+                lotName: finalTitle,
+                openingPrice,
+                lotEndsFrom: auctionEndDate,
+                auctionCity,
+                imageUrl: imageUrl || null,
+            });
+            listing.year = year ?? listing.year;
+            listing.make = make ?? listing.make;
+            listing.model = model ?? listing.model;
+            listing.mileage = mileage ?? listing.mileage;
+            listing.state = state ?? listing.state;
+            listing.current_bid = openingPrice || listing.current_bid || 0;
+            listing.auction_end_date = auctionEndDate || listing.auction_end_date;
+            listing.image_url = imageUrl || listing.image_url || null;
 
             if (!applyFilters(listing, log)) return;
 
@@ -525,10 +641,12 @@ const crawler = new HttpCrawler({
 
             // Extract card-level titles for pre-filtering
             const cardTitles = extractLotCards(html);
+            const cardBids = extractCatalogueBidByIndex(html);
 
             for (let i = 0; i < lotLinks.length; i++) {
                 const lotUrl = `${BASE_URL}${lotLinks[i]}`;
                 const cardTitle = cardTitles[i] || '';
+                const cardBid = cardBids[i] || 0;
                 
                 // Pre-filter from card text
                 const { year: cardYear, make: cardMake } = parseVehicleTitle(cardTitle);
@@ -543,13 +661,26 @@ const crawler = new HttpCrawler({
 
                 await crawler.requestQueue.addRequest({
                     url: lotUrl,
+                    uniqueKey: lotLinks[i],
                     label: 'LOT',
-                    headers: BROWSER_HEADERS,
+                    headers: buildDetailHeaders(DETAIL_UA_ROTATION[0]),
                     userData: { 
                         auctionCity,
                         auctionCountry,
                         state,
                         catalogueName,
+                        detailAttempt: 0,
+                        cardTitle,
+                        cardBid,
+                        fallbackListing: {
+                            title: cardTitle,
+                            year: cardYear,
+                            make: cardMake,
+                            model: parseVehicleTitle(cardTitle).model,
+                            current_bid: cardBid,
+                            state,
+                            listing_url: lotUrl,
+                        },
                     },
                 });
             }

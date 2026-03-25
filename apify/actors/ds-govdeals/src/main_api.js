@@ -103,7 +103,7 @@ function extractVinFromLot(lot) {
 }
 
 const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 1,
+    maxRequestsPerCrawl: 20,
     requestHandlerTimeoutSecs: 360, // extended for detail page scraping
     async requestHandler({ page, log }) {
         log.info('Loading GovDeals and capturing maestro /search/list traffic...');
@@ -202,7 +202,7 @@ const crawler = new PlaywrightCrawler({
                 }
             }
 
-            // Step 2: Attempt direct API pagination for pages 2+ (Node.js fetch, no CORS)
+            // Step 2: Attempt direct API pagination from the Maestro REST endpoint.
             if (capturedApi.searchPayload) {
                 await paginateWithAuth(page, log, seenIds);
             }
@@ -291,21 +291,21 @@ async function scrapeDetailPagesForVin(page, lots, log) {
 async function paginateWithAuth(page, log, seenIds = new Set()) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
 
-    // Start at page 2 — page 1 was already intercepted from the initial page load
-    for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
+    // Paginate the REST endpoint directly using the Maestro `page` parameter.
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
         const payload = {
             ...searchPayload,
-            pageNumber: pageNum,           // maestro API uses pageNumber, not page
+            page: pageNum,
             pageSize: 50,                  // request 50 per page for efficiency
             timing: 'current',             // active listings only (not completed)
             requestType: searchPayload.requestType || 'search',
             responseStyle: searchPayload.responseStyle || 'productsOnly',
         };
         // Remove old/conflicting fields if present
-        delete payload.page;
+        delete payload.pageNumber;
         delete payload.displayRows;
 
-        log.info(`Fetching page ${pageNum} via Node fetch: ${searchUrl}`);
+        log.info(`Fetching Maestro page ${pageNum} via Node fetch: ${searchUrl}`);
 
         try {
             // Use Node.js fetch (no CORS restrictions, unlike page.evaluate browser fetch)
