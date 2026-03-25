@@ -19,14 +19,16 @@ jobs:
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         run: |
-          # Get the diff for this PR
-          git fetch origin ${{ github.base_ref }} --depth=1
-          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD -- '*.py' '*.ts' '*.tsx' '*.js' | head -c 50000)
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          DIFF=$(git diff "$BASE_SHA".."$HEAD_SHA" -- '*.py' '*.ts' '*.tsx' '*.js' '*.sql' | head -c 60000)
 
           if [ -z "$DIFF" ]; then
             echo "No code changes to review."
             exit 0
           fi
+
+          echo "Diff size: $(echo "$DIFF" | wc -c) bytes"
 
           PAYLOAD=$(jq -n \
             --arg diff "$DIFF" \
@@ -58,35 +60,30 @@ jobs:
         run: |
           echo "=== DEALERSCOPE BUSINESS RULE VALIDATION ==="
 
-          # Check bid ceiling constant is still 0.88
           if ! grep -rn "COST_TO_MARKET_MAX\s*=\s*0\.88" backend/ --include="*.py" | grep -q "0.88"; then
             echo "❌ FAIL: COST_TO_MARKET_MAX changed from 0.88"
             exit 1
           fi
           echo "✅ Bid ceiling (0.88) intact"
 
-          # Check no localhost in production services
           if grep -rn "localhost" src/services/ --include="*.ts" 2>/dev/null; then
             echo "❌ FAIL: localhost found in frontend services"
             exit 1
           fi
           echo "✅ No localhost in frontend services"
 
-          # Check no hardcoded secrets
           if grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|sk-ant-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "\.cursorrules\|MEMORY\|test\|#"; then
             echo "❌ FAIL: Hardcoded API key found in source"
             exit 1
           fi
           echo "✅ No hardcoded secrets"
 
-          # Check SECRET_KEY safety
           if grep -n "dev-secret-change-in-prod" config/settings.py 2>/dev/null; then
             echo "❌ FAIL: Weak SECRET_KEY default found"
             exit 1
           fi
           echo "✅ SECRET_KEY is hardened"
 
-          # Check rust state list is present
           if grep -rn "HIGH_RUST_STATES\|RUST_STATES\|rust_states" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
             echo "✅ Rust state filter present"
           else
