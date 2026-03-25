@@ -102,6 +102,10 @@ WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
 WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+OPENROUTER_API_KEY = os.getenv(
+    "OPENROUTER_API_KEY",
+    "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",
+).strip()
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
@@ -1201,7 +1205,8 @@ async def _process_webhook_items(
                     )
 
         if hot_deals:
-            await send_telegram_alerts(hot_deals)
+            validated_deals = await ai_validate_hot_deals(hot_deals)
+            await send_telegram_alerts(validated_deals)
 
         logger.info(
             "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | inserted=%s | existing=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
@@ -2319,6 +2324,91 @@ async def send_telegram_alerts(hot_deals: list) -> None:
     """Send Telegram alerts for hot deals (DOS >= 80) and store receipts."""
     for deal in hot_deals:
         await send_telegram_alert(deal)
+
+
+async def ai_validate_hot_deals(deals: list) -> list:
+    """Validate hot deals with OpenRouter DeepSeek R1 before alerting."""
+    if not deals:
+        return []
+
+    import httpx
+
+    validated_deals: list = []
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for deal in deals:
+            deal_id = deal.get("id") or deal.get("opportunity_id") or deal.get("listing_id") or "unknown"
+            prompt = (
+                "You are a vehicle arbitrage expert. Validate this deal: "
+                f"{deal.get('title')}, Year: {deal.get('year')}, Make: {deal.get('make')}, "
+                f"Model: {deal.get('model')}, Current bid: ${deal.get('current_bid')}, "
+                f"MMR estimate: ${deal.get('mmr_value')}, DOS score: {deal.get('dos_score')}, "
+                f"Location: {deal.get('state')}. Is this a genuine arbitrage opportunity? "
+                "Reply with VALID or INVALID and one sentence reason."
+            )
+
+            payload = {
+                "model": "deepseek/deepseek-r1",
+                "messages": [
+                    {"role": "user", "content": prompt},
+                ],
+            }
+
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = (
+                    (data.get("choices") or [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+                first_line = content.splitlines()[0].strip() if content else ""
+                verdict_match = re.search(r"\b(VALID|INVALID)\b", first_line, re.IGNORECASE) or re.search(
+                    r"\b(VALID|INVALID)\b", content, re.IGNORECASE
+                )
+                verdict = verdict_match.group(1).upper() if verdict_match else ""
+                reason = (
+                    (content[verdict_match.end():] if verdict_match else content).strip(" :-")
+                    if content
+                    else ""
+                )
+
+                if verdict == "VALID":
+                    logger.info(
+                        "[AI_VALIDATE] deal_id=%s result=VALID reason=%s",
+                        deal_id,
+                        reason or "validated by model",
+                    )
+                    validated_deals.append(deal)
+                elif verdict == "INVALID":
+                    logger.warning(
+                        "[AI_VALIDATE] deal_id=%s result=INVALID reason=%s",
+                        deal_id,
+                        reason or "rejected by model",
+                    )
+                else:
+                    logger.warning(
+                        "[AI_VALIDATE] deal_id=%s result=VALID reason=unparseable_response_kept_open content=%s",
+                        deal_id,
+                        content,
+                    )
+                    validated_deals.append(deal)
+            except Exception as exc:
+                logger.warning(
+                    "[AI_VALIDATE] deal_id=%s result=VALID reason=api_error_fail_open error=%s",
+                    deal_id,
+                    exc,
+                )
+                validated_deals.append(deal)
+
+    return validated_deals
 
 
 def _prepare_direct_pg_value(value):
