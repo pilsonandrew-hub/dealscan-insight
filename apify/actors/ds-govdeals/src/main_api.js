@@ -30,13 +30,20 @@ const HIGH_RUST_STATES = new Set([
     'CT','NJ','MD','DE',
 ]);
 
+const GOVDEALS_VEHICLE_SEARCH_URL = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100';
+const GOVDEALS_VEHICLE_CATEGORY_FACETS = [
+    '{!tag=product_category_external_id}product_category_external_id:"4100"',
+];
+const DEFAULT_DISPLAY_ROWS = 50;
+const HARD_MAX_PAGES = 200;
+
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
 const MAX_DETAIL_PAGES = 200;
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = 10, minBid = 500, maxBid = 75000 } = input;
+const { maxPages = HARD_MAX_PAGES, minBid = 500, maxBid = 75000 } = input;
 
 let totalFound = 0, totalPassed = 0;
 const capturedApi = {
@@ -128,9 +135,12 @@ const crawler = new PlaywrightCrawler({
                 const postData = request.postData();
                 if (!postData) return;
                 try {
-                    capturedApi.searchPayload = JSON.parse(postData);
-                    capturedApi.searchUrl = url;
-                    log.info(`[SEARCH PAYLOAD CAPTURED] ${url} payload=${JSON.stringify(capturedApi.searchPayload).slice(0,500)}`);
+                    const nextPayload = JSON.parse(postData);
+                    if (!capturedApi.searchPayload || isBroaderVehiclePayload(nextPayload, capturedApi.searchPayload)) {
+                        capturedApi.searchPayload = nextPayload;
+                        capturedApi.searchUrl = url;
+                        log.info(`[SEARCH PAYLOAD CAPTURED] ${url} payload=${JSON.stringify(capturedApi.searchPayload).slice(0,500)}`);
+                    }
                 } catch (err) {
                     log.warning(`Failed to parse search payload: ${err.message}`);
                 }
@@ -160,11 +170,10 @@ const crawler = new PlaywrightCrawler({
         });
 
         // ── Load homepage and navigate to passenger vehicles ────────────
-        // GovDeals category URLs for passenger/light vehicles:
-        // /en/passenger-vehicles  (sedans, SUVs, trucks)
-        // /en/trucks-and-vans     (pickup trucks, vans)
-        // We hit both to maximize coverage
+        // GovDeals vehicle search is exposed through the legacy advanced search
+        // route. The broad category=4100 listing covers the full vehicle family.
         const VEHICLE_CATEGORY_URLS = [
+            GOVDEALS_VEHICLE_SEARCH_URL,
             'https://www.govdeals.com/en/passenger-vehicles',
             'https://www.govdeals.com/en/trucks-and-vans',
             'https://www.govdeals.com/en/suvs',
@@ -205,15 +214,42 @@ const crawler = new PlaywrightCrawler({
             // Step 2: Attempt direct API pagination from the Maestro REST endpoint.
             // If searchPayload wasn't intercepted, build a default one from scratch.
             if (!capturedApi.searchPayload && capturedApi.searchUrl) {
-                log.info('searchPayload not intercepted — building default Maestro payload');
+                log.info('searchPayload not intercepted — building default broad vehicle payload');
                 capturedApi.searchPayload = {
+                    categoryIds: '4100',
                     requestType: 'search',
                     responseStyle: 'productsOnly',
-                    timing: 'current',
-                    category: 'Vehicles',
-                    pageSize: 50,
+                    businessId: 'GD',
+                    searchText: '*',
+                    isQAL: false,
                     page: 1,
+                    displayRows: DEFAULT_DISPLAY_ROWS,
+                    sortField: 'currentbid',
+                    sortOrder: 'desc',
+                    sessionId: `ds-govdeals-${Date.now()}`,
+                    facets: [],
+                    facetsFilter: [...GOVDEALS_VEHICLE_CATEGORY_FACETS],
+                    timeType: '',
+                    sellerTypeId: null,
+                    accountIds: [],
                 };
+            } else if (capturedApi.searchPayload) {
+                capturedApi.searchPayload = ensureBroadVehiclePayload(capturedApi.searchPayload);
+            }
+            if (capturedApi.searchPayload && !capturedApi.searchPayload.sessionId) {
+                capturedApi.searchPayload.sessionId = `ds-govdeals-${Date.now()}`;
+            }
+            if (capturedApi.searchPayload && !Array.isArray(capturedApi.searchPayload.facetsFilter)) {
+                capturedApi.searchPayload.facetsFilter = [...GOVDEALS_VEHICLE_CATEGORY_FACETS];
+            }
+            if (capturedApi.searchPayload && !capturedApi.searchPayload.categoryIds) {
+                capturedApi.searchPayload.categoryIds = '4100';
+            }
+            if (capturedApi.searchPayload && !capturedApi.searchPayload.displayRows) {
+                capturedApi.searchPayload.displayRows = DEFAULT_DISPLAY_ROWS;
+            }
+            if (capturedApi.searchPayload && !capturedApi.searchPayload.searchText) {
+                capturedApi.searchPayload.searchText = '*';
             }
             if (capturedApi.searchPayload && capturedApi.searchUrl) {
                 await paginateWithAuth(page, log, seenIds);
@@ -254,6 +290,59 @@ function normalizeLot(lot) {
         source_site:   'govdeals',
         scraped_at:    new Date().toISOString(),
     };
+}
+
+function ensureBroadVehiclePayload(payload) {
+    const normalized = { ...payload };
+    const displayRows = Number(normalized.displayRows || normalized.pageSize || DEFAULT_DISPLAY_ROWS);
+    const hasBroadCategory = isBroadVehiclePayload(normalized);
+
+    normalized.businessId = normalized.businessId || 'GD';
+    normalized.searchText = normalized.searchText || '*';
+    normalized.isQAL = normalized.isQAL ?? false;
+    normalized.page = 1;
+    normalized.displayRows = displayRows > 0 ? displayRows : DEFAULT_DISPLAY_ROWS;
+    normalized.sortField = normalized.sortField || 'currentbid';
+    normalized.sortOrder = normalized.sortOrder || 'desc';
+    normalized.requestType = normalized.requestType || 'search';
+    normalized.responseStyle = normalized.responseStyle || 'productsOnly';
+    normalized.timeType = normalized.timeType || '';
+    normalized.sellerTypeId = normalized.sellerTypeId ?? null;
+    normalized.accountIds = Array.isArray(normalized.accountIds) ? normalized.accountIds : [];
+    normalized.facets = Array.isArray(normalized.facets) ? normalized.facets : [];
+    normalized.facetsFilter = hasBroadCategory && Array.isArray(normalized.facetsFilter) && normalized.facetsFilter.length > 0
+        ? normalized.facetsFilter
+        : [...GOVDEALS_VEHICLE_CATEGORY_FACETS];
+    normalized.categoryIds = hasBroadCategory && normalized.categoryIds
+        ? normalized.categoryIds
+        : '4100';
+    delete normalized.pageSize;
+    delete normalized.pageNumber;
+    delete normalized.searchPg;
+    delete normalized.offset;
+    delete normalized.start;
+    delete normalized.skip;
+    return normalized;
+}
+
+function isBroadVehiclePayload(candidate, reference = null) {
+    const inspect = (value) => {
+        if (!value || typeof value !== 'object') return false;
+        const categoryIds = String(value.categoryIds || '').toLowerCase();
+        if (categoryIds.includes('4100')) return true;
+
+        const filters = Array.isArray(value.facetsFilter) ? value.facetsFilter : [];
+        return filters.some((entry) => String(entry).includes('product_category_external_id:"4100"'));
+    };
+
+    const candidateBroad = inspect(candidate);
+    if (!reference) return candidateBroad;
+
+    const referenceBroad = inspect(reference);
+    if (candidateBroad && !referenceBroad) return true;
+    if (!candidateBroad && referenceBroad) return false;
+
+    return false;
 }
 
 /**
@@ -304,20 +393,19 @@ async function scrapeDetailPagesForVin(page, lots, log) {
 
 async function paginateWithAuth(page, log, seenIds = new Set()) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
+    const pageSize = Number(searchPayload.displayRows || searchPayload.pageSize || DEFAULT_DISPLAY_ROWS);
+    const seenPageSignatures = new Set();
+    let zeroNewItemPages = 0;
+    let totalCount = null;
+    let totalPages = Number.isFinite(maxPages) ? maxPages : HARD_MAX_PAGES;
 
     // Paginate the REST endpoint directly using the Maestro `page` parameter.
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+    for (let pageNum = 1; pageNum <= Math.min(totalPages, HARD_MAX_PAGES); pageNum++) {
         const payload = {
-            ...searchPayload,
+            ...ensureBroadVehiclePayload(searchPayload),
             page: pageNum,
-            pageSize: 50,                  // request 50 per page for efficiency
-            timing: 'current',             // active listings only (not completed)
-            requestType: searchPayload.requestType || 'search',
-            responseStyle: searchPayload.responseStyle || 'productsOnly',
+            displayRows: pageSize,
         };
-        // Remove old/conflicting fields if present
-        delete payload.pageNumber;
-        delete payload.displayRows;
 
         log.info(`Fetching Maestro page ${pageNum} via Node fetch: ${searchUrl}`);
 
@@ -339,6 +427,13 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
                 total: nodeResp.headers.get('x-total-count'),
                 json: nodeResp.ok ? await nodeResp.json() : null,
             };
+            if (resp.total && Number.isFinite(Number(resp.total))) {
+                totalCount = Number(resp.total);
+                totalPages = Math.min(
+                    Math.max(totalPages, Math.ceil(totalCount / pageSize)),
+                    HARD_MAX_PAGES,
+                );
+            }
 
             if (!resp?.ok || !resp.json) {
                 log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'})`);
@@ -348,14 +443,41 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             const lots = extractLots(resp.json);
             if (!lots.length) { log.info(`Page ${pageNum}: empty — done`); break; }
 
+            const pageSignature = lots
+                .map((lot) => String(lot.assetId ?? lot.id ?? ''))
+                .join('|');
+            if (seenPageSignatures.has(pageSignature)) {
+                log.info(`Page ${pageNum}: repeated prior results — stopping pagination`);
+                break;
+            }
+            seenPageSignatures.add(pageSignature);
+
             log.info(`Page ${pageNum}: ${lots.length} lots (x-total-count: ${resp.total || 'n/a'})`);
+            let newItemCount = 0;
             for (const lot of lots) {
-                if (seenIds.has(lot.assetId)) continue; // already saved from intercept
-                seenIds.add(lot.assetId);
+                const lotId = String(lot.assetId ?? lot.id ?? '');
+                if (lotId && seenIds.has(lotId)) continue; // already saved from intercept
+                if (lotId) seenIds.add(lotId);
+                newItemCount++;
                 totalFound++;
                 if (!passes(lot)) continue;
                 totalPassed++;
                 passingLots.push(normalizeLot(lot));
+            }
+
+            if (newItemCount === 0) {
+                zeroNewItemPages++;
+                if (zeroNewItemPages >= 3) {
+                    log.info(`Page ${pageNum}: 3 consecutive pages with no new items — stopping pagination`);
+                    break;
+                }
+            } else {
+                zeroNewItemPages = 0;
+            }
+
+            if (totalCount != null && pageNum * pageSize >= totalCount) {
+                log.info(`Page ${pageNum}: reached x-total-count ${totalCount}, pagination complete`);
+                break;
             }
         } catch (err) {
             log.warning(`Page ${pageNum} failed: ${err.message}`);

@@ -150,9 +150,66 @@ function normalizeText(value) {
 }
 
 function parseBid(value) {
+    if (value === null || value === undefined) return null;
     const text = normalizeText(value).replace(/,/g, '');
     const match = text.match(/\$?\s*([\d]+(?:\.\d+)?)/);
-    return match ? parseFloat(match[1]) : 0;
+    return match ? parseFloat(match[1]) : null;
+}
+
+function normalizeBidValue(value) {
+    const bid = parseBid(value);
+    if (bid === null || !Number.isFinite(bid)) return null;
+    return bid;
+}
+
+function normalizeRawBidValue(value) {
+    const bid = normalizeBidValue(value);
+    if (bid === null) return null;
+
+    const text = normalizeText(value).replace(/,/g, '');
+    if (bid === 1 && /^(\$?\s*)?1(?:\.0+)?$/.test(text)) {
+        return null;
+    }
+
+    return bid;
+}
+
+function stripHtml(html) {
+    return normalizeText(
+        String(html ?? '')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+    );
+}
+
+function extractPriceFromText(text) {
+    const patterns = [
+        /(?:current|opening|starting)\s*bid(?:\s*price)?[^$]{0,120}\$\s*([\d,]+(?:\.\d{2})?)/i,
+        /(?:bid(?:ding)?\s*price|hammer\s*price)\s*[:\-]?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i,
+        /\$\s*([\d,]+(?:\.\d{2})?)\s*(?:current|opening|starting)\s*bid\b/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (!match) continue;
+        const bid = normalizeBidValue(match[1]);
+        if (bid !== null) return bid;
+    }
+
+    return null;
+}
+
+function extractOpeningBid(html, data = {}) {
+    const text = stripHtml(html);
+
+    const htmlBid = extractPriceFromText(text) ?? extractPriceFromText(String(html ?? ''));
+    if (htmlBid !== null) return htmlBid;
+
+    const dataBid = normalizeRawBidValue(data.openingPrice) ?? normalizeRawBidValue(data.currentBid);
+    if (dataBid !== null) return dataBid;
+
+    return null;
 }
 
 function parseDate(value) {
@@ -299,10 +356,19 @@ function extractDataLayer(html) {
     const raw = match[1];
     const result = {};
     
-    // Extract individual key-value pairs with regex (handles trailing commas)
-    const pairs = raw.matchAll(/"([^"]+)"\s*:\s*"([^"]*)"/g);
-    for (const [, key, value] of pairs) {
-        result[key] = value;
+    // Extract individual key-value pairs with regex (handles trailing commas).
+    // Support quoted strings, numbers, booleans, and nulls.
+    const pairs = raw.matchAll(/"([^"]+)"\s*:\s*(?:"([^"]*)"|(-?\d+(?:\.\d+)?)|(true|false)|null)/g);
+    for (const [, key, stringValue, numberValue, booleanValue] of pairs) {
+        if (stringValue !== undefined) {
+            result[key] = stringValue;
+        } else if (numberValue !== undefined) {
+            result[key] = Number(numberValue);
+        } else if (booleanValue !== undefined) {
+            result[key] = booleanValue === 'true';
+        } else {
+            result[key] = null;
+        }
     }
     
     return result;
@@ -392,10 +458,7 @@ function extractCatalogueBidByIndex(html) {
         const windowStart = Math.max(0, index - 900);
         const windowEnd = Math.min(html.length, index + 1800);
         const chunk = html.slice(windowStart, windowEnd);
-
-        const bidMatch = chunk.match(/(?:current\s*bid|opening\s*bid|starting\s*bid|bid(?:ding)?(?:\s*price)?|hammer\s*price)[^$]{0,80}\$\s*([\d,]+(?:\.\d{2})?)/i)
-            ?? chunk.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
-        bids.push(bidMatch ? parseBid(bidMatch[1] || bidMatch[0]) : 0);
+        bids.push(extractPriceFromText(stripHtml(chunk)));
     }
 
     return bids;
@@ -421,8 +484,8 @@ function buildFallbackListing(request, detailData = {}) {
         || ''
     );
     const parsed = parseVehicleTitle(finalTitle);
-    const cardBid = Number(request.userData?.cardBid || fallback.current_bid || 0);
-    const detailBid = parseBid(detailData.openingPrice || detailData.currentBid || '0');
+    const cardBid = normalizeBidValue(request.userData?.cardBid ?? fallback.current_bid);
+    const detailBid = normalizeRawBidValue(detailData.openingPrice ?? detailData.currentBid);
 
     return {
         listing_id: listingId,
@@ -431,7 +494,7 @@ function buildFallbackListing(request, detailData = {}) {
         make: parsed.make ?? fallback.make ?? null,
         model: parsed.model ?? fallback.model ?? null,
         mileage: extractMileage(request.userData?.cardHtml || '') || fallback.mileage || null,
-        current_bid: detailBid || cardBid || 0,
+        current_bid: detailBid ?? cardBid ?? null,
         auction_end_date: parseDate(detailData.lotEndsFrom || request.userData?.auctionEndDate || ''),
         state: detailData.auctionCity
             ? (parseStateFromCity(detailData.auctionCity) ?? parseState(detailData.auctionCity) ?? fallback.state ?? null)
@@ -533,10 +596,9 @@ const crawler = new HttpCrawler({
 
                 totalFound += 1;
                 totalAfterFilters += 1;
-                log.warning(`[BS] Lot detail blocked, keeping fallback listing at $0: ${fallbackListing.title}`);
+                log.warning(`[BS] Lot detail blocked, keeping fallback listing at Price TBD: ${fallbackListing.title}`);
                 await Actor.pushData({
                     ...fallbackListing,
-                    current_bid: 0,
                 });
                 return;
             }
@@ -572,8 +634,8 @@ const crawler = new HttpCrawler({
                     ?? null;
             }
             
-            // Opening price as current bid proxy
-            const openingPrice = parseBid(data.openingPrice || '0');
+            // Use the visible listing HTML first, then dataLayer. BidSpotter's $1 is a placeholder.
+            const openingPrice = extractOpeningBid(html, data);
             const auctionEndDate = parseDate(data.lotEndsFrom || '');
             const mileage = extractMileage(html);
             const imageUrl = extractImageUrl(html);
@@ -590,7 +652,7 @@ const crawler = new HttpCrawler({
             listing.model = model ?? listing.model;
             listing.mileage = mileage ?? listing.mileage;
             listing.state = state ?? listing.state;
-            listing.current_bid = openingPrice || listing.current_bid || 0;
+            listing.current_bid = openingPrice ?? listing.current_bid ?? null;
             listing.auction_end_date = auctionEndDate || listing.auction_end_date;
             listing.image_url = imageUrl || listing.image_url || null;
 
@@ -600,7 +662,8 @@ const crawler = new HttpCrawler({
             seenListings.add(listing.listing_id);
 
             totalAfterFilters += 1;
-            log.info(`[BS] ✓ ${listing.year} ${listing.make} ${listing.model} | $${listing.current_bid} | ${listing.state || 'US'} | ${finalTitle.slice(0, 50)}`);
+            const bidLabel = listing.current_bid != null ? `$${listing.current_bid}` : 'Price TBD';
+            log.info(`[BS] ✓ ${listing.year} ${listing.make} ${listing.model} | ${bidLabel} | ${listing.state || 'US'} | ${finalTitle.slice(0, 50)}`);
             await Actor.pushData(listing);
             return;
         }
@@ -646,7 +709,7 @@ const crawler = new HttpCrawler({
             for (let i = 0; i < lotLinks.length; i++) {
                 const lotUrl = `${BASE_URL}${lotLinks[i]}`;
                 const cardTitle = cardTitles[i] || '';
-                const cardBid = cardBids[i] || 0;
+                const cardBid = cardBids[i] ?? null;
                 
                 // Pre-filter from card text
                 const { year: cardYear, make: cardMake } = parseVehicleTitle(cardTitle);

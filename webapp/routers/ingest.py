@@ -951,6 +951,7 @@ async def _process_webhook_items(
                     item,
                     apify_run_id,
                     default_time_anchor=metadata.get("created_at"),
+                    source_hint=metadata.get("source") or metadata.get("actor_id"),
                 )
             except Exception as norm_err:
                 logger.warning(f"[INGEST] item {item_index} normalize error: {norm_err}")
@@ -971,10 +972,9 @@ async def _process_webhook_items(
                 continue
 
             # Handle completed auction sources — write to dealer_sales for DOS calibration
-            source_site = (vehicle.get("source_site") or "").lower()
-            _SOURCE_ALIASES = {"hibid-v2": "hibid", "jjkane.com": "jjkane", "govdeals.com": "govdeals", "publicsurplus.com": "publicsurplus"}
-            source_site = _SOURCE_ALIASES.get(source_site, source_site)
+            source_site = _canonical_source_site(vehicle.get("source_site") or vehicle.get("source")) or None
             vehicle["source_site"] = source_site  # persist normalized value
+            vehicle["source"] = source_site
             if source_site == "govdeals-sold":
                 if supabase_client is None:
                     logger.error("[INGEST] dealer_sales write skipped — supabase_client is None")
@@ -1444,7 +1444,94 @@ def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] =
     return None
 
 
-def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Optional[datetime] = None) -> Optional[dict]:
+_SOURCE_SITE_ALIASES = {
+    "allsurplus": "allsurplus",
+    "bidspotter": "bidspotter",
+    "equipmentfacts": "equipmentfacts",
+    "gsa auctions": "gsaauctions",
+    "gsaauctions": "gsaauctions",
+    "govdeals": "govdeals",
+    "govdeals.com": "govdeals",
+    "govdeals-sold": "govdeals-sold",
+    "govdeals_sold": "govdeals-sold",
+    "govplanet": "govplanet",
+    "hibid": "hibid",
+    "hibid-v2": "hibid",
+    "ironplanet": "ironplanet",
+    "jjkane": "jjkane",
+    "municibid": "municibid",
+    "publicsurplus": "publicsurplus",
+    "publicsurplus_tx": "publicsurplus",
+    "proxibid": "proxibid",
+    "usgovbid": "usgovbid",
+}
+
+_SOURCE_SITE_URL_HINTS = (
+    ("allsurplus.com", "allsurplus"),
+    ("bidspotter.com", "bidspotter"),
+    ("equipmentfacts.com", "equipmentfacts"),
+    ("gsaauctions.gov", "gsaauctions"),
+    ("govdeals.com", "govdeals"),
+    ("govplanet.com", "govplanet"),
+    ("hibid.com", "hibid"),
+    ("ironplanet.com", "ironplanet"),
+    ("jjkane.com", "jjkane"),
+    ("municibid.com", "municibid"),
+    ("publicsurplus.com", "publicsurplus"),
+    ("proxibid.com", "proxibid"),
+    ("usgovbid.com", "usgovbid"),
+)
+
+
+def _canonical_source_site(raw_value: Any) -> str:
+    text = str(raw_value or "").strip().lower()
+    if not text or text in {"apify", "none", "null", "unknown"}:
+        return ""
+    if text in _SOURCE_SITE_ALIASES:
+        return _SOURCE_SITE_ALIASES[text]
+    normalized = text.replace("_", "-")
+    return _SOURCE_SITE_ALIASES.get(normalized, "")
+
+
+def _source_site_from_url(url: str) -> str:
+    lowered = (url or "").strip().lower()
+    if not lowered:
+        return ""
+    for needle, source_site in _SOURCE_SITE_URL_HINTS:
+        if needle in lowered:
+            return source_site
+    return ""
+
+
+def _infer_source_site(item: dict, *, source_hint: Optional[str] = None) -> Optional[str]:
+    for candidate in (
+        item.get("source_site"),
+        item.get("source"),
+        source_hint,
+    ):
+        source_site = _canonical_source_site(candidate)
+        if source_site:
+            return source_site
+
+    for candidate in (
+        item.get("listing_url"),
+        item.get("auction_url"),
+        item.get("url"),
+    ):
+        source_site = _source_site_from_url(str(candidate or ""))
+        if source_site:
+            return source_site
+
+    return None
+
+
+def normalize_apify_vehicle(
+    item: dict,
+    run_id: str,
+    *,
+    default_time_anchor: Optional[datetime] = None,
+    source_hint: Optional[str] = None,
+) -> Optional[dict]:
     """Normalize raw Apify scraper output to DealerScope vehicle format.
 
     Handles two formats:
@@ -1511,7 +1598,7 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
         agency = item.get("seller") or item.get("agency_name") or ""
 
         # Source
-        source = item.get("source_site") or item.get("source") or "govdeals"
+        source = _infer_source_site(item, source_hint=source_hint)
 
         normalized = {
             "listing_id": _compute_listing_id(source, listing_url),
@@ -1539,7 +1626,7 @@ def normalize_apify_vehicle(item: dict, run_id: str, *, default_time_anchor: Opt
             "source_run_id": run_id,
         }
         normalized["canonical_id"] = compute_canonical_id(normalized)
-        normalized["all_sources"] = [normalized.get("source_site", "unknown")]
+        normalized["all_sources"] = [source] if source else []
         normalized["is_duplicate"] = False
         normalized["canonical_record_id"] = None
         normalized["duplicate_count"] = 0
@@ -3056,6 +3143,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
 def build_opportunity_row(vehicle: dict) -> dict:
     score_result = vehicle.get("score_breakdown", {})
     current_bid = float(vehicle.get("current_bid") or 0)
+    source_site = _canonical_source_site(vehicle.get("source_site") or vehicle.get("source")) or None
     buyer_premium = score_result.get("buyer_premium_amount")
     if buyer_premium is None:
         buyer_premium = score_result.get("premium")
@@ -3093,9 +3181,10 @@ def build_opportunity_row(vehicle: dict) -> dict:
     pricing_source = score_result.get("pricing_source")
     pricing_maturity = score_result.get("pricing_maturity") or "unknown"
     return {
-        "listing_id": _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+        "listing_id": _compute_listing_id(source_site, vehicle.get("listing_url") or ""),
         "listing_url": vehicle.get("listing_url", ""),
-        "source": vehicle.get("source_site"),
+        "source": source_site,
+        "source_site": source_site,
         "title": vehicle.get("title"),
         "year": vehicle.get("year"),
         "make": vehicle.get("make"),
