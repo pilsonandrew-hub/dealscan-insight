@@ -32,8 +32,8 @@ jobs:
           fi
           echo "✅ No localhost in frontend services"
 
-          # Check no hardcoded secrets
-          if grep -rn "apify_api_\|sk-proj-\|sk-ant-\|ntn_" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v ".cursorrules\|MEMORY\|test\|#"; then
+          # Check no hardcoded secrets (match actual key patterns, not function names)
+          if grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|sk-ant-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "\.cursorrules\|MEMORY\|test\|#"; then
             echo "❌ FAIL: Hardcoded API key found in source"
             exit 1
           fi
