@@ -61,13 +61,13 @@ def _safe_float(value: object) -> Optional[float]:
         return None
 
 
-def _fetch_opportunity(opportunity_id: str) -> dict:
+def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = None) -> dict:
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     resp = (
         supabase_client.table("opportunities")
-        .select("id,make,model,year,mileage,current_bid,state")
+        .select("id,user_id,make,model,year,mileage,current_bid,state")
         .eq("id", opportunity_id)
         .limit(1)
         .execute()
@@ -75,7 +75,10 @@ def _fetch_opportunity(opportunity_id: str) -> dict:
     opportunities = resp.data or []
     if not opportunities:
         raise HTTPException(status_code=404, detail="Opportunity not found")
-    return opportunities[0]
+    opp = opportunities[0]
+    if require_user_id and opp.get("user_id") != require_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this opportunity")
+    return opp
 
 
 def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> bool:
@@ -123,8 +126,8 @@ async def patch_outcome(
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Service unavailable")
 
-    _verify_auth(authorization)
-    opportunity = _fetch_opportunity(opportunity_id)
+    user_id = _verify_auth(authorization)
+    opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)
     current_bid = _safe_float(opportunity.get("current_bid")) or 0.0
 
     sold_price = _safe_float(payload.sold_price)
@@ -249,6 +252,8 @@ async def create_bid_outcome(
     )
 
     update_payload = {
+        "bid_amount": payload.purchase_price if payload.purchase_price is not None else _safe_float(opportunity.get("current_bid")),
+        "won": payload.won,
         "outcome_notes": notes_blob,
         "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
     }
