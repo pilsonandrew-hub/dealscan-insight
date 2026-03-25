@@ -681,6 +681,39 @@ export const api = {
     return res.json();
   },
 
+  async getOutcomeSummary(): Promise<{
+    count_by_outcome: Record<string, number>;
+    total_gross_margin: number;
+    avg_roi: number | null;
+  }> {
+    const res = await fetch(`${API_BASE}/api/outcomes/summary`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`Outcome summary fetch failed: ${res.status}`);
+    return res.json();
+  },
+
+  async recordOutcome(payload: {
+    opportunity_id: string;
+    outcome: 'won' | 'lost' | 'passed';
+    sold_price?: number;
+  }): Promise<void> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({
+        outcome: payload.outcome,
+        sold_price: payload.sold_price ?? null,
+      }),
+    });
+    if (!res.ok) throw new Error(`Record outcome failed: ${res.status}`);
+  },
+
   // Log a bid/win outcome for an opportunity
   async logBidOutcome(payload: {
     opportunity_id: string;

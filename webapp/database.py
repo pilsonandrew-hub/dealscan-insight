@@ -13,6 +13,23 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+supabase_client = None
+try:
+    import os
+
+    _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
+    _supabase_key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+    )
+    if _supabase_url and _supabase_key:
+        from supabase import create_client
+
+        supabase_client = create_client(_supabase_url, _supabase_key)
+except Exception as exc:
+    logger.warning("Supabase client init failed in webapp.database (non-fatal): %s", exc)
+
 # Create engine with proper pooling
 if settings.database_url.startswith("sqlite"):
     # SQLite for testing only

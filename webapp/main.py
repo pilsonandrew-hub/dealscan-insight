@@ -18,7 +18,7 @@ from webapp.middleware.request_id import RequestIDMiddleware
 from webapp.middleware.rate_limit import RateLimitMiddleware
 from webapp.middleware.security import SecurityMiddleware
 from webapp.middleware.error_handler import ErrorHandlerMiddleware
-from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest, sniper
+from webapp.routers import auth, vehicles, opportunities, upload, ml, admin, ingest, sniper, outcomes
 from webapp.scheduler import start_scheduler, stop_scheduler
 recon_module = None
 _recon_load_error = ""
@@ -101,6 +101,7 @@ app.include_router(ml.router, prefix="/ml", tags=["Machine Learning"])
 app.include_router(admin.router, prefix="/admin", tags=["Administration"])
 app.include_router(ingest.router)
 app.include_router(sniper.router)
+app.include_router(outcomes.router, prefix="/api")
 if recon_module:
     app.include_router(recon_module.router, prefix="/api", tags=["Recon"])
 
@@ -125,4 +126,3 @@ if __name__ == "__main__":
         timeout_keep_alive=120,
         timeout_graceful_shutdown=30
     )
-
