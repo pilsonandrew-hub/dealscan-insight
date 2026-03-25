@@ -92,6 +92,7 @@ const sampleLocations = [];
 
 let totalFound = 0;
 let totalAfterFilters = 0;
+let totalFailedFilters = 0;
 let apiModeUsed = false;
 
 function normalizeText(value) {
@@ -362,31 +363,36 @@ function buildListing(rawResult, sourceUrl) {
 function passesFilters(listing, log) {
     if (!listing.title || !isVehicle(listing.title)) {
         log.debug(`[SKIP] Not a vehicle: ${listing.title || 'unknown title'}`);
+        totalFailedFilters++;
         return false;
     }
-    if (listing.state && HIGH_RUST_STATES.has(listing.state)) {
-        const currentYear = new Date().getFullYear();
-        if (listing.year && listing.year >= currentYear - 2) {
+    if (listing.state && HIGH_RUST_STATES.has(listing.state) && listing.year != null) {
+        if (listing.year >= 2023) {
             log.info(`[BYPASS] Rust state ${listing.state} allowed — vehicle is ${listing.year} (≤3yr old)`);
         } else {
             log.debug(`[SKIP] High-rust state: ${listing.state} - ${listing.title}`);
+            totalFailedFilters++;
             return false;
         }
     }
     if (listing.state && !targetStateSet.has(listing.state)) {
         log.debug(`[SKIP] Out-of-target state: ${listing.state} - ${listing.title}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.current_bid > 0 && listing.current_bid < minBid) {
         log.debug(`[SKIP] Bid too low: $${listing.current_bid} - ${listing.title}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.year && listing.year < minYear) {
         log.debug(`[SKIP] Too old: ${listing.year} - ${listing.title}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.mileage && listing.mileage > maxMileage) {
         log.debug(`[SKIP] Too many miles: ${listing.mileage} - ${listing.title}`);
+        totalFailedFilters++;
         return false;
     }
     return true;
@@ -952,6 +958,6 @@ await crawler.run([
 ]);
 
 console.log('[HIBID] Sample locations:', sampleLocations);
-console.log(`[HIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
+console.log(`[HIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Failed filters: ${totalFailedFilters}`);
 
 await Actor.exit();

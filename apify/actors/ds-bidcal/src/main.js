@@ -59,6 +59,7 @@ const targetStateSet = new Set(targetStates.map(s => s.toUpperCase()));
 const allListings = [];
 let totalFound = 0;
 let totalAfterFilters = 0;
+let totalFailedFilters = 0;
 
 function isVehicle(title) {
     const lower = title.toLowerCase();
@@ -137,36 +138,42 @@ function isLikelyDetailUrl(url) {
 function applyFilters(listing, log) {
     if (!isVehicle(listing.title)) {
         log.debug(`[SKIP] Not a vehicle: ${listing.title}`);
+        totalFailedFilters++;
         return false;
     }
     const state = listing.state;
-    if (state && HIGH_RUST_STATES.has(state)) {
-        const currentYear = new Date().getFullYear();
-        if (listing.year && listing.year >= currentYear - 2) {
+    if (state && HIGH_RUST_STATES.has(state) && listing.year != null) {
+        if (listing.year >= 2023) {
             log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${listing.year} (≤3yr old)`);
         } else {
             log.debug(`[SKIP] High-rust state: ${state} — ${listing.title}`);
+            totalFailedFilters++;
             return false;
         }
     }
     if (state && !targetStateSet.has(state)) {
         log.debug(`[SKIP] Out-of-target state: ${state}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.current_bid > 0 && listing.current_bid < minBid) {
         log.debug(`[SKIP] Bid too low: $${listing.current_bid}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.current_bid > 0 && listing.current_bid > maxBid) {
         log.debug(`[SKIP] Bid too high: $${listing.current_bid}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.year && listing.year < minYear) {
         log.debug(`[SKIP] Too old: ${listing.year}`);
+        totalFailedFilters++;
         return false;
     }
     if (listing.mileage && listing.mileage > maxMileage) {
         log.debug(`[SKIP] Too many miles: ${listing.mileage}`);
+        totalFailedFilters++;
         return false;
     }
     return true;
@@ -397,6 +404,6 @@ await crawler.run(
     }))
 );
 
-console.log(`[BIDCAL COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
+console.log(`[BIDCAL COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Failed filters: ${totalFailedFilters}`);
 
 await Actor.exit();
