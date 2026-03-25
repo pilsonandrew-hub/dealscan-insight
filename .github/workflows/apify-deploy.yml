@@ -45,10 +45,14 @@ jobs:
           ctx = ssl.create_default_context()
 
           def api(method, path, data=None):
-              url = f"https://api.apify.com/v2{path}?token={TOKEN}"
+              # Always include token in URL AND Authorization header
+              sep = "&" if "?" in path else "?"
+              url = f"https://api.apify.com/v2{path}{sep}token={TOKEN}"
               body = json.dumps(data).encode() if data else None
-              req = urllib.request.Request(url, data=body, method=method,
-                  headers={"Content-Type": "application/json"} if body else {})
+              headers = {"Authorization": f"Bearer {TOKEN}"}
+              if body:
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(url, data=body, method=method, headers=headers)
               try:
                   resp = urllib.request.urlopen(req, context=ctx)
                   return json.loads(resp.read())
@@ -125,7 +129,7 @@ jobs:
               print(f"✅ Source uploaded")
 
               # Trigger rebuild
-              build = api("POST", f"/acts/{actor_id}/builds?version={version}&tag=latest&useCache=false")
+              build = api("POST", f"/acts/{actor_id}/builds?version={version}&tag=latest&useCache=false&betaPackages=false")
               build_id = build.get("data", {}).get("id", "?")
               print(f"🔨 Build triggered: {build_id}")
 
