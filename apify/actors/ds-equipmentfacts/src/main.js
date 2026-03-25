@@ -178,18 +178,29 @@ const {
 
 let totalFound = 0;
 let totalPassed = 0;
+let totalFailed = 0;
 
 function passes(item) {
     const state = normalizeState(item.state || item.locationState || '');
-    const year = parseInt(item.year || item.modelYear || 0);
-    const currentYear = new Date().getFullYear();
-    if (!includeRustStates && HIGH_RUST_STATES.has(state)) {
-        if (!(year && year >= currentYear - 2)) return false;
+    const yearValue = item.year ?? item.modelYear ?? null;
+    const year = yearValue == null || yearValue === '' ? null : parseInt(yearValue, 10);
+    const hasYear = Number.isFinite(year);
+    if (!includeRustStates && HIGH_RUST_STATES.has(state) && hasYear) {
+        if (year < 2023) {
+            totalFailed++;
+            return false;
+        }
         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
     }
     const bid = parseFloat(item.currentBid || item.bidAmount || item.currentPrice || 0);
-    if (bid > 0 && (bid < minBid || bid > maxBid)) return false;
-    if (year && (currentYear - year) > 15) return false;
+    if (bid > 0 && (bid < minBid || bid > maxBid)) {
+        totalFailed++;
+        return false;
+    }
+    if (hasYear && year < 2022) {
+        totalFailed++;
+        return false;
+    }
     return true;
 }
 
@@ -454,7 +465,10 @@ const crawler = new PlaywrightCrawler({
             if (seenIds.has(id)) continue;
             seenIds.add(id);
             totalFound++;
-            if (!isVehicleRelevant(lot)) continue;
+            if (!isVehicleRelevant(lot)) {
+                totalFailed++;
+                continue;
+            }
             if (!passes(lot)) continue;
             totalPassed++;
             await Actor.pushData(normalizeLot(lot));
@@ -523,7 +537,10 @@ async function paginateApi(log, seenIds) {
                 if (id && seenIds.has(id)) continue;
                 if (id) seenIds.add(id);
                 totalFound++;
-                if (!isVehicleRelevant(lot)) continue;
+                if (!isVehicleRelevant(lot)) {
+                    totalFailed++;
+                    continue;
+                }
                 if (!passes(lot)) continue;
                 totalPassed++;
                 await Actor.pushData(normalizeLot(lot));
@@ -539,7 +556,7 @@ async function paginateApi(log, seenIds) {
 // Run all vehicle category search URLs
 await crawler.run(SEARCH_URLS.map(url => ({ url })));
 
-console.log(`[EQUIPMENTFACTS] Total found: ${totalFound} | Passed filters: ${totalPassed}`);
+console.log(`[EQUIPMENTFACTS] Total found: ${totalFound} | Passed filters: ${totalPassed} | Failed filters: ${totalFailed}`);
 console.log(`[EQUIPMENTFACTS] API base URL: ${capturedApi.apiBaseUrl || 'NOT CAPTURED'}`);
 console.log(`[EQUIPMENTFACTS] API key captured: ${!!capturedApi.apiKey}`);
 console.log(`[EQUIPMENTFACTS] Auth token captured: ${!!capturedApi.authToken}`);
