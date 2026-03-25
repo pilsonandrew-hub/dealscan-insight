@@ -1,0 +1,6 @@
+PHASE 3 — Remove dead enterprise scaffolding from src/main.tsx.
+The entire setTimeout block that imports EnterpriseSystemOrchestrator and UnifiedLogger is AI-generated dead weight. It runs after render, logs to console, and does nothing useful for the actual app.
+1. Read src/main.tsx lines 20-80
+2. Remove the setTimeout block that imports from ./core/
+3. Run: npm run build — confirm it passes
+4. Commit: "fix: remove dead enterprise orchestrator from main.tsx startup"
