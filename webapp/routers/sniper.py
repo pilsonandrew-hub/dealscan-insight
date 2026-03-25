@@ -622,4 +622,3 @@ async def sniper_check(
     """
     _verify_check_secret(authorization)
     return await _run_sniper_check_internal()
-# codex_write_test
