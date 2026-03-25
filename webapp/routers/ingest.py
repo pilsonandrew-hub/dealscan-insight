@@ -37,9 +37,15 @@ logger = logging.getLogger(__name__)
 try:
     from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 except ImportError:
+    logger.critical(
+        "[ALERT_GATE] alert_gating import failed; using fail-closed stub that blocks all alerts"
+    )
     AlertThresholds = None  # type: ignore[assignment]
 
     def evaluate_alert_gate(*args, **kwargs):  # type: ignore[no-redef]
+        logger.critical(
+            "[ALERT_GATE] fail-closed stub active; returning ineligible for all alerts"
+        )
         return {
             "eligible": False,
             "alert_type": None,
@@ -2135,12 +2141,12 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         except Exception as e:
             logger.warning(f"[SUPPRESSION CHECK] failed: {e}")
 
-    # Per-run alert cap (max 5) with 1-hour TTL reset
+    # Per-run alert cap (max 20) with 1-hour TTL reset
     _now = _time.time()
     if _now - alerts_this_run_ts.get(run_id, 0) > 3600:
         alerts_this_run.pop(run_id, None)
         alerts_this_run_ts.pop(run_id, None)
-    if alerts_this_run.get(run_id, 0) >= 5:
+    if alerts_this_run.get(run_id, 0) >= 20:
         logger.info(f"[ALERT CAP] max alerts reached for run {run_id}")
         return None
     alerts_this_run[run_id] = alerts_this_run.get(run_id, 0) + 1

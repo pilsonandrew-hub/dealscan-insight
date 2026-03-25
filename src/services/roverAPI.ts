@@ -81,12 +81,15 @@ class RoverAPIService {
       const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
       await fetch(`${apiUrl}/api/rover/events`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+        headers,
         body: JSON.stringify({
           event: event.event,
           userId: event.userId,

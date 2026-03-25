@@ -1,4 +1,4 @@
-# DEPRECATED - use backend/main.py instead
+# DEPRECATED - do not deploy or extend this entrypoint; use backend/main.py instead.
 """
 DealerScope FastAPI Production Application
 Secure, scalable arbitrage platform with ML/AI integration

@@ -1,3 +1,4 @@
+# DEPRECATED - do not deploy or extend this entrypoint; use backend/main.py instead.
 """
 Minimal FastAPI app to get DealerScope running
 """

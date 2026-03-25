@@ -1,3 +1,4 @@
+# DEPRECATED - do not deploy or extend this entrypoint; use backend/main.py instead.
 """
 Simplified FastAPI app that runs without dependencies
 """
