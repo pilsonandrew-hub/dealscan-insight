@@ -1,0 +1,121 @@
+name: Deploy Apify Actors
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apify/actors/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Apify CLI
+        run: npm install -g apify-cli
+
+      - name: Deploy changed actors
+        run: |
+          # Find which actor directories changed
+          CHANGED=$(git diff --name-only HEAD~1 HEAD | grep '^apify/actors/' | cut -d'/' -f3 | sort -u)
+          
+          if [ -z "$CHANGED" ]; then
+            echo "No actor changes detected"
+            exit 0
+          fi
+          
+          # Map actor directories to Apify actor IDs
+          declare -A ACTOR_IDS=(
+            ["ds-hibid-v2"]="7s9e0eATTt1kuGGfE"
+            ["ds-publicsurplus"]="9xxQLlRsROnSgA42i"
+            ["ds-govdeals"]="CuKaIAcWyFS0EPrAz"
+            ["ds-municibid"]="svmsItf3CRBZuIntp"
+            ["ds-gsaauctions"]="fvDnYmGuFBCrwpEi9"
+            ["ds-allsurplus"]="gYGIfHeYeN3EzmLnB"
+            ["ds-govplanet"]="pO2t5UDoSVmO1gvKJ"
+            ["ds-proxibid"]="bxhncvtHEP712WX2e"
+            ["ds-jjkane"]="lvb7T6VMFfNUQpqlq"
+            ["ds-bidspotter"]="5Eu3hfCcBBdzp6I1u"
+            ["ds-hibid-v2"]="7s9e0eATTt1kuGGfE"
+          )
+          
+          for ACTOR_DIR in $CHANGED; do
+            ACTOR_ID="${ACTOR_IDS[$ACTOR_DIR]}"
+            if [ -z "$ACTOR_ID" ]; then
+              echo "⚠️  No Apify ID mapped for $ACTOR_DIR — skipping"
+              continue
+            fi
+            
+            echo "🚀 Deploying $ACTOR_DIR → $ACTOR_ID"
+            DIR="apify/actors/$ACTOR_DIR"
+            
+            if [ ! -d "$DIR" ]; then
+              echo "⚠️  Directory $DIR not found — skipping"
+              continue
+            fi
+            
+            # Get version number
+            VERSION=$(curl -s "https://api.apify.com/v2/acts/$ACTOR_ID?token=$APIFY_TOKEN" | \
+              python3 -c "import json,sys; vs=json.load(sys.stdin)['data']['versions']; print(vs[-1]['versionNumber'])")
+            
+            echo "Uploading source files for version $VERSION..."
+            
+            # Build source files payload
+            MAIN_JS=$(cat "$DIR/src/main.js")
+            PKG=$(cat "$DIR/package.json" 2>/dev/null || echo '{"name":"actor","version":"1.0.0","type":"module","scripts":{"start":"node src/main.js"},"dependencies":{"apify":"^3.0.0","crawlee":"^3.0.0"}}')
+            DOCKERFILE=$(cat "$DIR/Dockerfile" 2>/dev/null || echo 'FROM apify/actor-node-playwright-chrome:20\nCOPY package*.json ./\nRUN npm install --only=prod\nCOPY . ./')
+            
+            python3 - << PYEOF
+import json, urllib.request, ssl
+
+actor_id = "$ACTOR_ID"
+version = "$VERSION"
+token = "$APIFY_TOKEN"
+main_js = open("$DIR/src/main.js").read()
+
+try:
+    pkg = open("$DIR/package.json").read()
+except: pkg = '{"name":"actor","version":"1.0.0","type":"module","scripts":{"start":"node src/main.js"},"dependencies":{"apify":"^3.0.0","crawlee":"^3.0.0"}}'
+
+try:
+    dockerfile = open("$DIR/Dockerfile").read()
+except: dockerfile = "FROM apify/actor-node-playwright-chrome:20\nCOPY package*.json ./\nRUN npm install --only=prod\nCOPY . ./"
+
+payload = json.dumps({
+    "sourceFiles": [
+        {"name": "src/main.js", "format": "TEXT", "content": main_js},
+        {"name": "package.json", "format": "TEXT", "content": pkg},
+        {"name": "Dockerfile", "format": "TEXT", "content": dockerfile},
+    ]
+}).encode()
+
+ctx = ssl.create_default_context()
+req = urllib.request.Request(
+    f"https://api.apify.com/v2/acts/{actor_id}/versions/{version}?token={token}",
+    data=payload,
+    method="PUT",
+    headers={"Content-Type": "application/json"}
+)
+try:
+    resp = urllib.request.urlopen(req, context=ctx)
+    print(f"✅ {actor_id} v{version} uploaded successfully")
+except urllib.error.HTTPError as e:
+    print(f"❌ Upload failed: {e.code} {e.read().decode()[:200]}")
+PYEOF
+            
+            # Trigger rebuild
+            curl -s -X POST "https://api.apify.com/v2/acts/$ACTOR_ID/builds?token=$APIFY_TOKEN&version=$VERSION&tag=latest&useCache=false" \
+              -H "Content-Type: application/json" | \
+              python3 -c "import json,sys; d=json.load(sys.stdin); print('Build triggered:', d.get('data',{}).get('id','err'))"
+            
+            echo "✅ $ACTOR_DIR deployed and rebuilding"
+          done
