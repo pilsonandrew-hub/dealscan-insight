@@ -30,29 +30,10 @@ from psycopg2 import extras as psycopg2_extras
 from psycopg2 import sql as psycopg2_sql
 
 from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
+from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 logger = logging.getLogger(__name__)
-
-try:
-    from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
-except ImportError:
-    logger.critical(
-        "[ALERT_GATE] alert_gating import failed; using fail-closed stub that blocks all alerts"
-    )
-    AlertThresholds = None  # type: ignore[assignment]
-
-    def evaluate_alert_gate(*args, **kwargs):  # type: ignore[no-redef]
-        logger.critical(
-            "[ALERT_GATE] fail-closed stub active; returning ineligible for all alerts"
-        )
-        return {
-            "eligible": False,
-            "alert_type": None,
-            "blocking_reasons": ["alert_gate_import_failed"],
-            "summary": "type=blocked | import_failed",
-            "signals": {},
-        }
 
 try:
     from backend.ingest.condition import compute_condition_grade as _compute_condition_grade
@@ -136,9 +117,6 @@ elif _supabase_anon_key:
         logger.critical(
             "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations in production."
         )
-        raise RuntimeError(
-            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations in production."
-        )
 else:
     _supabase_key = None
     if _environment == "development":
@@ -147,9 +125,6 @@ else:
         )
     else:
         logger.critical(
-            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations."
-        )
-        raise RuntimeError(
             "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations."
         )
 

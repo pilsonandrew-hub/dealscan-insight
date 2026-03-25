@@ -111,10 +111,12 @@ class RoverAPIService {
       if (!user) return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
 
       const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
       const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${user.id}&limit=${limit}`, {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+        headers,
       });
 
       if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
