@@ -203,8 +203,22 @@ const crawler = new PlaywrightCrawler({
             }
 
             // Step 2: Attempt direct API pagination from the Maestro REST endpoint.
-            if (capturedApi.searchPayload) {
+            // If searchPayload wasn't intercepted, build a default one from scratch.
+            if (!capturedApi.searchPayload && capturedApi.searchUrl) {
+                log.info('searchPayload not intercepted — building default Maestro payload');
+                capturedApi.searchPayload = {
+                    requestType: 'search',
+                    responseStyle: 'productsOnly',
+                    timing: 'current',
+                    category: 'Vehicles',
+                    pageSize: 50,
+                    page: 1,
+                };
+            }
+            if (capturedApi.searchPayload && capturedApi.searchUrl) {
                 await paginateWithAuth(page, log, seenIds);
+            } else {
+                log.warning('Cannot paginate — searchPayload or searchUrl missing');
             }
 
             // Step 3: Push all passing lots immediately (before VIN scraping to prevent data loss on timeout)
