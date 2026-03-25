@@ -58,8 +58,8 @@ jobs:
         run: |
           echo "=== DEALERSCOPE BUSINESS RULE VALIDATION ==="
 
-          # Check bid ceiling constant
-          if grep -rn "COST_TO_MARKET_MAX" backend/ --include="*.py" | grep -v "0.88"; then
+          # Check bid ceiling constant is still 0.88
+          if ! grep -rn "COST_TO_MARKET_MAX\s*=\s*0\.88" backend/ --include="*.py" | grep -q "0.88"; then
             echo "❌ FAIL: COST_TO_MARKET_MAX changed from 0.88"
             exit 1
           fi
