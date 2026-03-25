@@ -180,10 +180,13 @@ function applyFilters(listing, log) {
         return false;
     }
     const state = listing.state;
-    if (state && HIGH_RUST_STATES.has(state) && listing.year != null) {
-        if (listing.year >= 2023) {
-            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${listing.year} (≤3yr old)`);
+    if (state && HIGH_RUST_STATES.has(state)) {
+        const currentYear = new Date().getFullYear();
+        const bypassYear = currentYear - 2; // vehicles newer than 2 years bypass rust filter
+        if (listing.year != null && listing.year >= bypassYear) {
+            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${listing.year} (≤2yr old, bypass >= ${bypassYear})`);
         } else {
+            // null year OR old vehicle in rust state — reject
             log.debug(`[SKIP] High-rust state: ${state} — ${listing.title}`);
             totalFailedFilters++;
             return false;
