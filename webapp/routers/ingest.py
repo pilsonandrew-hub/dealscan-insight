@@ -973,8 +973,7 @@ async def _process_webhook_items(
 
             # Handle completed auction sources — write to dealer_sales for DOS calibration
             source_site = _canonical_source_site(vehicle.get("source_site") or vehicle.get("source")) or None
-            vehicle["source_site"] = source_site  # persist normalized value
-            vehicle["source"] = source_site
+            vehicle["source_site"] = source_site  # persist normalized value (source and source_site are kept in sync via build_opportunity_row)
             if source_site == "govdeals-sold":
                 if supabase_client is None:
                     logger.error("[INGEST] dealer_sales write skipped — supabase_client is None")
