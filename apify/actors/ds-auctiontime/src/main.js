@@ -182,9 +182,9 @@ function applyFilters(listing, log) {
     const state = listing.state;
     if (state && HIGH_RUST_STATES.has(state)) {
         const currentYear = new Date().getFullYear();
-        const bypassYear = currentYear - 2; // vehicles newer than 2 years bypass rust filter
+        const bypassYear = currentYear - 2; // model year >= currentYear-2 bypasses rust filter per business rule
         if (listing.year != null && listing.year >= bypassYear) {
-            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${listing.year} (≤2yr old, bypass >= ${bypassYear})`);
+            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${listing.year} (model_year >= ${bypassYear}, bypass threshold = currentYear-2)`);
         } else {
             // null year OR old vehicle in rust state — reject
             log.debug(`[SKIP] High-rust state: ${state} — ${listing.title}`);
