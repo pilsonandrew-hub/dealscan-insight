@@ -1670,10 +1670,19 @@ def passes_basic_gates(vehicle: dict) -> dict:
     Five-layer institutional filter.
     Returns {"pass": bool, "reason": str}
     """
-    # Layer 0: Must be an actual vehicle (has make OR VIN — rejects equipment/parts)
+    # Layer 0: Must be an actual vehicle (has make OR VIN OR title contains vehicle keywords)
     make = vehicle.get("make", "") or ""
     vin = vehicle.get("vin", "") or ""
-    if not make.strip() and len(vin) != 17:
+    title = (vehicle.get("title") or "").lower()
+    _VEHICLE_TITLE_KEYWORDS = [
+        "ford", "chevrolet", "chevy", "dodge", "ram", "toyota", "honda", "nissan",
+        "jeep", "gmc", "chrysler", "hyundai", "kia", "subaru", "mazda", "volkswagen",
+        "bmw", "mercedes", "audi", "lexus", "acura", "infiniti", "cadillac", "lincoln",
+        "buick", "mitsubishi", "volvo", "tesla", "truck", "pickup", "suv", "sedan",
+        "coupe", "van", "vehicle", "automobile", "f-150", "silverado", "tacoma", "tundra",
+    ]
+    title_has_vehicle = any(kw in title for kw in _VEHICLE_TITLE_KEYWORDS)
+    if not make.strip() and len(vin) != 17 and not title_has_vehicle:
         return {"pass": False, "reason": "not_a_vehicle (no make or valid VIN)"}
 
     bid = vehicle.get("current_bid", 0)
@@ -1721,14 +1730,19 @@ def passes_basic_gates(vehicle: dict) -> dict:
         return {"pass": False, "reason": f"commercial_hd_tonnage ({title[:50]})"}
 
     if not year:
-        return {"pass": False, "reason": "no_year"}
+        # Missing year = pass through (can't confirm age, benefit of the doubt)
+        # Per business rules: null year should not block a potentially good deal
+        pass  # continue to next checks without year-based filtering
 
     current_year = datetime.now().year
-    age = current_year - year
     # Government/public auction sources run older fleet vehicles — allow up to 20 years
     gov_sources = {"publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "hibid"}
     max_age = 20 if source in gov_sources else 4
-    if age > max_age or age < 0:
+    if year:
+        age = current_year - year
+    else:
+        age = 0  # unknown year — skip age check
+    if year and (age > max_age or age < 0):
         return {"pass": False, "reason": f"age_exceeded ({age} years, max {max_age} for {source})"}
 
     if mileage is not None:
