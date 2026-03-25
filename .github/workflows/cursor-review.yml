@@ -16,15 +16,43 @@ jobs:
 
       - name: Cursor AI Code Review
         if: github.event_name == 'pull_request'
-        uses: getcursor/cursor-review@v1
-        with:
-          api_key: ${{ secrets.CURSOR_API_KEY }}
-          instructions: |
-            You are reviewing DealerScope — a vehicle arbitrage platform.
-            Focus on: null safety, business rule enforcement (bid ceiling 0.88, max age 4yr, max mileage 50k, rust state filter),
-            webhook security, and scraper filter logic. Flag any issue that could cause 0-item output or silent failures.
-            Do NOT flag function names containing 'apify_api_' as hardcoded secrets.
-        continue-on-error: true
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          # Get the diff for this PR
+          git fetch origin ${{ github.base_ref }} --depth=1
+          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD -- '*.py' '*.ts' '*.tsx' '*.js' | head -c 50000)
+
+          if [ -z "$DIFF" ]; then
+            echo "No code changes to review."
+            exit 0
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg diff "$DIFF" \
+            '{
+              "model": "cursor-fast",
+              "messages": [
+                {
+                  "role": "system",
+                  "content": "You are a senior code reviewer for DealerScope, a vehicle arbitrage platform. Review the diff and flag: 1) Auth/security issues (missing ownership checks, exposed secrets), 2) Business rule violations (bid ceiling 0.88, max age 4yr, max mileage 50k, rust state filter), 3) Null safety / silent failures in scrapers, 4) Data integrity issues. Be concise. Do NOT flag apify_api_ function names as secrets."
+                },
+                {
+                  "role": "user",
+                  "content": $diff
+                }
+              ]
+            }')
+
+          RESPONSE=$(curl -s -X POST https://api.cursor.sh/v1/chat/completions \
+            -H "Authorization: Bearer $CURSOR_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review content returned"')
+          echo "## Cursor Code Review" >> $GITHUB_STEP_SUMMARY
+          echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
+          echo "$REVIEW"
 
       - name: Validate Business Rules
         run: |
@@ -44,7 +72,7 @@ jobs:
           fi
           echo "✅ No localhost in frontend services"
 
-          # Check no hardcoded secrets (match actual key patterns, not function names)
+          # Check no hardcoded secrets
           if grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|sk-ant-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "\.cursorrules\|MEMORY\|test\|#"; then
             echo "❌ FAIL: Hardcoded API key found in source"
             exit 1
@@ -59,10 +87,10 @@ jobs:
           echo "✅ SECRET_KEY is hardened"
 
           # Check rust state list is present
-          if ! grep -rn "HIGH_RUST_STATES\|RUST_STATES\|rust_states" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
-            echo "⚠️ WARNING: Rust state filter may be missing"
-          else
+          if grep -rn "HIGH_RUST_STATES\|RUST_STATES\|rust_states" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
             echo "✅ Rust state filter present"
+          else
+            echo "⚠️ WARNING: Rust state filter may be missing"
           fi
 
           echo ""
