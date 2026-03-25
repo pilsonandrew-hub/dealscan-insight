@@ -102,12 +102,9 @@ WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
 WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-OPENROUTER_API_KEY = os.getenv(
-    "OPENROUTER_API_KEY",
-    "[REDACTED_OPENROUTER_KEY]",
-).strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 # DeepSeek direct API (preferred over OpenRouter for deal validation)
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "[REDACTED_DEEPSEEK_KEY]").strip()
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
