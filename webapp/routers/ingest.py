@@ -106,6 +106,8 @@ OPENROUTER_API_KEY = os.getenv(
     "OPENROUTER_API_KEY",
     "[REDACTED_OPENROUTER_KEY]",
 ).strip()
+# DeepSeek direct API (preferred over OpenRouter for deal validation)
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "[REDACTED_DEEPSEEK_KEY]").strip()
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
@@ -2334,9 +2336,10 @@ async def ai_validate_hot_deals(deals: list) -> list:
     import httpx
 
     validated_deals: list = []
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    # Use DeepSeek direct API (cheaper, faster than OpenRouter)
+    url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json",
     }
 
@@ -2353,7 +2356,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
             )
 
             payload = {
-                "model": "deepseek/deepseek-r1",
+                "model": "deepseek-reasoner",
                 "messages": [
                     {"role": "user", "content": prompt},
                 ],
