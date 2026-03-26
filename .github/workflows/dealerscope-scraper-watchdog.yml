@@ -2,7 +2,7 @@ name: DealerScope Scraper Watchdog
 
 on:
   schedule:
-    - cron: '0 */4 * * *'   # every 4 hours
+    - cron: '0 */12 * * *'   # every 12 hours (matches scraper schedule)
   workflow_dispatch:
 
 jobs:
@@ -23,11 +23,10 @@ jobs:
           BOT_TOKEN = os.environ["BOT_TOKEN"]
           CHAT_ID = os.environ["CHAT_ID"]
 
-          # All active actors from apify/deployment.json
+          # All active actors — ds-hibid intentionally disabled, excluded from monitoring
           ACTORS = {
               "ds-govdeals":       "CuKaIAcWyFS0EPrAz",
               "ds-publicsurplus":  "9xxQLlRsROnSgA42i",
-              "ds-hibid":          "e8UeyRvQ6QSnX5fhP",
               "ds-municibid":      "svmsItf3CRBZuIntp",
               "ds-gsaauctions":    "fvDnYmGuFBCrwpEi9",
               "ds-allsurplus":     "gYGIfHeYeN3EzmLnB",
@@ -38,8 +37,8 @@ jobs:
           }
 
           ctx = ssl.create_default_context()
-          now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
-          cutoff = now - datetime.timedelta(hours=6)
+          now = datetime.datetime.now(datetime.timezone.utc)
+          cutoff = now - datetime.timedelta(hours=14)  # 12hr schedule + 2hr buffer
           stalled = []
 
           for name, actor_id in ACTORS.items():
