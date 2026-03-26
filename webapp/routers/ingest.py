@@ -1551,6 +1551,8 @@ def normalize_apify_vehicle(
         model = item.get("model") or extract_model(title, make) or ""
         year_raw = item.get("modelYear") or item.get("year")
         year = int(year_raw) if year_raw and str(year_raw).isdigit() else extract_year(title)
+        from backend.ingest.score import determine_vehicle_tier
+        vehicle_tier = determine_vehicle_tier(year, item.get("mileage") or item.get("meterCount") or item.get("odometer"))
 
         # Skip high rust states at normalize time — bypass allowed for ≤8yr old vehicles
         # (Consistent with MEMORY.md rule: vehicles ≤3yr bypass rust rejection, but
@@ -1621,6 +1623,13 @@ def normalize_apify_vehicle(
             "year": year,
             "make": make,
             "model": model,
+            "designated_lane": vehicle_tier,
+            "vehicle_tier": vehicle_tier,
+            "dos_premium": None,
+            "dos_standard": None,
+            "risk_flags": [],
+            "bid_ceiling_pct": 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None,
+            "min_margin_target": 500 if vehicle_tier in {"premium", "standard"} else None,
             "run_id": run_id,
             "source_run_id": run_id,
         }
@@ -1911,6 +1920,17 @@ def score_vehicle(vehicle: dict) -> dict:
             manheim_updated_at=manheim_result.get("manheim_updated_at"),
         )
         result["mmr_estimated"] = mmr
+        for key in (
+            "designated_lane",
+            "dos_premium",
+            "dos_standard",
+            "risk_flags",
+            "vehicle_tier",
+            "bid_ceiling_pct",
+            "min_margin_target",
+            "ai_confidence_score",
+        ):
+            vehicle[key] = result.get(key)
         return result
 
     except Exception as e:
@@ -2385,7 +2405,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
         "channel": "telegram",
         "delivery_state": "sent",
         "sent_at": datetime.now(timezone.utc).isoformat(),
-        "dos_score": vehicle.get("dos_score"),
+        "dos_score": score_result.get("dos_score", vehicle.get("dos_score")),
         "vehicle_title": (
             f"{vehicle.get('year', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip()
             or vehicle.get("title")
@@ -3182,6 +3202,14 @@ def build_opportunity_row(vehicle: dict) -> dict:
     )
     pricing_source = score_result.get("pricing_source")
     pricing_maturity = score_result.get("pricing_maturity") or "unknown"
+    vehicle_tier = score_result.get("vehicle_tier") or vehicle.get("vehicle_tier") or "unassigned"
+    designated_lane = score_result.get("designated_lane") or vehicle.get("designated_lane") or vehicle_tier
+    bid_ceiling_pct = score_result.get("bid_ceiling_pct")
+    if bid_ceiling_pct is None:
+        bid_ceiling_pct = 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None
+    min_margin_target = score_result.get("min_margin_target")
+    if min_margin_target is None and vehicle_tier in {"premium", "standard"}:
+        min_margin_target = 500
     return {
         "listing_id": _compute_listing_id(source_site, vehicle.get("listing_url") or ""),
         "listing_url": vehicle.get("listing_url", ""),
@@ -3237,7 +3265,6 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "mmr_lookup_basis": score_result.get("mmr_lookup_basis"),
         "mmr_confidence_proxy": score_result.get("mmr_confidence_proxy"),
         "investment_grade": score_result.get("investment_grade"),
-        "bid_ceiling_pct": score_result.get("bid_ceiling_pct"),
         "max_bid": score_result.get("max_bid"),
         "bid_headroom": score_result.get("bid_headroom"),
         "ceiling_reason": score_result.get("ceiling_reason"),
@@ -3246,6 +3273,13 @@ def build_opportunity_row(vehicle: dict) -> dict:
         "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
+        "designated_lane": designated_lane,
+        "dos_premium": score_result.get("dos_premium"),
+        "dos_standard": score_result.get("dos_standard"),
+        "risk_flags": score_result.get("risk_flags") or vehicle.get("risk_flags") or [],
+        "vehicle_tier": vehicle_tier,
+        "bid_ceiling_pct": bid_ceiling_pct,
+        "min_margin_target": min_margin_target,
         "raw_data": vehicle,
         "canonical_id": vehicle.get("canonical_id"),
         "is_duplicate": vehicle.get("is_duplicate", False),
