@@ -619,11 +619,13 @@ def score_deal(
     max_bid = ((mmr * bid_ceiling_pct) - buyer_premium_amount - auction_fees_amount) if mmr > 0 else 0
     bid_headroom = max_bid - bid
     min_margin_target = 2500.0 if vehicle_tier == "standard" else 1500.0
-    ceiling_pass = bid <= max_bid and gross_margin >= min_margin_target
+    ceiling_pass = bid <= max_bid and gross_margin >= min_margin_target and vehicle_tier != "rejected"
 
     all_in_cost = bid + buyer_premium_amount + auction_fees_amount
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
-    if selected_dos >= 80 and roi_pct >= 20 and ceiling_pass:
+    if vehicle_tier == "rejected":
+        investment_grade = "Rejected"
+    elif selected_dos >= 80 and roi_pct >= 20 and ceiling_pass:
         investment_grade = "Platinum"
     elif selected_dos >= 65 and roi_pct >= 12 and ceiling_pass:
         investment_grade = "Gold"
