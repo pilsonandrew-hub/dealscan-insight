@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional
 
 
 ALERT_ALLOWED_PRICING_MATURITIES = frozenset({"proxy", "market_comp", "live_market"})
-ALERT_ALLOWED_GRADES = frozenset({"Gold", "Platinum"})
+ALERT_ALLOWED_GRADES = frozenset({"Premium", "Standard", "Gold", "Platinum"})  # Gold/Platinum kept for legacy compat
 
 
 @dataclass(frozen=True)
@@ -159,7 +159,7 @@ def evaluate_alert_gate(
     alert_type = None
     if not reasons:
         if (
-            signals["investment_grade"] == "Platinum"
+            signals["investment_grade"] in ("Platinum", "Premium")
             and signals["roi_per_day"] >= config.platinum_min_roi_day
         ):
             alert_type = "platinum"

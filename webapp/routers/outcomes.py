@@ -176,7 +176,7 @@ async def patch_outcome(
 
 @router.get("/summary")
 async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
-    _verify_auth(authorization)
+    user_id = _verify_auth(authorization)
     if not supabase_client:
         return {
             "count_by_outcome": {"pending": 0, "won": 0, "lost": 0, "passed": 0},
@@ -188,6 +188,7 @@ async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
         resp = (
             supabase_client.table("dealer_sales")
             .select("outcome,gross_margin,roi_pct")
+            .eq("user_id", user_id)
             .execute()
         )
         rows = resp.data or []
