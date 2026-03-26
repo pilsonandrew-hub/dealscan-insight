@@ -8,8 +8,10 @@ Wholesale vehicle arbitrage platform. Scrapes government auctions, scores deals 
 - Bid ceiling: Premium = 88% of MMR all-in | Standard = 80% of MMR all-in
 - Min gross margin: Premium = $1,500 | Standard = $2,500
 - Min ROI: hot >20%, good >12%
-- Max vehicle age: 4 years (NO EXCEPTIONS in scoring)
-- Max mileage: 50,000 miles (NO EXCEPTIONS in scoring)
+## Two-Lane Tier System (CRITICAL — DO NOT CONFUSE)
+- **Premium lane:** ≤4 years old, ≤50k miles, bid ceiling 88% MMR, min margin $1,500
+- **Standard lane:** 5-10 years old, ≤100k miles, ≤18k miles/year, bid ceiling 80% MMR, min margin $2,500
+- **Rejected:** >10 years old OR fails mileage gates
 - High-rust states HARD REJECT: OH, MI, PA, NY, WI, MN, IL, IN, MO, IA, ND, SD, NE, KS, WV, ME, NH, VT, MA, RI, CT, NJ, MD, DE
 - Exception: Vehicles <= currentYear - 2 bypass rust state rejection (newer cars haven't rusted yet)
 - DOS score threshold: >= 50 to save, >= 65 for Rover display, >= 80 for alert

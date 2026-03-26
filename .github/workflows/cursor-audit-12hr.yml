@@ -27,20 +27,20 @@ jobs:
             FAILED=1
           fi
 
-          # 2. Standard year cutoff (must be 4yr, not 10yr)
-          if grep -n "STANDARD_YEAR_CUTOFF\|standard.*year\|year.*standard" backend/ingest/score.py | grep -qi "10\b"; then
-            echo "❌ FAIL: Standard year cutoff is 10yr — must be 4yr"
-            FAILED=1
+          # 2. Standard year cutoff (must be 10yr — Standard lane allows up to 10yr old vehicles)
+          if grep -n "STANDARD_YEAR_CUTOFF" backend/ingest/score.py | grep -q "10"; then
+            echo "✅ Standard year cutoff correct (10yr for Standard lane)"
           else
-            echo "✅ Standard year cutoff OK"
+            echo "❌ FAIL: Standard year cutoff missing or wrong — should be CURRENT_YEAR - 10"
+            FAILED=1
           fi
 
-          # 3. Standard mileage (must not be 100000)
-          if grep -n "100000\|100_000" backend/ingest/score.py | grep -qi "standard\|mileage"; then
-            echo "❌ FAIL: Standard mileage cap may be 100k — must be 50k"
-            FAILED=1
+          # 3. Standard mileage (100k allowed for Standard lane per tier strategy)
+          if grep -n "100000\|100_000" backend/ingest/score.py | grep -q .; then
+            echo "✅ Standard mileage cap present (100k for Standard lane)"
           else
-            echo "✅ Standard mileage cap OK"
+            echo "❌ FAIL: Standard lane mileage cap missing"
+            FAILED=1
           fi
 
           # 4. Rust state filter present
