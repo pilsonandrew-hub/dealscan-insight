@@ -1606,8 +1606,26 @@ def normalize_apify_vehicle(
             "title": title,
             "title_status": item.get("title_status") or item.get("titleStatus") or "",
             "current_bid": current_bid,
-            "buyer_premium_pct": float(item.get("buyer_premium_pct") or 10.0),
-            "doc_fee": float(item.get("doc_fee") or 75),
+            "buyer_premium_pct": (
+                float(item["buyer_premium_pct"])
+                if item.get("buyer_premium_pct") not in {None, ""}
+                else float(item["buyer_premium"]) if item.get("buyer_premium") not in {None, ""} else None
+            ),
+            "buyer_premium": (
+                float(item["buyer_premium_pct"])
+                if item.get("buyer_premium_pct") not in {None, ""}
+                else float(item["buyer_premium"]) if item.get("buyer_premium") not in {None, ""} else None
+            ),
+            "doc_fee": (
+                float(item["auction_fees"])
+                if item.get("auction_fees") not in {None, ""}
+                else float(item["doc_fee"]) if item.get("doc_fee") not in {None, ""} else None
+            ),
+            "auction_fees": (
+                float(item["auction_fees"])
+                if item.get("auction_fees") not in {None, ""}
+                else float(item["doc_fee"]) if item.get("doc_fee") not in {None, ""} else None
+            ),
             "mileage": mileage,
             "state": state,
             "location": (
@@ -1918,8 +1936,11 @@ def score_vehicle(vehicle: dict) -> dict:
             manheim_confidence=manheim_result.get("manheim_confidence"),
             manheim_source_status=manheim_result.get("manheim_source_status"),
             manheim_updated_at=manheim_result.get("manheim_updated_at"),
+            buyer_premium_pct=vehicle.get("buyer_premium_pct") or vehicle.get("buyer_premium"),
+            auction_fees=vehicle.get("auction_fees") or vehicle.get("doc_fee"),
         )
         result["mmr_estimated"] = mmr
+        vehicle["mmr_estimated"] = mmr
         for key in (
             "designated_lane",
             "dos_premium",
@@ -3168,30 +3189,41 @@ def build_opportunity_row(vehicle: dict) -> dict:
     source_site = _canonical_source_site(vehicle.get("source_site") or vehicle.get("source")) or None
     buyer_premium = score_result.get("buyer_premium_amount")
     if buyer_premium is None:
+        buyer_premium = score_result.get("buyer_premium")
+    if buyer_premium is None:
         buyer_premium = score_result.get("premium")
     if buyer_premium is None:
-        buyer_premium = current_bid * 0.125
+        buyer_premium = current_bid * 0.05
     buyer_premium_pct = score_result.get("buyer_premium_pct")
     if buyer_premium_pct is None:
         premium_basis = score_result.get("buyer_premium_amount")
+        if premium_basis is None:
+            premium_basis = score_result.get("buyer_premium")
         if premium_basis is None:
             premium_basis = score_result.get("premium")
         if premium_basis is not None and current_bid > 0:
             buyer_premium_pct = float(premium_basis) / current_bid
         else:
-            buyer_premium_pct = 0.125
+            buyer_premium_pct = 0.05
     else:
         buyer_premium_pct = float(buyer_premium_pct)
         if buyer_premium_pct > 1:
             buyer_premium_pct /= 100.0
     projected_buyer_premium = score_result.get("buyer_premium_amount")
     if projected_buyer_premium is None:
+        projected_buyer_premium = score_result.get("buyer_premium")
+    if projected_buyer_premium is None:
         projected_buyer_premium = score_result.get("premium")
     if projected_buyer_premium is not None:
         buyer_premium = round(float(projected_buyer_premium), 2)
     else:
         buyer_premium = round(current_bid * buyer_premium_pct, 2)
-    doc_fee = float(score_result.get("doc_fee", 75) or 75)
+    doc_fee = score_result.get("auction_fees")
+    if doc_fee is None:
+        doc_fee = score_result.get("doc_fee")
+    if doc_fee is None:
+        doc_fee = 200
+    doc_fee = float(doc_fee)
     auction_fees = round(doc_fee, 2)
     condition_grade = _compute_condition_grade(
         title=vehicle.get("title") or "",
