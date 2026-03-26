@@ -25,13 +25,19 @@
 import { Actor } from 'apify';
 
 const SOURCE = 'jjkane';
-const ALGOLIA_APP_ID = 'ICB6K32PD0';
-const ALGOLIA_SEARCH_KEY = '9d3241f7a3ee8947997deaa33cb0b249';
 const ALGOLIA_INDEX = 'api_items';
+const MARKETCHECK_URL = 'https://mc-api.marketcheck.com/v2/search/car/active';
+
+await Actor.init();
+const input = await Actor.getInput() || {};
+const ALGOLIA_APP_ID = input.algoliaAppId || process.env.ALGOLIA_APP_ID;
+const ALGOLIA_SEARCH_KEY = input.algoliaSearchKey || process.env.ALGOLIA_SEARCH_KEY;
 const ALGOLIA_URL = `https://${ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/${ALGOLIA_INDEX}/query`;
 
-const MARKETCHECK_KEY = 'cwOBTpHcggdsdrDjQVtXPe5tsWsrU5aD';
-const MARKETCHECK_URL = 'https://mc-api.marketcheck.com/v2/search/car/active';
+const MARKETCHECK_KEY = input.marketcheckKey || process.env.MARKETCHECK_KEY;
+if (!MARKETCHECK_KEY) {
+    throw new Error('Missing MARKETCHECK_KEY in actor input');
+}
 
 // Auction-to-retail discount factor (government surplus clears at 60-75% retail)
 const AUCTION_DISCOUNT = 0.70;
@@ -260,8 +266,6 @@ async function queryAlgolia({ categoryFilter, stateFilter, page = 0, hitsPerPage
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-await Actor.init();
-const input = await Actor.getInput() ?? {};
 const {
     targetStates = TARGET_STATES,
     minBid = 0,
