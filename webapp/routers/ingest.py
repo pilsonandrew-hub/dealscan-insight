@@ -33,6 +33,7 @@ from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
+telegram_router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 logger = logging.getLogger(__name__)
 
 try:
@@ -89,6 +90,7 @@ WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
 WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+ANDREW_UUID = "ff8425cd-0596-470b-b2b8-3a7a30ef4e37"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 # DeepSeek direct API (fallback if OpenRouter unavailable)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -2439,6 +2441,106 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
     except Exception as e:
         logger.error(f"[ALERT_LOG] Failed to write receipt for run_id={vehicle.get('run_id')}: {e}")
         return False
+
+
+@telegram_router.post("/callback")
+async def telegram_callback_webhook(payload: dict[str, Any]):
+    """Handle Telegram callback_query webhooks for BUY/WATCH/PASS deal buttons."""
+    callback_query = payload.get("callback_query") or {}
+    callback_id = callback_query.get("id")
+    callback_data = callback_query.get("data") or ""
+    from_user = callback_query.get("from") or {}
+    telegram_user_id = from_user.get("id")
+
+    if not callback_id or not callback_data:
+        raise HTTPException(status_code=400, detail="Invalid Telegram callback payload")
+
+    if not TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Telegram bot token not configured")
+
+    action = None
+    opportunity_id = None
+    if callback_data.startswith("buy_"):
+        action = "buy"
+        opportunity_id = callback_data.removeprefix("buy_").strip()
+    elif callback_data.startswith("watch_"):
+        action = "watch"
+        opportunity_id = callback_data.removeprefix("watch_").strip()
+    elif callback_data.startswith("pass_"):
+        action = "pass"
+        opportunity_id = callback_data.removeprefix("pass_").strip()
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported Telegram callback action")
+
+    if not opportunity_id:
+        raise HTTPException(status_code=400, detail="Missing opportunity id in callback data")
+
+    try:
+        uuid.UUID(opportunity_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid opportunity id")
+
+    async def _answer_callback(text: str) -> None:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+                json={
+                    "callback_query_id": callback_id,
+                    "text": text,
+                    "show_alert": False,
+                },
+            )
+            resp.raise_for_status()
+
+    callback_text = "Recorded"
+    try:
+        if action in {"buy", "watch"}:
+            event_type = "click" if action == "buy" else "save"
+            weight = 1 if action == "buy" else 3
+            item_data = {
+                "opportunity_id": opportunity_id,
+                "source": "telegram_button",
+                "action": action,
+            }
+            if supabase_client is not None:
+                supabase_client.table("rover_events").insert({
+                    "user_id": ANDREW_UUID,
+                    "event_type": event_type,
+                    "item_data": item_data,
+                    "weight": weight,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+            callback_text = f"Recorded {action}"
+        else:
+            if supabase_client is not None:
+                supabase_client.table("opportunities").update({
+                    "pipeline_step": "passed",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", opportunity_id).execute()
+            callback_text = "Marked as passed"
+    except Exception as exc:
+        logger.warning(
+            "[TELEGRAM] callback processing failed action=%s opportunity_id=%s user_id=%s: %s",
+            action,
+            opportunity_id,
+            telegram_user_id,
+            exc,
+        )
+        callback_text = "Callback recorded with a warning"
+
+    try:
+        await _answer_callback(callback_text)
+    except Exception as exc:
+        logger.warning("[TELEGRAM] answerCallbackQuery failed: %s", exc)
+
+    return {
+        "ok": True,
+        "action": action,
+        "opportunity_id": opportunity_id,
+        "telegram_user_id": telegram_user_id,
+    }
 
 
 async def send_telegram_alerts(hot_deals: list) -> None:
