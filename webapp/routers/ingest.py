@@ -2468,11 +2468,14 @@ async def ai_validate_hot_deals(deals: list) -> list:
     async with httpx.AsyncClient(timeout=10.0) as client:
         for deal in deals:
             deal_id = deal.get("id") or deal.get("opportunity_id") or deal.get("listing_id") or "unknown"
+            mmr_estimated = deal.get("mmr_estimated")
+            if mmr_estimated is None:
+                mmr_estimated = (deal.get("score_breakdown") or {}).get("mmr_estimated")
             prompt = (
                 "You are a vehicle arbitrage expert. Validate this deal: "
                 f"{deal.get('title')}, Year: {deal.get('year')}, Make: {deal.get('make')}, "
                 f"Model: {deal.get('model')}, Current bid: ${deal.get('current_bid')}, "
-                f"MMR estimate: ${deal.get('mmr_value')}, DOS score: {deal.get('dos_score')}, "
+                f"MMR estimate: ${mmr_estimated}, DOS score: {deal.get('dos_score')}, "
                 f"Location: {deal.get('state')}. Is this a genuine arbitrage opportunity? "
                 "Reply with VALID or INVALID and one sentence reason."
             )
