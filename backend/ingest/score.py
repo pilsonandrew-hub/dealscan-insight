@@ -511,18 +511,20 @@ def _compute_max_bid_v2(
     state: str = "",
     buyer_premium_pct: Optional[float] = None,
     auction_fees: Optional[float] = None,
+    tier: str = "premium",
 ) -> float:
     del state
     if mmr is None or mmr <= 0:
         return 0.0
-    bid_value = _coerce_float(bid) if bid is not None else mmr * 0.88
+    ceiling = 0.80 if tier == "standard" else 0.88
+    bid_value = _coerce_float(bid) if bid is not None else mmr * ceiling
     if bid_value is None or bid_value <= 0:
-        bid_value = mmr * 0.88
+        bid_value = mmr * ceiling
     premium_pct = _normalize_pct(buyer_premium_pct, 0.05)
     buyer_premium_amount = round(bid_value * premium_pct, 2)
     fees = _coerce_float(auction_fees)
     auction_fees_amount = round(fees if fees is not None else 200.0, 2)
-    return round((mmr * 0.88) - buyer_premium_amount - auction_fees_amount, 2)
+    return round((mmr * ceiling) - buyer_premium_amount - auction_fees_amount, 2)
 
 
 def score_deal(
@@ -616,7 +618,14 @@ def score_deal(
     trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
 
     bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88
-    max_bid = ((mmr * bid_ceiling_pct) - buyer_premium_amount - auction_fees_amount) if mmr > 0 else 0
+    max_bid = _compute_max_bid_v2(
+        mmr,
+        bid=bid,
+        state=state,
+        buyer_premium_pct=buyer_premium_pct_value,
+        auction_fees=auction_fees,
+        tier=vehicle_tier,
+    )
     bid_headroom = max_bid - bid
     min_margin_target = 2500.0 if vehicle_tier == "standard" else 1500.0
     ceiling_pass = bid <= max_bid and gross_margin >= min_margin_target and vehicle_tier != "rejected"

@@ -1,6 +1,8 @@
 """
 Opportunities API endpoints
 """
+import logging
+import os
 from typing import List, Optional
 from fastapi import Header, APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -13,6 +15,21 @@ from webapp.models.vehicle import Vehicle, Opportunity
 from webapp.auth import get_current_user, get_optional_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _get_supabase_client():
+    from supabase import create_client
+
+    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
+    supabase_key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+    )
+    if not supabase_url or not supabase_key:
+        raise RuntimeError("Supabase is not configured")
+    return create_client(supabase_url, supabase_key)
 
 class OpportunityResponse(BaseModel):
     id: int
@@ -253,18 +270,31 @@ async def save_opportunity(
     db: Session = Depends(get_db)
 ):
     """Mark opportunity as saved"""
-    
+    try:
+        supa = _get_supabase_client()
+        supa.table("user_opportunity_actions").upsert(
+            {
+                "user_id": current_user.id,
+                "opportunity_id": str(opportunity_id),
+                "action": "saved",
+            },
+            on_conflict="user_id,opportunity_id",
+        ).execute()
+        return {"message": "Opportunity saved"}
+    except Exception as exc:
+        logger.warning("[OPPORTUNITIES] user_opportunity_actions save failed, falling back: %s", exc)
+
     opportunity = db.query(Opportunity).filter(
         Opportunity.id == opportunity_id
     ).first()
-    
+
     if not opportunity:
         raise HTTPException(status_code=404, detail="Opportunity not found")
-    
+
     opportunity.user_action = "saved"
     opportunity.user_id = current_user.id
     db.commit()
-    
+
     return {"message": "Opportunity saved"}
 
 @router.post("/{opportunity_id}/pass")
@@ -283,12 +313,23 @@ async def pass_opportunity(
     if not user or not user.user:
         raise HTTPException(status_code=401, detail="Invalid token")
     try:
-        supa.table("user_passes").upsert(
-            {"user_id": user.user.id, "opportunity_id": opportunity_id},
-            on_conflict="user_id,opportunity_id"
+        supa.table("user_opportunity_actions").upsert(
+            {
+                "user_id": user.user.id,
+                "opportunity_id": str(opportunity_id),
+                "action": "passed",
+            },
+            on_conflict="user_id,opportunity_id",
         ).execute()
     except Exception:
-        raise HTTPException(status_code=500, detail="Failed to record pass")
+        logger.warning("[OPPORTUNITIES] user_opportunity_actions pass failed, falling back", exc_info=True)
+        try:
+            supa.table("user_passes").upsert(
+                {"user_id": user.user.id, "opportunity_id": opportunity_id},
+                on_conflict="user_id,opportunity_id"
+            ).execute()
+        except Exception:
+            raise HTTPException(status_code=500, detail="Failed to record pass")
     return {"success": True}
 
 
