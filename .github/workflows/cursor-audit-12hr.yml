@@ -1,0 +1,193 @@
+name: DealerScope Automated Audit (12hr)
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'   # Every 12 hours
+  workflow_dispatch:          # Manual trigger
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Business Rule Validation
+        id: rules
+        run: |
+          echo "=== DEALERSCOPE BUSINESS RULE AUDIT ==="
+          FAILED=0
+
+          # 1. Bid ceiling check
+          if grep -n "0\.88\|0\.80" backend/ingest/score.py | grep -q "bid_ceiling\|CEILING\|ceiling"; then
+            echo "✅ Bid ceiling constants present"
+          else
+            echo "❌ FAIL: Bid ceiling missing from score.py"
+            FAILED=1
+          fi
+
+          # 2. Standard year cutoff (must be 4yr, not 10yr)
+          if grep -n "STANDARD_YEAR_CUTOFF\|standard.*year\|year.*standard" backend/ingest/score.py | grep -qi "10\b"; then
+            echo "❌ FAIL: Standard year cutoff is 10yr — must be 4yr"
+            FAILED=1
+          else
+            echo "✅ Standard year cutoff OK"
+          fi
+
+          # 3. Standard mileage (must not be 100000)
+          if grep -n "100000\|100_000" backend/ingest/score.py | grep -qi "standard\|mileage"; then
+            echo "❌ FAIL: Standard mileage cap may be 100k — must be 50k"
+            FAILED=1
+          else
+            echo "✅ Standard mileage cap OK"
+          fi
+
+          # 4. Rust state filter present
+          if grep -rn "HIGH_RUST_STATES\|RUST_STATES" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
+            echo "✅ Rust state filter present in backend"
+          else
+            echo "❌ FAIL: Rust state filter missing from backend"
+            FAILED=1
+          fi
+
+          # 5. Zero bid protection
+          if grep -n "zero.*bid\|bid.*zero\|bid.*<= 0\|bid == 0\|not bid" backend/ingest/score.py | head -1 | grep -q .; then
+            echo "✅ Zero bid protection present"
+          else
+            echo "⚠️ WARNING: Zero bid protection may be missing in score.py"
+          fi
+
+          # 6. No hardcoded secrets
+          if grep -rn "apify_api_[A-Za-z0-9]\{20,\}\|sk-proj-[A-Za-z0-9]\|sk-ant-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" \
+            src/ backend/ webapp/ apify/ \
+            --include="*.py" --include="*.ts" --include="*.tsx" --include="*.js" 2>/dev/null \
+            | grep -v "test\|spec\|\.md\|#\|//"; then
+            echo "❌ FAIL: Hardcoded API key found in source"
+            FAILED=1
+          else
+            echo "✅ No hardcoded secrets"
+          fi
+
+          # 7. user_id filter in outcomes summary
+          if grep -A 10 "get_outcomes_summary\|outcomes_summary" webapp/routers/outcomes.py 2>/dev/null | grep -q "user_id"; then
+            echo "✅ outcomes summary filters by user_id"
+          else
+            echo "❌ FAIL: outcomes summary missing user_id filter — data leak!"
+            FAILED=1
+          fi
+
+          # 8. No localhost in frontend services
+          if grep -rn "localhost" src/services/ --include="*.ts" 2>/dev/null; then
+            echo "❌ FAIL: localhost found in frontend services"
+            FAILED=1
+          else
+            echo "✅ No localhost in frontend"
+          fi
+
+          echo ""
+          echo "=== AUDIT COMPLETE ==="
+          exit $FAILED
+
+      - name: AI Code Review (Cursor)
+        if: github.event_name == 'pull_request'
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          # Get changed files
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          DIFF=$(git diff "$BASE_SHA".."$HEAD_SHA" -- '*.py' '*.ts' '*.tsx' '*.js' '*.sql' | head -c 60000)
+
+          if [ -z "$DIFF" ]; then
+            echo "No code changes to review."
+            exit 0
+          fi
+
+          PAYLOAD=$(jq -n --arg diff "$DIFF" '{
+            "model": "cursor-fast",
+            "messages": [
+              {"role": "system", "content": "You are a senior code reviewer for DealerScope, a vehicle arbitrage platform. Review the diff and flag: 1) Auth/security issues, 2) Business rule violations (bid ceiling 0.88/0.80, min margin $1500/$2500, max age 4yr, max mileage 50k, rust state filter), 3) Silent failures, 4) Data integrity issues. Be concise and actionable."},
+              {"role": "user", "content": $diff}
+            ]
+          }')
+
+          RESPONSE=$(curl -s -X POST https://api.cursor.sh/v1/chat/completions \
+            -H "Authorization: Bearer $CURSOR_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"')
+          echo "## 🤖 Cursor AI Review" >> $GITHUB_STEP_SUMMARY
+          echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
+          echo "$REVIEW"
+
+      - name: Deep Audit (Gemini — scheduled runs only)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: "-1003672399222"
+        run: |
+          python3 << 'PYEOF'
+          import json, urllib.request, ssl, os, datetime
+
+          GEMINI_KEY = os.environ["GEMINI_KEY"]
+          BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+          CHAT_ID = os.environ.get("CHAT_ID", "")
+          ctx = ssl.create_default_context()
+
+          # Read key files for audit
+          files_to_audit = [
+            "backend/ingest/score.py",
+            "webapp/routers/ingest.py",
+            "webapp/routers/outcomes.py",
+            "webapp/routers/rover.py",
+          ]
+
+          code_bundle = ""
+          for filepath in files_to_audit:
+            try:
+              with open(filepath) as f:
+                content = f.read()[:15000]
+              code_bundle += f"\n\n### FILE: {filepath}\n{content}"
+            except FileNotFoundError:
+              pass
+
+          prompt = f"""Quick RED TEAM audit of DealerScope backend files.
+          Business rules: bid ceiling Premium=0.88 Standard=0.80, min margin $1500/$2500, max age=4yr, max mileage=50k, rust states rejected.
+          Report only CRITICAL and HIGH issues found. Format: SEVERITY | FILE | ISSUE | FIX
+          Be concise — top 10 issues max.
+          CODE:{code_bundle[:50000]}"""
+
+          payload = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.0}
+          }).encode()
+
+          url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key={GEMINI_KEY}"
+          req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+
+          try:
+            with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+              data = json.loads(r.read())
+            findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+
+            print("=== GEMINI AUDIT FINDINGS ===")
+            print(findings)
+
+            # Send to Telegram if there's anything critical
+            if findings and ("CRITICAL" in findings or "HIGH" in findings) and BOT_TOKEN:
+              now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+              msg = f"🔍 <b>DealerScope 12hr Audit — {now}</b>\n\n{findings[:3000]}"
+              tg_payload = json.dumps({"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}).encode()
+              tg_req = urllib.request.Request(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data=tg_payload, headers={"Content-Type": "application/json"}, method="POST"
+              )
+              with urllib.request.urlopen(tg_req, context=ctx) as r:
+                print("Telegram alert sent:", json.loads(r.read()).get("ok"))
+
+          except Exception as e:
+            print(f"Gemini audit error: {e}")
+          PYEOF

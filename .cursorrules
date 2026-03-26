@@ -1,107 +1,56 @@
-# DealerScope — Cursor Rules & Constitutional Law
-# Every AI agent that touches this codebase must read and obey these rules.
-# No exceptions. No negotiations. These are non-negotiable business rules.
+# DealerScope — Cursor AI Rules
+# Injected into every Cursor session automatically
 
-## PROJECT IDENTITY
-- Product: DealerScope — AI-powered wholesale vehicle arbitrage platform
-- Owner: Andrew Pilson (pilson.andrew@gmail.com)
-- Primary repo: pilsonandrew-hub/dealscan-insight
-- Backend: Railway (https://dealscan-insight-production.up.railway.app)
-- Database: Supabase (project: lbnxzvqppccajllsqaaw)
-- Scraping: Apify cloud (account: Javariousthebot)
+## Platform
+Wholesale vehicle arbitrage platform. Scrapes government auctions, scores deals using institutional dealer logic, surfaces profitable vehicles to buy below MMR and resell to dealers at Manheim.
 
-## BUSINESS RULES — HARD LIMITS (NEVER VIOLATE)
-- Bid ceiling: NEVER exceed 88% of MMR all-in (COST_TO_MARKET_MAX = 0.88)
-- Minimum gross margin: $1,500 — reject anything below this
-- Minimum ROI: "hot" = >20%, "good" = >12%
-- Maximum vehicle age: 4 years
-- Maximum mileage: 50,000 miles
-- MDS threshold: 35 days (2026 institutional standard)
-- CPO premium: 10-15% above standard MMR for 1-3yr old, clean title vehicles
-- DOS score thresholds: save≥50, Rover display≥65, Telegram alert≥80
+## Non-Negotiable Business Rules (ENFORCE ALWAYS)
+- Bid ceiling: Premium = 88% of MMR all-in | Standard = 80% of MMR all-in
+- Min gross margin: Premium = $1,500 | Standard = $2,500
+- Min ROI: hot >20%, good >12%
+- Max vehicle age: 4 years (NO EXCEPTIONS in scoring)
+- Max mileage: 50,000 miles (NO EXCEPTIONS in scoring)
+- High-rust states HARD REJECT: OH, MI, PA, NY, WI, MN, IL, IN, MO, IA, ND, SD, NE, KS, WV, ME, NH, VT, MA, RI, CT, NJ, MD, DE
+- Exception: Vehicles <= currentYear - 2 bypass rust state rejection (newer cars haven't rusted yet)
+- DOS score threshold: >= 50 to save, >= 65 for Rover display, >= 80 for alert
 
-## DOS SCORING FORMULA (CANONICAL — DO NOT CHANGE WITHOUT APPROVAL)
-DOS = Margin×0.35 + Velocity×0.25 + Segment×0.20 + Model×0.12 + Source×0.08
+## DOS Scoring Formula
+Margin×0.35 + Velocity×0.25 + Segment×0.20 + Model×0.12 + Source×0.08
 
-## RUST STATE REJECTION (HARD FILTER — WITH NEW VEHICLE EXCEPTION)
-REJECTED: OH, MI, PA, NY, WI, MN, IL, IN, MO, IA, ND, SD, NE, KS, WV, ME, NH, VT, MA, RI, CT, NJ, MD, DE
-EXCEPTION: High-rust states ALLOWED if vehicle is ≤3 years old (model year >= current_year - 2, i.e. 2024+ for 2026).
-  Rationale: Newer vehicles haven't had time to accumulate rust damage. Flag as rust_state_bypass=True.
-TARGET: AZ, CA, NV, CO, NM, UT, TX, FL, GA, SC, TN, NC, VA, WA, OR, HI
+## Architecture (Never Change Without Approval)
+- `backend/main.py` = canonical entrypoint
+- `webapp/routers/ingest.py` = Apify webhook handler
+- `webapp/routers/rover.py` = recommendation engine
+- `webapp/routers/outcomes.py` = deal outcomes tracking
+- `backend/ingest/score.py` = DOS scoring engine
+- `src/` = canonical frontend (React 18 + TypeScript + Tailwind)
+- Rover is a FastAPI module — NOT a separate microservice
+- No automated bidding ever
+- No SaaS/multi-tenant features
 
-## ARCHITECTURE DECISIONS (FINAL — DO NOT REVISIT)
-- backend/main.py = canonical entrypoint (NOT webapp/main.py — that is deprecated)
-- src/ = canonical frontend (frontend/ was deleted)
-- Rover lives inside FastAPI — NEVER a separate Express/TypeScript microservice
-- ModernAuthContext.tsx = the ONE auth context (no alternatives)
-- 5 tabs only: Dashboard, Crosshair, Rover, Analytics, Settings (no additions without approval)
-- No automated bidding — SniperScope sends alerts only, human pulls the trigger
-- No SaaS/multi-tenant until paying users exist
-- Scraping belongs in Apify actors only — NEVER in browser or frontend code
+## Security Rules (Flag Immediately)
+- No hardcoded API keys, tokens, or secrets in any file
+- All webhook endpoints must validate HMAC signature
+- All user data endpoints must filter by authenticated user_id
+- No service role client where anon client suffices
+- Validate apify_run_id against regex before URL injection
+- Zero-bid vehicles must never be scored (infinite ROI bug)
 
-## THREE CORE MODULES
-1. Crosshair — Active targeting (user specifies search criteria)
-2. Sniper (formerly SniperScope) — Bid assistant with T-60/15/5 Telegram alerts
-3. Rover — Passive AI that learns preferences and surfaces deals autonomously
+## Code Standards
+- Python: FastAPI, Supabase client, proper error handling (fail closed, not open)
+- JavaScript/TypeScript: No unguarded JSON.parse, no unguarded Date parsing
+- All business rule constants defined at top of file, never inline magic numbers
+- Every exception handler must log before returning generic error
+- Never swallow DB write failures silently
 
-## ROVER EVENT WEIGHTS
-view=0.2, click=1, save=3, bid=5, purchase=8 | Decay half-life: 72 hours
-pass=-1.5 (negative signal — vehicle was explicitly rejected)
+## Known Issues Being Fixed (Don't Regress)
+- Standard lane bid ceiling must be 0.80, NOT 0.88
+- CURRENT_YEAR must be computed dynamically, not frozen at import time
+- score.py: STANDARD_YEAR_CUTOFF must be CURRENT_YEAR - 4, not CURRENT_YEAR - 10
+- score.py: Standard mileage max must be 50k, not 100k
+- outcomes.py: get_outcomes_summary MUST filter by user_id
+- rover.py: Recommendations must enforce business rules before returning
+- ds-allsurplus: webhook secret must come from env var, not hardcoded
 
-## SECURITY RULES
-- NEVER hardcode API keys, tokens, or secrets in source code
-- All secrets come from environment variables only
-- Webhook authentication uses X-Apify-Webhook-Secret header
-- SECRET_KEY must be set in production — raise RuntimeError if missing
-- No sensitive data in git history, comments, or logs
-
-## CROSS-REVIEW PROTOCOL (MANDATORY)
-- Claude Code builds → Codex reviews
-- Codex builds → Claude Code reviews
-- Both must sign off before merging to main
-- Cursor is the 3rd reviewer — block merge if business rules are violated
-
-## APIFY ACTORS (14 active — DO NOT DELETE OR MODIFY WEBHOOKS WITHOUT AUDIT)
-All actors use webhook: https://dealscan-insight-production.up.railway.app/api/ingest/apify
-All actors use header: X-Apify-Webhook-Secret (value in Railway env)
-Actors: ds-govdeals, ds-publicsurplus, ds-hibid, ds-municibid, ds-gsaauctions,
-        ds-allsurplus, ds-bidcal, ds-auctiontime, ds-govplanet, ds-proxibid,
-        ds-equipmentfacts, ds-usgovbid, ds-jjkane, ds-bidspotter
-
-## KEY FILES — KNOW THESE
-- backend/ingest/score.py — DOS scoring (source of truth for scoring logic)
-- backend/rover/heuristic_scorer.py — Rover preference learning engine
-- webapp/routers/ingest.py — Apify webhook → normalize → score → Supabase
-- webapp/routers/rover.py — Rover API endpoints
-- webapp/routers/sniper.py — Sniper alert system
-- webapp/routers/saved_searches.py — Saved search + alert system
-- webapp/routers/vin.py — VIN decoder + instant scoring
-- src/services/roverAPI.ts — Frontend Rover calls (must use Railway URL, never localhost)
-- src/services/api.ts — Frontend API calls (must use Railway URL, never localhost)
-- apify/deployment.json — Actor and schedule IDs
-
-## WHAT GOOD CODE LOOKS LIKE HERE
-- Python backend: FastAPI, type hints, Pydantic models, proper error handling
-- TypeScript frontend: React 18, Tailwind, shadcn/ui, mobile-first responsive
-- No inline secrets, no hardcoded URLs, no localhost in production paths
-- Every new endpoint needs: auth check, input validation, error handling, logging
-- Every new Apify actor needs: webhook, 3hr schedule, Dockerfile with playwright base
-
-## NOTION INTEGRATION
-- Database: "Dealerscope Deals" (ID: 32034c00de4c80fdae18eb02848a9f39)
-- Integration: DealerScope Bot (token in Railway env as NOTION_TOKEN)
-- Deals sync automatically via sync_to_notion() in ingest.py
-
-## RAILWAY ENVIRONMENT
-- Project: exemplary-mercy (54a9370c-89ae-41fe-ac64-c01d8c2fbaad)
-- Service: dealscan-insight (fbc5a039-4de7-468c-abb1-71dcdaf47f38)
-- All env vars set in Railway — never in .env file for production
-
-## WHAT NEVER TO DO
-- Do not write to the old Dealerscope repo (it is archived)
-- Do not create a 6th tab without explicit approval
-- Do not add automated bidding logic
-- Do not add multi-tenant/SaaS features until paying users exist
-- Do not run heavy brew installs during active chat sessions (kills gateway)
-- Do not self-modify heartbeat config or OpenClaw settings autonomously
-- Do not trust Codex session exit code 0 as proof of success — verify with git log
+## Repo
+https://github.com/pilsonandrew-hub/dealscan-insight
