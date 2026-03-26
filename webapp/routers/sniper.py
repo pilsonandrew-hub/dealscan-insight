@@ -27,6 +27,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException
+from backend.ingest.score import HIGH_RUST_STATES
 
 router = APIRouter(prefix="/api/sniper", tags=["sniper"])
 logger = logging.getLogger(__name__)
@@ -221,7 +222,11 @@ async def create_sniper_target(
 
     if not opportunity_id:
         raise HTTPException(status_code=400, detail="opportunity_id is required")
-    if not max_bid or float(max_bid) <= 0:
+    try:
+        max_bid_value = float(max_bid)
+    except (TypeError, ValueError):
+        max_bid_value = None
+    if max_bid_value is None or max_bid_value <= 0:
         raise HTTPException(status_code=400, detail="max_bid must be a positive number")
 
     if not supa:
@@ -231,7 +236,7 @@ async def create_sniper_target(
     try:
         opp_resp = (
             supa.table("opportunities")
-            .select("id, auction_end_date, year, make, model, current_bid")
+            .select("id, auction_end_date, year, make, model, current_bid, state, vehicle_tier, max_bid")
             .eq("id", str(opportunity_id))
             .limit(1)
             .execute()
@@ -240,6 +245,28 @@ async def create_sniper_target(
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
         opp = opp_resp.data[0]
+        current_year = datetime.now(timezone.utc).year
+        vehicle_tier = str(opp.get("vehicle_tier") or "").strip().lower()
+        if vehicle_tier == "rejected":
+            raise HTTPException(status_code=422, detail="Vehicle does not meet tier requirements")
+
+        state = str(opp.get("state") or "").upper().strip()
+        if state in HIGH_RUST_STATES:
+            try:
+                model_year = int(float(opp.get("year")))
+            except (TypeError, ValueError):
+                model_year = None
+            if model_year is None or model_year < current_year - 2:
+                raise HTTPException(status_code=422, detail="Rust state vehicle not eligible")
+
+        opportunity_max_bid = opp.get("max_bid")
+        try:
+            opportunity_max_bid_value = float(opportunity_max_bid) if opportunity_max_bid is not None else None
+        except (TypeError, ValueError):
+            opportunity_max_bid_value = None
+        if opportunity_max_bid_value is not None and max_bid_value > opportunity_max_bid_value:
+            raise HTTPException(status_code=422, detail="Max bid exceeds computed ceiling")
+
         auction_end = opp.get("auction_end_date")
         if auction_end:
             try:
@@ -284,7 +311,7 @@ async def create_sniper_target(
         row = {
             "user_id": user_id,
             "opportunity_id": str(opportunity_id),
-            "max_bid": float(max_bid),
+            "max_bid": max_bid_value,
             "status": "active",
             "alert_60min_sent": False,
             "alert_15min_sent": False,
