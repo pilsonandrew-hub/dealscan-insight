@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from typing import Optional
 
 
@@ -9,6 +10,24 @@ STANDARD_YEAR_CUTOFF = CURRENT_YEAR - 10
 HIGH_RUST_STATES = {
     "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD", "NE", "KS", "WV",
     "ME", "NH", "VT", "MA", "RI", "CT", "NJ", "MD", "DE",
+}
+
+HIGH_DEMAND_MODELS = {
+    "camry",
+    "corolla",
+    "civic",
+    "accord",
+    "f-150",
+    "f150",
+    "f-250",
+    "f250",
+    "silverado",
+    "rav4",
+    "cr-v",
+    "crv",
+    "highlander",
+    "tacoma",
+    "wrangler",
 }
 
 
