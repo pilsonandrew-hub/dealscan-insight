@@ -11,7 +11,9 @@ Redis affinity vectors added (2026-03-14):
 - increment_affinity() called after each event (non-fatal if Redis down)
 - get_recommendations() re-ranks by affinity boost (up to +15 pts)
 """
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, status
+from supabase import Client, create_client
+from supabase.lib.client_options import ClientOptions
 from typing import Optional
 from datetime import datetime, timezone
 import time
@@ -27,16 +29,15 @@ _event_rate: dict[str, list[float]] = {}
 _VALID_EVENT_TYPES = ['view', 'click', 'save', 'bid', 'purchase', 'pass']
 
 # Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
-_supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
-# NOTE: Using service role key — bypasses RLS. Switch to anon key + user JWT for multi-tenant.
-# Safe for single-user deployment. Fix before dealer onboarding.
-_supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 
-supa = None
+# Background-only client for auth verification and non-request tasks.
+_background_supabase_client: Optional[Client] = None
 try:
-    if _supabase_url and _supabase_key:
-        from supabase import create_client
-        supa = create_client(_supabase_url, _supabase_key)
+    background_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or SUPABASE_ANON_KEY
+    if SUPABASE_URL and background_key:
+        _background_supabase_client = create_client(SUPABASE_URL, background_key)
 except Exception as _e:
     logger.warning(f"Rover Supabase client init failed (non-fatal): {_e}")
 
@@ -50,6 +51,40 @@ try:
         logger.info("[ROVER] Redis not configured — affinity disabled")
 except Exception as _re:
     logger.warning(f"[ROVER] Redis affinity init failed (non-fatal): {_re}")
+
+
+def get_user_supabase_client(authorization: str = Header(..., alias="Authorization")) -> Client:
+    """Create a user-scoped Supabase client that forwards the caller JWT for RLS."""
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase configuration missing (URL or anon key).",
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format. Expected 'Bearer <token>'.",
+        )
+
+    token = authorization.replace("Bearer ", "", 1).strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token.",
+        )
+
+    try:
+        return create_client(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY,
+            options=ClientOptions(headers={"Authorization": f"Bearer {token}"}),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {exc}",
+        )
 
 
 def _coerce_number(value, default: float = 0.0) -> float:
@@ -136,12 +171,12 @@ def _verify_auth(authorization: Optional[str]) -> str:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     token = authorization.split(" ", 1)[1]
-    if not supa:
+    if not _background_supabase_client:
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     try:
         # Verify token against Supabase auth
-        user = supa.auth.get_user(token)
+        user = _background_supabase_client.auth.get_user(token)
         if not user or not user.user:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
         return user.user.id
@@ -156,6 +191,7 @@ async def get_recommendations(
     user_id: str,
     limit: int = 20,
     authorization: Optional[str] = Header(None),
+    supabase_client: Client = Depends(get_user_supabase_client),
 ):
     """Get personalized deal recommendations for a user."""
     # Verify auth and ensure user can only see their own recommendations
@@ -163,16 +199,13 @@ async def get_recommendations(
     if auth_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    if not supa:
-        raise HTTPException(status_code=503, detail="Service unavailable")
-
     try:
         now_ms = time.time() * 1000
         effective_limit = max(1, min(limit, 20))
         # Fetch a wider pool so affinity re-ranking has room to surface better matches
         fetch_limit = min(effective_limit * 3, 60)
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        opps_resp = supa.table("opportunities")\
+        opps_resp = supabase_client.table("opportunities")\
             .select("*")\
             .gte("dos_score", 65)\
             .order("dos_score", desc=True)\
@@ -186,7 +219,7 @@ async def get_recommendations(
         # --- Heuristic preference vector (from event history) ---
         heuristic_prefs: dict[str, float] = {}
         try:
-            events_resp = supa.table("rover_events")\
+            events_resp = supabase_client.table("rover_events")\
                 .select("event_type,item_data,timestamp")\
                 .eq("user_id", user_id)\
                 .order("timestamp", desc=True)\
@@ -275,6 +308,7 @@ async def get_recommendations(
 async def track_event(
     payload: dict,
     authorization: Optional[str] = Header(None),
+    supabase_client: Client = Depends(get_user_supabase_client),
 ):
     """Track a user interaction event for preference learning."""
     # Validate event_type before JWT auth (fail fast)
@@ -291,9 +325,6 @@ async def track_event(
     if len(bucket) >= 10:
         raise HTTPException(status_code=429, detail="Too many events, slow down")
     bucket.append(now_ts)
-
-    if not supa:
-        raise HTTPException(status_code=503, detail="Service unavailable")
 
     # Ensure userId matches authenticated user (prevent poisoning other users' vectors)
     payload_user_id = payload.get("userId") or payload.get("user_id")
@@ -320,7 +351,7 @@ async def track_event(
                 logger.debug(f"[ROVER] Dedup check failed (non-fatal): {_de}")
 
         # Store raw weight — decay is applied at read time in build_preference_vector()
-        insert_result = supa.table("rover_events").insert({
+        insert_result = supabase_client.table("rover_events").insert({
             "user_id": auth_user_id,
             "event_type": event_type,
             "item_data": item_data,
