@@ -100,6 +100,7 @@ app.include_router(upload.router, prefix="/upload", tags=["Data Upload"])
 app.include_router(ml.router, prefix="/ml", tags=["Machine Learning"])
 app.include_router(admin.router, prefix="/admin", tags=["Administration"])
 app.include_router(ingest.router)
+app.include_router(ingest.telegram_router)
 app.include_router(sniper.router)
 app.include_router(outcomes.router, prefix="/api")
 if recon_module:
