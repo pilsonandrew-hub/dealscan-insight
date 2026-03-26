@@ -642,6 +642,11 @@ def score_deal(
         1,
     )
 
+    # AI confidence gate — thresholds tighten as data quality improves
+    # Standard needs >= 60, Premium >= 50 (will raise to 85/70 when condition data is richer)
+    ai_conf_threshold = 60.0 if vehicle_tier == "standard" else 50.0
+    ceiling_pass = ceiling_pass and (vehicle_tier == "rejected" or ai_confidence_score >= ai_conf_threshold)
+
     return {
         "dos_score": selected_dos,
         "score": selected_dos,
