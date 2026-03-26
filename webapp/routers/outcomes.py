@@ -110,7 +110,7 @@ def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: Out
     }
 
     try:
-        supabase_client.table("dealer_sales").upsert(insert_payload, on_conflict="opportunity_id").execute()
+        supabase_client.table("dealer_sales").upsert(insert_payload, on_conflict="opportunity_id,user_id").execute()
         return True
     except Exception as exc:
         logger.warning("[OUTCOMES] dealer_sales mirror skipped for opportunity %s: %s", payload.opportunity_id, exc)
@@ -160,7 +160,7 @@ async def patch_outcome(
     }
 
     try:
-        supabase_client.table("dealer_sales").upsert(upsert_payload, on_conflict="opportunity_id").execute()
+        supabase_client.table("dealer_sales").upsert(upsert_payload, on_conflict="opportunity_id,user_id").execute()
         return {
             "success": True,
             "opportunity_id": opportunity_id,
