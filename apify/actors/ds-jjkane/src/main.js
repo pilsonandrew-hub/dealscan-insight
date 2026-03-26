@@ -431,7 +431,7 @@ if (effectiveWebhookUrl && totalPassed > 0) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-webhook-secret': effectiveWebhookSecret,
+                'X-Apify-Webhook-Secret': effectiveWebhookSecret,
             },
             body: JSON.stringify({
                 source: SOURCE,
