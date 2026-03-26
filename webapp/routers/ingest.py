@@ -1405,8 +1405,8 @@ async def pass_opportunity(
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    opp_resp = supa.table("opportunities").select("id,user_id").eq("id", opportunity_id).maybe_single().execute()
-    if not opp_resp.data:
+    opp_check = supa.table("opportunities").select("id").eq("id", opportunity_id).maybe_single().execute()
+    if not opp_check or not opp_check.data:
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
     # Write to user_passes table
@@ -1629,24 +1629,29 @@ def normalize_apify_vehicle(
         # Source
         source = _infer_source_site(item, source_hint=source_hint)
 
+        buyer_premium_pct = _extract_numeric_field(include_any=("pct", "percent", "rate", "%"))
+        buyer_premium = _extract_numeric_field(
+            include_any=("buyer_premium", "premium", "fee", "amount", "flat"),
+            exclude_any=("doc", "auction", "pct", "percent", "rate", "%"),
+        )
+        doc_fee = _extract_numeric_field(
+            include_any=("doc_fee", "doc fee", "documentation_fee", "documentation fee", "docfee"),
+            exclude_any=("auction", "fee", "fees", "pct", "percent", "rate", "%"),
+        )
+        auction_fees = _extract_numeric_field(
+            include_any=("auction_fees", "auction fee", "auction_fee", "auctionfee"),
+            exclude_any=("doc", "documentation", "pct", "percent", "rate", "%"),
+        )
+
         normalized = {
             "listing_id": _compute_listing_id(source, listing_url),
             "title": title,
             "title_status": item.get("title_status") or item.get("titleStatus") or "",
             "current_bid": current_bid,
-            "buyer_premium_pct": _extract_numeric_field(include_any=("pct", "percent", "%")),
-            "buyer_premium": _extract_numeric_field(
-                include_any=("buyer_premium", "premium"),
-                exclude_any=("pct", "percent", "%"),
-            ),
-            "doc_fee": _extract_numeric_field(
-                include_any=("doc_fee", "doc fee", "documentation_fee", "documentation fee", "docfee"),
-                exclude_any=("pct", "percent", "%"),
-            ),
-            "auction_fees": _extract_numeric_field(
-                include_any=("auction_fees", "auction fee", "auction_fee", "auctionfee"),
-                exclude_any=("pct", "percent", "%"),
-            ),
+            "buyer_premium_pct": buyer_premium_pct,
+            "buyer_premium": buyer_premium,
+            "doc_fee": doc_fee,
+            "auction_fees": auction_fees,
             "mileage": mileage,
             "state": state,
             "location": (
@@ -1810,12 +1815,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
     }
     source = _source_aliases.get(source, source)
 
-    # Government/auction sources: lower min bid only.
-    gov_sources_bid = {"publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter", "hibid"}
-    is_gov = source in gov_sources_bid
-    min_bid = 500 if is_gov else 3000
-    # Allow bid=0 for gov sources (auction not yet open — e.g. JJKane pre-auction lots)
-    if (bid > 0 and bid < min_bid) or bid > 35000:
+    if bid < 3000 or bid > 35000:
         return {"pass": False, "reason": f"bid_out_of_range (${bid:,.0f})"}
 
     # Reject non-US states (Canadian provinces, garbage codes)

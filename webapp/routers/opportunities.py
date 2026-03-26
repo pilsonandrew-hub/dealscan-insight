@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from webapp.database import get_db
 from webapp.models.user import User
 from webapp.models.vehicle import Vehicle, Opportunity
-from webapp.auth import get_current_user, get_optional_user
+from webapp.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -208,7 +208,7 @@ async def list_saved_opportunities(
 async def get_opportunity(
     opportunity_id: int,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Get specific opportunity details"""
     

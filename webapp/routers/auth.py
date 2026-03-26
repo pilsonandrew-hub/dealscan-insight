@@ -1,8 +1,10 @@
 """
 Authentication router with JWT and TOTP support
 """
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -18,6 +20,16 @@ from webapp.auth import get_current_user, log_security_event
 
 router = APIRouter()
 security = HTTPBearer()
+_login_attempts: dict = defaultdict(list)
+
+
+def _check_rate_limit(identifier: str, max_attempts: int = 10, window_seconds: int = 60):
+    now = time.time()
+    attempts = [t for t in _login_attempts[identifier] if now - t < window_seconds]
+    _login_attempts[identifier] = attempts
+    if len(attempts) >= max_attempts:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+    _login_attempts[identifier].append(now)
 
 # Pydantic models
 class LoginRequest(BaseModel):
@@ -52,6 +64,7 @@ async def login(
     db: Session = Depends(get_db)
 ):
     """Authenticate user and return tokens"""
+    _check_rate_limit(login_data.username)
     
     # Find user
     user = db.query(User).filter(
