@@ -15,6 +15,7 @@ Fixes applied (2026-03-11):
 - Dataset ID format validated before fetch
 """
 from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks
+from fastapi.responses import JSONResponse
 from typing import Any, Optional
 import hmac
 import hashlib
@@ -493,7 +494,7 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
         return {"is_duplicate": True, "canonical_record_id": existing_id, "canonical_update": canonical_update}
     except Exception as lookup_error:
         logger.warning(f"[DEDUP] check failed: {lookup_error}")
-        return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
+        raise
 
 
 def _parse_datetime_utc(raw_value) -> Optional[datetime]:
@@ -855,6 +856,9 @@ async def _process_webhook_items(
         if not dataset_id and apify_run_id and apify_token:
             import httpx
             try:
+                if not re.match(r'^[a-zA-Z0-9_-]{5,50}$', str(apify_run_id)):
+                    logger.warning('[INGEST] Suspicious apify_run_id rejected: %s', apify_run_id)
+                    return JSONResponse({'status': 'rejected'}, status_code=400)
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     run_resp = await client.get(
                         f"https://api.apify.com/v2/actor-runs/{apify_run_id}",
@@ -1090,7 +1094,13 @@ async def _process_webhook_items(
 
             dedup = {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
             if vehicle["dos_score"] >= 50:
-                dedup = check_and_handle_duplicate(supabase_client, vehicle)
+                try:
+                    dedup = check_and_handle_duplicate(supabase_client, vehicle)
+                except Exception as dedup_err:
+                    logger.error("[DEDUP] lookup failed; skipping item %s: %s", vehicle.get("title", "?"), dedup_err)
+                    skipped += 1
+                    _increment_reason_counter(skip_reasons, "dedup_exception")
+                    continue
             is_dup = dedup["is_duplicate"]
             if is_dup:
                 vehicle["is_duplicate"] = True
@@ -1395,6 +1405,10 @@ async def pass_opportunity(
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    opp_resp = supa.table("opportunities").select("id,user_id").eq("id", opportunity_id).maybe_single().execute()
+    if not opp_resp.data:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
     # Write to user_passes table
     try:
         supa.table("user_passes").upsert({
@@ -1556,23 +1570,35 @@ def normalize_apify_vehicle(
         from backend.ingest.score import determine_vehicle_tier
         vehicle_tier = determine_vehicle_tier(year, item.get("mileage") or item.get("meterCount") or item.get("odometer"))
 
-        # Skip high rust states at normalize time — bypass allowed for ≤8yr old vehicles
-        # (Consistent with MEMORY.md rule: vehicles ≤3yr bypass rust rejection, but
-        #  government fleet sources can be older — use 8yr to match gov source max age)
+        # Skip high rust states at normalize time using the same rule for every source.
         if state in HIGH_RUST_STATES:
             current_year = datetime.now().year
-            source_check = (item.get("source_site") or item.get("source") or "").lower()
-            gov_rust_bypass = {"govplanet", "municibid", "usgovbid", "jjkane", "publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions"}
-            max_rust_age = 8 if source_check in gov_rust_bypass else 2
-            if not year or year < current_year - max_rust_age:
+            if not year or year < current_year - 2:
                 return None
-            logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤{max_rust_age}yr old)')
+            logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤2yr old)')
 
         # Bid: parseforge uses currentBid, ours uses current_bid
         current_bid = float(item.get("currentBid") or item.get("current_bid") or 0)
 
         # Mileage: parseforge puts in meterCount when type is odometer; jjkane uses odometer
         mileage = item.get("mileage") or item.get("meterCount") or item.get("odometer")
+        if not mileage and mileage != 0:
+            return None
+
+        def _extract_numeric_field(*, include_any: tuple[str, ...], exclude_any: tuple[str, ...] = ()) -> Optional[float]:
+            for key, value in item.items():
+                key_text = str(key).lower()
+                if not any(token in key_text for token in include_any):
+                    continue
+                if exclude_any and any(token in key_text for token in exclude_any):
+                    continue
+                if value in {None, ""}:
+                    continue
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+            return None
 
         # End time: parseforge uses auctionEndUtc
         time_anchor = (
@@ -1608,25 +1634,18 @@ def normalize_apify_vehicle(
             "title": title,
             "title_status": item.get("title_status") or item.get("titleStatus") or "",
             "current_bid": current_bid,
-            "buyer_premium_pct": (
-                float(item["buyer_premium_pct"])
-                if item.get("buyer_premium_pct") not in {None, ""}
-                else float(item["buyer_premium"]) if item.get("buyer_premium") not in {None, ""} else None
+            "buyer_premium_pct": _extract_numeric_field(include_any=("pct", "percent", "%")),
+            "buyer_premium": _extract_numeric_field(
+                include_any=("buyer_premium", "premium"),
+                exclude_any=("pct", "percent", "%"),
             ),
-            "buyer_premium": (
-                float(item["buyer_premium_pct"])
-                if item.get("buyer_premium_pct") not in {None, ""}
-                else float(item["buyer_premium"]) if item.get("buyer_premium") not in {None, ""} else None
+            "doc_fee": _extract_numeric_field(
+                include_any=("doc_fee", "doc fee", "documentation_fee", "documentation fee", "docfee"),
+                exclude_any=("pct", "percent", "%"),
             ),
-            "doc_fee": (
-                float(item["auction_fees"])
-                if item.get("auction_fees") not in {None, ""}
-                else float(item["doc_fee"]) if item.get("doc_fee") not in {None, ""} else None
-            ),
-            "auction_fees": (
-                float(item["auction_fees"])
-                if item.get("auction_fees") not in {None, ""}
-                else float(item["doc_fee"]) if item.get("doc_fee") not in {None, ""} else None
+            "auction_fees": _extract_numeric_field(
+                include_any=("auction_fees", "auction fee", "auction_fee", "auctionfee"),
+                exclude_any=("pct", "percent", "%"),
             ),
             "mileage": mileage,
             "state": state,
@@ -1791,7 +1810,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
     }
     source = _source_aliases.get(source, source)
 
-    # Government/auction sources: lower min bid, higher age/mileage tolerance
+    # Government/auction sources: lower min bid only.
     gov_sources_bid = {"publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "bidspotter", "hibid"}
     is_gov = source in gov_sources_bid
     min_bid = 500 if is_gov else 3000
@@ -1805,11 +1824,9 @@ def passes_basic_gates(vehicle: dict) -> dict:
 
     if state in HIGH_RUST_STATES:
         current_year = datetime.now().year
-        # Gov fleet sources run older vehicles — allow up to 8yr in rust states
-        max_rust_age = 8 if is_gov else 2
-        if not year or year < current_year - max_rust_age:
+        if not year or year < current_year - 2:
             return {"pass": False, "reason": f"high_rust_state ({state})"}
-        logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤{max_rust_age}yr old)')
+        logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤2yr old)')
 
     title_brand_issue = _find_title_brand_issue(vehicle)
     if title_brand_issue:
@@ -1822,30 +1839,11 @@ def passes_basic_gates(vehicle: dict) -> dict:
     if _is_commercial_hd_tonnage(title):
         return {"pass": False, "reason": f"commercial_hd_tonnage ({title[:50]})"}
 
-    if not year:
-        # Missing year = pass through (can't confirm age, benefit of the doubt)
-        # Per business rules: null year should not block a potentially good deal
-        pass  # continue to next checks without year-based filtering
-
     current_year = datetime.now().year
-    # Government/public auction sources run older fleet vehicles — allow up to 20 years
-    gov_sources = {"publicsurplus", "publicsurplus_tx", "govdeals", "gsaauctions", "govplanet", "municibid", "usgovbid", "jjkane", "hibid"}
-    max_age = 20 if source in gov_sources else 4
-    if year:
-        age = current_year - year
-    else:
-        age = 0  # unknown year — skip age check
-    if year and (age > max_age or age < 0):
-        return {"pass": False, "reason": f"age_exceeded ({age} years, max {max_age} for {source})"}
-
-    if mileage is not None:
-        try:
-            # Gov fleet vehicles run 100k–200k miles routinely — higher cap for gov sources
-            max_mileage = 200000 if is_gov else 50000
-            if float(mileage) > max_mileage:
-                return {"pass": False, "reason": f"mileage_exceeded ({mileage:,} mi)"}
-        except (ValueError, TypeError):
-            pass  # No mileage data is OK at this stage
+    from backend.ingest.score import determine_vehicle_tier
+    vehicle_tier = determine_vehicle_tier(year, mileage)
+    if vehicle_tier == "rejected":
+        return {"pass": False, "reason": "age_or_mileage_exceeded"}
 
     if not vehicle.get("listing_url"):
         return {"pass": False, "reason": "no_listing_url"}
@@ -2035,7 +2033,7 @@ def _fallback_score(vehicle: dict) -> dict:
         "max_bid": 0,
         "bid_headroom": 0,
         "ceiling_reason": "fallback_score",
-        "ceiling_pass": True,
+        "ceiling_pass": False,
     }
 
 
@@ -2428,7 +2426,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
         "channel": "telegram",
         "delivery_state": "sent",
         "sent_at": datetime.now(timezone.utc).isoformat(),
-        "dos_score": score_result.get("dos_score", vehicle.get("dos_score")),
+        "dos_score": vehicle.get("score_breakdown", {}).get("dos_score", vehicle.get("dos_score", 0)),
         "vehicle_title": (
             f"{vehicle.get('year', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip()
             or vehicle.get("title")
@@ -3158,7 +3156,7 @@ def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str],
     - existing_id: the ID of the existing record, or None if no duplicate
     - should_update: True if new score is higher and we should UPDATE instead of skip
 
-    Non-fatal: logs errors and returns (None, False) on failure so insert proceeds.
+    Fail closed: any lookup error is raised so the caller can skip the item.
     """
     if supabase_client is None:
         return None, False
@@ -3180,7 +3178,7 @@ def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str],
             return existing_id, should_update
     except Exception as vin_check_err:
         logger.warning("[DEDUP] VIN duplicate check failed for VIN %s: %s", vin, vin_check_err)
-    return None, False
+        raise
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
@@ -3198,7 +3196,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
     if normalized_vin != raw_vin:
         row["vin"] = normalized_vin
 
-    # VIN deduplication check — non-fatal, skip or update if duplicate found
+    # VIN deduplication check — skip the item if the lookup fails.
     if normalized_vin:
         try:
             existing_id, should_update = _check_vin_duplicate(normalized_vin, float(score))
@@ -3230,7 +3228,8 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                     vehicle["_save_status"] = "vin_dedup_skipped"
                     return existing_id
         except Exception as dedup_err:
-            logger.warning("[DEDUP] VIN dedup logic error for VIN %s: %s — proceeding with insert", normalized_vin, dedup_err)
+            logger.warning("[DEDUP] VIN dedup logic error for VIN %s: %s", normalized_vin, dedup_err)
+            raise
 
     if supabase_client is not None:
         try:

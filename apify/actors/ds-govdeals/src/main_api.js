@@ -78,7 +78,9 @@ function passes(item) {
     if (bid < minBid || bid > maxBid) return false;
     const year = parseInt(item.modelYear || item.year || 0);
     const currentYear = new Date().getFullYear();
-    if (year && (currentYear - year) > 12) return false;
+    if (year && (currentYear - year) > 10) return false;
+    const mileage = parseInt(item.meterCount || item.meter_count || 0);
+    if (mileage > 0 && mileage > 100000) return false;
     if (HIGH_RUST_STATES.has(state)) {
         if (!(year && year >= currentYear - 2)) return false;
         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
@@ -257,14 +259,14 @@ const crawler = new PlaywrightCrawler({
                 log.warning('Cannot paginate — searchPayload or searchUrl missing');
             }
 
-            // Step 3: Push all passing lots immediately (before VIN scraping to prevent data loss on timeout)
+            // Step 3: VIN enrichment before pushing so populated VINs are preserved in the dataset
+            await scrapeDetailPagesForVin(page, passingLots, log);
+
+            // Step 4: Push all passing lots after VIN enrichment completes
             for (const lot of passingLots) {
                 await Actor.pushData(lot);
             }
             log.info(`[GOVDEALS] Pushed ${passingLots.length} lots to dataset`);
-
-            // Step 4: VIN enrichment (best-effort, non-blocking)
-            await scrapeDetailPagesForVin(page, passingLots, log);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');

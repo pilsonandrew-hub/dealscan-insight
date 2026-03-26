@@ -3,9 +3,8 @@ import re
 from typing import Optional
 
 
-CURRENT_YEAR = datetime.now().year
-PREMIUM_YEAR_CUTOFF = CURRENT_YEAR - 4
-STANDARD_YEAR_CUTOFF = CURRENT_YEAR - 10
+def _current_year() -> int:
+    return datetime.now().year
 
 HIGH_RUST_STATES = {
     "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD", "NE", "KS", "WV",
@@ -47,7 +46,7 @@ def _coerce_year(value: object) -> Optional[int]:
         year = int(float(value))
     except (TypeError, ValueError):
         return None
-    if 1980 <= year <= CURRENT_YEAR + 1:
+    if 1980 <= year <= _current_year() + 1:
         return year
     return None
 
@@ -71,14 +70,17 @@ def _parse_datetime(value: object) -> Optional[datetime]:
 
 
 def determine_vehicle_tier(year, mileage) -> str:
+    current_year = _current_year()
+    premium_year_cutoff = current_year - 4
+    standard_year_cutoff = current_year - 10
     model_year = _coerce_year(year)
     if model_year is None:
         return "rejected"
 
-    if model_year < STANDARD_YEAR_CUTOFF:
+    if model_year < standard_year_cutoff:
         return "rejected"
 
-    if model_year >= PREMIUM_YEAR_CUTOFF:
+    if model_year >= premium_year_cutoff:
         vehicle_tier = "premium"
     else:
         vehicle_tier = "standard"
@@ -90,7 +92,7 @@ def determine_vehicle_tier(year, mileage) -> str:
         if vehicle_tier == "standard":
             if mileage_value > 100000:
                 return "rejected"
-            age_years = max(1, CURRENT_YEAR - model_year)
+            age_years = max(1, current_year - model_year)
             if mileage_value / age_years > 18000:
                 return "rejected"
 
@@ -102,7 +104,7 @@ def _mileage_per_year(vehicle: dict) -> Optional[float]:
     year = _coerce_year(vehicle.get("year"))
     if mileage is None or year is None:
         return None
-    age = max(1, CURRENT_YEAR - year)
+    age = max(1, _current_year() - year)
     return mileage / age
 
 
@@ -308,7 +310,7 @@ def compute_risk_flags(vehicle: dict, tier) -> list[str]:
     mileage = _coerce_float(vehicle.get("mileage"))
     year = _coerce_year(vehicle.get("year"))
     if mileage is not None and year is not None:
-        age = max(1, CURRENT_YEAR - year)
+        age = max(1, _current_year() - year)
         mileage_per_year = mileage / age
         if mileage_per_year > 18000:
             flags.append("mileage_per_year_gt_18000")
@@ -562,11 +564,93 @@ def score_deal(
     Returns full scoring dict compatible with save_opportunity_to_supabase.
     """
     mmr = manheim_mmr_mid or mmr_ca or 0
+    bid_value = _coerce_float(bid)
     vehicle_tier = determine_vehicle_tier(year, mileage)
+    if bid_value is None or bid_value <= 0:
+        buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
+        bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88 if vehicle_tier == "premium" else None
+        return {
+            "dos_score": 0.0,
+            "score": 0.0,
+            "legacy_dos_score": 0.0,
+            "score_version": "v3_two_lane",
+            "mmr_estimated": mmr,
+            "margin": 0.0,
+            "gross_margin": 0.0,
+            "wholesale_margin": 0.0,
+            "buyer_premium_pct": buyer_premium_pct_value,
+            "buyer_premium_amount": 0.0,
+            "auction_fees": 0.0,
+            "retail_asking_price_estimate": 0.0,
+            "retail_comp_price_estimate": retail_comp_price_estimate,
+            "retail_comp_low": retail_comp_low,
+            "retail_comp_high": retail_comp_high,
+            "retail_comp_count": retail_comp_count or 0,
+            "retail_comp_confidence": retail_comp_confidence,
+            "pricing_source": pricing_source or mmr_lookup_basis or "mmr_proxy",
+            "pricing_maturity": "proxy",
+            "pricing_updated_at": pricing_updated_at,
+            "expected_close_bid": 0.0,
+            "expected_close_source": "zero_bid",
+            "current_bid_trust_score": 0.0,
+            "auction_stage_hours_remaining": None,
+            "acquisition_price_basis": 0.0,
+            "acquisition_basis_source": "zero_bid",
+            "total_cost": 0.0,
+            "projected_total_cost": 0.0,
+            "manheim_mmr_mid": manheim_mmr_mid,
+            "manheim_mmr_low": manheim_mmr_low,
+            "manheim_mmr_high": manheim_mmr_high,
+            "manheim_range_width_pct": manheim_range_width_pct,
+            "manheim_confidence": manheim_confidence,
+            "manheim_source_status": manheim_source_status or "unavailable",
+            "manheim_updated_at": manheim_updated_at,
+            "retail_proxy_multiplier": 1.35,
+            "wholesale_ctm_pct": None,
+            "retail_ctm_pct": None,
+            "ctm_pct": None,
+            "estimated_days_to_sale": None,
+            "roi_per_day": None,
+            "roi_pct": 0.0,
+            "investment_grade": "Rejected" if vehicle_tier == "rejected" else "Bronze",
+            "bid_ceiling_pct": bid_ceiling_pct,
+            "max_bid": 0.0,
+            "bid_headroom": 0.0,
+            "min_margin_target": 2500.0 if vehicle_tier == "standard" else 1500.0 if vehicle_tier == "premium" else None,
+            "ceiling_reason": "zero_bid",
+            "ceiling_pass": False,
+            "designated_lane": vehicle_tier,
+            "vehicle_tier": vehicle_tier,
+            "dos_premium": 0.0,
+            "dos_standard": 0.0,
+            "risk_flags": compute_risk_flags(
+                {
+                    "bid": bid_value,
+                    "current_bid": bid_value,
+                    "mmr_estimated": mmr,
+                    "manheim_mmr_mid": manheim_mmr_mid,
+                    "state": state,
+                    "source_site": source_site,
+                    "model": model,
+                    "make": make,
+                    "year": year,
+                    "mileage": mileage,
+                    "auction_end": auction_end,
+                    "auction_end_time": auction_end,
+                    "auction_end_date": auction_end,
+                    "pricing_updated_at": pricing_updated_at,
+                    "scraped_at": pricing_updated_at,
+                    "title_status": "unknown",
+                    "description": "",
+                },
+                vehicle_tier,
+            ),
+            "ai_confidence_score": 0.0,
+        }
 
     vehicle_proxy = {
-        "bid": bid,
-        "current_bid": bid,
+        "bid": bid_value,
+        "current_bid": bid_value,
         "mmr_estimated": mmr,
         "manheim_mmr_mid": manheim_mmr_mid,
         "state": state,
@@ -593,10 +677,10 @@ def score_deal(
     selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard if vehicle_tier == "standard" else max(dos_premium, dos_standard)
 
     buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
-    buyer_premium_amount = round((bid or 0) * buyer_premium_pct_value, 2) if bid and bid > 0 else 0.0
+    buyer_premium_amount = round((bid_value or 0) * buyer_premium_pct_value, 2) if bid_value and bid_value > 0 else 0.0
     auction_fees_value = _coerce_float(auction_fees)
     auction_fees_amount = round(auction_fees_value if auction_fees_value is not None else 200.0, 2)
-    gross_margin = round(mmr - bid - buyer_premium_amount - auction_fees_amount, 2) if mmr > 0 else 0.0
+    gross_margin = round(mmr - bid_value - buyer_premium_amount - auction_fees_amount, 2) if mmr > 0 else 0.0
     wholesale_margin = gross_margin
     retail_price = retail_comp_price_estimate or (mmr * 1.35 if mmr > 0 else 0)
 
@@ -620,17 +704,17 @@ def score_deal(
     bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88
     max_bid = _compute_max_bid_v2(
         mmr,
-        bid=bid,
+        bid=bid_value,
         state=state,
         buyer_premium_pct=buyer_premium_pct_value,
         auction_fees=auction_fees,
         tier=vehicle_tier,
     )
-    bid_headroom = max_bid - bid
+    bid_headroom = max_bid - bid_value
     min_margin_target = 2500.0 if vehicle_tier == "standard" else 1500.0
-    ceiling_pass = bid <= max_bid and gross_margin >= min_margin_target and vehicle_tier != "rejected"
+    ceiling_pass = bid_value <= max_bid and gross_margin >= min_margin_target and vehicle_tier != "rejected"
 
-    all_in_cost = bid + buyer_premium_amount + auction_fees_amount
+    all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
     if vehicle_tier == "rejected":
         investment_grade = "Rejected"
@@ -643,8 +727,8 @@ def score_deal(
     else:
         investment_grade = "Bronze"
 
-    acquisition_price_basis = _round_price_basis(bid)
-    ctm_pct = (bid / mmr) if mmr > 0 else None
+    acquisition_price_basis = _round_price_basis(bid_value)
+    ctm_pct = (bid_value / mmr) if mmr > 0 else None
 
     ai_confidence_score = round(
         _clamp((trust_score * 100.0 * 0.35) + ((100.0 - len(risk_flags) * 15.0) * 0.25) + (_condition_score(vehicle_proxy) * 0.40)),
@@ -698,6 +782,7 @@ def score_deal(
         "ctm_pct": ctm_pct,
         "estimated_days_to_sale": None,
         "roi_per_day": None,
+        "roi_pct": roi_pct,
         "investment_grade": investment_grade,
         "bid_ceiling_pct": bid_ceiling_pct,
         "max_bid": max_bid,

@@ -1,5 +1,9 @@
 import { Actor } from 'apify';
 
+if (!process.env.WEBHOOK_SECRET) {
+    console.warn('[ALLSURPLUS] WARNING: WEBHOOK_SECRET env var not set');
+}
+
 await Actor.init();
 const input = await Actor.getInput() || {};
 
@@ -275,6 +279,7 @@ for (const searchText of searchTerms) {
                 const year = item.modelYear ? parseInt(item.modelYear) : null;
 
                 if (!allowHighRust && HIGH_RUST_STATES.has(state)) {
+                    const currentYear = new Date().getFullYear();
                     if (year && year >= currentYear - 2) {
                         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
                     } else {
@@ -299,8 +304,15 @@ for (const searchText of searchTerms) {
                     continue;
                 }
 
-                if (year && year < minYear) {
+                if (!year || year < minYear) {
                     console.log(`[SKIP] Too old: ${year} — ${title}`);
+                    continue;
+                }
+
+                const mileageRaw = item.mileage || item.meter_reading || '';
+                const mileageNum = parseInt(mileageRaw.toString().replace(/,/g, ''), 10);
+                if (!isNaN(mileageNum) && mileageNum > 0 && mileageNum > maxMileage) {
+                    console.log('[SKIP-MILEAGE]', title, '| mileage:', mileageNum);
                     continue;
                 }
                 
@@ -388,7 +400,7 @@ if (totalPassed > 0) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Apify-Webhook-Secret': 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA',
+                'X-Apify-Webhook-Secret': process.env.WEBHOOK_SECRET || '',
             },
             body: JSON.stringify({
                 source: 'allsurplus',
