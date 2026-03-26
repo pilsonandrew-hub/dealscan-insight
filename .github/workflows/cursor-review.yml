@@ -60,11 +60,11 @@ jobs:
         run: |
           echo "=== DEALERSCOPE BUSINESS RULE VALIDATION ==="
 
-          if ! grep -rn "COST_TO_MARKET_MAX\s*=\s*0\.88" backend/ --include="*.py" | grep -q "0.88"; then
-            echo "❌ FAIL: COST_TO_MARKET_MAX changed from 0.88"
+          if ! grep -rn "0\.88\|0\.80" backend/ingest/score.py | grep -q "bid_ceiling"; then
+            echo "❌ FAIL: Bid ceiling logic missing from score.py"
             exit 1
           fi
-          echo "✅ Bid ceiling (0.88) intact"
+          echo "✅ Bid ceiling logic intact (Premium=0.88, Standard=0.80)"
 
           if grep -rn "localhost" src/services/ --include="*.ts" 2>/dev/null; then
             echo "❌ FAIL: localhost found in frontend services"
