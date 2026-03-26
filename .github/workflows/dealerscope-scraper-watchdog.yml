@@ -31,11 +31,8 @@ jobs:
               "ds-municibid":      "svmsItf3CRBZuIntp",
               "ds-gsaauctions":    "fvDnYmGuFBCrwpEi9",
               "ds-allsurplus":     "gYGIfHeYeN3EzmLnB",
-              "ds-bidcal":         "DF1THdFOBSYlxyNjD",
-              "ds-auctiontime":    "eb4oYXDf8qs1Ckbth",
               "ds-govplanet":      "pO2t5UDoSVmO1gvKJ",
               "ds-proxibid":       "bxhncvtHEP712WX2e",
-              "ds-equipmentfacts": "0XjoegYZVcPldLstl",
               "ds-usgovbid":       "6XO9La81aEmtsCT3g",
               "ds-jjkane":         "lvb7T6VMFfNUQpqlq",
           }
