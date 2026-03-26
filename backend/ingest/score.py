@@ -362,6 +362,153 @@ def _round_price_basis(price: float) -> float:
     return round(price / magnitude) * magnitude
 
 
+def _normalize_pct(value: Optional[float], default: float) -> float:
+    pct = _coerce_float(value)
+    if pct is None:
+        pct = default
+    if pct > 1:
+        pct /= 100.0
+    return max(0.0, pct)
+
+
+def _normalized_text(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _segment_score_v2(vehicle: dict) -> float:
+    segment = _normalized_text(
+        vehicle.get("segment_tier")
+        or vehicle.get("segmentTier")
+        or vehicle.get("segment")
+        or vehicle.get("body_type")
+        or vehicle.get("bodyType")
+        or vehicle.get("body_class")
+        or vehicle.get("bodyClass")
+        or vehicle.get("vehicle_type")
+    )
+    if not segment:
+        return 0.4
+
+    high_value_segments = (
+        "truck",
+        "pickup",
+        "suv",
+        "crossover",
+        "utility",
+        "wagon",
+    )
+    medium_value_segments = (
+        "sedan",
+        "coupe",
+        "hatchback",
+        "car",
+        "van",
+        "minivan",
+    )
+
+    if any(token in segment for token in high_value_segments):
+        return 1.0
+    if any(token in segment for token in medium_value_segments):
+        return 0.65
+    return 0.4
+
+
+def _model_score_v2(vehicle: dict) -> float:
+    make = _normalized_text(vehicle.get("make"))
+    model = _normalized_text(vehicle.get("model"))
+    if not make and not model:
+        return 0.4
+
+    model_blob = f"{make} {model}".strip()
+    if any(token in model_blob for token in HIGH_DEMAND_MODELS):
+        return 1.0
+
+    if model and model not in {"unknown", "other", "n/a", "na", "none", "null"}:
+        return 0.65
+    return 0.4
+
+
+def _source_score_v2(vehicle: dict) -> float:
+    source = _normalized_text(vehicle.get("source_site") or vehicle.get("source"))
+    if not source:
+        return 0.4
+    if any(token in source for token in ("govdeals", "govplanet", "gsaauctions", "publicsurplus", "municibid")):
+        return 1.0
+    if any(token in source for token in ("hibid", "proxibid", "bidspotter", "allsurplus", "jjkane", "usgovbid")):
+        return 0.65
+    return 0.4
+
+
+def _compute_margin_score_v2(gross_margin: float) -> float:
+    if gross_margin >= 10000:
+        return 1.0
+    if gross_margin >= 7000:
+        return 0.85
+    if gross_margin >= 4000:
+        return 0.7
+    if gross_margin >= 2000:
+        return 0.55
+    if gross_margin >= 1500:
+        return 0.45
+    if gross_margin >= 500:
+        return 0.35
+    return 0.1
+
+
+def _compute_dos_v2(vehicle: dict, gross_margin: float) -> float:
+    margin_score = _compute_margin_score_v2(gross_margin)
+    velocity_score = _auction_velocity_score(vehicle) / 100.0
+    segment_score = _segment_score_v2(vehicle)
+    model_score = _model_score_v2(vehicle)
+    source_score = _source_score_v2(vehicle)
+    dos = (
+        margin_score * 0.35
+        + velocity_score * 0.25
+        + segment_score * 0.20
+        + model_score * 0.12
+        + source_score * 0.08
+    ) * 100.0
+    return round(_clamp(dos), 2)
+
+
+def _compute_gross_margin_v2(
+    mmr: float,
+    bid: float,
+    state: str = "",
+    buyer_premium_pct: Optional[float] = None,
+    auction_fees: Optional[float] = None,
+) -> float:
+    del state
+    if mmr is None or mmr <= 0:
+        return 0.0
+    bid_value = _coerce_float(bid) or 0.0
+    premium_pct = _normalize_pct(buyer_premium_pct, 0.05)
+    buyer_premium_amount = round(bid_value * premium_pct, 2)
+    fees = _coerce_float(auction_fees)
+    auction_fees_amount = round(fees if fees is not None else 200.0, 2)
+    return round(mmr - bid_value - buyer_premium_amount - auction_fees_amount, 2)
+
+
+def _compute_max_bid_v2(
+    mmr: float,
+    bid: Optional[float] = None,
+    state: str = "",
+    buyer_premium_pct: Optional[float] = None,
+    auction_fees: Optional[float] = None,
+) -> float:
+    del state
+    if mmr is None or mmr <= 0:
+        return 0.0
+    bid_value = _coerce_float(bid) if bid is not None else mmr * 0.88
+    if bid_value is None or bid_value <= 0:
+        bid_value = mmr * 0.88
+    premium_pct = _normalize_pct(buyer_premium_pct, 0.05)
+    buyer_premium_amount = round(bid_value * premium_pct, 2)
+    fees = _coerce_float(auction_fees)
+    auction_fees_amount = round(fees if fees is not None else 200.0, 2)
+    return round((mmr * 0.88) - buyer_premium_amount - auction_fees_amount, 2)
+
+
 def score_deal(
     bid: float,
     mmr_ca: Optional[float],
