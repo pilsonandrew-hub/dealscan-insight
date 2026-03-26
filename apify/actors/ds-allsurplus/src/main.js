@@ -1,9 +1,12 @@
 import { Actor } from 'apify';
 
+await Actor.init();
+const input = await Actor.getInput() || {};
+
 // AllSurplus Maestro API - reverse-engineered from JS bundle
 const MAESTRO_URL = 'https://maestro.lqdt1.com';
-const MAESTRO_API_KEY = 'af93060f-337e-428c-87b8-c74b5837d6cd';
-const MAESTRO_SUBSCRIPTION_KEY = 'cf620d1d8f904b5797507dc5fd1fdb80';
+const MAESTRO_API_KEY = input.maestroApiKey || process.env.MAESTRO_API_KEY;
+const MAESTRO_SUBSCRIPTION_KEY = input.maestroSubscriptionKey || process.env.MAESTRO_SUBSCRIPTION_KEY;
 const BUSINESS_ID = 'AD'; // AllSurplus bizId
 const IMAGE_BASE = 'https://webassets.lqdt1.com/assets';
 const ASSET_URL_BASE = 'https://www.allsurplus.com/asset';
@@ -199,9 +202,6 @@ async function searchMaestro(searchText, page, displayRows, facetsFilter = [], s
     return await response.json();
 }
 
-await Actor.init();
-
-const input = await Actor.getInput() ?? {};
 // Age gate: ingest.py allows max 4 years old for AllSurplus
 // Calculate dynamic minYear to match the gate (current year - 4)
 const currentYear = new Date().getFullYear();
