@@ -370,6 +370,8 @@ def score_deal(
     manheim_confidence: Optional[float] = None,
     manheim_source_status: Optional[str] = None,
     manheim_updated_at=None,
+    buyer_premium_pct: Optional[float] = None,
+    auction_fees: Optional[float] = None,
 ) -> dict:
     """
     Primary DOS scoring function.
@@ -406,7 +408,11 @@ def score_deal(
 
     selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard if vehicle_tier == "standard" else max(dos_premium, dos_standard)
 
-    gross_margin = mmr - bid if mmr > 0 else 0
+    buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
+    buyer_premium_amount = round((bid or 0) * buyer_premium_pct_value, 2) if bid and bid > 0 else 0.0
+    auction_fees_value = _coerce_float(auction_fees)
+    auction_fees_amount = round(auction_fees_value if auction_fees_value is not None else 200.0, 2)
+    gross_margin = round(mmr - bid - buyer_premium_amount - auction_fees_amount, 2) if mmr > 0 else 0.0
     wholesale_margin = gross_margin
     retail_price = retail_comp_price_estimate or (mmr * 1.35 if mmr > 0 else 0)
 
@@ -427,13 +433,14 @@ def score_deal(
 
     trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
 
-    bid_ceiling_pct = 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else 0.0
-    max_bid = mmr * bid_ceiling_pct if mmr > 0 else 0
+    bid_ceiling_pct = 0.88
+    max_bid = ((mmr * 0.88) - buyer_premium_amount - auction_fees_amount) if mmr > 0 else 0
     bid_headroom = max_bid - bid
     min_margin_target = 500.0
     ceiling_pass = bid <= max_bid and gross_margin >= min_margin_target
 
-    roi_pct = (gross_margin / bid * 100) if bid > 0 else 0
+    all_in_cost = bid + buyer_premium_amount + auction_fees_amount
+    roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
     if selected_dos >= 80 and roi_pct >= 20 and ceiling_pass:
         investment_grade = "Platinum"
     elif selected_dos >= 65 and roi_pct >= 12 and ceiling_pass:
@@ -460,6 +467,9 @@ def score_deal(
         "margin": gross_margin,
         "gross_margin": gross_margin,
         "wholesale_margin": wholesale_margin,
+        "buyer_premium_pct": buyer_premium_pct_value,
+        "buyer_premium_amount": buyer_premium_amount,
+        "auction_fees": auction_fees_amount,
         "retail_asking_price_estimate": retail_price,
         "retail_comp_price_estimate": retail_comp_price_estimate,
         "retail_comp_low": retail_comp_low,
@@ -475,8 +485,8 @@ def score_deal(
         "auction_stage_hours_remaining": auction_stage_hours_remaining,
         "acquisition_price_basis": acquisition_price_basis,
         "acquisition_basis_source": "current_bid",
-        "total_cost": bid,
-        "projected_total_cost": bid,
+        "total_cost": all_in_cost,
+        "projected_total_cost": all_in_cost,
         "manheim_mmr_mid": manheim_mmr_mid,
         "manheim_mmr_low": manheim_mmr_low,
         "manheim_mmr_high": manheim_mmr_high,
