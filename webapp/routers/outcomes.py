@@ -175,7 +175,8 @@ async def patch_outcome(
 
 
 @router.get("/summary")
-async def outcomes_summary():
+async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
+    _verify_auth(authorization)
     if not supabase_client:
         return {
             "count_by_outcome": {"pending": 0, "won": 0, "lost": 0, "passed": 0},
@@ -224,7 +225,7 @@ async def create_outcome(
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     user_id = _verify_auth(authorization)
-    opportunity = _fetch_opportunity(payload.opportunity_id)
+    opportunity = _fetch_opportunity(payload.opportunity_id, require_user_id=user_id)
     _legacy_mirror_to_dealer_sales(user_id, opportunity, payload)
 
     return {"success": True}
@@ -239,7 +240,7 @@ async def create_bid_outcome(
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     user_id = _verify_auth(authorization)
-    opportunity = _fetch_opportunity(payload.opportunity_id)
+    opportunity = _fetch_opportunity(payload.opportunity_id, require_user_id=user_id)
 
     notes_blob = json.dumps(
         {
