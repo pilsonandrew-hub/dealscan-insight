@@ -205,15 +205,30 @@ async def get_recommendations(
         # Fetch a wider pool so affinity re-ranking has room to surface better matches
         fetch_limit = min(effective_limit * 3, 60)
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        current_year = datetime.now(timezone.utc).year
+        premium_year_cutoff = current_year - 4
+        standard_year_cutoff = current_year - 10
+        HIGH_RUST_STATES_ROVER = {
+            "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD",
+            "NE", "KS", "WV", "ME", "NH", "VT", "MA", "RI", "CT", "NJ", "MD", "DE",
+        }
         opps_resp = supabase_client.table("opportunities")\
-            .select("*")\
+            .select("id,make,model,year,mileage,state,current_bid,mmr_estimated,dos_score,vehicle_tier,auction_end_date,source_site,investment_grade,gross_margin,roi_pct,max_bid,score_breakdown")\
             .gte("dos_score", 65)\
+            .neq("vehicle_tier", "rejected")\
+            .gte("year", standard_year_cutoff)\
             .order("dos_score", desc=True)\
             .or_(f"auction_end_date.gt.{now_iso},auction_end_date.is.null")\
             .limit(fetch_limit)\
             .execute()
 
-        raw_rows = opps_resp.data or []
+        # Post-fetch: filter rust states (DB can't do set membership easily)
+        all_rows = opps_resp.data or []
+        raw_rows = [
+            r for r in all_rows
+            if (str(r.get("state") or "").upper() not in HIGH_RUST_STATES_ROVER)
+            or (r.get("year") and int(r.get("year", 0)) >= current_year - 2)
+        ]
         personalized = False
 
         # --- Heuristic preference vector (from event history) ---

@@ -104,7 +104,20 @@ async def login(
                 detail="TOTP code required"
             )
         
-        if not verify_totp_code(user.totp_secret, login_data.totp_code):
+        # Check TOTP code or backup code
+        import hashlib
+        totp_valid = verify_totp_code(user.totp_secret, login_data.totp_code)
+        backup_valid = False
+        if not totp_valid and user.backup_codes:
+            code_hash = hashlib.sha256(login_data.totp_code.encode()).hexdigest()
+            stored_hashes = user.backup_codes.split(",")
+            if code_hash in stored_hashes:
+                # Consume the backup code
+                remaining = [h for h in stored_hashes if h != code_hash]
+                user.backup_codes = ",".join(remaining)
+                backup_valid = True
+
+        if not totp_valid and not backup_valid:
             await log_security_event(
                 db, "auth_failure", "high",
                 f"Invalid TOTP code for user: {user.username}"
@@ -229,15 +242,19 @@ async def enable_totp(
     backup_codes = generate_backup_codes()
     qr_code = generate_qr_code(current_user.username, secret)
     
-    # Store in database (not yet enabled)
+    # Store secret and hashed backup codes (never store plain text backup codes)
+    import hashlib
+    hashed_codes = [hashlib.sha256(code.encode()).hexdigest() for code in backup_codes]
     current_user.totp_secret = secret
-    current_user.backup_codes = ",".join(backup_codes)
+    current_user.backup_codes = ",".join(hashed_codes)
     db.commit()
     
+    # Return secret + QR only during setup — backup codes shown once, never again
+    # Secret is needed to configure authenticator app — only shown here pre-verification
     return EnableTOTPResponse(
         secret=secret,
         qr_code=qr_code,
-        backup_codes=backup_codes
+        backup_codes=backup_codes  # plain codes shown once to user, hashed version stored
     )
 
 @router.post("/verify-totp")
