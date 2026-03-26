@@ -538,6 +538,26 @@ const DashboardTab = () => {
             No high-priority opportunities right now. Pipeline may be between runs.
           </div>
         ) : (
+          {/* Standard Lane Velocity Cap Warning */}
+          {(() => {
+            const standardCount = hotDeals.filter(d => !passedIds.has(d.id!) && d.designated_lane === 'standard').length;
+            const STANDARD_CAP = 10;
+            if (standardCount >= STANDARD_CAP) {
+              return (
+                <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-900/40 border border-amber-600/50 text-amber-300 text-xs font-medium">
+                  ⚠️ Standard lane cap reached ({standardCount}/{STANDARD_CAP} units). Review existing Standard deals before adding more to avoid capital tie-up.
+                </div>
+              );
+            }
+            if (standardCount >= 7) {
+              return (
+                <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-900/30 border border-yellow-700/40 text-yellow-400 text-xs">
+                  📦 {standardCount}/{STANDARD_CAP} Standard lane slots used — approaching cap.
+                </div>
+              );
+            }
+            return null;
+          })()}
           {/* Lane filter toggle */}
           <div className="flex gap-2 mb-4">
             {(['all', 'premium', 'standard'] as const).map(l => (
