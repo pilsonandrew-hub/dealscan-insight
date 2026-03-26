@@ -538,7 +538,7 @@ const DashboardTab = () => {
             No high-priority opportunities right now. Pipeline may be between runs.
           </div>
         ) : (
-          {/* Standard Lane Velocity Cap Warning */}
+          <>
           {(() => {
             const standardCount = hotDeals.filter(d => !passedIds.has(d.id!) && d.designated_lane === 'standard').length;
             const STANDARD_CAP = 10;
@@ -586,6 +586,7 @@ const DashboardTab = () => {
               </div>
             ))}
           </div>
+          </>
         )}
       </div>
 
