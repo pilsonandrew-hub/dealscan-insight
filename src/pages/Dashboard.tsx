@@ -24,6 +24,7 @@ import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
 import { OnboardingFlow } from '@/components/OnboardingFlow';
+import LaneBadge from '@/components/LaneBadge';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'analytics' | 'settings';
@@ -77,6 +78,7 @@ interface RoverRecommendation {
   pricing_updated_at?: string;
   investment_grade?: string;
   listing_url?: string;
+  designated_lane?: 'premium' | 'standard' | 'unassigned' | 'rejected';
 }
 
 
@@ -203,6 +205,7 @@ const DealCard = ({
         <span className={`text-[11px] font-semibold px-2 py-1 rounded-md ${gradeColor(deal.investment_grade)}`}>
           {deal.investment_grade || 'Watch'}
         </span>
+        <LaneBadge lane={deal.designated_lane} size="sm" />
         <span className={`text-xs font-bold px-2 py-1 rounded-md ${dosColor(deal.score)}`}>
           {deal.score ?? '—'} {dosLabel(deal.score)}
         </span>
@@ -434,6 +437,7 @@ const DashboardTab = () => {
   const [loading, setLoading] = useState(true);
   const [passedIds, setPassedIds] = useState<Set<string>>(new Set());
   const [fadingIds, setFadingIds] = useState<Set<string>>(new Set());
+  const [laneFilter, setLaneFilter] = useState<'all' | 'premium' | 'standard'>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -534,8 +538,26 @@ const DashboardTab = () => {
             No high-priority opportunities right now. Pipeline may be between runs.
           </div>
         ) : (
+          {/* Lane filter toggle */}
+          <div className="flex gap-2 mb-4">
+            {(['all', 'premium', 'standard'] as const).map(l => (
+              <button
+                key={l}
+                onClick={() => setLaneFilter(l)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                  laneFilter === l
+                    ? l === 'premium' ? 'bg-emerald-600 text-white border-emerald-600'
+                      : l === 'standard' ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-900 border-gray-300'
+                    : 'bg-transparent text-gray-400 border-gray-600 hover:border-gray-400'
+                }`}
+              >
+                {l === 'all' ? 'All' : l === 'premium' ? '⭐ Premium' : '📦 Standard'}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {hotDeals.filter(d => !passedIds.has(d.id!)).map(deal => (
+            {hotDeals.filter(d => !passedIds.has(d.id!) && (laneFilter === 'all' || d.designated_lane === laneFilter)).map(deal => (
               <div
                 key={deal.id}
                 className={`transition-all duration-300 ${fadingIds.has(deal.id!) ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
@@ -846,7 +868,7 @@ const RoverTab = () => {
       try {
         const { data: manualDeals } = await supabase
           .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
           .gte('dos_score', 65)
           .order('dos_score', { ascending: false })
           .limit(25);
@@ -865,7 +887,7 @@ const RoverTab = () => {
             max_bid: d.max_bid, pricing_source: d.pricing_source,
             manheim_mmr_mid: d.manheim_mmr_mid, manheim_mmr_low: d.manheim_mmr_low,
             manheim_mmr_high: d.manheim_mmr_high, pricing_updated_at: d.pricing_updated_at,
-            investment_grade: d.investment_grade,
+            investment_grade: d.investment_grade, designated_lane: d.designated_lane,
           }));
           setRecs(mapped);
         } else {
@@ -911,7 +933,7 @@ const RoverTab = () => {
         // Cold-start fallback: query Supabase for top DOS score deals
         const { data: fallbackDeals } = await supabase
           .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
           .gte('dos_score', 65)
           .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
           .order('dos_score', { ascending: false })
@@ -952,7 +974,7 @@ const RoverTab = () => {
             manheim_mmr_low: d.manheim_mmr_low,
             manheim_mmr_high: d.manheim_mmr_high,
             pricing_updated_at: d.pricing_updated_at,
-            investment_grade: d.investment_grade,
+            investment_grade: d.investment_grade, designated_lane: d.designated_lane,
           }));
           setRecs(mapped);
           setIsFallback(true);
@@ -966,7 +988,7 @@ const RoverTab = () => {
       try {
         const { data: fallbackDeals } = await supabase
           .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url')
+          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
           .gte('dos_score', 65)
           .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
           .order('dos_score', { ascending: false })
@@ -981,7 +1003,7 @@ const RoverTab = () => {
             estimated_days_to_sale: d.estimated_days_to_sale, max_bid: d.max_bid,
             pricing_source: d.pricing_source, manheim_mmr_mid: d.manheim_mmr_mid,
             manheim_mmr_low: d.manheim_mmr_low, manheim_mmr_high: d.manheim_mmr_high,
-            pricing_updated_at: d.pricing_updated_at, investment_grade: d.investment_grade,
+            pricing_updated_at: d.pricing_updated_at, investment_grade: d.investment_grade, designated_lane: d.designated_lane,
           }));
           setRecs(mapped);
           setIsFallback(true);
