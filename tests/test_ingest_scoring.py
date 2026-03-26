@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from backend.ingest.manheim_market import get_manheim_market_data
-from backend.ingest.score import resolve_expected_close_bid, score_deal
+from backend.ingest.score import CURRENT_YEAR, determine_vehicle_tier, resolve_expected_close_bid, score_deal
 from webapp.routers.ingest import passes_basic_gates, score_vehicle
 
 
@@ -109,7 +109,7 @@ def test_manheim_market_data_uses_proxy_fallback_without_live_config(monkeypatch
     assert result["manheim_mmr_low"] < result["manheim_mmr_mid"] < result["manheim_mmr_high"]
 
 
-def test_score_deal_penalizes_wide_live_manheim_ranges_in_ceiling():
+def test_score_deal_uses_premium_lane_defaults_for_recent_vehicle():
     result = score_deal(
         bid=10000,
         mmr_ca=20000,
@@ -130,8 +130,56 @@ def test_score_deal_penalizes_wide_live_manheim_ranges_in_ceiling():
         manheim_source_status="live",
     )
 
-    assert result["bid_ceiling_pct"] == 85.0
-    assert "live_range_penalty_3pct" in result["ceiling_reason"]
+    assert result["vehicle_tier"] == "premium"
+    assert result["bid_ceiling_pct"] == 0.88
+    assert result["min_margin_target"] == 1500.0
+    assert result["ceiling_pass"] is True
+
+
+def test_determine_vehicle_tier_enforces_age_and_mileage_hard_stops():
+    assert determine_vehicle_tier(CURRENT_YEAR - 4, 50000) == "premium"
+    assert determine_vehicle_tier(CURRENT_YEAR - 4, 50001) == "rejected"
+    assert determine_vehicle_tier(CURRENT_YEAR - 5, 90000) == "standard"
+    assert determine_vehicle_tier(CURRENT_YEAR - 5, 90001) == "rejected"
+    assert determine_vehicle_tier(CURRENT_YEAR - 5, 100001) == "rejected"
+    assert determine_vehicle_tier(CURRENT_YEAR - 11, 10000) == "rejected"
+    assert determine_vehicle_tier(None, 10000) == "rejected"
+
+
+def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
+    standard = score_deal(
+        bid=7000,
+        mmr_ca=10000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 5,
+        mileage=30000,
+    )
+
+    premium = score_deal(
+        bid=7000,
+        mmr_ca=10000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 2,
+        mileage=30000,
+    )
+
+    assert standard["vehicle_tier"] == "standard"
+    assert standard["bid_ceiling_pct"] == 0.8
+    assert standard["max_bid"] == 7450.0
+    assert standard["min_margin_target"] == 2500.0
+    assert standard["ceiling_pass"] is False
+
+    assert premium["vehicle_tier"] == "premium"
+    assert premium["bid_ceiling_pct"] == 0.88
+    assert premium["max_bid"] == 8250.0
+    assert premium["min_margin_target"] == 1500.0
+    assert premium["ceiling_pass"] is True
 
 
 def test_score_deal_keeps_weak_retail_evidence_on_proxy_path():
