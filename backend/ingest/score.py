@@ -73,12 +73,28 @@ def _parse_datetime(value: object) -> Optional[datetime]:
 def determine_vehicle_tier(year, mileage) -> str:
     model_year = _coerce_year(year)
     if model_year is None:
-        return "unassigned"
+        return "rejected"
+
+    if model_year < STANDARD_YEAR_CUTOFF:
+        return "rejected"
+
     if model_year >= PREMIUM_YEAR_CUTOFF:
-        return "premium"
-    if model_year >= STANDARD_YEAR_CUTOFF:
-        return "standard"
-    return "rejected"
+        vehicle_tier = "premium"
+    else:
+        vehicle_tier = "standard"
+
+    mileage_value = _coerce_float(mileage)
+    if mileage_value is not None:
+        if vehicle_tier == "premium" and mileage_value > 50000:
+            return "rejected"
+        if vehicle_tier == "standard":
+            if mileage_value > 100000:
+                return "rejected"
+            age_years = max(1, CURRENT_YEAR - model_year)
+            if mileage_value / age_years > 18000:
+                return "rejected"
+
+    return vehicle_tier
 
 
 def _mileage_per_year(vehicle: dict) -> Optional[float]:
@@ -599,10 +615,10 @@ def score_deal(
 
     trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
 
-    bid_ceiling_pct = 0.88
-    max_bid = ((mmr * 0.88) - buyer_premium_amount - auction_fees_amount) if mmr > 0 else 0
+    bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88
+    max_bid = ((mmr * bid_ceiling_pct) - buyer_premium_amount - auction_fees_amount) if mmr > 0 else 0
     bid_headroom = max_bid - bid
-    min_margin_target = 500.0
+    min_margin_target = 2500.0 if vehicle_tier == "standard" else 1500.0
     ceiling_pass = bid <= max_bid and gross_margin >= min_margin_target
 
     all_in_cost = bid + buyer_premium_amount + auction_fees_amount
