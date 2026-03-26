@@ -18,7 +18,7 @@
  *
  * Marketcheck API:
  *   https://mc-api.marketcheck.com/v2/search/car/active
- *   api_key=cwOBTpHcggdsdrDjQVtXPe5tsWsrU5aD
+ *   api_key loaded from MARKETCHECK_KEY env var (set in Apify actor input)
  *   params: year, make, model, miles_min, miles_max (±20% of odometer)
  */
 
