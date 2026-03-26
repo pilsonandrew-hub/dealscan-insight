@@ -1,4 +1,4 @@
-# DEPRECATED - do not deploy or extend this entrypoint; use backend/main.py instead.
+# NOTE: This is the active production entrypoint. backend/main.py is the legacy path.
 """
 DealerScope FastAPI Production Application
 Secure, scalable arbitrage platform with ML/AI integration
