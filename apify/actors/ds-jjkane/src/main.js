@@ -270,7 +270,7 @@ const {
     targetStates = TARGET_STATES,
     minBid = 0,
     maxBid = 75000,
-    maxYearAge = 15,
+    maxYearAge = 10,
     maxItemsPerState = 500,
     enableMarketcheck = true,
     webhookUrl = null,
@@ -325,14 +325,16 @@ for (const state of targetStates) {
                 const vin = normalizeText(hit.vin || '');
 
                 // ── Filters ──────────────────────────────────────────────────
-                // Rust state — bypass for ≤3yr old
+                // Rust state — bypass for ≤2yr old
                 if (HIGH_RUST_STATES.has(state_code)) {
                     if (!(year && year >= currentYear - 2)) continue;
                     console.log(`[BYPASS] Rust ${state_code} — year ${year}`);
                 }
 
                 // Year age
-                if (year && (currentYear - year) > maxYearAge) continue;
+                if (!year || (currentYear - year) > maxYearAge) continue;
+
+                if (odometer !== null && odometer > 100000) continue;
 
                 // ── Marketcheck pricing ───────────────────────────────────────
                 let marketcheckMedian = null;

@@ -79,8 +79,8 @@ const input = await Actor.getInput() ?? {};
 const {
     maxPages = 6,
     minBid = 1000,
-    maxMileage = 50000,
-    minYear = 2022,
+    maxMileage = 100000,
+    minYear = new Date().getFullYear() - 10,
     targetStates = [...TARGET_STATES],
 } = input;
 
@@ -367,8 +367,8 @@ function passesFilters(listing, log) {
         return false;
     }
     if (listing.state && HIGH_RUST_STATES.has(listing.state) && listing.year != null) {
-        if (listing.year >= 2023) {
-            log.info(`[BYPASS] Rust state ${listing.state} allowed — vehicle is ${listing.year} (≤3yr old)`);
+        if (listing.year >= new Date().getFullYear() - 2) {
+            log.info(`[BYPASS] Rust state ${listing.state} allowed — vehicle is ${listing.year} (≤2yr old)`);
         } else {
             log.debug(`[SKIP] High-rust state: ${listing.state} - ${listing.title}`);
             totalFailedFilters++;
@@ -385,12 +385,12 @@ function passesFilters(listing, log) {
         totalFailedFilters++;
         return false;
     }
-    if (listing.year && listing.year < minYear) {
+    if (!listing.year || listing.year < minYear) {
         log.debug(`[SKIP] Too old: ${listing.year} - ${listing.title}`);
         totalFailedFilters++;
         return false;
     }
-    if (listing.mileage && listing.mileage > maxMileage) {
+    if (listing.mileage !== null && listing.mileage > maxMileage) {
         log.debug(`[SKIP] Too many miles: ${listing.mileage} - ${listing.title}`);
         totalFailedFilters++;
         return false;

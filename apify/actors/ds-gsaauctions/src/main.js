@@ -119,7 +119,7 @@ const input = await Actor.getInput() ?? {};
 const {
     minBid = 100,
     maxBid = 75000,
-    minYear = 2010,
+    minYear = new Date().getFullYear() - 10,
     maxYear = new Date().getFullYear() + 1,
     pageSize = 50,
     // Number of pages from the END to scan (active items are at the end)
@@ -188,7 +188,7 @@ for (let page = startPage; page <= totalPages; page++) {
         // Rust state filter
         if (stateCode && HIGH_RUST_STATES.has(stateCode)) {
             const { year } = parseVehicleTitle(title);
-            if (!year || year < currentYear - 8) {
+            if (!year || year < currentYear - 2) {
                 console.log(`[GSA] Skipping rust-state ${stateCode} old vehicle: ${title}`);
                 continue;
             }
@@ -203,7 +203,7 @@ for (let page = startPage; page <= totalPages; page++) {
 
         const { year, make, model } = parseVehicleTitle(title);
 
-        if (year && (year < minYear || year > maxYear)) continue;
+        if (!year || year < minYear || year > maxYear) continue;
 
         const listingId = String(auctionId || lotId);
         const listingUrl = `${BASE_UI_URL}/auctions/preview/${listingId}`;

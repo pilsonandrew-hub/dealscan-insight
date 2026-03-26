@@ -289,12 +289,12 @@ const crawler = new PlaywrightCrawler({
             const currentYear = new Date().getFullYear();
             if (state && HIGH_RUST_STATES.has(state)) {
                 if (!(year && year >= currentYear - 2)) continue;
-                console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+                console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
             }
 
             if (current_bid > 0 && (current_bid < minBid || current_bid > maxBid)) continue;
 
-            if (year && (currentYear - year) > 12) continue;
+            if (!year || (currentYear - year) > 10) continue;
 
             const make = parseMake(title);
             const model = parseModel(title, make);
