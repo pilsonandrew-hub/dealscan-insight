@@ -142,12 +142,12 @@ function passesFilters({ year, price, state, locationText = '' }) {
     const isDC = DC_PATTERN.test(locationText);
     if (!isDC && (!state || !US_STATES.has(state))) return false;
     const currentYear = new Date().getFullYear();
-    // Government vehicles are kept longer — allow up to 25 years old
-    if (year && (currentYear - year) > 25) return false;
+    // Government vehicles are kept longer — allow up to 10 years old
+    if (!year || (currentYear - year) > 10) return false;
     if (year && year < 1970) return false;
-    // Rust-state: allow up to 18 years in high-rust states (gov vehicles, not retail)
+    // Rust-state: bypass for <=2yr old vehicles in high-rust states
     if (state && HIGH_RUST.has(state)) {
-        if (year && (currentYear - year) > 18) return false;
+        if (!(year && year >= currentYear - 2)) return false;
     }
     if (price > 0 && price > 55000) return false;
     return true;
@@ -179,6 +179,8 @@ const {
     maxItemsPerCategory = 500,   // safety cap per category (override to 0 for unlimited)
     minBid = 200,
     maxBid = 40000,
+    maxMileage = 100000,
+    maxAgeYears = 10,
     webhookUrl = null,
     webhookSecret = null,
 } = input;

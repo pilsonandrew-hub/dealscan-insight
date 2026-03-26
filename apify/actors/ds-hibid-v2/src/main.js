@@ -83,8 +83,8 @@ const {
     pageLength = 50,        // lots per GraphQL page
     minBid = 500,
     maxBid = 75000,
-    minYear = 2000,
-    maxMileage = 150000,
+    minYear = new Date().getFullYear() - 10,
+    maxMileage = 100000,
     targetStates = [...TARGET_STATES],
     searchTerms = [         // Multiple search passes to maximize vehicle coverage
         'ford', 'chevrolet', 'toyota', 'honda', 'dodge', 'nissan', 'jeep',
@@ -216,7 +216,7 @@ function passesFilters(listing, log) {
     // High-rust bypass by year
     if (state && HIGH_RUST_STATES.has(state)) {
         const currentYear = new Date().getFullYear();
-        if (!(listing.year && listing.year >= currentYear - 3)) {
+        if (!(listing.year && listing.year >= currentYear - 2)) {
             log.debug(`[SKIP-RUST] ${state} + year ${listing.year}: ${listing.title?.slice(0, 50)}`);
             return false;
         }
@@ -245,13 +245,13 @@ function passesFilters(listing, log) {
     }
 
     // Year
-    if (listing.year && listing.year < minYear) {
+    if (!listing.year || listing.year < minYear) {
         log.debug(`[SKIP-YEAR] ${listing.year}`);
         return false;
     }
 
     // Mileage
-    if (listing.mileage && listing.mileage > maxMileage) {
+    if (listing.mileage !== null && listing.mileage > maxMileage) {
         log.debug(`[SKIP-MILES] ${listing.mileage}`);
         return false;
     }

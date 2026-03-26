@@ -135,7 +135,7 @@ const input = await Actor.getInput() ?? {};
 const {
     maxCatalogues = 50,
     maxPages = 10,
-    minYear = 1990,
+    minYear = new Date().getFullYear() - 10,
     targetStates = [...TARGET_STATES],
 } = input;
 
@@ -337,8 +337,13 @@ function applyFilters(listing, log) {
     }
 
     // Year filter
-    if (listing.year && listing.year < minYear) {
+    if (!listing.year || listing.year < minYear) {
         log.debug(`[BS] Skip old year ${listing.year}: ${listing.title}`);
+        return false;
+    }
+
+    if (listing.mileage !== null && listing.mileage > 100000) {
+        log.debug(`[BS] Skip high mileage ${listing.mileage}: ${listing.title}`);
         return false;
     }
 
@@ -486,6 +491,7 @@ function buildFallbackListing(request, detailData = {}) {
     const parsed = parseVehicleTitle(finalTitle);
     const cardBid = normalizeBidValue(request.userData?.cardBid ?? fallback.current_bid);
     const detailBid = normalizeRawBidValue(detailData.openingPrice ?? detailData.currentBid);
+    const mileage = parseMileage(finalTitle);
 
     return {
         listing_id: listingId,
@@ -493,7 +499,7 @@ function buildFallbackListing(request, detailData = {}) {
         year: parsed.year ?? fallback.year ?? null,
         make: parsed.make ?? fallback.make ?? null,
         model: parsed.model ?? fallback.model ?? null,
-        mileage: extractMileage(request.userData?.cardHtml || '') || fallback.mileage || null,
+        mileage: extractMileage(request.userData?.cardHtml || '') || mileage || fallback.mileage || null,
         current_bid: detailBid ?? cardBid ?? null,
         auction_end_date: parseDate(detailData.lotEndsFrom || request.userData?.auctionEndDate || ''),
         state: detailData.auctionCity
@@ -713,11 +719,12 @@ const crawler = new HttpCrawler({
                 
                 // Pre-filter from card text
                 const { year: cardYear, make: cardMake } = parseVehicleTitle(cardTitle);
+                const cardMileage = parseMileage(cardTitle);
                 if (cardTitle && !cardMake && !isVehicleLot(cardTitle)) {
                     log.debug(`[BS] Pre-filter non-vehicle: ${cardTitle.slice(0, 60)}`);
                     continue;
                 }
-                if (cardYear && cardYear < minYear) {
+                if (!cardYear || cardYear < minYear) {
                     log.debug(`[BS] Pre-filter old year ${cardYear}: ${cardTitle.slice(0, 60)}`);
                     continue;
                 }
@@ -741,6 +748,7 @@ const crawler = new HttpCrawler({
                             make: cardMake,
                             model: parseVehicleTitle(cardTitle).model,
                             current_bid: cardBid,
+                            mileage: cardMileage,
                             state,
                             listing_url: lotUrl,
                         },

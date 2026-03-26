@@ -188,12 +188,12 @@ const crawler = new CheerioCrawler({
             if (state) {
                 if (!US_STATES.has(state)) return;
                 if (HIGH_RUST.has(state)) {
-                    if (!(year >= currentYear - 8)) return;
-                    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤8yr old)`);
+                    if (!(year >= currentYear - 2)) return;
+                    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
                 }
             }
             const age = currentYear - year;
-            if (age > 15 || age < 0) return;
+            if (age > 10 || age < 0) return;
 
             passed++;
             const model = parseModel(title, make);

@@ -76,8 +76,8 @@ const {
     maxPages = 20,
     minBid = 3000,
     maxBid = 35000,
-    maxMileage = 50000,
-    minYear = 2022,
+    maxMileage = 100000,
+    minYear = new Date().getFullYear() - 10,
     targetStates = [...TARGET_STATES],
 } = input;
 
@@ -207,12 +207,12 @@ function applyFilters(listing, log) {
         totalFailedFilters++;
         return false;
     }
-    if (listing.year && listing.year < minYear) {
+    if (!listing.year || listing.year < minYear) {
         log.debug(`[SKIP] Too old: ${listing.year}`);
         totalFailedFilters++;
         return false;
     }
-    if (listing.mileage && listing.mileage > maxMileage) {
+    if (listing.mileage !== null && listing.mileage > maxMileage) {
         log.debug(`[SKIP] Too many miles: ${listing.mileage}`);
         totalFailedFilters++;
         return false;

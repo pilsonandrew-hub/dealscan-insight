@@ -60,7 +60,7 @@ const {
     maxPages = 5,
     minBid = 500,
     maxBid = 50000,
-    minYear = 2018,
+    minYear = new Date().getFullYear() - 10,
 } = input;
 
 let totalFound = 0;
@@ -98,6 +98,11 @@ function parseMake(text) {
 function parseBid(text) {
     const m = normalize(text).replace(/,/g, '').match(/\$?([\d]+(?:\.\d{2})?)/);
     return m ? parseFloat(m[1]) : 0;
+}
+
+function parseMileage(text) {
+    const m = normalize(text).replace(/,/g, '').match(/(\d[\d,]*)\s*(?:miles?|mi\.?)\b/i);
+    return m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
 }
 
 function parseVin(text) {
@@ -192,6 +197,7 @@ const crawler = new PlaywrightCrawler({
                 const make = parseMake(card.title);
                 const bid = parseBid(card.priceText);
                 const vin = parseVin(card.title);
+                const mileage = parseMileage(card.title);
 
                 if (seenLotIds.has(card.lotId)) continue;
                 seenLotIds.add(card.lotId);
@@ -199,11 +205,12 @@ const crawler = new PlaywrightCrawler({
                 if (!make) continue;
                 if (!year || year < minYear) continue;
                 if (bid > 0 && (bid < minBid || bid > maxBid)) continue;
+                if (mileage !== null && mileage > 100000) continue;
                 if (!state || !US_STATES.has(state)) continue;
                 if (HIGH_RUST.has(state)) {
                     const currentYear = new Date().getFullYear();
                     if (!(year && year >= currentYear - 2)) continue;
-                    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+                    console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
                 }
 
                 totalPassed++;
@@ -259,7 +266,7 @@ try {
         await fetch('https://dealscan-insight-production.up.railway.app/api/ingest/apify', {
             method: 'POST',
             headers: {
-                'X-Apify-Webhook-Secret': 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA',
+                'X-Apify-Webhook-Secret': process.env.WEBHOOK_SECRET || '',
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({

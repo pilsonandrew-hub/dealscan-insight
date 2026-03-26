@@ -79,16 +79,16 @@ function parsePriceString(priceString = '') {
 function passesFilters({ state, mileage, year, currentBid, maxMileage, maxAgeYears, minBid, maxBid }) {
     // Must be USA
     if (!state || !US_STATES.has(state)) return false;
-    // Skip high-rust states — bypass for ≤3yr old vehicles
+    // Skip high-rust states — bypass for <=2yr old vehicles
     if (HIGH_RUST.has(state)) {
         const currentYear = new Date().getFullYear();
         if (!(year !== null && year >= currentYear - 2)) return false;
-        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
     }
     // Mileage filter (if available)
     if (mileage !== null && mileage > maxMileage) return false;
     // Age filter (if year available)
-    if (year !== null && (new Date().getFullYear() - year) > maxAgeYears) return false;
+    if (year === null || (new Date().getFullYear() - year) > maxAgeYears) return false;
     // Price filter (if price available — 0 means TBD/not set, skip price filter for those)
     if (currentBid > 0 && (currentBid < minBid || currentBid > maxBid)) return false;
     return true;
@@ -99,8 +99,8 @@ await Actor.init();
 const input = await Actor.getInput() ?? {};
 const {
     maxPages = 4,
-    maxMileage = 150000,
-    maxAgeYears = 8,
+    maxMileage = 100000,
+    maxAgeYears = 10,
     minBid = 0,
     maxBid = 150000,
     maxItems = 0, // 0 = unlimited
