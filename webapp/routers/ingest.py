@@ -2498,8 +2498,10 @@ async def _submit_rover_action(opportunity_id: str, action: str, user_id: str) -
         "action": action,
         "user_id": user_id,
     }
+    internal_secret = get_config("INTERNAL_API_SECRET") or ""
+    headers = {"X-Internal-Secret": internal_secret} if internal_secret else {}
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(f"{_rover_actions_base_url()}/api/rover/actions", json=payload)
+        resp = await client.post(f"{_rover_actions_base_url()}/api/rover/actions", json=payload, headers=headers)
         resp.raise_for_status()
 
 
