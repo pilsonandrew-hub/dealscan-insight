@@ -117,6 +117,28 @@ const VEHICLE_MAKES = [
     'porsche', 'maserati', 'alfa romeo', 'fiat', 'genesis', 'rivian', 'lucid',
     'international', 'kenworth', 'peterbilt', 'mack', 'freightliner', 'western star', 'sterling',
 ];
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 const VEHICLE_KEYWORDS = [
     'sedan', 'coupe', 'hatchback', 'wagon', 'convertible', 'suv', 'sport utility',
@@ -305,6 +327,7 @@ function parseVehicleTitle(title) {
 function isVehicleLot(title) {
     const { lower } = parseVehicleTitle(title);
     if (!lower) return false;
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (EXCLUDED_PATTERN.test(lower)) return false;
     return VEHICLE_MAKES.some((m) => lower.includes(m))
         || VEHICLE_KEYWORDS.some((k) => lower.includes(k));

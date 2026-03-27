@@ -40,6 +40,28 @@ const HARD_MAX_PAGES = 200;
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
 const MAX_DETAIL_PAGES = 200;
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
@@ -73,6 +95,18 @@ function extractLots(json) {
 }
 
 function passes(item) {
+    const conditionText = [
+        item.assetTitle,
+        item.assetShortDescription,
+        item.longDescription,
+        item.itemDescription,
+        item.description,
+        item.notes,
+        item.assetLongDescription,
+        item.itemNotes,
+        item.title,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(conditionText))) return false;
     const state = (item.locationState || item.state || '').toUpperCase();
     const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;

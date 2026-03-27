@@ -52,6 +52,28 @@ const MAKES = [
     'bmw','mercedes','audi','lexus','acura','infiniti','cadillac','lincoln',
     'buick','pontiac','mitsubishi','volvo','tesla','rivian',
 ];
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 await Actor.init();
 
@@ -108,6 +130,11 @@ function parseMileage(text) {
 function parseVin(text) {
     const m = normalize(text).match(/\b#?([A-HJ-NPR-Z0-9]{17})\b/i);
     return m ? m[1].toUpperCase() : null;
+}
+
+function hasConditionReject(text) {
+    const lower = normalize(text).toLowerCase();
+    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower));
 }
 
 function parseLotId(url) {
@@ -202,6 +229,7 @@ const crawler = new PlaywrightCrawler({
                 if (seenLotIds.has(card.lotId)) continue;
                 seenLotIds.add(card.lotId);
 
+                if (hasConditionReject(card.title)) continue;
                 if (!make) continue;
                 if (!year || year < minYear) continue;
                 if (bid > 0 && (bid < minBid || bid > maxBid)) continue;

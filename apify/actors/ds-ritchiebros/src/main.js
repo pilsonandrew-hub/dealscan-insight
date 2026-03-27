@@ -3,6 +3,28 @@ import { PlaywrightCrawler } from 'crawlee';
 
 await Actor.init();
 const HIGH_RUST = new Set(['OH','MI','PA','NY','WI','MN','IL','IN','MO','IA','ND','SD','NE','KS','WV','ME','NH','VT','MA','RI','CT','NJ','MD','DE']);
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 let found = 0, passed = 0;
 
 const proxyConfiguration = await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'], countryCode: 'US' });
@@ -26,6 +48,7 @@ const crawler = new PlaywrightCrawler({
         log.info('[RITCHIEBROS] Found: ' + items.length);
         found += items.length;
         for (const item of items) {
+            if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test((item.title || '').toLowerCase()))) continue;
             const state = item.location?.match(/\b([A-Z]{2})\b/)?.[1];
             const mileage = extractMileage(item.title || '');
             if (state && HIGH_RUST.has(state)) {

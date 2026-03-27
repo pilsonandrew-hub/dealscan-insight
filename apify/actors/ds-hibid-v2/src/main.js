@@ -66,6 +66,28 @@ const VEHICLE_KEYWORDS = [
 ];
 
 const EXCLUDED_PATTERNS = /\b(forklift|tractor(?!\s+trailer)|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv(?!\s*vehicle)|utv|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed\s+truck|box\s*truck|cargo\s+van|step\s+van|cutaway|chassis\s+cab|stake\s*bed|lug\s*nut|auto\s*part|spare\s*tire|wheel\s+cover|tonneau|bed\s+cover|floor\s+mat|car\s+seat|child\s+seat|car\s+cover)\b/i;
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 // US state abbreviations set
 const US_STATES = new Set([
@@ -161,6 +183,7 @@ function parseVehicleTitle(text) {
 function isVehicle(text) {
     if (!text) return false;
     const lower = String(text).toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (EXCLUDED_PATTERNS.test(lower)) return false;
     const hasMake = [...VEHICLE_MAKES].some(m => new RegExp(`\\b${m}\\b`).test(lower));
     const hasKeyword = VEHICLE_KEYWORDS.some(k => lower.includes(k));
@@ -189,6 +212,10 @@ function buildLotUrl(lotId, siteSubdomain) {
 }
 
 function passesFilters(listing, log) {
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(String(listing.title || '').toLowerCase()))) {
+        log.debug(`[SKIP] Condition reject: ${listing.title || 'unknown title'}`);
+        return false;
+    }
     if (!isVehicle(listing.title)) {
         log.debug(`[SKIP-NON-VEH] ${listing.title?.slice(0, 60)}`);
         return false;
