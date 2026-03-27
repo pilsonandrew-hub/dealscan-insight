@@ -590,31 +590,6 @@ const DashboardTab = () => {
         )}
       </div>
 
-      {/* Pipeline Status */}
-      <div>
-        <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">
-          Scraper Sources
-        </h2>
-        <div className="bg-gray-900 rounded-xl border border-gray-800 divide-y divide-gray-800">
-          {sources.length === 0 && !loading ? (
-            <div className="p-4 text-gray-500 text-sm text-center">No source data available</div>
-          ) : sources.map(src => {
-            const fresh = src.last_run && (Date.now() - new Date(src.last_run).getTime()) < 4 * 3600 * 1000;
-            return (
-              <div key={src.name} className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <span className={`h-2 w-2 rounded-full ${fresh ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-                  <span className="text-sm text-white font-medium">{src.name}</span>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-gray-500">
-                  <span>{src.count} deals</span>
-                  <span>{timeAgo(src.last_run)}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 };
@@ -1897,22 +1872,18 @@ const SettingsTab = () => {
   const { user, signOut } = useAuth();
   const [railwayStatus, setRailwayStatus] = useState<{ status: string; latency?: number } | null>(null);
   const [supabaseStatus, setSupabaseStatus] = useState<{ status: string; latency?: number } | null>(null);
-  const [sources, setSources] = useState<ScraperSource[]>([]);
   const [checking, setChecking] = useState(false);
 
   const checkConnections = useCallback(async () => {
     setChecking(true);
-    // Use allSettled so each check is independent — one failure won't block others
-    const [r, s, src] = await Promise.allSettled([
+    const [r, s] = await Promise.allSettled([
       api.checkRailwayHealth(),
-      api.checkSupabaseHealth(),
-      api.getScraperSources()
+      api.checkSupabaseHealth()
     ]);
     if (r.status === 'fulfilled') setRailwayStatus(r.value);
     else setRailwayStatus({ status: 'error' });
     if (s.status === 'fulfilled') setSupabaseStatus(s.value);
     else setSupabaseStatus({ status: 'error' });
-    if (src.status === 'fulfilled') setSources(src.value);
     setChecking(false);
   }, []);
 
@@ -1986,32 +1957,6 @@ const SettingsTab = () => {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Scraper sources */}
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3">Scraper Sources</h3>
-        {sources.length === 0 ? (
-          <p className="text-gray-500 text-sm">No source data</p>
-        ) : (
-          <div className="space-y-2">
-            {sources.map(src => {
-              const fresh = src.last_run && (Date.now() - new Date(src.last_run).getTime()) < 4 * 3600 * 1000;
-              return (
-                <div key={src.name} className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`h-1.5 w-1.5 rounded-full ${fresh ? 'bg-emerald-400' : 'bg-gray-600'}`} />
-                    <span className="text-sm text-white">{src.name}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
-                    <span>{src.count} deals</span>
-                    <span>{timeAgo(src.last_run)}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
