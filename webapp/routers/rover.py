@@ -226,8 +226,10 @@ async def get_recommendations(
         all_rows = opps_resp.data or []
         raw_rows = [
             r for r in all_rows
-            if (str(r.get("state") or "").upper() not in HIGH_RUST_STATES_ROVER)
-            or (r.get("year") and int(r.get("year", 0)) >= current_year - 2)
+            if not (
+                str(r.get("state") or "").upper() in HIGH_RUST_STATES_ROVER
+                and not (r.get("year") and int(r.get("year", 0)) >= current_year - 2)
+            )
         ]
         personalized = False
 
@@ -277,6 +279,8 @@ async def get_recommendations(
         if affinity or heuristic_prefs:
             personalized = True
             max_aff = max(affinity.values()) if affinity else 1.0
+            if max_aff <= 0:
+                max_aff = 1.0
 
             def _affinity_boost(row: dict) -> float:
                 if not affinity:

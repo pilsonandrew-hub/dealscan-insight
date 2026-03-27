@@ -20,8 +20,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
-DECAY_HALF_LIFE_HOURS = 72
-DECAY_FACTOR = math.exp(-math.log(2) / DECAY_HALF_LIFE_HOURS)  # per hour
+DECAY_HALF_LIFE_HOURS = 72  # 72 hour half-life
+DECAY_FACTOR = math.exp(-math.log(2) / DECAY_HALF_LIFE_HOURS)
 KEY_TTL = 2592000  # 30 days in seconds
 
 # Internal hash field name for tracking last decay timestamp
@@ -316,26 +316,18 @@ def get_affinity_vector(redis_client, user_id: str) -> dict[str, float]:
 
     Applies lazy decay on read, migrates old flat keys if needed.
     """
-    hash_key = _hash_key(user_id)
-
-    # Lazy migration from old flat-key schema
-    if not redis_client.exists(hash_key):
-        migrate_to_hset(redis_client, user_id)
-
-    # Apply decay before returning scores
-    apply_decay(redis_client, user_id)
-
-    raw = redis_client.hgetall(hash_key)
+    key = f"rover:affinity:{user_id}"
+    raw = redis_client.hgetall(key)
     if not raw:
         return {}
 
+    now_ms = time.time() * 1000
     result: dict[str, float] = {}
     for field, val in raw.items():
-        if field == _DECAY_TS_FIELD:
-            continue
-        try:
-            result[field] = float(val)
-        except (TypeError, ValueError):
-            pass
-
+        dim = field.decode() if isinstance(field, bytes) else field
+        score = float(val.decode() if isinstance(val, bytes) else val)
+        # apply decay
+        decayed = score * (DECAY_FACTOR ** ((now_ms - 0) / 3600000))
+        if abs(decayed) > 0.01:
+            result[dim] = decayed
     return result
