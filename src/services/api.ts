@@ -573,7 +573,8 @@ export const api = {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const res = await fetch(`${API_BASE}/api/rover/recommendations?limit=25`, {
+      const userId = session?.user?.id;
+      const res = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId || '')}&limit=25`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'

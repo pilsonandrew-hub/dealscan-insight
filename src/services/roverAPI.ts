@@ -128,9 +128,9 @@ class RoverAPIService {
     }
   }
 
-  async getRecommendationsWithToken(_userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
+  async getRecommendationsWithToken(userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
     try {
-      const resp = await fetch(`${API_BASE}/api/rover/recommendations?limit=${limit}`, {
+      const resp = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!resp.ok) {
