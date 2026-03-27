@@ -524,8 +524,16 @@ async def track_event(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+
+
 @router.post("/actions")
-async def record_action(payload: dict[str, Any]):
+async def record_action(
+    payload: dict[str, Any],
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
+):
+    if not INTERNAL_API_SECRET or x_internal_secret != INTERNAL_API_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
     """Record a rover action from internal callers such as Telegram callbacks."""
     opportunity_id = str(payload.get("opportunity_id") or "").strip()
     action = str(payload.get("action") or "").strip().lower()

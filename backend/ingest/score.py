@@ -523,10 +523,10 @@ def _compute_max_bid_v2(
     if bid_value is None or bid_value <= 0:
         bid_value = mmr * ceiling
     premium_pct = _normalize_pct(buyer_premium_pct, 0.05)
-    buyer_premium_amount = round(bid_value * premium_pct, 2)
     fees = _coerce_float(auction_fees)
     auction_fees_amount = round(fees if fees is not None else 200.0, 2)
-    return round((mmr * ceiling) - buyer_premium_amount - auction_fees_amount, 2)
+    max_bid = round(((mmr * ceiling) - auction_fees_amount) / (1 + premium_pct), 2)
+    return max_bid
 
 
 def score_deal(

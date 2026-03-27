@@ -27,7 +27,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 FIRECRAWL_API_URL = "https://api.firecrawl.dev/v1/scrape"
-FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "FIRECRAWL_API_KEY_REDACTED")
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 TIMEOUT_SECONDS = 30
 
 

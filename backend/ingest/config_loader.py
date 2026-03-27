@@ -22,10 +22,7 @@ from functools import lru_cache
 logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://lbnxzvqppccajllsqaaw.supabase.co")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv(
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY_REDACTED"
-)
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 _config_cache: dict[str, str] = {}
 _cache_loaded = False
