@@ -4,7 +4,9 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { SonarCard } from './SonarCard';
 import { sonarSearchStreaming, SONAR_SOURCES, type SonarResult, type SonarSource } from '@/services/sonarAPI';
-import { Search, Share2, ArrowUpDown, Check, Loader2 } from 'lucide-react';
+import { Search, Share2, ArrowUpDown, Check, Loader2, ClipboardCheck } from 'lucide-react';
+import { toast } from 'sonner';
+import { fmt$ } from '@/utils/formatters';
 
 type SortKey = 'price_asc' | 'ending_soon' | 'newest';
 
@@ -25,11 +27,14 @@ type SourceStatus = 'pending' | 'scanning' | 'done';
 export const SonarTab: React.FC = () => {
   const [query, setQuery] = useState('');
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 20_000]);
+  const [minInput, setMinInput] = useState('0');
+  const [maxInput, setMaxInput] = useState('20000');
   const [results, setResults] = useState<SonarResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('price_asc');
-  const [sourceStatuses, setSourceStatuses] = useState<Map<SonarSource, SourceStatus>>(new Map());
+  const [sourceStatuses, setSourceStatuses] = useState<Record<string, SourceStatus>>({});
+  const [shareIcon, setShareIcon] = useState<'share' | 'check'>('share');
   const abortRef = useRef(false);
 
   const handleSearch = useCallback(async (e?: React.FormEvent) => {
@@ -40,8 +45,8 @@ export const SonarTab: React.FC = () => {
     setHasSearched(true);
 
     // Initialize all sources as pending, first one as scanning
-    const initial = new Map<SonarSource, SourceStatus>();
-    SONAR_SOURCES.forEach((s, i) => initial.set(s, i === 0 ? 'scanning' : 'pending'));
+    const initial: Record<string, SourceStatus> = {};
+    SONAR_SOURCES.forEach((s, i) => { initial[s] = i === 0 ? 'scanning' : 'pending'; });
     setSourceStatuses(initial);
 
     let nextSourceIdx = 1;
@@ -50,14 +55,12 @@ export const SonarTab: React.FC = () => {
       { query, minPrice: priceRange[0], maxPrice: priceRange[1] },
       (batch) => {
         if (abortRef.current) return;
-        // Add results from this batch
         setResults((prev) => [...prev, ...batch.results]);
-        // Mark this source done, next source scanning
         setSourceStatuses((prev) => {
-          const next = new Map(prev);
-          next.set(batch.source, 'done');
+          const next = { ...prev };
+          next[batch.source] = 'done';
           if (nextSourceIdx < SONAR_SOURCES.length) {
-            next.set(SONAR_SOURCES[nextSourceIdx], 'scanning');
+            next[SONAR_SOURCES[nextSourceIdx]] = 'scanning';
             nextSourceIdx++;
           }
           return next;
@@ -75,18 +78,32 @@ export const SonarTab: React.FC = () => {
         `${i + 1}. ${r.year} ${r.make} ${r.model} ${r.trim} — ${fmt$(r.currentBid)} (${r.timeRemaining} left) — ${r.location}`
     );
     const text = `Sonar Search Results\n${query ? `"${query}"` : 'All vehicles'} · $${priceRange[0].toLocaleString()}–$${priceRange[1].toLocaleString()}\n\n${lines.join('\n')}`;
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success('Copied to clipboard');
+      setShareIcon('check');
+      setTimeout(() => setShareIcon('share'), 2000);
+    });
   }, [results, sortKey, query, priceRange]);
 
-  const handleMinInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Math.max(0, Math.min(Number(e.target.value) || 0, priceRange[1]));
-    setPriceRange([val, priceRange[1]]);
-  }, [priceRange]);
+  const handleMinBlur = useCallback(() => {
+    const parsed = Math.max(0, Number(minInput) || 0);
+    const clamped = Math.min(parsed, priceRange[1]);
+    setPriceRange([clamped, priceRange[1]]);
+    setMinInput(String(clamped));
+  }, [minInput, priceRange]);
 
-  const handleMaxInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Math.max(priceRange[0], Math.min(Number(e.target.value) || 0, 75_000));
-    setPriceRange([priceRange[0], val]);
-  }, [priceRange]);
+  const handleMaxBlur = useCallback(() => {
+    const parsed = Math.max(priceRange[0], Number(maxInput) || 0);
+    setPriceRange([priceRange[0], parsed]);
+    setMaxInput(String(parsed));
+  }, [maxInput, priceRange]);
+
+  const handleSliderChange = useCallback((v: number[]) => {
+    const range = v as [number, number];
+    setPriceRange(range);
+    setMinInput(String(range[0]));
+    setMaxInput(String(range[1]));
+  }, []);
 
   const sorted = sortResults(results, sortKey);
 
@@ -140,22 +157,21 @@ export const SonarTab: React.FC = () => {
           </div>
           <Slider
             min={0}
-            max={75_000}
+            max={999_999}
             step={500}
             value={priceRange}
-            onValueChange={(v) => setPriceRange(v as [number, number])}
+            onValueChange={handleSliderChange}
             className="sonar-slider"
           />
           <div className="flex gap-3 items-center">
             <div className="flex-1">
               <label className="text-gray-500 text-xs mb-1 block">Min ($)</label>
               <Input
-                type="number"
-                min={0}
-                max={priceRange[1]}
-                step={500}
-                value={priceRange[0]}
-                onChange={handleMinInput}
+                type="text"
+                inputMode="numeric"
+                value={minInput}
+                onChange={(e) => setMinInput(e.target.value)}
+                onBlur={handleMinBlur}
                 className="bg-gray-800 border-gray-700 text-white text-sm h-8"
               />
             </div>
@@ -163,12 +179,11 @@ export const SonarTab: React.FC = () => {
             <div className="flex-1">
               <label className="text-gray-500 text-xs mb-1 block">Max ($)</label>
               <Input
-                type="number"
-                min={priceRange[0]}
-                max={75_000}
-                step={500}
-                value={priceRange[1]}
-                onChange={handleMaxInput}
+                type="text"
+                inputMode="numeric"
+                value={maxInput}
+                onChange={(e) => setMaxInput(e.target.value)}
+                onBlur={handleMaxBlur}
                 className="bg-gray-800 border-gray-700 text-white text-sm h-8"
               />
             </div>
@@ -176,7 +191,7 @@ export const SonarTab: React.FC = () => {
         </div>
       </form>
 
-      {/* Per-source progress ticks */}
+      {/* Per-source progress ticks + skeleton loaders */}
       {isSearching && (
         <div className="space-y-4">
           <div className="flex flex-col items-center justify-center py-8 space-y-6">
@@ -189,7 +204,7 @@ export const SonarTab: React.FC = () => {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 text-sm">
             {SONAR_SOURCES.map((source) => {
-              const status = sourceStatuses.get(source) ?? 'pending';
+              const status = sourceStatuses[source] ?? 'pending';
               return (
                 <span
                   key={source}
@@ -210,6 +225,28 @@ export const SonarTab: React.FC = () => {
               );
             })}
           </div>
+
+          {/* Skeleton loaders when no results yet */}
+          {results.length === 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden animate-pulse">
+                  <div className="h-44 bg-gray-800" />
+                  <div className="p-4 space-y-3">
+                    <div className="h-5 bg-gray-800 rounded w-3/4" />
+                    <div className="h-4 bg-gray-800 rounded w-1/2" />
+                    <div className="h-6 bg-gray-800 rounded w-1/3" />
+                    <div className="flex gap-3">
+                      <div className="h-3 bg-gray-800 rounded w-16" />
+                      <div className="h-3 bg-gray-800 rounded w-20" />
+                      <div className="h-3 bg-gray-800 rounded w-14" />
+                    </div>
+                    <div className="h-3 bg-gray-800 rounded w-full" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -243,8 +280,12 @@ export const SonarTab: React.FC = () => {
               onClick={handleShare}
               className="text-gray-400 hover:text-cyan-400 gap-1"
             >
-              <Share2 className="h-3.5 w-3.5" />
-              Share
+              {shareIcon === 'check' ? (
+                <ClipboardCheck className="h-3.5 w-3.5 text-green-400" />
+              ) : (
+                <Share2 className="h-3.5 w-3.5" />
+              )}
+              {shareIcon === 'check' ? 'Copied!' : 'Share'}
             </Button>
           </div>
         </div>
@@ -266,67 +307,6 @@ export const SonarTab: React.FC = () => {
           <p className="text-sm mt-1">Try broadening your search or adjusting your budget range</p>
         </div>
       )}
-
-      {/* Sonar CSS */}
-      <style>{`
-        .sonar-pulse-container {
-          position: relative;
-          width: 120px;
-          height: 120px;
-        }
-        .sonar-pulse-dot {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          width: 12px;
-          height: 12px;
-          margin: -6px 0 0 -6px;
-          background: #06b6d4;
-          border-radius: 50%;
-          box-shadow: 0 0 12px #06b6d4;
-        }
-        .sonar-pulse-ring {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          border: 2px solid #06b6d4;
-          border-radius: 50%;
-          opacity: 0;
-          animation: sonar-expand 2s ease-out infinite;
-        }
-        .sonar-pulse-ring-1 {
-          width: 40px; height: 40px; margin: -20px 0 0 -20px;
-          animation-delay: 0s;
-        }
-        .sonar-pulse-ring-2 {
-          width: 40px; height: 40px; margin: -20px 0 0 -20px;
-          animation-delay: 0.6s;
-        }
-        .sonar-pulse-ring-3 {
-          width: 40px; height: 40px; margin: -20px 0 0 -20px;
-          animation-delay: 1.2s;
-        }
-        @keyframes sonar-expand {
-          0% { transform: scale(1); opacity: 0.7; }
-          100% { transform: scale(3); opacity: 0; }
-        }
-        .sonar-card-enter {
-          animation: sonar-fade-up 0.4s ease-out both;
-        }
-        @keyframes sonar-fade-up {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .sonar-ring-1 { animation: sonar-icon-pulse 2.5s ease-in-out infinite; }
-        .sonar-ring-2 { animation: sonar-icon-pulse 2.5s ease-in-out 0.4s infinite; }
-        @keyframes sonar-icon-pulse {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.8; }
-        }
-        .sonar-slider [data-orientation="horizontal"] > span:first-child > span {
-          background: #06b6d4;
-        }
-      `}</style>
     </div>
   );
 };
