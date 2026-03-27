@@ -44,7 +44,7 @@ ACTORS = {
 }
 
 JOB_TTL_SECONDS = 300
-POLL_TIMEOUT_SECONDS = 60
+POLL_TIMEOUT_SECONDS = 240
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -122,13 +122,13 @@ async def _load_job(job_id: str) -> dict | None:
 
 async def _start_actor(client: httpx.AsyncClient, actor_id: str, body: dict) -> str | None:
     """Start an Apify actor run, return the run ID or None on failure."""
-    url = f"{APIFY_BASE}/acts/{actor_id}/runs?waitForFinish=120"
+    url = f"{APIFY_BASE}/acts/{actor_id}/runs"
     try:
         resp = await client.post(
             url,
             json=body,
             headers={"Authorization": f"Bearer {APIFY_TOKEN}"},
-            timeout=130,
+            timeout=15,
         )
         if resp.status_code in (200, 201):
             return resp.json().get("data", {}).get("id")
