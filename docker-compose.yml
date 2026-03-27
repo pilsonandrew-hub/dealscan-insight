@@ -109,6 +109,13 @@ services:
       timeout: 5s
       retries: 5
 
+  # NOTE (DEA-11): Traefik is configured in docker-compose.prod.yml with BasicAuth
+  # middleware on the dashboard. When deploying, ensure TRAEFIK_DASHBOARD_USERS is set
+  # to an htpasswd-formatted string: admin:$(htpasswd -nbB admin 'strong-password')
+
+  # NOTE (DEA-12): Elasticsearch is configured in docker-compose.prod.yml with
+  # xpack.security.enabled=true. No ES in dev compose — security is prod-only.
+
 volumes:
   postgres_data:
   redis_data:

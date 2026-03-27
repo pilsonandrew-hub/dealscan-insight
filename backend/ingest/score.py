@@ -447,11 +447,13 @@ def _model_score_v2(vehicle: dict) -> float:
 
 
 def _source_score_v2(vehicle: dict) -> float:
+    """Source reliability score — government sources scored on same scale as others (DEA-2)."""
     source = _normalized_text(vehicle.get("source_site") or vehicle.get("source"))
     if not source:
         return 0.4
+    # DEA-2: Gov sources no longer get a perfect 1.0; scored fairly alongside others
     if any(token in source for token in ("govdeals", "govplanet", "gsaauctions", "publicsurplus", "municibid")):
-        return 1.0
+        return 0.75
     if any(token in source for token in ("hibid", "proxibid", "bidspotter", "allsurplus", "jjkane", "usgovbid")):
         return 0.65
     return 0.4

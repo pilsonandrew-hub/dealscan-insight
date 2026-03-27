@@ -33,7 +33,7 @@ def _check_rate_limit(identifier: str, max_attempts: int = 10, window_seconds: i
     _login_attempts[identifier].append(now)
 
 
-def _check_ip_rate_limit(ip_address: str, max_attempts: int = 20, window_seconds: int = 60):
+def _check_ip_rate_limit(ip_address: str, max_attempts: int = 5, window_seconds: int = 900):
     now = time.time()
     attempts = [t for t in _login_attempts_by_ip[ip_address] if now - t < window_seconds]
     _login_attempts_by_ip[ip_address] = attempts
