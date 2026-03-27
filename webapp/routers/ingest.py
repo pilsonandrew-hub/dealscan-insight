@@ -258,7 +258,8 @@ _TITLE_BRAND_PATTERNS = [
     # Mechanical issues — no project cars
     ("won't start", r"\bwon'?t\s+start\b|\bdoes\s+not\s+start\b|\bno\s+start\b|\binop(?:erable)?\b"),
     ("needs engine", r"\bneeds?\s+engine\b|\bbad\s+engine\b|\bblown\s+engine\b|\bengine\s+knock\b|\bengine\s+miss\b"),
-    ("needs transmission", r"\bneeds?\s+trans(?:mission)?\b|\bbad\s+trans(?:mission)?\b|\bno\s+trans(?:mission)?\b"),
+    ("won't go into gear", r"\bwon'?t\s+(?:go\s+into|shift\s+into|engage)\s+gear\b|\bno\s+reverse\b|\bno\s+drive\b|\bstuck\s+in\s+(?:park|neutral|gear)\b|\bslipping\s+(?:trans|transmission)\b"),
+    ("needs transmission", r"\bneeds?\s+trans(?:mission)?\b|\bbad\s+trans(?:mission)?\b|\bno\s+trans(?:mission)?\b|\btransmission\s+(?:fail|issues?|problem|gone|dead|shot)\b"),
     ("needs repair", r"\bneeds?\s+(?:major\s+)?repair\b|\bproject\s+(?:car|vehicle|truck)\b"),
     ("as-is no warranty", r"\bas[\s-]?is\b.*\bno\s+warrant|\bno\s+warrant.*\bas[\s-]?is\b"),
     # Parts / incomplete
