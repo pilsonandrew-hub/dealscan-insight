@@ -29,10 +29,8 @@ _event_rate: dict[str, list[float]] = {}
 
 _VALID_EVENT_TYPES = ['view', 'click', 'save', 'bid', 'purchase', 'pass']
 
-# Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
-from backend.ingest.config_loader import get_config as _get_config
-SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or _get_config("SUPABASE_URL") or ""
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or _get_config("SUPABASE_ANON_KEY") or ""
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "https://lbnxzvqppccajllsqaaw.supabase.co"
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI"
 
 # Background-only client for auth verification.
 _background_supabase_client: Optional[Client] = None
@@ -66,9 +64,10 @@ except Exception as _re:
 def get_user_supabase_client(authorization: str = Header(..., alias="Authorization")) -> Client:
     """Create a user-scoped Supabase client that forwards the caller JWT for RLS."""
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        logger.error("[ROVER] get_user_supabase_client called with empty SUPABASE_URL=%r / SUPABASE_ANON_KEY=%s", SUPABASE_URL, "set" if SUPABASE_ANON_KEY else "EMPTY")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Supabase configuration missing (URL or anon key).",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase configuration missing — service temporarily unavailable.",
         )
 
     if not authorization.startswith("Bearer "):
@@ -440,7 +439,7 @@ async def get_recommendations(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[ROVER] Recommendations error for {user_id}: {e}")
+        logger.error("[ROVER] Recommendations error for %s: %s: %s", user_id, type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
