@@ -331,10 +331,12 @@ async def get_recommendations(
     supabase_client: Client = Depends(get_user_supabase_client),
 ):
     """Get personalized deal recommendations for a user."""
+    logger.info(f"[ROVER] Request received: user_id={user_id}, auth_user_id will be verified next")
     # Verify auth and ensure user can only see their own recommendations
     auth_user_id = _verify_auth(authorization)
     if auth_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    logger.info(f"[ROVER] Auth passed for user_id={user_id}")
 
     try:
         now_ms = time.time() * 1000
@@ -359,6 +361,7 @@ async def get_recommendations(
             .limit(fetch_limit)\
             .execute()
 
+        logger.info(f"[ROVER] Supabase query returned {len(opps_resp.data or [])} rows")
         # Post-fetch: filter rust states (DB can't do set membership easily)
         all_rows = opps_resp.data or []
         raw_rows = []
@@ -455,8 +458,8 @@ async def get_recommendations(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("[ROVER] Recommendations error for %s: %s: %s", user_id, type(e).__name__, e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"[ROVER] FULL ERROR: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DEBUG: {type(e).__name__}: {str(e)}")
 
 
 @router.get("/debug", tags=["rover"])
