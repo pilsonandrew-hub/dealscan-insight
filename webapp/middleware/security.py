@@ -98,37 +98,69 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         return False
     
     def _is_safe_url(self, url: str) -> bool:
-        """Validate URL against SSRF attacks"""
-        try:
-            parsed = urlparse(url)
-            
-            # Only allow HTTP/HTTPS
-            if parsed.scheme not in ('http', 'https'):
-                return False
-                
-            # Check if domain is allowed
-            hostname = parsed.hostname
-            if not hostname or hostname not in ALLOWED_DOMAINS:
-                return False
-                
-            # Resolve hostname to IP and check if it's private
-            try:
-                import socket
-                ip = socket.gethostbyname(hostname)
-                ip_obj = ipaddress.ip_address(ip)
-                
-                # Block private IPs
-                for network in PRIVATE_NETWORKS:
-                    if ip_obj in network:
-                        return False
-                        
-            except (socket.gaierror, ValueError):
-                return False
-                
-            return True
-            
-        except Exception:
-            return False
+        """Validate URL against SSRF attacks (validation-only, no fetch)"""
+        resolved = resolve_and_validate_url(url)
+        return resolved is not None
+
+
+def resolve_and_validate_url(url: str):
+    """Resolve hostname once, validate IP, return (resolved_ip, parsed) or None.
+
+    Callers MUST use the returned resolved_ip for the actual HTTP request
+    (with the original Host header) to prevent DNS rebinding.
+    """
+    import socket
+    try:
+        parsed = urlparse(url)
+
+        if parsed.scheme not in ('http', 'https'):
+            return None
+
+        hostname = parsed.hostname
+        if not hostname or hostname not in ALLOWED_DOMAINS:
+            return None
+
+        # Resolve ONCE — this is the IP we will connect to
+        resolved_ip = socket.gethostbyname(hostname)
+        ip_obj = ipaddress.ip_address(resolved_ip)
+
+        for network in PRIVATE_NETWORKS:
+            if ip_obj in network:
+                return None
+
+        return resolved_ip, parsed
+
+    except (socket.gaierror, ValueError, Exception):
+        return None
+
+
+def safe_fetch(url: str, **kwargs):
+    """Fetch a URL with SSRF-safe DNS pinning.
+
+    Resolves the hostname once, validates the IP, then makes the HTTP
+    request directly to the resolved IP with the original Host header.
+    """
+    import requests
+
+    result = resolve_and_validate_url(url)
+    if result is None:
+        raise ValueError(f"URL blocked by SSRF policy: {url}")
+
+    resolved_ip, parsed = result
+    hostname = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    # Build the pinned URL: replace hostname with resolved IP
+    pinned_url = url.replace(f"://{hostname}", f"://{resolved_ip}", 1)
+
+    headers = kwargs.pop("headers", {})
+    headers["Host"] = hostname
+
+    # Disable redirects to prevent re-resolution via Location header
+    kwargs.setdefault("allow_redirects", False)
+    kwargs.setdefault("timeout", 30)
+
+    return requests.get(pinned_url, headers=headers, verify=parsed.scheme == "https", **kwargs)
 
 
 def is_safe_domain(domain: str) -> bool:

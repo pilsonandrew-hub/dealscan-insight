@@ -136,15 +136,19 @@ async def login(
             )
         
         # Check TOTP code or backup code
-        import hashlib
+        import bcrypt
         totp_valid = verify_totp_code(user.totp_secret, login_data.totp_code)
         backup_valid = False
         if not totp_valid and user.backup_codes:
-            code_hash = hashlib.sha256(login_data.totp_code.encode()).hexdigest()
             stored_hashes = user.backup_codes.split(",")
-            if code_hash in stored_hashes:
+            matched_hash = None
+            for stored_hash in stored_hashes:
+                if bcrypt.checkpw(login_data.totp_code.encode(), stored_hash.encode()):
+                    matched_hash = stored_hash
+                    break
+            if matched_hash:
                 # Consume the backup code
-                remaining = [h for h in stored_hashes if h != code_hash]
+                remaining = [h for h in stored_hashes if h != matched_hash]
                 user.backup_codes = ",".join(remaining)
                 backup_valid = True
 
@@ -274,8 +278,8 @@ async def enable_totp(
     qr_code = generate_qr_code(current_user.username, secret)
     
     # Store secret and hashed backup codes (never store plain text backup codes)
-    import hashlib
-    hashed_codes = [hashlib.sha256(code.encode()).hexdigest() for code in backup_codes]
+    import bcrypt
+    hashed_codes = [bcrypt.hashpw(code.encode(), bcrypt.gensalt()).decode() for code in backup_codes]
     current_user.totp_secret = secret
     current_user.backup_codes = ",".join(hashed_codes)
     db.commit()

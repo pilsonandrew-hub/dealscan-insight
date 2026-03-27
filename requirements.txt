@@ -12,6 +12,7 @@ pydantic-settings==2.6.0
 PyJWT>=2.8.0
 passlib[bcrypt]==1.7.0
 python-multipart==0.0.9
+defusedxml>=0.7.1
 
 # Database
 sqlalchemy==2.0.23

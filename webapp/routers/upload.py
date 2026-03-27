@@ -1,6 +1,9 @@
 """
 File upload API endpoints with security validation
 """
+import defusedxml
+defusedxml.defuse_stdlib()
+
 import io
 import csv
 from typing import List, Dict, Any

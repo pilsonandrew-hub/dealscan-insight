@@ -72,27 +72,32 @@ def get_token_expiry(token: str) -> Optional[datetime]:
     return None
 
 class TokenBlacklist:
-    """In-memory token blacklist (use Redis in production)"""
-    
+    """Redis-backed token blacklist with TTL auto-expiry"""
+
+    DEFAULT_TTL = 86400  # 24 hours fallback
+
     def __init__(self):
-        self._blacklisted = set()
-    
+        import redis
+        self._redis = redis.from_url(settings.redis_url, decode_responses=True)
+
+    def _key(self, token: str) -> str:
+        import hashlib
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        return f"bl:{token_hash}"
+
     def add_token(self, token: str):
-        """Add token to blacklist"""
-        self._blacklisted.add(token)
-    
+        """Add token to blacklist with TTL matching token expiry"""
+        expiry = get_token_expiry(token)
+        if expiry:
+            ttl = int((expiry - datetime.now(timezone.utc)).total_seconds())
+            ttl = max(ttl, 1)
+        else:
+            ttl = self.DEFAULT_TTL
+        self._redis.setex(self._key(token), ttl, "1")
+
     def is_blacklisted(self, token: str) -> bool:
         """Check if token is blacklisted"""
-        return token in self._blacklisted
-    
-    def clear_expired(self):
-        """Clear expired tokens from blacklist"""
-        # In production, use Redis TTL instead
-        valid_tokens = set()
-        for token in self._blacklisted:
-            if get_token_expiry(token) and get_token_expiry(token) > datetime.now(timezone.utc):
-                valid_tokens.add(token)
-        self._blacklisted = valid_tokens
+        return self._redis.exists(self._key(token)) > 0
 
 # Global blacklist instance
 token_blacklist = TokenBlacklist()
