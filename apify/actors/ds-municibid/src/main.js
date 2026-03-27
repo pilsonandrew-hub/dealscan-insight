@@ -100,6 +100,11 @@ function parseYear(title = '') {
     return m ? parseInt(m[1]) : null;
 }
 
+function parseMileage(text = '') {
+    const m = String(text).replace(/,/g, '').match(/\b(\d{1,3}(?:\d{3})+|\d+)\s*(?:miles?|mi\.?)\b/i);
+    return m ? parseInt(m[1], 10) : null;
+}
+
 function parseMake(title = '') {
     const lower = title.toLowerCase();
     const found = MAKES.find(mk => new RegExp(`\\b${mk}\\b`).test(lower));
@@ -178,10 +183,12 @@ const crawler = new CheerioCrawler({
 
             const state = parseState(location);
             const year = parseYear(title);
+            const mileage = parseMileage(title);
             const make = parseMake(title);
 
             // Filters
             if (!year || !make) return;
+            if (mileage !== null && mileage > 100000) return;
             if (!isPassengerVehicle(title)) return;
             if (bid < minBid || bid > maxBid) return;
             const currentYear = new Date().getFullYear();
@@ -203,6 +210,7 @@ const crawler = new CheerioCrawler({
                 year,
                 make,
                 model,
+                mileage,
                 current_bid: bid,
                 state,
                 location,

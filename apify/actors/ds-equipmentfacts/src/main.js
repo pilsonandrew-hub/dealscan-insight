@@ -22,6 +22,11 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'equipmentfacts';
 const BASE_URL = 'https://www.equipmentfacts.com';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+
+if (!WEBHOOK_SECRET) {
+    console.warn('[EQUIPMENTFACTS] WARNING: WEBHOOK_SECRET env var not set');
+}
 
 // Vehicle/truck relevant categories on EquipmentFacts
 const VEHICLE_CATEGORIES = [
@@ -197,7 +202,17 @@ function passes(item) {
         totalFailed++;
         return false;
     }
-    if (hasYear && year < 2022) {
+    const mileageValue = item.mileage ?? item.miles ?? item.meterCount ?? null;
+    const mileage = mileageValue == null || mileageValue === ''
+        ? null
+        : parseInt(String(mileageValue).replace(/,/g, ''), 10);
+    if (mileage !== null && mileage > 100000) {
+        totalFailed++;
+        return false;
+    }
+    const currentYear = new Date().getFullYear();
+    const age = hasYear ? currentYear - year : null;
+    if (!year || age > 10 || age < 0) {
         totalFailed++;
         return false;
     }

@@ -7,6 +7,11 @@ let found = 0, passed = 0;
 
 const proxyConfiguration = await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'], countryCode: 'US' });
 
+function extractMileage(text = '') {
+    const match = String(text).replace(/,/g, '').match(/\b(\d{1,3}(?:\d{3})+|\d+)\s*(?:miles?|mi\.?)\b/i);
+    return match ? parseInt(match[1], 10) : null;
+}
+
 const crawler = new PlaywrightCrawler({
     proxyConfiguration,
     maxRequestsPerCrawl: 30,
@@ -22,6 +27,7 @@ const crawler = new PlaywrightCrawler({
         found += items.length;
         for (const item of items) {
             const state = item.location?.match(/\b([A-Z]{2})\b/)?.[1];
+            const mileage = extractMileage(item.title || '');
             if (state && HIGH_RUST.has(state)) {
                 const yearMatch = (item.title || '').match(/\b(20\d{2}|19[89]\d)\b/);
                 const year = yearMatch ? parseInt(yearMatch[1]) : null;
@@ -29,7 +35,12 @@ const crawler = new PlaywrightCrawler({
                 if (!(year && year >= currentYear - 2)) continue;
                 log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
             }
-            await Actor.pushData({...item, source: 'ritchiebros'});
+            const yearMatch = (item.title || '').match(/\b(20\d{2}|19[89]\d)\b/);
+            const year = yearMatch ? parseInt(yearMatch[1]) : null;
+            const age = new Date().getFullYear() - year;
+            if (!year || age > 10 || age < 0) continue;
+            if (mileage !== null && mileage > 100000) continue;
+            await Actor.pushData({...item, mileage, source: 'ritchiebros'});
             passed++;
         }
     }

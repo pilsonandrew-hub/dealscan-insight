@@ -22,6 +22,8 @@ import { CheerioCrawler } from 'crawlee';
 const SOURCE = 'bidcal';
 
 const BASE = 'https://www.bidcal.com';
+const WEBHOOK_URL = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 const TARGET_STATES = new Set([
     'AZ','CA','NV','CO','NM','UT','TX','FL','GA','SC','TN','NC','VA','WA','OR','HI'
@@ -405,5 +407,31 @@ await crawler.run(
 );
 
 console.log(`[BIDCAL COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Failed filters: ${totalFailedFilters}`);
+
+if (WEBHOOK_URL && totalAfterFilters > 0) {
+    try {
+        const dataset = await Actor.openDataset();
+        const env = Actor.getEnv();
+        const resp = await fetch(WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-apify-webhook-secret': WEBHOOK_SECRET,
+            },
+            body: JSON.stringify({
+                source: SOURCE,
+                actorRunId: env.actorRunId,
+                datasetId: dataset.id,
+                itemCount: totalAfterFilters,
+                totalScraped: totalFound,
+                timestamp: new Date().toISOString(),
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        console.log(`[BIDCAL] Webhook sent: HTTP ${resp.status}`);
+    } catch (webhookErr) {
+        console.warn(`[BIDCAL] Webhook failed (non-blocking): ${webhookErr.message}`);
+    }
+}
 
 await Actor.exit();
