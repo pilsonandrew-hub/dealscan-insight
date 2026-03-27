@@ -10,6 +10,11 @@ import { PlaywrightCrawler } from 'crawlee';
 const SOURCE = 'ironplanet';
 const BASE = 'https://www.ironplanet.com';
 const SEARCH_URL = `${BASE}/jsp/s/search.ips?ct=3`;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+
+if (!WEBHOOK_SECRET) {
+    console.warn('[IRONPLANET] WARNING: WEBHOOK_SECRET env var not set');
+}
 
 const HIGH_RUST = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',

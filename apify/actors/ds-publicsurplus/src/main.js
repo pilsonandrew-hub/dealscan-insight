@@ -202,6 +202,11 @@ function parseState(location) {
     return match ? match[1].toUpperCase() : null;
 }
 
+function parseMileage(text = '') {
+    const match = normalizeText(text).replace(/,/g, '').match(/\b(\d{1,3}(?:\d{3})+|\d+)\s*(?:miles?|mi\.?)\b/i);
+    return match ? parseInt(match[1], 10) : null;
+}
+
 // Queue of passing standard listings that need VIN detail-page scraping
 const vinQueue = [];
 let detailPageCount = 0;
@@ -221,6 +226,7 @@ async function pushListing(listing, sourceUrl, log) {
     const currentBid = parseMoney(listing.currentBid);
     const location = normalizeText(listing.location);
     const state = parseState(location) || null;
+    const mileage = parseMileage([title, description].filter(Boolean).join(' '));
 
     if (!title) {
         log.debug(`[SKIP] Missing title on ${sourceUrl}`);
@@ -249,6 +255,16 @@ async function pushListing(listing, sourceUrl, log) {
         log.debug(`[SKIP] Out-of-range bid $${currentBid} - ${title}`);
         return false;
     }
+    const currentYear = new Date().getFullYear();
+    const age = currentYear - year;
+    if (!year || age > 10 || age < 0) {
+        log.debug(`[SKIP] Too old or unknown year: ${year} - ${title}`);
+        return false;
+    }
+    if (mileage !== null && mileage > 100000) {
+        log.debug(`[SKIP] Too many miles: ${mileage} - ${title}`);
+        return false;
+    }
 
     const listingUrl = normalizeText(listing.listingUrl) || sourceUrl;
     const dedupeKey = listingUrl || `${title}-${state}-${currentBid}`;
@@ -272,6 +288,7 @@ async function pushListing(listing, sourceUrl, log) {
         auction_end_time: parseAuctionDate(listing.endDate),
         location,
         state,
+        mileage,
         listing_url: listingUrl,
         item_number: normalizeText(listing.itemNumber),
         photo_url: normalizeText(listing.photoUrl) || null,
@@ -323,6 +340,17 @@ async function pushTXListing(listing, sourceUrl, log) {
     seenListings.add(dedupeKey);
 
     const { year, make, model, vin } = parseTXSurplusTitle(title);
+    const mileage = parseMileage(title);
+    const currentYear = new Date().getFullYear();
+    const age = currentYear - year;
+    if (!year || age > 10 || age < 0) {
+        log.debug(`[TX][SKIP] Too old or unknown year: ${year} - ${title}`);
+        return false;
+    }
+    if (mileage !== null && mileage > 100000) {
+        log.debug(`[TX][SKIP] Too many miles: ${mileage} - ${title}`);
+        return false;
+    }
 
     const vehicle = {
         title,
@@ -345,6 +373,7 @@ async function pushTXListing(listing, sourceUrl, log) {
         agency_name: 'Texas General Land Office',
         auction_source: 'Texas State Surplus',
         source_site: 'publicsurplus_tx',
+        mileage,
         scraped_at: new Date().toISOString(),
     };
 
