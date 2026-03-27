@@ -90,7 +90,7 @@ const crawler = new PlaywrightCrawler({
                     'content-type': headers['content-type'] || 'application/json',
                     'x-api-key': headers['x-api-key'],
                 };
-                log.info(`[API KEY CAPTURED] ${headers['x-api-key']} via ${url}`);
+                log.info(`[API KEY CAPTURED] ${headers['x-api-key'].slice(0, 8)}*** via ${url}`);
             }
 
             if (url.includes('/search/list') && request.method() === 'POST') {

@@ -1,0 +1,11 @@
+# Paperclip Agent Environment — DealerScope
+export PAPERCLIP_API_URL='http://localhost:3100'
+export PAPERCLIP_COMPANY_ID='7b1c8c43-1b42-4a53-96af-7a1824189dd0'
+
+# Agent IDs
+export PAPERCLIP_JAARIOUS_AGENT_ID='b7f632b0-095e-4f94-bd50-206770ef495d'
+export PAPERCLIP_CODEX_AGENT_ID='bbae4bb5-76ee-4e93-a12a-daea0a76cc1a'
+export PAPERCLIP_CURSOR_AGENT_ID='73fbe2cd-2671-4c02-bbdc-29572a2b6c3a'
+
+# Ja'various (CEO) API Key
+export PAPERCLIP_API_KEY='pcp_d18bc1e973d8bceff5d89d6c2fcfa17feafaf32b17c03d65'

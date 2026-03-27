@@ -6,7 +6,7 @@ import os
 from typing import List, Optional
 from fastapi import Header, APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, and_, text
+from sqlalchemy import desc
 from pydantic import BaseModel
 
 from webapp.database import get_db
@@ -30,6 +30,12 @@ def _get_supabase_client():
     if not supabase_url or not supabase_key:
         raise RuntimeError("Supabase is not configured")
     return create_client(supabase_url, supabase_key)
+
+
+def _scope_opportunity_query(query, current_user: User):
+    if current_user.is_admin:
+        return query
+    return query.filter(Opportunity.user_id == current_user.id)
 
 class OpportunityResponse(BaseModel):
     id: int
@@ -80,6 +86,7 @@ async def list_opportunities(
         Opportunity.is_active == True,
         Vehicle.is_active == True
     )
+    query = _scope_opportunity_query(query, current_user)
     
     # Apply filters
     if min_score > 0:
@@ -212,8 +219,11 @@ async def get_opportunity(
 ):
     """Get specific opportunity details"""
     
-    result = db.query(Opportunity, Vehicle).join(
-        Vehicle, Vehicle.id == Opportunity.vehicle_id
+    result = _scope_opportunity_query(
+        db.query(Opportunity, Vehicle).join(
+            Vehicle, Vehicle.id == Opportunity.vehicle_id
+        ),
+        current_user,
     ).filter(
         Opportunity.id == opportunity_id,
         Opportunity.is_active == True
@@ -284,7 +294,7 @@ async def save_opportunity(
     except Exception as exc:
         logger.warning("[OPPORTUNITIES] user_opportunity_actions save failed, falling back: %s", exc)
 
-    opportunity = db.query(Opportunity).filter(
+    opportunity = _scope_opportunity_query(db.query(Opportunity), current_user).filter(
         Opportunity.id == opportunity_id
     ).first()
 
@@ -341,7 +351,7 @@ async def ignore_opportunity(
 ):
     """Mark opportunity as ignored"""
     
-    opportunity = db.query(Opportunity).filter(
+    opportunity = _scope_opportunity_query(db.query(Opportunity), current_user).filter(
         Opportunity.id == opportunity_id
     ).first()
     

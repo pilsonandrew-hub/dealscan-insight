@@ -240,7 +240,7 @@ const crawler = new PlaywrightCrawler({
                 if (apiKey) {
                     capturedApi.apiKey = apiKey;
                     capturedApi.requestHeaders = { ...headers };
-                    log.info(`[API KEY CAPTURED] ${apiKey} from ${url}`);
+                    log.info(`[API KEY CAPTURED] ${apiKey.slice(0, 8)}*** from ${url}`);
                 }
             }
             if (!capturedApi.authToken) {
