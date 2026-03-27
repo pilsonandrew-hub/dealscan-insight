@@ -30,8 +30,9 @@ _event_rate: dict[str, list[float]] = {}
 _VALID_EVENT_TYPES = ['view', 'click', 'save', 'bid', 'purchase', 'pass']
 
 # Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
-SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+from backend.ingest.config_loader import get_config as _get_config
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or _get_config("SUPABASE_URL") or ""
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or _get_config("SUPABASE_ANON_KEY") or ""
 
 # Background-only client for auth verification.
 _background_supabase_client: Optional[Client] = None
