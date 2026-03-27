@@ -62,6 +62,28 @@ const STATE_NAMES = {
 };
 
 const COMMERCIAL_PATTERN = /\b(dump truck|flatbed|refuse|crane|utility body|step van|panel van|ambulance|fire truck|bucket truck|aerial lift|sewer|sweeper|plow truck|tractor|forklift|loader|backhoe|excavator|grader|boat|trailer|motorcycle|atv|utv|rv|camper|spreader|mixer|tank|tanker)\b/i;
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 const MAKES = new Set([
     'ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc',
@@ -130,6 +152,8 @@ function extractModel(desc = '', make = '') {
 
 function isVehicle(desc = '') {
     // l2=USA already filters to US at source — no flagPath check needed
+    const lower = desc.toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (COMMERCIAL_PATTERN.test(desc)) return false; // skip heavy equipment
     return true;
 }

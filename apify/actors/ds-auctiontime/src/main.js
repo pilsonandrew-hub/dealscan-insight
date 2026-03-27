@@ -51,6 +51,28 @@ const VEHICLE_MAKES = ['ford','chevrolet','chevy','dodge','ram','toyota','honda'
 // Exclude farm equipment / non-vehicle categories
 const EXCLUDE_KEYWORDS = ['tractor farm','combine','harvester','planter','cultivator','plow','tillage',
     'grain cart','hay baler','sprayer farm','corn head','header','auger','irrigation'];
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 const SEARCH_URLS = [
     `${BASE}/listings/pickup-trucks`,
@@ -105,6 +127,7 @@ function isDetailListingUrl(url) {
 function isCommercialVehicle(title) {
     const lower = title.toLowerCase();
     // Reject farm equipment
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (EXCLUDE_KEYWORDS.some(kw => lower.includes(kw))) return false;
     return VEHICLE_KEYWORDS.some(kw => lower.includes(kw)) ||
            VEHICLE_MAKES.some(make => lower.includes(make));

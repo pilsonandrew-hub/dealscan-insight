@@ -51,6 +51,28 @@ const MAKES = [
 ];
 
 const EXCLUDED_PATTERN = /\b(forklift|tractor|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv|utv|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed|box\s*truck|step\s+van|cutaway|chassis\s+cab|stake\s*bed|forklift|pallet|raft|printer|computer|furniture|desk|chair|cabinet|aircraft|plane|helicopter)\b/i;
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 function normalizeText(v) {
     return String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -86,6 +108,8 @@ function parseVehicleTitle(title) {
 }
 
 function isPassengerVehicle(title, categoryCode) {
+    const lower = normalizeText(title).toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (!VEHICLE_CATEGORY_CODES.has(String(categoryCode))) return false;
     if (EXCLUDED_PATTERN.test(title)) return false;
     return true;

@@ -28,6 +28,28 @@ const VEHICLE_MAKES = ['ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', '
     'hyundai', 'kia', 'subaru', 'mazda', 'volkswagen', 'vw', 'bmw', 'mercedes', 'audi', 'lexus', 'acura', 'infiniti',
     'cadillac', 'lincoln', 'buick', 'pontiac', 'mitsubishi', 'volvo', 'tesla', 'saturn', 'isuzu', 'hummer',
     'rivian', 'lucid', 'genesis'];
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 const BASE_URL = 'https://www.publicsurplus.com';
 // 'all' = nationwide search across all agencies (not just WA)
@@ -68,6 +90,7 @@ function normalizeText(value) {
 
 function isVehicle(title) {
     const lower = normalizeText(title).toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     return VEHICLE_KEYWORDS.some((keyword) => lower.includes(keyword))
         || VEHICLE_MAKES.some((make) => lower.includes(make));
 }
@@ -232,6 +255,10 @@ async function pushListing(listing, sourceUrl, log) {
         log.debug(`[SKIP] Missing title on ${sourceUrl}`);
         return false;
     }
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(`${title} ${description}`.toLowerCase()))) {
+        log.debug(`[SKIP] Condition reject: ${title}`);
+        return false;
+    }
     if (!isVehicle(title)) {
         log.debug(`[SKIP] Not a vehicle: ${title}`);
         return false;
@@ -321,6 +348,10 @@ async function pushTXListing(listing, sourceUrl, log) {
 
     if (!title) {
         log.debug(`[TX][SKIP] Missing title on ${sourceUrl}`);
+        return false;
+    }
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(title.toLowerCase()))) {
+        log.debug(`[TX][SKIP] Condition reject: ${title}`);
         return false;
     }
     if (!isVehicle(title)) {

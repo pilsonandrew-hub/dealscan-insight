@@ -39,6 +39,28 @@ const VEHICLE_KEYWORDS = ['car','truck','suv','van','pickup','sedan','coupe','wa
 const VEHICLE_MAKES = ['ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc','chrysler',
     'hyundai','kia','subaru','mazda','volkswagen','vw','bmw','mercedes','audi','lexus','acura','infiniti',
     'cadillac','lincoln','buick','pontiac','mitsubishi','volvo','tesla','rivian','lucid','genesis'];
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 const SEARCH_URLS = [
     `${BASE}/?s=truck`,
@@ -65,6 +87,7 @@ let totalFailedFilters = 0;
 
 function isVehicle(title) {
     const lower = title.toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     return VEHICLE_KEYWORDS.some(kw => lower.includes(kw)) ||
            VEHICLE_MAKES.some(make => lower.includes(make));
 }

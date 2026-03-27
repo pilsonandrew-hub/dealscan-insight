@@ -65,6 +65,28 @@ const HIGH_RUST_STATES = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
     'WV', 'ME', 'NH', 'VT', 'MA', 'RI', 'CT', 'NJ', 'MD', 'DE',
 ]);
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -124,6 +146,11 @@ function median(arr) {
     return sorted.length % 2 === 0
         ? (sorted[mid - 1] + sorted[mid]) / 2
         : sorted[mid];
+}
+
+function hasConditionReject(text) {
+    const lower = normalizeText(text).toLowerCase();
+    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower));
 }
 
 // ── Marketcheck API ───────────────────────────────────────────────────────────
@@ -323,8 +350,14 @@ for (const state of targetStates) {
                 const city = normalizeText(hit.offSitePhysicalCity || '');
                 const catalogDescription = normalizeText(hit.catalogDescription || '');
                 const vin = normalizeText(hit.vin || '');
+                const conditionText = [
+                    title,
+                    catalogDescription,
+                    normalizeText(hit.webDescription || ''),
+                ].filter(Boolean).join(' ');
 
                 // ── Filters ──────────────────────────────────────────────────
+                if (hasConditionReject(conditionText)) continue;
                 // Rust state — bypass for ≤2yr old
                 if (HIGH_RUST_STATES.has(state_code)) {
                     if (!(year && year >= currentYear - 2)) continue;

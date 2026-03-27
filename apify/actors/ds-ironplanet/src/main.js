@@ -21,6 +21,28 @@ const HIGH_RUST = new Set([
     'ND', 'SD', 'NE', 'KS', 'WV', 'ME', 'NH', 'VT', 'MA', 'RI',
     'CT', 'NJ', 'MD', 'DE',
 ]);
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 const US_STATES = new Set([
     'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
@@ -99,6 +121,11 @@ function passesFilters({ state, mileage, year, currentBid, maxMileage, maxAgeYea
     return true;
 }
 
+function hasConditionReject(text) {
+    const lower = String(text ?? '').toLowerCase();
+    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower));
+}
+
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
@@ -162,6 +189,9 @@ const crawler = new PlaywrightCrawler({
         for (const item of items) {
             totalScraped++;
 
+            if (hasConditionReject(item.description || item.title || '')) {
+                continue;
+            }
             const state = extractStateFromCode(item.locationCode) || extractStateFromName(item.locationString);
             const mileage = parseMileage(item.meterString);
             const year = extractYear(item.description);

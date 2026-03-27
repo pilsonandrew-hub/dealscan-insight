@@ -72,6 +72,28 @@ const VEHICLE_KEYWORDS = ['car', 'truck', 'suv', 'van', 'pickup', 'sedan', 'coup
 const VEHICLE_MAKES = ['ford', 'chevrolet', 'chevy', 'dodge', 'ram', 'toyota', 'honda', 'nissan', 'jeep', 'gmc', 'chrysler',
     'hyundai', 'kia', 'subaru', 'mazda', 'volkswagen', 'vw', 'bmw', 'mercedes', 'audi', 'lexus', 'acura', 'infiniti',
     'cadillac', 'lincoln', 'buick', 'pontiac', 'mitsubishi', 'volvo', 'tesla', 'rivian', 'lucid', 'genesis'];
+const CONDITION_REJECT_PATTERNS = [
+    /\bsalvage\b/i,
+    /\bflood\b/i,
+    /\bframe[\s-]+damage\b/i,
+    /\bcrash(?:ed)?\b/i,
+    /\bcollision[\s-]+damage\b/i,
+    /\bfire[\s-]+damage\b/i,
+    /\bhail[\s-]+damage\b/i,
+    /\bwont\s+start\b/i,
+    /\bwon'?t\s+start\b/i,
+    /\bdoes\s+not\s+start\b/i,
+    /\bno[\s-]start\b/i,
+    /\binop(?:erable)?\b/i,
+    /\bparts[\s-]+only\b/i,
+    /\bfor\s+parts\b/i,
+    /\bproject\s+(?:car|vehicle|truck)\b/i,
+    /\brebuilt\s+title\b/i,
+    /\bstructural[\s-]+damage\b/i,
+    /\bblown\s+engine\b/i,
+    /\bbad\s+engine\b/i,
+    /\bno\s+title\b/i,
+];
 
 await Actor.init();
 
@@ -111,6 +133,7 @@ function recordLocationSample(locationText) {
 
 function isVehicle(title) {
     const lower = normalizeText(title).toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     // Must match a known make, OR a vehicle keyword + a model year (2000-2030)
     // This prevents "car seats", "motor oil", "van accessories" etc from passing
     const hasMake = VEHICLE_MAKES.some((make) => lower.includes(make));
@@ -361,6 +384,11 @@ function buildListing(rawResult, sourceUrl) {
 }
 
 function passesFilters(listing, log) {
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(normalizeText(listing.title).toLowerCase()))) {
+        log.debug(`[SKIP] Condition reject: ${listing.title || 'unknown title'}`);
+        totalFailedFilters++;
+        return false;
+    }
     if (!listing.title || !isVehicle(listing.title)) {
         log.debug(`[SKIP] Not a vehicle: ${listing.title || 'unknown title'}`);
         totalFailedFilters++;
