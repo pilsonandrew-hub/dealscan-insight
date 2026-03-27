@@ -32,6 +32,7 @@ from psycopg2 import sql as psycopg2_sql
 
 from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
+from backend.ingest.config_loader import get_config
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 telegram_router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -92,7 +93,7 @@ WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 ANDREW_UUID = "ff8425cd-0596-470b-b2b8-3a7a30ef4e37"
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
 # DeepSeek direct API (fallback if OpenRouter unavailable)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
@@ -2073,8 +2074,8 @@ def _fallback_score(vehicle: dict) -> dict:
 
 async def sync_to_notion(vehicle: dict) -> bool:
     """Push a scored deal to the Notion Dealerscope Deals database."""
-    notion_token = os.getenv("NOTION_TOKEN", "")
-    notion_db_id = os.getenv("NOTION_DEALS_DB_ID", "")
+    notion_token = get_config("NOTION_TOKEN") or ""
+    notion_db_id = get_config("NOTION_DEALS_DB_ID") or ""
     if not notion_token or not notion_db_id:
         return False
 
@@ -2419,8 +2420,8 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
     await insert_alert_log(deal, message_id_str)
 
     # Also send to Slack #general (non-blocking — never fail the Telegram receipt on Slack error)
-    slack_token = os.getenv("SLACK_BOT_TOKEN")
-    slack_channel = os.getenv("SLACK_CHANNEL_ID", "C0ALM52FV25")
+    slack_token = get_config("SLACK_BOT_TOKEN")
+    slack_channel = get_config("SLACK_CHANNEL_ID") or "C0ALM52FV25"
     if slack_token:
         try:
             prefix = "💎 *PLATINUM*" if is_platinum else "🔥 *HOT DEAL*"
