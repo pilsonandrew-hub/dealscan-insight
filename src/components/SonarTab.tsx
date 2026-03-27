@@ -22,7 +22,7 @@ function sortResults(results: SonarResult[], key: SortKey): SonarResult[] {
 
 export const SonarTab: React.FC = () => {
   const [query, setQuery] = useState('');
-  const [priceRange, setPriceRange] = useState<[number, number]>([0, 80_000]);
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 20_000]);
   const [results, setResults] = useState<SonarResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -111,8 +111,8 @@ export const SonarTab: React.FC = () => {
           </div>
           <Slider
             min={0}
-            max={100_000}
-            step={1_000}
+            max={75_000}
+            step={500}
             value={priceRange}
             onValueChange={(v) => setPriceRange(v as [number, number])}
             className="sonar-slider"
