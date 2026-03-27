@@ -10,30 +10,82 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Set Railway env vars via API
+      - name: Sync Railway env vars from Supabase app_config
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SERVICE_ID: fbc5a039-4de7-468c-abb1-71dcdaf47f38
+          ENVIRONMENT_ID: 1a116d8c-86fd-47ed-8f50-b8b8b994d514
         run: |
-          # Railway GraphQL mutation to upsert variables
-          PROJECT_ID="54a9370c-89ae-41fe-ac64-c01d8c2fbaad"
-          SERVICE_ID="fbc5a039-4de7-468c-abb1-71dcdaf47f38"
+          set -euo pipefail
 
-          set_var() {
-            local name=$1
-            local value=$2
-            echo "Setting $name..."
-            curl -s -X POST "https://backboard.railway.app/graphql/v2" \
-              -H "Authorization: Bearer $RAILWAY_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"query\": \"mutation { variableUpsert(input: { projectId: \\\"$PROJECT_ID\\\", serviceId: \\\"$SERVICE_ID\\\", environmentId: \\\"production\\\", name: \\\"$name\\\", value: \\\"$value\\\" }) }\"
-              }" | python3 -c "import json,sys; d=json.load(sys.stdin); print('  OK' if d.get('data') else '  FAIL: ' + str(d.get('errors',[{}])[0].get('message','?')))"
+          python3 <<'PYEOF'
+          import json
+          import os
+          import ssl
+          import subprocess
+          import sys
+          import urllib.request
+
+          required_keys = [
+              "OPENROUTER_API_KEY",
+              "NOTION_TOKEN",
+              "NOTION_DEALS_DB_ID",
+              "FIRECRAWL_API_KEY",
+              "SLACK_BOT_TOKEN",
+          ]
+
+          supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          service_id = os.environ["SERVICE_ID"]
+          environment_id = os.environ["ENVIRONMENT_ID"]
+          railway_env = os.environ["RAILWAY_TOKEN"]
+
+          ctx = ssl.create_default_context()
+          req = urllib.request.Request(
+              f"{supabase_url}/rest/v1/app_config?select=key,value",
+              headers={
+                  "apikey": service_key,
+                  "Authorization": f"Bearer {service_key}",
+              },
+          )
+
+          with urllib.request.urlopen(req, context=ctx) as resp:
+              rows = json.loads(resp.read())
+
+          config = {
+              row["key"]: row["value"]
+              for row in rows
+              if isinstance(row, dict) and "key" in row and "value" in row
           }
 
-          set_var "OPENROUTER_API_KEY" "${{ secrets.OPENROUTER_API_KEY }}"
-          set_var "NOTION_TOKEN" "${{ secrets.NOTION_TOKEN }}"
-          set_var "NOTION_DEALS_DB_ID" "${{ secrets.NOTION_DEALS_DB_ID }}"
-          set_var "FIRECRAWL_API_KEY" "${{ secrets.FIRECRAWL_API_KEY }}"
-          set_var "SLACK_BOT_TOKEN" "${{ secrets.SLACK_BOT_TOKEN }}"
+          missing = [key for key in required_keys if not (config.get(key) or "").strip()]
+          if missing:
+              print(f"Missing required app_config keys: {', '.join(missing)}", file=sys.stderr)
+              raise SystemExit(1)
 
-          echo "Done. Check Railway dashboard to confirm vars are live."
+          cmd = [
+              "railway",
+              "variable",
+              "set",
+              "-s",
+              service_id,
+              "-e",
+              environment_id,
+              "--skip-deploys",
+          ]
+          cmd.extend(f"{key}={config[key]}" for key in required_keys)
+
+          env = os.environ.copy()
+          env["RAILWAY_TOKEN"] = railway_env
+
+          subprocess.run(cmd, check=True, env=env)
+          subprocess.run(
+              ["railway", "redeploy", "-s", service_id, "-e", environment_id, "-y"],
+              check=True,
+              env=env,
+          )
+
+          print("Railway env vars synced from Supabase app_config and backend redeployed.")
+          PYEOF
