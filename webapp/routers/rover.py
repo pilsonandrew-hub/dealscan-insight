@@ -16,6 +16,7 @@ from supabase import Client, create_client
 from supabase.lib.client_options import ClientOptions
 from typing import Any, Optional
 from datetime import datetime, timezone
+import importlib
 import time
 import os
 import logging
@@ -59,6 +60,22 @@ try:
         logger.info("[ROVER] Redis not configured — affinity disabled")
 except Exception as _re:
     logger.warning(f"[ROVER] Redis affinity init failed (non-fatal): {_re}")
+
+
+def _rover_debug_snapshot() -> dict[str, str]:
+    heuristic_status = "ok"
+    try:
+        importlib.import_module("backend.rover.heuristic_scorer")
+    except Exception as _hs_exc:
+        logger.warning("[ROVER] heuristic_scorer import check failed: %s", _hs_exc)
+        heuristic_status = "fail"
+
+    return {
+        "SUPABASE_URL set": "yes" if os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") else "no",
+        "SUPABASE_ANON_KEY set": "yes" if os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") else "no",
+        "heuristic_scorer import": heuristic_status,
+        "redis available": "yes" if _redis_client else "no",
+    }
 
 
 def get_user_supabase_client(authorization: str = Header(..., alias="Authorization")) -> Client:
@@ -344,13 +361,12 @@ async def get_recommendations(
 
         # Post-fetch: filter rust states (DB can't do set membership easily)
         all_rows = opps_resp.data or []
-        raw_rows = [
-            r for r in all_rows
-            if not (
-                str(r.get("state") or "").upper() in HIGH_RUST_STATES_ROVER
-                and not (r.get("year") and int(r.get("year", 0)) >= current_year - 2)
-            )
-        ]
+        raw_rows = []
+        for r in all_rows:
+            year_value = _coerce_number(r.get("year"), 0.0)
+            if str(r.get("state") or "").upper() in HIGH_RUST_STATES_ROVER and not (year_value >= current_year - 2):
+                continue
+            raw_rows.append(r)
         personalized = False
 
         # --- Heuristic preference vector (from event history) ---
@@ -441,6 +457,11 @@ async def get_recommendations(
     except Exception as e:
         logger.error("[ROVER] Recommendations error for %s: %s: %s", user_id, type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/debug", tags=["rover"])
+async def rover_debug():
+    return _rover_debug_snapshot()
 
 
 @router.post("/events")
