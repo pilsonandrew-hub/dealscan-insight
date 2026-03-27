@@ -1,0 +1,35 @@
+# DealerScope Red Team Audit
+
+## `backend/ingest/score.py`
+- HIGH / `backend/ingest/score.py:6` / `CURRENT_YEAR` is frozen at import time, and `determine_vehicle_tier()` accepts future model years plus 10-year-old standard vehicles with up to 100k miles. That is materially looser than the 4-year / 50k SOP and will keep classifying inventory that should be hard-rejected. / Compute the year dynamically at call time, reject future years, and make the tier function enforce the real 4-year / 50k gate.
+
+## `webapp/routers/ingest.py`
+- HIGH / `webapp/routers/ingest.py:1794` / `passes_basic_gates()` explicitly weakens the business rules for gov sources: zero bids are allowed, rust-state vehicles get an 8-year bypass, age is relaxed to 20 years, and mileage is allowed up to 200k. That directly violates the stated 0.88/0.80, 1500/2500, 4-year max, 50k max, and rust-state filters. / Remove the source-specific exceptions from the hard gate or make them explicit, audited overrides that still preserve the SOP limits.
+- HIGH / `webapp/routers/ingest.py:1841` / The mileage gate is soft. If mileage is missing or malformed, the `try` block is skipped and the vehicle passes; if it is present, gov sources are allowed up to 200k miles. Any source that omits mileage can therefore bypass the 50k rule entirely. / Reject missing mileage for gated inventory and enforce the same 50k cap across all sources.
+- HIGH / `webapp/routers/ingest.py:1651` / `normalize_apify_vehicle()` stores `min_margin_target = 500` for premium/standard rows, which is below the 1500/2500 business rule and can mislead downstream logic or dashboards that trust the stored row. / Store the real tier-specific target or leave it unset until scoring populates it.
+- HIGH / `webapp/routers/ingest.py:1798` / Bid validation lets zero bids through for gov sources, and invalid numeric bids can collapse to zero earlier in normalization. That means unopened or malformed lots can bypass the minimum-bid floor. / Treat zero/invalid bid as reject unless there is an explicit, documented exception that downstream code also enforces.
+- MEDIUM / `webapp/routers/ingest.py:1572` / The normalization path does raw `float()` / `int()` conversions for bid, premium, fee, and canonical-ID inputs. One malformed field drops the entire listing because the function catches everything and returns `None`. / Use safe coercion per field and preserve the record with partial defaults instead of losing the whole vehicle.
+- MEDIUM / `webapp/routers/ingest.py:1941` / `score_vehicle()` uses truthiness for `buyer_premium_pct` and `auction_fees`, so legitimate zero values are treated as missing and replaced with defaults. Zero-premium or zero-fee auctions get cost-inflated and can be rejected incorrectly. / Use `is not None` checks, not `or`, for numeric inputs that can legitimately be zero.
+- MEDIUM / `webapp/routers/ingest.py:1959` / The broad exception handler around `score_vehicle()` suppresses failures in Manheim/comps/scoring and falls back to a synthetic object with `ceiling_pass=True`. That hides pricing outages and can poison analytics with fake passing results. / Fail closed or return an explicit error state; do not mark a fallback as passing.
+- MEDIUM / `webapp/routers/ingest.py:1398` / `pass_opportunity()` swallows database write failures and still returns success. The UI can show “passed” even though `user_passes` never persisted. / Return an error or queue a retry if the write fails.
+
+## `webapp/routers/outcomes.py`
+- HIGH / `webapp/routers/outcomes.py:177` / `get_outcomes_summary()` verifies a JWT but does not filter by `user_id`, so any authenticated user can read aggregate outcome metrics for the entire table. / Filter the query by the authenticated user or enforce row-level security for the aggregation path.
+- HIGH / `webapp/routers/outcomes.py:147` / `patch_outcome()` upserts with `on_conflict="opportunity_id,user_id"` but omits `user_id` from the payload. That can create null-user rows or break conflict handling, corrupting outcome history. / Include `user_id` in the payload and validate that it matches the authenticated user.
+- MEDIUM / `webapp/routers/outcomes.py:229` / `create_outcome()` ignores the boolean return value from `_legacy_mirror_to_dealer_sales()`, so a failed mirror is reported as success. / Surface mirror failure or return partial-success status so operators know the write was dropped.
+
+## `webapp/routers/rover.py`
+- HIGH / `webapp/routers/rover.py:84` / `get_user_supabase_client()` returns the raw exception text in the HTTP error body on auth/client failures. That leaks implementation details that should stay server-side. / Return a generic auth failure to the client and log the exception internally only.
+- MEDIUM / `webapp/routers/rover.py:208` / `get_recommendations()` fetches `select("*")` and then sorts in Python. If opportunities carry large blobs like `raw_data`, this endpoint becomes a memory and latency bomb. / Select only the columns you render and push filtering/ranking down to a narrower query.
+- MEDIUM / `webapp/routers/rover.py:238` / The heuristic event timestamp parser strips `Z` and re-parses the value as a naive local datetime, which skews decay calculations and ranking. / Parse timestamps as timezone-aware UTC values and preserve the original offset.
+
+## `apify/actors/ds-govdeals/src/main.js`
+- No standalone findings in this file. It is only a shim that imports `src/main_api.js`, which was not part of the requested review set.
+
+## `apify/actors/ds-allsurplus/src/main.js`
+- CRITICAL / `apify/actors/ds-allsurplus/src/main.js:391` / The production webhook secret is hardcoded in source. Anyone with repo access can replay or forge ingest webhooks against the live endpoint. / Move the secret to an environment variable or secret manager and rotate the leaked value immediately.
+- HIGH / `apify/actors/ds-allsurplus/src/main.js:291` / `parseBid()` converts missing or invalid bid data to `0`, and the min/max bid checks only run when `bid > 0`. That means malformed or unopened lots bypass the bid filters entirely. / Reject missing/invalid bids instead of normalizing them to zero.
+- HIGH / `apify/actors/ds-allsurplus/src/main.js:277` / High-rust inventory is still allowed through with a 2-year exception, even though the requested business rule is a rust-state filter and a 4-year max. This is a policy bypass, not a filter. / Make rust-state inventory a hard reject or move the exception behind a documented manual override.
+- MEDIUM / `apify/actors/ds-allsurplus/src/main.js:309` / `new Date(...).toISOString()` is unguarded. One malformed auction timestamp throws and aborts the page loop, dropping the rest of the search batch. / Validate the date per item or wrap the conversion in a per-item try/catch.
+- MEDIUM / `apify/actors/ds-allsurplus/src/main.js:223` / `allListings` accumulates every emitted record in memory even though `Actor.pushData()` already persists them. Large searches will grow memory without bound. / Remove the buffer or cap it to a small sample.
+
