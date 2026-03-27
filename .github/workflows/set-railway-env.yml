@@ -1,0 +1,39 @@
+name: Set Railway Environment Variables
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Set Railway env vars via API
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          # Railway GraphQL mutation to upsert variables
+          PROJECT_ID="54a9370c-89ae-41fe-ac64-c01d8c2fbaad"
+          SERVICE_ID="fbc5a039-4de7-468c-abb1-71dcdaf47f38"
+
+          set_var() {
+            local name=$1
+            local value=$2
+            echo "Setting $name..."
+            curl -s -X POST "https://backboard.railway.app/graphql/v2" \
+              -H "Authorization: Bearer $RAILWAY_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"query\": \"mutation { variableUpsert(input: { projectId: \\\"$PROJECT_ID\\\", serviceId: \\\"$SERVICE_ID\\\", environmentId: \\\"production\\\", name: \\\"$name\\\", value: \\\"$value\\\" }) }\"
+              }" | python3 -c "import json,sys; d=json.load(sys.stdin); print('  OK' if d.get('data') else '  FAIL: ' + str(d.get('errors',[{}])[0].get('message','?')))"
+          }
+
+          set_var "OPENROUTER_API_KEY" "${{ secrets.OPENROUTER_API_KEY }}"
+          set_var "NOTION_TOKEN" "${{ secrets.NOTION_TOKEN }}"
+          set_var "NOTION_DEALS_DB_ID" "${{ secrets.NOTION_DEALS_DB_ID }}"
+          set_var "FIRECRAWL_API_KEY" "${{ secrets.FIRECRAWL_API_KEY }}"
+          set_var "SLACK_BOT_TOKEN" "${{ secrets.SLACK_BOT_TOKEN }}"
+
+          echo "Done. Check Railway dashboard to confirm vars are live."
