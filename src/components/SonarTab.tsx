@@ -30,6 +30,8 @@ export const SonarTab: React.FC = () => {
   const [minInput, setMinInput] = useState('0');
   const [maxInput, setMaxInput] = useState('20000');
   const [results, setResults] = useState<SonarResult[]>([]);
+  const [excludedResults, setExcludedResults] = useState<SonarResult[]>([]);
+  const [showAll, setShowAll] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('price_asc');
@@ -43,6 +45,7 @@ export const SonarTab: React.FC = () => {
     abortRef.current = false;
     setIsSearching(true);
     setResults([]);
+    setExcludedResults([]);
     setExcludedCount(0);
     setHasSearched(true);
 
@@ -58,7 +61,10 @@ export const SonarTab: React.FC = () => {
       (batch) => {
         if (abortRef.current) return;
         const { clean, excluded } = filterQuality(batch.results);
+        const cleanIds = new Set(clean.map((r) => r.id));
+        const damaged = batch.results.filter((r) => !cleanIds.has(r.id));
         setResults((prev) => [...prev, ...clean]);
+        setExcludedResults((prev) => [...prev, ...damaged]);
         setExcludedCount((prev) => prev + excluded);
         setSourceStatuses((prev) => {
           const next = { ...prev };
@@ -109,7 +115,9 @@ export const SonarTab: React.FC = () => {
     setMaxInput(String(range[1]));
   }, []);
 
-  const sorted = sortResults(results, sortKey);
+  const displayResults = showAll ? [...results, ...excludedResults] : results;
+  const sorted = sortResults(displayResults, sortKey);
+  const damagedIds = new Set(excludedResults.map((r) => r.id));
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
@@ -255,17 +263,34 @@ export const SonarTab: React.FC = () => {
       )}
 
       {/* Results toolbar */}
-      {results.length > 0 && (
-        <div className="flex items-center justify-between">
-          <span className="text-gray-400 text-sm">
-            {results.length} result{results.length !== 1 ? 's' : ''}
-            {isSearching && ' so far'}
+      {displayResults.length > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-gray-400 text-sm">
+              {displayResults.length} result{displayResults.length !== 1 ? 's' : ''}
+              {isSearching && ' so far'}
+              {excludedCount > 0 && (
+                <span className="text-yellow-500/70 ml-1">
+                  · {excludedCount} filtered for quality
+                </span>
+              )}
+            </span>
             {excludedCount > 0 && (
-              <span className="text-yellow-500/70 ml-1">
-                · {excludedCount} filtered for quality
-              </span>
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                <span className="relative inline-block w-8 h-[18px]">
+                  <input
+                    type="checkbox"
+                    checked={showAll}
+                    onChange={(e) => setShowAll(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <span className="block w-full h-full rounded-full bg-gray-700 peer-checked:bg-red-600/70 transition-colors" />
+                  <span className="absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-gray-300 peer-checked:translate-x-[14px] transition-transform" />
+                </span>
+                <span className="text-xs text-gray-500">Show damaged/salvage</span>
+              </label>
             )}
-          </span>
+          </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 text-xs">
               <ArrowUpDown className="h-3 w-3 text-gray-500" />
@@ -301,16 +326,16 @@ export const SonarTab: React.FC = () => {
       )}
 
       {/* Results grid — shows progressively as batches arrive */}
-      {results.length > 0 && (
+      {displayResults.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {sorted.map((r, i) => (
-            <SonarCard key={r.id} result={r} index={i} />
+            <SonarCard key={r.id} result={r} index={i} isDamaged={damagedIds.has(r.id)} />
           ))}
         </div>
       )}
 
       {/* Empty state */}
-      {!isSearching && hasSearched && results.length === 0 && (
+      {!isSearching && hasSearched && displayResults.length === 0 && (
         <div className="text-center py-16 text-gray-500">
           <p className="text-lg">No vehicles found</p>
           <p className="text-sm mt-1">Try broadening your search or adjusting your budget range</p>
