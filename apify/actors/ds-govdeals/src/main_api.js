@@ -30,7 +30,7 @@ const HIGH_RUST_STATES = new Set([
     'CT','NJ','MD','DE',
 ]);
 
-const GOVDEALS_VEHICLE_SEARCH_URL = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100';
+const GOVDEALS_VEHICLE_SEARCH_URL_BASE = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100';
 const GOVDEALS_VEHICLE_CATEGORY_FACETS = [
     '{!tag=product_category_external_id}product_category_external_id:"4100"',
 ];
@@ -65,7 +65,11 @@ const CONDITION_REJECT_PATTERNS = [
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = HARD_MAX_PAGES, minBid = 500, maxBid = 75000 } = input;
+const { maxPages = HARD_MAX_PAGES, minBid = 500, maxBid = 75000, searchQuery = "" } = input;
+
+const GOVDEALS_VEHICLE_SEARCH_URL = searchQuery
+    ? `${GOVDEALS_VEHICLE_SEARCH_URL_BASE}&kWord=${encodeURIComponent(searchQuery)}`
+    : GOVDEALS_VEHICLE_SEARCH_URL_BASE;
 
 let totalFound = 0, totalPassed = 0;
 const capturedApi = {
@@ -256,7 +260,7 @@ const crawler = new PlaywrightCrawler({
                     requestType: 'search',
                     responseStyle: 'productsOnly',
                     businessId: 'GD',
-                    searchText: '*',
+                    searchText: searchQuery || '*',
                     isQAL: false,
                     page: 1,
                     displayRows: DEFAULT_DISPLAY_ROWS,

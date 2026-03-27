@@ -53,7 +53,7 @@ const CONDITION_REJECT_PATTERNS = [
 
 const BASE_URL = 'https://www.publicsurplus.com';
 // 'all' = nationwide search across all agencies (not just WA)
-const BASE_LIST_URL = `${BASE_URL}/sms/all/browse/cataucs?catid=4&page={PAGE}`;
+const BASE_LIST_URL_TEMPLATE = `${BASE_URL}/sms/all/browse/cataucs?catid=4&page={PAGE}`;
 
 // Texas General Land Office surplus — mobile site with JS pagination
 const TX_SURPLUS_BASE = 'https://m.publicsurplus.com/sms/state,tx/list/current?orgid=871876';
@@ -71,7 +71,12 @@ const {
     maxBid = 35000,
     targetStates = [...TARGET_STATES],
     maxTXPages = 10,
+    searchQuery = "",
 } = input;
+
+const BASE_LIST_URL = searchQuery
+    ? `${BASE_LIST_URL_TEMPLATE}&kw=${encodeURIComponent(searchQuery)}`
+    : BASE_LIST_URL_TEMPLATE;
 
 const targetStateSet = new Set(targetStates.map((state) => state.toUpperCase()));
 const effectiveMaxPages = Math.max(1, Math.min(maxPages, 3));
