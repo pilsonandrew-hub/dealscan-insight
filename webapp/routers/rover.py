@@ -80,37 +80,25 @@ def _rover_debug_snapshot() -> dict[str, str]:
 
 def get_user_supabase_client(authorization: str = Header(..., alias="Authorization")) -> Client:
     """Create a user-scoped Supabase client that forwards the caller JWT for RLS."""
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-        logger.error("[ROVER] get_user_supabase_client called with empty SUPABASE_URL=%r / SUPABASE_ANON_KEY=%s", SUPABASE_URL, "set" if SUPABASE_ANON_KEY else "EMPTY")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Supabase configuration missing — service temporarily unavailable.",
-        )
+    # Read dynamically at request time so Railway env vars are always fresh
+    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "https://lbnxzvqppccajllsqaaw.supabase.co"
+    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI"
 
     if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header format. Expected 'Bearer <token>'.",
-        )
+        raise HTTPException(status_code=401, detail="Invalid authorization header format.")
 
     token = authorization.replace("Bearer ", "", 1).strip()
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token.",
-        )
+        raise HTTPException(status_code=401, detail="Missing authentication token.")
 
     try:
         return create_client(
-            SUPABASE_URL,
-            SUPABASE_ANON_KEY,
+            supabase_url,
+            supabase_anon_key,
             options=ClientOptions(headers={"Authorization": f"Bearer {token}"}),
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {exc}",
-        )
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}")
 
 
 def _coerce_number(value, default: float = 0.0) -> float:
@@ -197,12 +185,18 @@ def _verify_auth(authorization: Optional[str]) -> str:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     token = authorization.split(" ", 1)[1]
-    if not _background_supabase_client:
-        raise HTTPException(status_code=503, detail="Service unavailable")
+    client = _background_supabase_client
+    if not client:
+        supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "https://lbnxzvqppccajllsqaaw.supabase.co"
+        supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI"
+        try:
+            client = create_client(supabase_url, supabase_anon_key)
+        except Exception:
+            raise HTTPException(status_code=503, detail="Service unavailable")
 
     try:
         # Verify token against Supabase auth
-        user = _background_supabase_client.auth.get_user(token)
+        user = client.auth.get_user(token)
         if not user or not user.user:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
         return user.user.id
