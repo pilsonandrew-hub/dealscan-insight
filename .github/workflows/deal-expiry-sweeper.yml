@@ -1,0 +1,113 @@
+name: Deal Expiry Sweeper
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+jobs:
+  deal-expiry-sweeper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install supabase client and sweep expired deals
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: "-1003672399222"
+        run: |
+          python3 -m pip install --upgrade pip supabase
+          python3 << 'PYEOF'
+          import datetime
+          import json
+          import os
+          import ssl
+          import sys
+          import urllib.request
+
+          from supabase import create_client
+
+          SUPABASE_URL = os.environ["SUPABASE_URL"]
+          SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          BOT_TOKEN = os.environ["BOT_TOKEN"]
+          CHAT_ID = os.environ["CHAT_ID"]
+
+          supabase = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
+          ctx = ssl.create_default_context()
+          now = datetime.datetime.now(datetime.timezone.utc)
+          expired_cutoff = (now - datetime.timedelta(hours=24)).isoformat()
+          archive_cutoff = (now - datetime.timedelta(days=7)).isoformat()
+
+          def send_telegram(text: str):
+              payload = json.dumps({
+                  "chat_id": CHAT_ID,
+                  "text": text,
+                  "parse_mode": "HTML",
+              }).encode()
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                  data=payload,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, context=ctx) as resp:
+                  return json.loads(resp.read())
+
+          def fetch_ids(filters):
+              ids = []
+              offset = 0
+              page_size = 500
+              while True:
+                  query = supabase.table("opportunities").select("id").order("id")
+                  for fn in filters:
+                      query = fn(query)
+                  response = query.range(offset, offset + page_size - 1).execute()
+                  rows = response.data or []
+                  if not rows:
+                      break
+                  ids.extend(row["id"] for row in rows if row.get("id"))
+                  if len(rows) < page_size:
+                      break
+                  offset += page_size
+              return ids
+
+          def chunked(values, size=200):
+              for index in range(0, len(values), size):
+                  yield values[index:index + size]
+
+          expired_ids = fetch_ids([
+              lambda q: q.lt("auction_end_date", expired_cutoff),
+              lambda q: q.neq("status", "expired"),
+              lambda q: q.eq("is_active", True),
+          ])
+
+          archived_ids = fetch_ids([
+              lambda q: q.eq("pipeline_step", "passed"),
+              lambda q: q.lt("updated_at", archive_cutoff),
+          ])
+
+          expired_count = 0
+          for batch in chunked(expired_ids):
+              supabase.table("opportunities").update({
+                  "is_active": False,
+                  "pipeline_step": "expired",
+              }).in_("id", batch).execute()
+              expired_count += len(batch)
+
+          archived_count = 0
+          for batch in chunked(archived_ids):
+              supabase.table("opportunities").update({
+                  "pipeline_step": "archived",
+              }).in_("id", batch).execute()
+              archived_count += len(batch)
+
+          message = (
+              "🧹 <b>DealerScope Deal Expiry Sweeper</b>\n\n"
+              f"Expired deals: <b>{expired_count}</b>\n"
+              f"Archived deals: <b>{archived_count}</b>\n"
+              f"Run time: {now.strftime('%Y-%m-%d %H:%M UTC')}"
+          )
+          send_telegram(message)
+          print(message.replace("<b>", "").replace("</b>", ""))
+          PYEOF
