@@ -14,11 +14,12 @@ Redis affinity vectors added (2026-03-14):
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from supabase import Client, create_client
 from supabase.lib.client_options import ClientOptions
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime, timezone
 import time
 import os
 import logging
+import uuid
 from backend.rover.heuristic_scorer import build_preference_vector, score_item, rank_opportunities
 
 router = APIRouter(prefix="/api/rover", tags=["rover"])
@@ -32,14 +33,22 @@ _VALID_EVENT_TYPES = ['view', 'click', 'save', 'bid', 'purchase', 'pass']
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 
-# Background-only client for auth verification and non-request tasks.
+# Background-only client for auth verification.
 _background_supabase_client: Optional[Client] = None
 try:
-    background_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or SUPABASE_ANON_KEY
-    if SUPABASE_URL and background_key:
-        _background_supabase_client = create_client(SUPABASE_URL, background_key)
+    if SUPABASE_URL and SUPABASE_ANON_KEY:
+        _background_supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 except Exception as _e:
     logger.warning(f"Rover Supabase client init failed (non-fatal): {_e}")
+
+# Service-role client reserved for write operations only.
+_write_supabase_client: Optional[Client] = None
+try:
+    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if SUPABASE_URL and service_role_key:
+        _write_supabase_client = create_client(SUPABASE_URL, service_role_key)
+except Exception as _e:
+    logger.warning(f"Rover write Supabase client init failed (non-fatal): {_e}")
 
 _redis_client = None
 try:
@@ -184,6 +193,49 @@ def _verify_auth(authorization: Optional[str]) -> str:
         raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+def _write_rover_event(user_id: str, event_type: str, item_data: dict[str, Any], weight: float) -> int:
+    if not _write_supabase_client:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+    result = _write_supabase_client.table("rover_events").insert({
+        "user_id": user_id,
+        "event_type": event_type,
+        "item_data": item_data,
+        "weight": weight,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }).execute()
+    return len(result.data or [])
+
+
+def _apply_rover_action(opportunity_id: str, action: str, user_id: str) -> None:
+    if not _write_supabase_client:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+    if action in {"buy", "watch"}:
+        event_type = "click" if action == "buy" else "save"
+        weight = 1 if action == "buy" else 3
+        _write_rover_event(
+            user_id=user_id,
+            event_type=event_type,
+            item_data={
+                "opportunity_id": opportunity_id,
+                "source": "telegram_button",
+                "action": action,
+            },
+            weight=weight,
+        )
+        return
+
+    if action == "pass":
+        _write_supabase_client.table("opportunities").update({
+            "pipeline_step": "passed",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", opportunity_id).execute()
+        return
+
+    raise HTTPException(status_code=400, detail="Unsupported action")
 
 
 @router.get("/recommendations")
@@ -370,14 +422,12 @@ async def track_event(
                 logger.debug(f"[ROVER] Dedup check failed (non-fatal): {_de}")
 
         # Store raw weight — decay is applied at read time in build_preference_vector()
-        insert_result = supabase_client.table("rover_events").insert({
-            "user_id": auth_user_id,
-            "event_type": event_type,
-            "item_data": item_data,
-            "weight": raw_weight,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }).execute()
-        rows_written = len(insert_result.data or [])
+        rows_written = _write_rover_event(
+            user_id=auth_user_id,
+            event_type=event_type,
+            item_data=item_data,
+            weight=raw_weight,
+        )
         if rows_written:
             logger.info(
                 "[ROVER] Event written OK: type=%s user=%s... rows=%d",
@@ -403,4 +453,32 @@ async def track_event(
         raise
     except Exception as e:
         logger.error(f"[ROVER] Event tracking error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/actions")
+async def record_action(payload: dict[str, Any]):
+    """Record a rover action from internal callers such as Telegram callbacks."""
+    opportunity_id = str(payload.get("opportunity_id") or "").strip()
+    action = str(payload.get("action") or "").strip().lower()
+    user_id = str(payload.get("user_id") or "").strip()
+
+    if not opportunity_id or not action or not user_id:
+        raise HTTPException(status_code=400, detail="Missing opportunity_id, action, or user_id")
+
+    try:
+        uuid.UUID(opportunity_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid opportunity id")
+
+    if action not in {"buy", "watch", "pass"}:
+        raise HTTPException(status_code=400, detail="Unsupported action")
+
+    try:
+        _apply_rover_action(opportunity_id=opportunity_id, action=action, user_id=user_id)
+        return {"ok": True, "action": action, "opportunity_id": opportunity_id, "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[ROVER] Action recording error: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")

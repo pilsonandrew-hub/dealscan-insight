@@ -735,9 +735,13 @@ def score_deal(
         1,
     )
 
-    # AI confidence gate — thresholds tighten as data quality improves
-    # Standard needs >= 60, Premium >= 50 (will raise to 85/70 when condition data is richer)
-    ai_conf_threshold = 60.0 if vehicle_tier == "standard" else 50.0
+    # AI confidence gate — lane-aware thresholds (tightened 2026-03-27)
+    # Premium >= 70, Standard >= 85 (higher bar for older/higher-mile vehicles)
+    ai_conf_threshold = 0.0
+    if vehicle_tier == "premium":
+        ai_conf_threshold = 70.0
+    elif vehicle_tier == "standard":
+        ai_conf_threshold = 85.0
     ceiling_pass = ceiling_pass and (vehicle_tier == "rejected" or ai_confidence_score >= ai_conf_threshold)
 
     return {
