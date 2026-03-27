@@ -78,7 +78,7 @@ jobs:
 
           expired_ids = fetch_ids([
               lambda q: q.lt("auction_end_date", expired_cutoff),
-              lambda q: q.neq("status", "expired"),
+              lambda q: q.neq("pipeline_step", "expired"),
               lambda q: q.eq("is_active", True),
           ])
 
