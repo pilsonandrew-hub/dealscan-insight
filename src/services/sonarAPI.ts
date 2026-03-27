@@ -69,7 +69,7 @@ export function filterQuality(results: SonarResult[]): QualityFilterResult {
 // ─── Real API adapter ────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 3_000;
-const MAX_POLL_MS = 90_000;
+const MAX_POLL_MS = 180_000;
 
 interface StatusResponse {
   status: 'running' | 'complete';
