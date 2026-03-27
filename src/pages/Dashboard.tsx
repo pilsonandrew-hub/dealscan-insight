@@ -493,8 +493,14 @@ const DashboardTab = () => {
 
   const isPipelineLive = sources.some(s => {
     if (!s.last_run) return false;
-    return (Date.now() - new Date(s.last_run).getTime()) < 4 * 3600 * 1000;
+    return (Date.now() - new Date(s.last_run).getTime()) < 6 * 3600 * 1000;
   });
+
+  const lastRunTime = sources.reduce<Date | null>((latest, s) => {
+    if (!s.last_run) return latest;
+    const t = new Date(s.last_run);
+    return !latest || t > latest ? t : latest;
+  }, null);
 
   return (
     <div className="p-6 space-y-6">
@@ -512,6 +518,11 @@ const DashboardTab = () => {
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full ${isPipelineLive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
             {isPipelineLive ? 'Pipeline Live' : 'Pipeline Idle'}
+            {lastRunTime && (
+              <span className="text-[10px] opacity-60 ml-1">
+                {lastRunTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
           </span>
           <button onClick={load} disabled={loading} className="text-gray-400 hover:text-white transition-colors">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />

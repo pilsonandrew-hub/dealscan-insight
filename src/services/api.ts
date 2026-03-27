@@ -115,6 +115,7 @@ interface OpportunityRow {
   score_version?: string;
   legacy_dos_score?: number;
   processed_at?: string;
+  designated_lane?: string;
 }
 
 function getRowSource(row: OpportunityRow): string {
@@ -275,7 +276,8 @@ function transformOpportunity(row: OpportunityRow): Opportunity & { created_at: 
     bid_headroom: row.bid_headroom ?? undefined,
     ceiling_reason: row.ceiling_reason ?? undefined,
     score_version: row.score_version ?? undefined,
-    legacy_dos_score: row.legacy_dos_score ?? undefined
+    legacy_dos_score: row.legacy_dos_score ?? undefined,
+    designated_lane: row.designated_lane ?? undefined
   };
 }
 
