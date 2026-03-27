@@ -101,7 +101,7 @@ export const SonarTab: React.FC = () => {
   }, [minInput, priceRange]);
 
   const handleMaxBlur = useCallback(() => {
-    const parsed = Math.max(priceRange[0], Number(maxInput) || 0);
+    const parsed = Math.min(75_000, Math.max(priceRange[0], Number(maxInput) || 0));
     setPriceRange([priceRange[0], parsed]);
     setMaxInput(String(parsed));
   }, [maxInput, priceRange]);
@@ -168,7 +168,7 @@ export const SonarTab: React.FC = () => {
           </div>
           <Slider
             min={0}
-            max={999_999}
+            max={75_000}
             step={500}
             value={priceRange}
             onValueChange={handleSliderChange}
