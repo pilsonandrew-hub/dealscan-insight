@@ -230,16 +230,10 @@ if RateLimitMiddleware:
     app.add_middleware(RateLimitMiddleware)
 _DEFAULT_ALLOWED_ORIGINS = [
     "https://dealscan-insight.vercel.app",
-    "https://dealscan-insight-production.up.railway.app",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
-_configured_allowed_origins = [
-    o.strip()
-    for o in os.getenv("ALLOWED_ORIGINS", "").split(",")
-    if o.strip()
-]
-_ALLOWED_ORIGINS = list(dict.fromkeys(_DEFAULT_ALLOWED_ORIGINS + _configured_allowed_origins))
+_ALLOWED_ORIGINS = _DEFAULT_ALLOWED_ORIGINS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,

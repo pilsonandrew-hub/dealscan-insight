@@ -69,7 +69,11 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(RateLimitMiddleware)
 
 # CORS configuration
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",") if not settings.debug else ["*"]
+allowed_origins = [
+    "https://dealscan-insight.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
