@@ -1,0 +1,99 @@
+name: Scraper Health Agent
+
+on:
+  schedule:
+    - cron: '30 */3 * * *'   # Every 3hrs, 30min after scraper runs
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check all actor health + alert on failures
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1003672399222"
+        run: |
+          python3 << 'PYEOF'
+          import json, urllib.request, ssl, os, sys
+          from datetime import datetime, timezone, timedelta
+
+          TOKEN = os.environ["APIFY_TOKEN"]
+          BOT = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
+          ctx = ssl.create_default_context()
+
+          ACTORS = {
+              "ds-govdeals":      "CuKaIAcWyFS0EPrAz",
+              "ds-publicsurplus": "9xxQLlRsROnSgA42i",
+              "ds-hibid":         "e8UeyRvQ6QSnX5fhP",
+              "ds-allsurplus":    "gYGIfHeYeN3EzmLnB",
+              "ds-municibid":     "svmsItf3CRBZuIntp",
+              "ds-bidcal":        "DF1THdFOBSYlxyNjD",
+              "ds-auctiontime":   "eb4oYXDf8qs1Ckbth",
+              "ds-govplanet":     "pO2t5UDoSVmO1gvKJ",
+              "ds-proxibid":      "bxhncvtHEP712WX2e",
+              "ds-usgovbid":      "6XO9La81aEmtsCT3g",
+          }
+
+          failures = []
+          report = []
+          now = datetime.now(timezone.utc)
+
+          for name, actor_id in ACTORS.items():
+              try:
+                  url = f"https://api.apify.com/v2/acts/{actor_id}/runs/last?token={TOKEN}"
+                  with urllib.request.urlopen(url, context=ctx, timeout=10) as r:
+                      data = json.loads(r.read()).get("data", {})
+
+                  status = data.get("status", "UNKNOWN")
+                  finished = data.get("finishedAt", "")
+                  items = data.get("stats", {}).get("outputItemCount", 0)
+
+                  # Parse finish time
+                  age_hrs = 999
+                  if finished:
+                      try:
+                          ft = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+                          age_hrs = (now - ft).total_seconds() / 3600
+                      except:
+                          pass
+
+                  icon = "✅" if status == "SUCCEEDED" else "❌"
+                  age_str = f"{age_hrs:.1f}h ago" if age_hrs < 999 else "unknown"
+                  report.append(f"{icon} {name}: {status} | {items} rows | {age_str}")
+
+                  if status != "SUCCEEDED":
+                      failures.append(f"{name} ({status})")
+
+              except Exception as e:
+                  report.append(f"⚠️ {name}: ERROR — {e}")
+                  failures.append(f"{name} (error)")
+
+          print("\n".join(report))
+
+          # Alert on failures
+          if failures and BOT and CHAT:
+              msg = f"🚨 <b>Scraper Health Alert</b>\n\nFailed actors:\n"
+              msg += "\n".join(f"• {f}" for f in failures)
+              msg += f"\n\n<i>{now.strftime('%Y-%m-%d %H:%M UTC')}</i>"
+              
+              payload = json.dumps({"chat_id": CHAT, "text": msg, "parse_mode": "HTML"}).encode()
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{BOT}/sendMessage",
+                  data=payload,
+                  headers={"Content-Type": "application/json"},
+                  method="POST"
+              )
+              try:
+                  with urllib.request.urlopen(req, context=ctx) as r:
+                      print(f"\nAlert sent: {json.loads(r.read()).get('ok')}")
+              except Exception as e:
+                  print(f"\nAlert failed: {e}")
+
+          if failures:
+              sys.exit(1)
+          PYEOF
