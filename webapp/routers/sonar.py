@@ -29,9 +29,18 @@ APIFY_TOKEN = (os.getenv("APIFY_API_TOKEN") or os.getenv("APIFY_TOKEN") or "").s
 APIFY_BASE = "https://api.apify.com/v2"
 
 ACTORS = {
-    "GovDeals": "CuKaIAcWyFS0EPrAz",
-    "PublicSurplus": "9xxQLlRsROnSgA42i",
-    "HiBid": "7s9e0eATTt1kuGGfE",
+    "GovDeals":       "CuKaIAcWyFS0EPrAz",
+    "PublicSurplus":  "9xxQLlRsROnSgA42i",
+    "HiBid":          "7s9e0eATTt1kuGGfE",
+    "MuniciBid":      "svmsItf3CRBZuIntp",
+    "GSAAuctions":    "fvDnYmGuFBCrwpEi9",
+    "AllSurplus":     "gYGIfHeYeN3EzmLnB",
+    "GovPlanet":      "pO2t5UDoSVmO1gvKJ",
+    "Proxibid":       "bxhncvtHEP712WX2e",
+    "EquipmentFacts": "0XjoegYZVcPldLstl",
+    "USGovBid":       "6XO9La81aEmtsCT3g",
+    "JJKane":         "lvb7T6VMFfNUQpqlq",
+    "BidSpotter":     "5Eu3hfCcBBdzp6I1u",
 }
 
 JOB_TTL_SECONDS = 300
