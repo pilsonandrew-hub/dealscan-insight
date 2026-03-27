@@ -144,15 +144,19 @@ async def patch_outcome(
     else:
         sold_price = None
 
+    outcome_map = {"won": "sold", "lost": "passed", "passed": "passed"}
+    mapped_outcome = outcome_map[payload.outcome]
+
     upsert_payload = {
         "opportunity_id": opportunity_id,
+        "user_id": user_id,
         "make": opportunity.get("make"),
         "model": opportunity.get("model"),
         "year": opportunity.get("year"),
         "mileage": opportunity.get("mileage"),
         "sale_price": sold_price if sold_price is not None else current_bid,
         "sold_price": sold_price,
-        "outcome": payload.outcome,
+        "outcome": mapped_outcome,
         "gross_margin": gross_margin,
         "roi_pct": roi_pct,
         "state": opportunity.get("state"),
