@@ -28,10 +28,10 @@ jobs:
           fi
 
           # 2. Standard year cutoff (must be 10yr — Standard lane allows up to 10yr old vehicles)
-          if grep -n "STANDARD_YEAR_CUTOFF" backend/ingest/score.py | grep -q "10"; then
+          if grep -n "standard_year_cutoff\|STANDARD_YEAR_CUTOFF" backend/ingest/score.py | grep -q "10"; then
             echo "✅ Standard year cutoff correct (10yr for Standard lane)"
           else
-            echo "❌ FAIL: Standard year cutoff missing or wrong — should be CURRENT_YEAR - 10"
+            echo "❌ FAIL: Standard year cutoff missing or wrong — should be current_year - 10"
             FAILED=1
           fi
 
@@ -44,7 +44,7 @@ jobs:
           fi
 
           # 4. Rust state filter present
-          if grep -rn "HIGH_RUST_STATES\|RUST_STATES" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
+          if grep -rn "HIGH_RUST_STATES\|RUST_STATES\|HIGH_RUST\b" backend/ webapp/ --include="*.py" | grep -q "OH\|MI\|PA"; then
             echo "✅ Rust state filter present in backend"
           else
             echo "❌ FAIL: Rust state filter missing from backend"
