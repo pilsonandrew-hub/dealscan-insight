@@ -49,6 +49,45 @@ def test_passes_basic_gates_checks_vin_for_title_brand_keywords():
     assert result["reason"] == "title_brand_rejected (vin matched 'flood')"
 
 
+def test_passes_basic_gates_rejects_zero_bid():
+    vehicle = {
+        "title": "2024 Toyota Camry",
+        "vin": "4T1C11AK0RU000002",
+        "make": "Toyota",
+        "model": "Camry",
+        "current_bid": 0,
+        "state": "CA",
+        "year": 2024,
+        "mileage": 25000,
+        "listing_url": "https://example.com/vehicle/zero-bid",
+        "source_site": "govdeals",
+    }
+
+    result = passes_basic_gates(vehicle)
+
+    assert result["pass"] is False
+    assert result["reason"] == "bid_not_positive ($0)"
+
+
+def test_passes_basic_gates_allows_positive_bid_when_other_rules_pass():
+    vehicle = {
+        "title": "2024 Toyota Camry",
+        "vin": "4T1C11AK0RU000003",
+        "make": "Toyota",
+        "model": "Camry",
+        "current_bid": 500,
+        "state": "CA",
+        "year": 2024,
+        "mileage": 25000,
+        "listing_url": "https://example.com/vehicle/positive-bid",
+        "source_site": "publicsurplus",
+    }
+
+    result = passes_basic_gates(vehicle)
+
+    assert result == {"pass": True, "reason": "ok"}
+
+
 def test_score_deal_subtracts_recon_reserve_from_margin():
     result = score_deal(
         bid=10000,
