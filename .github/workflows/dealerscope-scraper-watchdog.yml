@@ -38,7 +38,7 @@ jobs:
 
           ctx = ssl.create_default_context()
           now = datetime.datetime.now(datetime.timezone.utc)
-          cutoff = now - datetime.timedelta(hours=14)  # 12hr schedule + 2hr buffer
+          cutoff = now - datetime.timedelta(hours=15)  # 12hr schedule + 3hr buffer
           stalled = []
 
           for name, actor_id in ACTORS.items():
@@ -63,8 +63,18 @@ jobs:
 
                   run_time = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
 
-                  if status != "SUCCEEDED":
-                      # Last run didn't succeed — always alert regardless of time
+                  if status == "ABORTED":
+                      # Aborted — auto-retrigger silently, only alert if it keeps happening
+                      retrigger_url = f"https://api.apify.com/v2/acts/{actor_id}/runs?token={APIFY_TOKEN}"
+                      retrigger_req = urllib.request.Request(retrigger_url, data=b'{}', method='POST',
+                          headers={'Content-Type': 'application/json'})
+                      try:
+                          with urllib.request.urlopen(retrigger_req, context=ctx) as rr:
+                              pass  # silently retrigger
+                      except Exception:
+                          stalled.append(f"<b>{name}</b>: ABORTED and retrigger failed")
+                  elif status != "SUCCEEDED":
+                      # Other failure — alert
                       stalled.append(f"<b>{name}</b>: last run status={status} at {started_at[:16]}Z")
                   elif run_time < cutoff:
                       # Succeeded but too long ago
