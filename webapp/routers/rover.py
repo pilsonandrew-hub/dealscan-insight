@@ -251,7 +251,7 @@ def _record_sale_intent(opportunity_id: str, user_id: str) -> None:
         # Fetch opportunity details for the sales record
         opp = (
             _write_supabase_client.table("opportunities")
-            .select("make,model,year,mileage,state,current_bid,mmr_estimated")
+            .select("make,model,year,mileage,state,current_bid,mmr")
             .eq("id", opportunity_id)
             .limit(1)
             .execute()
@@ -346,7 +346,7 @@ async def get_recommendations(
             "NE", "KS", "WV", "ME", "NH", "VT", "MA", "RI", "CT", "NJ", "MD", "DE",
         }
         opps_resp = supabase_client.table("opportunities")\
-            .select("id,make,model,year,mileage,state,current_bid,mmr_estimated,dos_score,vehicle_tier,auction_end_date,source_site,investment_grade,gross_margin,roi_pct,max_bid,score_breakdown")\
+            .select("id,make,model,year,mileage,state,current_bid,mmr,dos_score,vehicle_tier,auction_end_date,source_site,investment_grade,gross_margin,roi,max_bid,risk_flags")\
             .gte("dos_score", 65)\
             .neq("vehicle_tier", "rejected")\
             .gte("year", standard_year_cutoff)\
