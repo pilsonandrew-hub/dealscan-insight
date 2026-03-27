@@ -393,7 +393,7 @@ export const api = {
   },
 
   // Get hot deals (DOS score >= threshold)
-  async getHotDeals(minScore = 80, limit = 5): Promise<Opportunity[]> {
+  async getHotDeals(minScore = 80, limit = 50): Promise<Opportunity[]> {
     try {
       const { data, error } = await supabase
         .from('opportunities')
