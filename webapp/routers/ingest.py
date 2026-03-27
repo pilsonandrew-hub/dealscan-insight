@@ -2476,6 +2476,33 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
         return False
 
 
+def _rover_actions_base_url() -> str:
+    base_url = (
+        os.getenv("ROVER_API_BASE_URL")
+        or os.getenv("INTERNAL_API_BASE_URL")
+        or os.getenv("BACKEND_URL")
+        or os.getenv("BASE_URL")
+    )
+    if base_url:
+        return base_url.rstrip("/")
+
+    port = os.getenv("PORT", "8080")
+    return f"http://127.0.0.1:{port}"
+
+
+async def _submit_rover_action(opportunity_id: str, action: str, user_id: str) -> None:
+    import httpx
+
+    payload = {
+        "opportunity_id": opportunity_id,
+        "action": action,
+        "user_id": user_id,
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(f"{_rover_actions_base_url()}/api/rover/actions", json=payload)
+        resp.raise_for_status()
+
+
 @telegram_router.post("/callback")
 async def telegram_callback_webhook(payload: dict[str, Any]):
     """Handle Telegram callback_query webhooks for BUY/WATCH/PASS deal buttons."""
@@ -2529,30 +2556,8 @@ async def telegram_callback_webhook(payload: dict[str, Any]):
 
     callback_text = "Recorded"
     try:
-        if action in {"buy", "watch"}:
-            event_type = "click" if action == "buy" else "save"
-            weight = 1 if action == "buy" else 3
-            item_data = {
-                "opportunity_id": opportunity_id,
-                "source": "telegram_button",
-                "action": action,
-            }
-            if supabase_client is not None:
-                supabase_client.table("rover_events").insert({
-                    "user_id": ANDREW_UUID,
-                    "event_type": event_type,
-                    "item_data": item_data,
-                    "weight": weight,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }).execute()
-            callback_text = f"Recorded {action}"
-        else:
-            if supabase_client is not None:
-                supabase_client.table("opportunities").update({
-                    "pipeline_step": "passed",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }).eq("id", opportunity_id).execute()
-            callback_text = "Marked as passed"
+        await _submit_rover_action(opportunity_id=opportunity_id, action=action, user_id=ANDREW_UUID)
+        callback_text = f"Recorded {action}"
     except Exception as exc:
         logger.warning(
             "[TELEGRAM] callback processing failed action=%s opportunity_id=%s user_id=%s: %s",
