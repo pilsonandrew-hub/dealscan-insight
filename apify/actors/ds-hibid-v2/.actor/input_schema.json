@@ -1,61 +1,142 @@
 {
-    "title": "ds-hibid-v2 Input",
-    "type": "object",
-    "schemaVersion": 1,
-    "properties": {
-        "maxPages": {
-            "title": "Max pages per search term",
-            "type": "integer",
-            "default": 20,
-            "description": "Maximum GraphQL pages to fetch per search term (50 lots/page)"
-        },
-        "pageLength": {
-            "title": "Lots per page",
-            "type": "integer",
-            "default": 50,
-            "description": "Number of lots per GraphQL request (max 100)"
-        },
-        "minBid": {
-            "title": "Minimum bid ($)",
-            "type": "integer",
-            "default": 500
-        },
-        "maxBid": {
-            "title": "Maximum bid ($)",
-            "type": "integer",
-            "default": 75000
-        },
-        "minYear": {
-            "title": "Minimum vehicle year",
-            "type": "integer",
-            "default": 2000
-        },
-        "maxMileage": {
-            "title": "Maximum mileage",
-            "type": "integer",
-            "default": 150000
-        },
-        "targetStates": {
-            "title": "Target US states",
-            "type": "array",
-            "items": { "type": "string" },
-            "default": ["AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI","ID","MT","WY","ND","SD","NE","KS","AL","LA","OK"]
-        },
-        "searchTerms": {
-            "title": "Vehicle make search terms",
-            "type": "array",
-            "items": { "type": "string" },
-            "default": ["ford","chevrolet","toyota","honda","dodge","nissan","jeep","gmc","hyundai","kia","subaru","mazda","bmw","mercedes","audi","lexus","cadillac","lincoln","buick","mitsubishi","volkswagen","volvo","tesla","chrysler"]
-        },
-        "webhookUrl": {
-            "title": "Webhook URL",
-            "type": "string",
-            "default": "https://dealscan-insight-production.up.railway.app/api/ingest/apify"
-        },
-        "webhookSecret": {
-            "title": "Webhook secret",
-            "type": "string",
-            "isSecret": true
-        }
+  "title": "ds-hibid-v2 Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxPages": {
+      "title": "Max pages per search term",
+      "type": "integer",
+      "default": 20,
+      "description": "Maximum GraphQL pages to fetch per search term (50 lots/page)",
+      "editor": "number"
+    },
+    "pageLength": {
+      "title": "Lots per page",
+      "type": "integer",
+      "default": 50,
+      "description": "Number of lots per GraphQL request (max 100)",
+      "editor": "number"
+    },
+    "minBid": {
+      "title": "Minimum bid ($)",
+      "type": "integer",
+      "default": 500,
+      "editor": "number",
+      "description": "Minimum bid amount in dollars"
+    },
+    "maxBid": {
+      "title": "Maximum bid ($)",
+      "type": "integer",
+      "default": 75000,
+      "editor": "number",
+      "description": "Maximum bid amount in dollars"
+    },
+    "minYear": {
+      "title": "Minimum vehicle year",
+      "type": "integer",
+      "default": 2000,
+      "editor": "number",
+      "description": "Minimum vehicle year"
+    },
+    "maxMileage": {
+      "title": "Maximum mileage",
+      "type": "integer",
+      "default": 150000,
+      "editor": "number",
+      "description": "Maximum mileage"
+    },
+    "targetStates": {
+      "title": "Target US states",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "AZ",
+        "CA",
+        "NV",
+        "CO",
+        "NM",
+        "UT",
+        "TX",
+        "FL",
+        "GA",
+        "SC",
+        "TN",
+        "NC",
+        "VA",
+        "WA",
+        "OR",
+        "HI",
+        "ID",
+        "MT",
+        "WY",
+        "ND",
+        "SD",
+        "NE",
+        "KS",
+        "AL",
+        "LA",
+        "OK"
+      ],
+      "editor": "stringList",
+      "description": "Target US states (2-letter codes)"
+    },
+    "searchTerms": {
+      "title": "Vehicle make search terms",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "ford",
+        "chevrolet",
+        "toyota",
+        "honda",
+        "dodge",
+        "nissan",
+        "jeep",
+        "gmc",
+        "hyundai",
+        "kia",
+        "subaru",
+        "mazda",
+        "bmw",
+        "mercedes",
+        "audi",
+        "lexus",
+        "cadillac",
+        "lincoln",
+        "buick",
+        "mitsubishi",
+        "volkswagen",
+        "volvo",
+        "tesla",
+        "chrysler"
+      ],
+      "editor": "stringList",
+      "description": "Search terms list"
+    },
+    "webhookUrl": {
+      "title": "Webhook URL",
+      "type": "string",
+      "default": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
+      "editor": "textfield",
+      "description": "Webhook URL for results"
+    },
+    "webhookSecret": {
+      "title": "Webhook secret",
+      "type": "string",
+      "isSecret": true,
+      "editor": "textfield",
+      "description": "Webhook secret key"
+    },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Tesla Model 3)",
+      "editor": "textfield",
+      "default": ""
     }
+  }
 }
