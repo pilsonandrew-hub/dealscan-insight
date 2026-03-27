@@ -444,7 +444,7 @@ const DashboardTab = () => {
     try {
       const [m, h, s] = await Promise.all([
         api.getDashboardMetrics(),
-        api.getHotDeals(80, 5),
+        api.getHotDeals(80, 50),
         api.getScraperSources()
       ]);
       setMetrics(m);
