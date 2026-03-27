@@ -326,6 +326,6 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
 
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
 console.log(`[GOVDEALS-SOLD] Found: ${totalFound} | Collected: ${totalPassed}`);
-console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
+console.log(`[GOVDEALS-SOLD] Auth initialized`);
 console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} lots`);
 await Actor.exit();

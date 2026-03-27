@@ -605,9 +605,7 @@ async function paginateApi(log, seenIds) {
 await crawler.run(SEARCH_URLS.map(url => ({ url })));
 
 console.log(`[EQUIPMENTFACTS] Total found: ${totalFound} | Passed filters: ${totalPassed} | Failed filters: ${totalFailed}`);
-console.log(`[EQUIPMENTFACTS] API base URL: ${capturedApi.apiBaseUrl || 'NOT CAPTURED'}`);
-console.log(`[EQUIPMENTFACTS] API key captured: ${!!capturedApi.apiKey}`);
-console.log(`[EQUIPMENTFACTS] Auth token captured: ${!!capturedApi.authToken}`);
+console.log(`[EQUIPMENTFACTS] Auth initialized`);
 console.log(`[EQUIPMENTFACTS] Detected API URLs:`);
 for (const u of [...new Set(capturedApi.detectedUrls)].slice(0, 20)) {
     console.log(`  ${u}`);
