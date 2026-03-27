@@ -238,17 +238,33 @@ def _is_commercial_hd_tonnage(title: str) -> bool:
     return True
 
 _TITLE_BRAND_PATTERNS = [
+    # Title status issues
     ("salvage", r"\bsalvage\b"),
     ("rebuilt", r"\brebuilt\s+title\b"),
     ("flood", r"\bflood\b"),
     ("lemon", r"\blemon\s+law\b|\blemon\s+title\b"),
+    ("no title", r"\bno[\s-]title\b|\btitle[\s-]?less\b|\bmissing[\s-]title\b"),
+    # Damage — we don't buy projects
     ("frame damage", r"\bframe[\s-]+damage\b"),
     ("structural damage", r"\bstructural[\s-]+damage\b"),
-    ("airbag deployed", r"\bair\s*bag\s+deployed\b"),
-    ("parts only", r"\bparts[\s-]+only\b"),
-    ("non-op", r"\bnon[\s-]?op\b"),
+    ("crash", r"\bcrash(?:ed)?\b|\bcollision\s+damage\b|\baccident\s+damage\b"),
+    ("front end damage", r"\bfront[\s-]+end[\s-]+damage\b"),
+    ("rear end damage", r"\brear[\s-]+end[\s-]+damage\b"),
+    ("side damage", r"\bside[\s-]+damage\b"),
     ("fire damage", r"\bfire[\s-]+damage\b"),
     ("hail damage", r"\bhail[\s-]+damage\b"),
+    ("airbag deployed", r"\bair\s*bag\s+deployed\b"),
+    ("rust damage", r"\brust[\s-]+damage\b|\brust[\s-]+through\b|\brusted[\s-]+out\b|\bheavy[\s-]+rust\b"),
+    # Mechanical issues — no project cars
+    ("won't start", r"\bwon'?t\s+start\b|\bdoes\s+not\s+start\b|\bno\s+start\b|\binop(?:erable)?\b"),
+    ("needs engine", r"\bneeds?\s+engine\b|\bbad\s+engine\b|\bblown\s+engine\b|\bengine\s+knock\b|\bengine\s+miss\b"),
+    ("needs transmission", r"\bneeds?\s+trans(?:mission)?\b|\bbad\s+trans(?:mission)?\b|\bno\s+trans(?:mission)?\b"),
+    ("needs repair", r"\bneeds?\s+(?:major\s+)?repair\b|\bproject\s+(?:car|vehicle|truck)\b"),
+    ("as-is no warranty", r"\bas[\s-]?is\b.*\bno\s+warrant|\bno\s+warrant.*\bas[\s-]?is\b"),
+    # Parts / incomplete
+    ("parts only", r"\bparts[\s-]+only\b|\bfor\s+parts\b|\bfor\s+scrap\b"),
+    ("non-op", r"\bnon[\s-]?op\b"),
+    ("incomplete", r"\bincomplete\s+vehicle\b|\bmissing\s+(?:engine|drivetrain|motor)\b"),
 ]
 
 # MMR estimates by model — much more accurate than segment-only
