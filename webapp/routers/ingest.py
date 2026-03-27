@@ -1585,13 +1585,9 @@ def normalize_apify_vehicle(
         if not mileage and mileage != 0:
             return None
 
-        def _extract_numeric_field(*, include_any: tuple[str, ...], exclude_any: tuple[str, ...] = ()) -> Optional[float]:
-            for key, value in item.items():
-                key_text = str(key).lower()
-                if not any(token in key_text for token in include_any):
-                    continue
-                if exclude_any and any(token in key_text for token in exclude_any):
-                    continue
+        def _extract_numeric_key(*keys: str) -> Optional[float]:
+            for key in keys:
+                value = item.get(key)
                 if value in {None, ""}:
                     continue
                 try:
@@ -1629,18 +1625,49 @@ def normalize_apify_vehicle(
         # Source
         source = _infer_source_site(item, source_hint=source_hint)
 
-        buyer_premium_pct = _extract_numeric_field(include_any=("pct", "percent", "rate", "%"))
-        buyer_premium = _extract_numeric_field(
-            include_any=("buyer_premium", "premium", "fee", "amount", "flat"),
-            exclude_any=("doc", "auction", "pct", "percent", "rate", "%"),
+        buyer_premium_pct = _extract_numeric_key(
+            "buyer_premium_pct",
+            "buyers_premium_pct",
+            "buyer_premium_percent",
+            "buyers_premium_percent",
+            "buyerPremiumPct",
+            "buyersPremiumPct",
+            "buyerPremiumPercent",
+            "buyersPremiumPercent",
+            "premium_pct",
+            "premium_percent",
+            "premiumRate",
+            "rate",
+            "percent",
         )
-        doc_fee = _extract_numeric_field(
-            include_any=("doc_fee", "doc fee", "documentation_fee", "documentation fee", "docfee"),
-            exclude_any=("auction", "fee", "fees", "pct", "percent", "rate", "%"),
+        buyer_premium = _extract_numeric_key(
+            "buyer_premium",
+            "buyers_premium",
+            "buyerPremium",
+            "buyersPremium",
+            "buyer_premium_amount",
+            "buyers_premium_amount",
+            "buyerPremiumAmount",
+            "buyersPremiumAmount",
+            "premium",
+            "premium_amount",
+            "premiumAmount",
+            "flat_fee",
+            "flatFee",
         )
-        auction_fees = _extract_numeric_field(
-            include_any=("auction_fees", "auction fee", "auction_fee", "auctionfee"),
-            exclude_any=("doc", "documentation", "pct", "percent", "rate", "%"),
+        doc_fee = _extract_numeric_key(
+            "doc_fee",
+            "docFee",
+            "documentation_fee",
+            "documentationFee",
+            "docfee",
+        )
+        auction_fees = _extract_numeric_key(
+            "auction_fees",
+            "auctionFee",
+            "auctionFees",
+            "auction_fee",
+            "auctionfee",
         )
 
         normalized = {

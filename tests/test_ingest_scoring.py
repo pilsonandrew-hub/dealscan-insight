@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from backend.ingest.manheim_market import get_manheim_market_data
 from backend.ingest.score import CURRENT_YEAR, determine_vehicle_tier, resolve_expected_close_bid, score_deal
-from webapp.routers.ingest import passes_basic_gates, score_vehicle
+from webapp.routers.ingest import normalize_apify_vehicle, passes_basic_gates, score_vehicle
 
 
 def test_passes_basic_gates_rejects_title_brand_keywords():
@@ -86,6 +86,31 @@ def test_passes_basic_gates_allows_positive_bid_when_other_rules_pass():
     result = passes_basic_gates(vehicle)
 
     assert result == {"pass": True, "reason": "ok"}
+
+
+def test_normalize_apify_vehicle_keeps_percent_and_flat_fee_fields_separate():
+    item = {
+        "title": "2024 Toyota Camry",
+        "currentBid": 10000,
+        "meterCount": 25000,
+        "locationState": "CA",
+        "auctionEndUtc": "2026-03-26T18:00:00Z",
+        "url": "https://example.com/lot/1",
+        "seller": "Example Auctions",
+        "buyer_premium_pct": "12.5",
+        "buyers_premium_pct": "11.0",
+        "buyer_premium": "1250",
+        "doc_fee": "75",
+        "auction_fees": "150",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="run-1")
+
+    assert normalized is not None
+    assert normalized["buyer_premium_pct"] == 12.5
+    assert normalized["buyer_premium"] == 1250.0
+    assert normalized["doc_fee"] == 75.0
+    assert normalized["auction_fees"] == 150.0
 
 
 def test_score_deal_subtracts_recon_reserve_from_margin():
