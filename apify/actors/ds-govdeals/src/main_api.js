@@ -526,7 +526,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
 try {
     await crawler.run([{ url: 'https://www.govdeals.com/' }]);
     console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
-    console.log(`API key captured: ${!!capturedApi.apiKey} | Search URL: ${capturedApi.searchUrl || 'none'}`);
+    console.log(`[GOVDEALS] Auth initialized`);
     console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} passing lots`);
 } catch (err) {
     console.error(`[GOVDEALS] Fatal error: ${err.message}`);

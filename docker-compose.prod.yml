@@ -5,9 +5,9 @@ services:
   api:
     build: .
     environment:
-      - DATABASE_URL=postgresql://dealerscope:${POSTGRES_PASSWORD:-changeme}@db:5432/dealerscope
+      - DATABASE_URL=postgresql://dealerscope:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}@db:5432/dealerscope
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-change_me_in_production}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in production}
       - ENVIRONMENT=production
     ports:
       - "8000:8000"
@@ -28,7 +28,7 @@ services:
     build: .
     command: ["celery", "-A", "webapp.celery_app", "worker", "--loglevel=info"]
     environment:
-      - DATABASE_URL=postgresql://dealerscope:${POSTGRES_PASSWORD:-changeme}@db:5432/dealerscope
+      - DATABASE_URL=postgresql://dealerscope:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}@db:5432/dealerscope
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
@@ -41,7 +41,7 @@ services:
     environment:
       - POSTGRES_DB=dealerscope
       - POSTGRES_USER=dealerscope
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}
     ports:
       - "5432:5432"
     volumes:
@@ -80,7 +80,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in production}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
@@ -108,7 +108,7 @@ services:
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?ELASTIC_PASSWORD must be set in production}
     ports:
       - "9200:9200"
     volumes:
@@ -132,7 +132,7 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:?ELASTIC_PASSWORD must be set in production}
     depends_on:
       - elasticsearch
     restart: unless-stopped
@@ -173,7 +173,7 @@ services:
   db-backup:
     image: postgres:15-alpine
     environment:
-      - PGPASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - PGPASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}
     volumes:
       - ./backups:/backups
       - ./scripts/backup.sh:/backup.sh
