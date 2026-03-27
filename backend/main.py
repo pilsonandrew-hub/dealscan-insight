@@ -52,7 +52,7 @@ except Exception as e:
 # Routers — import each independently so one failure doesn't kill everything
 import importlib
 _routers = {}
-for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin", "recon", "sonar"]:
+for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin", "recon", "sonar", "lifecycle"]:
     try:
         _routers[_rname] = importlib.import_module(f"webapp.routers.{_rname}")
         logging.info(f"Router loaded: {_rname}")
@@ -199,6 +199,13 @@ async def lifespan(app: FastAPI):
     if _scheduler_available:
         start_scheduler()
         logger.info("[SCHEDULER] Started")
+    # DEA-13: Expire stale deals on startup
+    try:
+        from webapp.routers.lifecycle import expire_stale_deals
+        result = expire_stale_deals()
+        logger.info(f"[LIFECYCLE] Startup expiration: {result}")
+    except Exception as e:
+        logger.warning(f"[LIFECYCLE] Startup expiration failed (non-fatal): {e}")
     yield
     logger.info("Shutting down DealerScope unified backend")
     if _scheduler_available:
@@ -261,6 +268,7 @@ _prefix_map = {
     "vin": "/api/vin",  # VIN decoder — mounts /api/vin/*
     "recon": "/api",   # Recon — mounts /api/recon/*
     "sonar": "",       # Sonar — mounts /api/sonar/*
+    "lifecycle": "",   # Lifecycle — mounts /api/lifecycle/*
 }
 for _name, _mod in _routers.items():
     try:

@@ -1971,8 +1971,8 @@ def score_vehicle(vehicle: dict) -> dict:
             manheim_confidence=manheim_result.get("manheim_confidence"),
             manheim_source_status=manheim_result.get("manheim_source_status"),
             manheim_updated_at=manheim_result.get("manheim_updated_at"),
-            buyer_premium_pct=vehicle.get("buyer_premium_pct") or vehicle.get("buyer_premium"),
-            auction_fees=vehicle.get("auction_fees") or vehicle.get("doc_fee"),
+            buyer_premium_pct=vehicle.get("buyer_premium_pct"),
+            auction_fees=vehicle.get("auction_fees"),
         )
         result["mmr_estimated"] = mmr
         vehicle["mmr_estimated"] = mmr
