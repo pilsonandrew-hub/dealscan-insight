@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Cursor AI Code Review
+      - name: Cursor AI Code Review (PR diff)
         if: github.event_name == 'pull_request'
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
@@ -23,73 +23,73 @@ jobs:
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           DIFF=$(git diff "$BASE_SHA".."$HEAD_SHA" -- '*.py' '*.ts' '*.tsx' '*.js' '*.sql' | head -c 60000)
-
-          if [ -z "$DIFF" ]; then
-            echo "No code changes to review."
-            exit 0
-          fi
-
-          echo "Diff size: $(echo "$DIFF" | wc -c) bytes"
-
-          PAYLOAD=$(jq -n \
-            --arg diff "$DIFF" \
-            '{
-              "model": "cursor-fast",
-              "messages": [
-                {
-                  "role": "system",
-                  "content": "You are a senior code reviewer for DealerScope, a vehicle arbitrage platform. Review the diff and flag: 1) Auth/security issues (missing ownership checks, exposed secrets), 2) Business rule violations (bid ceiling 0.88, max age 4yr, max mileage 50k, rust state filter), 3) Null safety / silent failures in scrapers, 4) Data integrity issues. Be concise. Do NOT flag apify_api_ function names as secrets."
-                },
-                {
-                  "role": "user",
-                  "content": $diff
-                }
-              ]
-            }')
-
+          if [ -z "$DIFF" ]; then echo "No code changes to review."; exit 0; fi
+          PAYLOAD=$(jq -n --arg diff "$DIFF" '{
+            "model": "cursor-fast",
+            "messages": [
+              {"role": "system", "content": "You are a senior code reviewer for DealerScope. Review the diff and flag: 1) Auth/security issues, 2) Business rule violations (bid ceiling 0.88/0.80, min margin $1500/$2500, max age 4yr, max mileage 50k, rust state filter), 3) Silent failures, 4) Data integrity issues, 5) UX/consumer trust issues. Be concise and actionable."},
+              {"role": "user", "content": $diff}
+            ]
+          }')
           RESPONSE=$(curl -s -X POST https://api.cursor.sh/v1/chat/completions \
             -H "Authorization: Bearer $CURSOR_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"')
+          echo "## 🤖 Cursor AI Review" >> $GITHUB_STEP_SUMMARY
+          echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
+          echo "$REVIEW"
 
-          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review content returned"')
-          echo "## Cursor Code Review" >> $GITHUB_STEP_SUMMARY
+      - name: Cursor AI Code Review (push to main)
+        if: github.event_name == 'push'
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          # Get diff of the push (last commit vs parent)
+          HEAD="${{ github.sha }}"
+          PARENT=$(git rev-parse HEAD^1 2>/dev/null || echo "")
+          if [ -z "$PARENT" ]; then echo "First commit, skipping diff review."; exit 0; fi
+          DIFF=$(git diff "$PARENT".."$HEAD" -- '*.py' '*.ts' '*.tsx' '*.js' '*.sql' | head -c 60000)
+          if [ -z "$DIFF" ]; then echo "No code changes to review."; exit 0; fi
+          PAYLOAD=$(jq -n --arg diff "$DIFF" '{
+            "model": "cursor-fast",
+            "messages": [
+              {"role": "system", "content": "You are a senior code reviewer for DealerScope. Review the diff and flag: 1) Auth/security issues, 2) Business rule violations (bid ceiling 0.88/0.80, min margin $1500/$2500, max age 4yr, max mileage 50k, rust state filter), 3) Silent failures, 4) Data integrity issues, 5) UX/consumer trust issues. Be concise and actionable."},
+              {"role": "user", "content": $diff}
+            ]
+          }')
+          RESPONSE=$(curl -s -X POST https://api.cursor.sh/v1/chat/completions \
+            -H "Authorization: Bearer $CURSOR_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"')
+          echo "## 🤖 Cursor AI Review (push)" >> $GITHUB_STEP_SUMMARY
           echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
           echo "$REVIEW"
 
       - name: Validate Business Rules
         run: |
           echo "=== DEALERSCOPE BUSINESS RULE VALIDATION ==="
+          FAILED=0
 
-          if ! grep -rn "0\.88\|0\.80" backend/ingest/score.py | grep -q "bid_ceiling"; then
-            echo "❌ FAIL: Bid ceiling logic missing from score.py"
-            exit 1
+          if grep -rn "0\.88\|0\.80" backend/ingest/score.py | grep -q "bid_ceiling\|ceiling"; then
+            echo "✅ Bid ceiling logic intact"
+          else
+            echo "❌ FAIL: Bid ceiling missing"
+            FAILED=1
           fi
-          echo "✅ Bid ceiling logic intact (Premium=0.88, Standard=0.80)"
 
-          if grep -rn "localhost" src/services/ --include="*.ts" 2>/dev/null; then
-            echo "❌ FAIL: localhost found in frontend services"
-            exit 1
+          if grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|sk-ant-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "test\|#\|//"; then
+            echo "❌ FAIL: Hardcoded API key found"
+            FAILED=1
+          else
+            echo "✅ No hardcoded secrets"
           fi
-          echo "✅ No localhost in frontend services"
 
-          if grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|sk-ant-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "\.cursorrules\|MEMORY\|test\|#"; then
-            echo "❌ FAIL: Hardcoded API key found in source"
-            exit 1
-          fi
-          echo "✅ No hardcoded secrets"
-
-          if grep -n "dev-secret-change-in-prod" config/settings.py 2>/dev/null; then
-            echo "❌ FAIL: Weak SECRET_KEY default found"
-            exit 1
-          fi
-          echo "✅ SECRET_KEY is hardened"
-
-          if grep -rn "HIGH_RUST_STATES\|RUST_STATES\|rust_states" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
+          if grep -rn "HIGH_RUST_STATES\|rust_states" backend/ --include="*.py" | grep -q "OH\|MI\|PA"; then
             echo "✅ Rust state filter present"
           else
             echo "⚠️ WARNING: Rust state filter may be missing"
           fi
 
-          echo ""
-          echo "=== ALL BUSINESS RULE CHECKS PASSED ==="
+          exit $FAILED

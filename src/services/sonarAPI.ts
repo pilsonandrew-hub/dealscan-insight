@@ -14,10 +14,10 @@ export interface SonarResult {
   condition: string;
   sourceName: string;
   sourceUrl: string;
-  mileage: number;
+  mileage: number | null | string;
   auctionSource: string;
   issuingAgency: string;
-  titleStatus: 'Clean' | 'Salvage' | 'Rebuilt';
+  titleStatus: string;
   isAsIs: boolean;
 }
 
