@@ -1,5 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
+
 export interface AnomalyResult {
   isAnomaly: boolean;
   score: number;
@@ -323,20 +325,27 @@ export class AnomalyDetector {
   private async createAnomalyAlerts(anomalies: AnomalyResult[]): Promise<void> {
     for (const anomaly of anomalies) {
       try {
-        await supabase.from('user_alerts').insert({
-          id: `anomaly-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          user_id: (await supabase.auth.getUser()).data.user?.id,
-          type: 'anomaly',
-          priority: anomaly.confidence > 0.9 ? 'high' : 'medium',
-          title: `Data Anomaly Detected: ${anomaly.field}`,
-          message: anomaly.reason || `Unusual ${anomaly.field} value detected`,
-          opportunity_data: {
-            field: anomaly.field,
-            value: anomaly.value,
-            score: anomaly.score,
-            confidence: anomaly.confidence,
-            expected_range: anomaly.expectedRange
-          }
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        await fetch(`${API_BASE}/api/user-alerts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : '',
+          },
+          body: JSON.stringify({
+            type: 'anomaly',
+            priority: anomaly.confidence > 0.9 ? 'high' : 'medium',
+            title: `Data Anomaly Detected: ${anomaly.field}`,
+            message: anomaly.reason || `Unusual ${anomaly.field} value detected`,
+            opportunity_data: {
+              field: anomaly.field,
+              value: anomaly.value,
+              score: anomaly.score,
+              confidence: anomaly.confidence,
+              expected_range: anomaly.expectedRange
+            }
+          }),
         });
       } catch (error) {
         console.error('Failed to create anomaly alert:', error);
