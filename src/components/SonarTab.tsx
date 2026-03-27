@@ -60,11 +60,9 @@ export const SonarTab: React.FC = () => {
       { query, minPrice: priceRange[0], maxPrice: priceRange[1] },
       (batch) => {
         if (abortRef.current) return;
-        const { clean, excluded } = filterQuality(batch.results);
-        const cleanIds = new Set(clean.map((r) => r.id));
-        const damaged = batch.results.filter((r) => !cleanIds.has(r.id));
+        const { clean, excluded, excludedResults } = filterQuality(batch.results);
         setResults((prev) => [...prev, ...clean]);
-        setExcludedResults((prev) => [...prev, ...damaged]);
+        setExcludedResults((prev) => [...prev, ...excludedResults]);
         setExcludedCount((prev) => prev + excluded);
         setSourceStatuses((prev) => {
           const next = { ...prev };
@@ -118,6 +116,7 @@ export const SonarTab: React.FC = () => {
   const displayResults = showAll ? [...results, ...excludedResults] : results;
   const sorted = sortResults(displayResults, sortKey);
   const damagedIds = new Set(excludedResults.map((r) => r.id));
+  const hasExcludedResults = excludedCount > 0;
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
@@ -275,7 +274,7 @@ export const SonarTab: React.FC = () => {
                 </span>
               )}
             </span>
-            {excludedCount > 0 && (
+            {hasExcludedResults && (
               <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                 <span className="relative inline-block w-8 h-[18px]">
                   <input
