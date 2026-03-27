@@ -8,6 +8,7 @@ import { fmt$ } from '@/utils/formatters';
 interface SonarCardProps {
   result: SonarResult;
   index: number;
+  isDamaged?: boolean;
 }
 
 const TITLE_STATUS_COLORS: Record<string, string> = {
@@ -31,7 +32,7 @@ function formatMileage(mileage: number | null | string): string {
   return `${mileage.toLocaleString()} mi`;
 }
 
-export const SonarCard: React.FC<SonarCardProps> = ({ result, index }) => {
+export const SonarCard: React.FC<SonarCardProps> = ({ result, index, isDamaged = false }) => {
   const [conditionExpanded, setConditionExpanded] = useState(false);
   const [imgError, setImgError] = useState(false);
 
@@ -55,6 +56,12 @@ export const SonarCard: React.FC<SonarCardProps> = ({ result, index }) => {
           <Badge className="absolute top-2 right-2 bg-cyan-600/90 text-white border-0 text-xs">
             {result.sourceName}
           </Badge>
+          {isDamaged && (
+            <Badge className="absolute top-2 left-2 bg-red-600/90 text-white border-0 text-xs flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              Damaged/Salvage
+            </Badge>
+          )}
         </div>
 
         <CardContent className="p-4 space-y-3">
