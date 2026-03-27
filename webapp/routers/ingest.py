@@ -1806,17 +1806,8 @@ def passes_basic_gates(vehicle: dict) -> dict:
     state = vehicle.get("state", "")
     year = vehicle.get("year")
     mileage = vehicle.get("mileage")
-    source = (vehicle.get("source_site") or "").lower()
-
-    # Normalize source name variants to canonical form for gate lookups
-    _source_aliases = {
-        "hibid-v2": "hibid", "hibid-bidcal": "hibid", "hibid_v2": "hibid",
-        "jj kane": "jjkane", "jj_kane": "jjkane", "jjkane.com": "jjkane",
-    }
-    source = _source_aliases.get(source, source)
-
-    if bid < 3000 or bid > 35000:
-        return {"pass": False, "reason": f"bid_out_of_range (${bid:,.0f})"}
+    if bid <= 0:
+        return {"pass": False, "reason": f"bid_not_positive (${bid:,.0f})"}
 
     # Reject non-US states (Canadian provinces, garbage codes)
     if state and state not in US_STATES:
@@ -1826,7 +1817,7 @@ def passes_basic_gates(vehicle: dict) -> dict:
         current_year = datetime.now().year
         if not year or year < current_year - 2:
             return {"pass": False, "reason": f"high_rust_state ({state})"}
-        logger.info(f'[BYPASS] Rust state {state} allowed — vehicle is {year} (≤2yr old)')
+        logger.info(f"[GATE] Rust state {state} allowed for {year} (within 2-year window)")
 
     title_brand_issue = _find_title_brand_issue(vehicle)
     if title_brand_issue:
@@ -1839,7 +1830,6 @@ def passes_basic_gates(vehicle: dict) -> dict:
     if _is_commercial_hd_tonnage(title):
         return {"pass": False, "reason": f"commercial_hd_tonnage ({title[:50]})"}
 
-    current_year = datetime.now().year
     from backend.ingest.score import determine_vehicle_tier
     vehicle_tier = determine_vehicle_tier(year, mileage)
     if vehicle_tier == "rejected":
