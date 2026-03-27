@@ -101,7 +101,58 @@ const MOCK_RESULTS: SonarResult[] = [
     sourceName: 'GSA Auctions', sourceUrl: '#', mileage: 61_200,
     auctionSource: 'GSA Auctions', issuingAgency: 'U.S. General Services Administration', titleStatus: 'Salvage', isAsIs: true,
   },
+  {
+    id: 'snr-008',
+    photoUrl: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0afa?w=400&h=260&fit=crop',
+    year: 2019, make: 'Nissan', model: 'Altima', trim: 'S',
+    currentBid: 4_200, timeRemaining: '4h 10m', endsAt: new Date(Date.now() + 4 * 3600_000 + 10 * 60_000).toISOString(),
+    location: 'Houston, TX', condition: 'Flood damage, interior water stains, engine runs rough',
+    sourceName: 'HiBid', sourceUrl: '#', mileage: 52_000,
+    auctionSource: 'HiBid', issuingAgency: 'TX Dept. of Motor Vehicles', titleStatus: 'Flood', isAsIs: true,
+  },
+  {
+    id: 'snr-009',
+    photoUrl: 'https://images.unsplash.com/photo-1542362567-b07e54358753?w=400&h=260&fit=crop',
+    year: 2017, make: 'Chevrolet', model: 'Malibu', trim: 'LT',
+    currentBid: 2_800, timeRemaining: '9h 45m', endsAt: new Date(Date.now() + 9 * 3600_000 + 45 * 60_000).toISOString(),
+    location: 'Chicago, IL', condition: 'Transmission slipping, does not run consistently, sold as-is mechanical',
+    sourceName: 'GovDeals', sourceUrl: '#', mileage: 98_400,
+    auctionSource: 'GovDeals', issuingAgency: 'City of Chicago Fleet Mgmt', titleStatus: 'Salvage', isAsIs: true,
+  },
+  {
+    id: 'snr-010',
+    photoUrl: 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=400&h=260&fit=crop',
+    year: 2020, make: 'Kia', model: 'Optima', trim: 'LX',
+    currentBid: 3_500, timeRemaining: '7h 15m', endsAt: new Date(Date.now() + 7 * 3600_000 + 15 * 60_000).toISOString(),
+    location: 'Tampa, FL', condition: 'Fire damage to engine bay, inoperable, tow required',
+    sourceName: 'PublicSurplus', sourceUrl: '#', mileage: 41_200,
+    auctionSource: 'PublicSurplus', issuingAgency: 'Hillsborough County Fleet', titleStatus: 'Parts Only', isAsIs: true,
+  },
 ];
+
+// ─── Quality filter — exclude salvage/flood/damage/mechanical problems ──────
+
+const BAD_TITLE_STATUSES = /^(salvage|rebuilt|flood|parts only|lemon law|certificate of origin only|bill of sale only)$/i;
+
+const BAD_CONDITION_KEYWORDS = /frame damage|wont start|won't start|engine|transmission|flood|fire damage|hail|does not run|as-is mechanical|inoperable|no start|seized|blown/i;
+
+export interface QualityFilterResult {
+  clean: SonarResult[];
+  excluded: number;
+}
+
+export function filterQuality(results: SonarResult[]): QualityFilterResult {
+  const clean: SonarResult[] = [];
+  let excluded = 0;
+  for (const r of results) {
+    if (BAD_TITLE_STATUSES.test(r.titleStatus) || BAD_CONDITION_KEYWORDS.test(r.condition)) {
+      excluded++;
+    } else {
+      clean.push(r);
+    }
+  }
+  return { clean, excluded };
+}
 
 // ─── Adapter pattern ────────────────────────────────────────────────────────
 

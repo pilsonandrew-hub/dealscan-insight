@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { SonarCard } from './SonarCard';
-import { sonarSearchStreaming, SONAR_SOURCES, type SonarResult, type SonarSource } from '@/services/sonarAPI';
+import { sonarSearchStreaming, filterQuality, SONAR_SOURCES, type SonarResult, type SonarSource } from '@/services/sonarAPI';
 import { Search, Share2, ArrowUpDown, Check, Loader2, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { fmt$ } from '@/utils/formatters';
@@ -34,6 +34,7 @@ export const SonarTab: React.FC = () => {
   const [hasSearched, setHasSearched] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('price_asc');
   const [sourceStatuses, setSourceStatuses] = useState<Record<string, SourceStatus>>({});
+  const [excludedCount, setExcludedCount] = useState(0);
   const [shareIcon, setShareIcon] = useState<'share' | 'check'>('share');
   const abortRef = useRef(false);
 
@@ -42,6 +43,7 @@ export const SonarTab: React.FC = () => {
     abortRef.current = false;
     setIsSearching(true);
     setResults([]);
+    setExcludedCount(0);
     setHasSearched(true);
 
     // Initialize all sources as pending, first one as scanning
@@ -55,7 +57,9 @@ export const SonarTab: React.FC = () => {
       { query, minPrice: priceRange[0], maxPrice: priceRange[1] },
       (batch) => {
         if (abortRef.current) return;
-        setResults((prev) => [...prev, ...batch.results]);
+        const { clean, excluded } = filterQuality(batch.results);
+        setResults((prev) => [...prev, ...clean]);
+        setExcludedCount((prev) => prev + excluded);
         setSourceStatuses((prev) => {
           const next = { ...prev };
           next[batch.source] = 'done';
@@ -256,6 +260,11 @@ export const SonarTab: React.FC = () => {
           <span className="text-gray-400 text-sm">
             {results.length} result{results.length !== 1 ? 's' : ''}
             {isSearching && ' so far'}
+            {excludedCount > 0 && (
+              <span className="text-yellow-500/70 ml-1">
+                · {excludedCount} filtered for quality
+              </span>
+            )}
           </span>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 text-xs">
