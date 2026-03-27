@@ -72,13 +72,24 @@ def get_token_expiry(token: str) -> Optional[datetime]:
     return None
 
 class TokenBlacklist:
-    """Redis-backed token blacklist with TTL auto-expiry"""
+    """Redis-backed token blacklist with TTL auto-expiry.
+    Falls back to in-memory set if Redis is unavailable (graceful degradation)."""
 
     DEFAULT_TTL = 86400  # 24 hours fallback
 
     def __init__(self):
         import redis
-        self._redis = redis.from_url(settings.redis_url, decode_responses=True)
+        import logging
+        self._redis = None
+        self._fallback: set = set()
+        try:
+            client = redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2)
+            client.ping()  # Test connection immediately
+            self._redis = client
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                f"[TokenBlacklist] Redis unavailable ({e}), using in-memory fallback"
+            )
 
     def _key(self, token: str) -> str:
         import hashlib
@@ -87,17 +98,28 @@ class TokenBlacklist:
 
     def add_token(self, token: str):
         """Add token to blacklist with TTL matching token expiry"""
-        expiry = get_token_expiry(token)
-        if expiry:
-            ttl = int((expiry - datetime.now(timezone.utc)).total_seconds())
-            ttl = max(ttl, 1)
-        else:
-            ttl = self.DEFAULT_TTL
-        self._redis.setex(self._key(token), ttl, "1")
+        if self._redis:
+            try:
+                expiry = get_token_expiry(token)
+                if expiry:
+                    ttl = int((expiry - datetime.now(timezone.utc)).total_seconds())
+                    ttl = max(ttl, 1)
+                else:
+                    ttl = self.DEFAULT_TTL
+                self._redis.setex(self._key(token), ttl, "1")
+                return
+            except Exception:
+                pass
+        self._fallback.add(self._key(token))
 
     def is_blacklisted(self, token: str) -> bool:
         """Check if token is blacklisted"""
-        return self._redis.exists(self._key(token)) > 0
+        if self._redis:
+            try:
+                return self._redis.exists(self._key(token)) > 0
+            except Exception:
+                pass
+        return self._key(token) in self._fallback
 
 # Global blacklist instance
 token_blacklist = TokenBlacklist()

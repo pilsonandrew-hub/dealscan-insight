@@ -540,7 +540,7 @@ export const api = {
           .select('source, processed_at, created_at')
           .order('processed_at', { ascending: false })
           .limit(2000),
-        this.getApifyActorStatus()
+        this.getApifyActorStatus().catch(() => new Map())
       ]);
 
       if (dbResult.error) throw dbResult.error;
