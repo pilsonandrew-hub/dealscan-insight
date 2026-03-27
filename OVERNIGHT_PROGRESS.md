@@ -173,8 +173,8 @@ Full path: Apify webhook → ingest.py → score.py → Supabase → rover.py �
 - `src/services/roverAPI.ts` line 83 & 112: `VITE_API_URL` defaults to `localhost:8000` in production.
 - **Fix**: Set env var `VITE_API_URL=https://dealscan-insight-production.up.railway.app` in Railway/Vercel frontend deployment.
 
-Secondary risk:
-- `webapp/routers/rover.py` line 25: If `SUPABASE_SERVICE_ROLE_KEY` not set in Railway, falls back to anon key → RLS policies may block reads from `opportunities` table.
+Secondary risk (RESOLVED 2026-03-27):
+- ~~`webapp/routers/rover.py` line 25: If `SUPABASE_SERVICE_ROLE_KEY` not set in Railway, falls back to anon key → RLS policies may block reads from `opportunities` table.~~ Rover now correctly separates anon key (reads) from service_role key (writes only), with JWT-forwarding for user-scoped RLS queries.
 
 ---
 
