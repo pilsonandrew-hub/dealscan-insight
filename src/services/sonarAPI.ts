@@ -139,19 +139,22 @@ const BAD_CONDITION_KEYWORDS = /frame damage|wont start|won't start|engine|trans
 export interface QualityFilterResult {
   clean: SonarResult[];
   excluded: number;
+  excludedResults: SonarResult[];
 }
 
 export function filterQuality(results: SonarResult[]): QualityFilterResult {
   const clean: SonarResult[] = [];
+  const excludedResults: SonarResult[] = [];
   let excluded = 0;
   for (const r of results) {
     if (BAD_TITLE_STATUSES.test(r.titleStatus) || BAD_CONDITION_KEYWORDS.test(r.condition)) {
       excluded++;
+      excludedResults.push(r);
     } else {
       clean.push(r);
     }
   }
-  return { clean, excluded };
+  return { clean, excluded, excludedResults };
 }
 
 // ─── Adapter pattern ────────────────────────────────────────────────────────
