@@ -26,6 +26,7 @@ PRICE_BUCKETS = [10000, 20000, 35000, 50000]
 
 
 def mileage_bucket(mileage: float) -> str:
+    mileage = _coerce_float(mileage)
     if mileage < 15000: return "0-15k"
     elif mileage < 30000: return "15-30k"
     elif mileage < 60000: return "30-60k"
@@ -34,11 +35,21 @@ def mileage_bucket(mileage: float) -> str:
 
 
 def price_bucket(price: float) -> str:
+    price = _coerce_float(price)
     if price < 10000: return "sub-10k"
     elif price < 20000: return "10-20k"
     elif price < 35000: return "20-35k"
     elif price < 50000: return "35-50k"
     else: return "50k+"
+
+
+def _coerce_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def apply_decay(weight: float, event_ts_ms: float, now_ms: float, half_life_ms: float = DECAY_HALF_LIFE_MS) -> float:
@@ -95,12 +106,12 @@ def score_item(prefs: Dict[str, float], item: Dict[str, Any]) -> float:
     score += prefs.get(f"state:{item.get('state', '')}", 0) * 0.6
     score += prefs.get(f"mileage_bucket:{mileage_bucket(item.get('mileage', 50000))}", 0) * 0.8
     # Opportunity rows use current_bid, not price
-    _price = item.get('current_bid') or item.get('price') or item.get('estimated_sale_price') or 25000
+    _price = _coerce_float(item.get('current_bid') or item.get('price') or item.get('estimated_sale_price') or 25000, 25000)
     score += prefs.get(f"price_bucket:{price_bucket(_price)}", 0) * 0.9
 
     # Under-MMR bonus (key arbitrage signal)
-    mmr = item.get("mmr", 0)
-    price = item.get("current_bid") or item.get("price") or 0
+    mmr = _coerce_float(item.get("mmr", 0), 0)
+    price = _coerce_float(item.get("current_bid") or item.get("price") or 0, 0)
     if mmr and price and price < mmr:
         under_mmr_pct = (mmr - price) / mmr
         score += under_mmr_pct * 10  # Up to 10 bonus points
