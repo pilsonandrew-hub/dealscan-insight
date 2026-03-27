@@ -189,9 +189,8 @@ function buildOpportunityQuery(filters?: CrosshairSearchFilters) {
   if (filters?.minScore != null) query = query.gte('dos_score', filters.minScore);
   if (filters?.maxMileage != null) query = query.lte('mileage', filters.maxMileage);
 
-  const now = new Date().toISOString();
-  const cutoff7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  query = query.or(`auction_end_date.gt.${now},auction_end_date.is.null,created_at.gt.${cutoff7d}`);
+  // Show all deals — no date filter (let the UI sort by newest)
+  // Previously filtered by 48hr window which hid too many deals
 
   return query;
 }
