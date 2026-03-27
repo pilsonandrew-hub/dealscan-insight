@@ -209,6 +209,71 @@ def _write_rover_event(user_id: str, event_type: str, item_data: dict[str, Any],
     return len(result.data or [])
 
 
+def _record_sale_intent(opportunity_id: str, user_id: str) -> None:
+    """Record a BUY intent in dealer_sales with outcome=pending.
+
+    Idempotent: skips if a row already exists with outcome 'sold' or 'passed'.
+    Only inserts/updates when no row exists or the existing row is still 'pending'.
+    """
+    if not _write_supabase_client:
+        return  # non-fatal — rover_event is the primary record
+
+    try:
+        # Check for existing row
+        existing = (
+            _write_supabase_client.table("dealer_sales")
+            .select("id,outcome")
+            .eq("opportunity_id", opportunity_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            current_outcome = (existing.data[0].get("outcome") or "").lower()
+            if current_outcome in ("sold", "passed"):
+                logger.debug(
+                    "[ROVER] dealer_sales skip: opportunity=%s already %s",
+                    opportunity_id[:8], current_outcome,
+                )
+                return
+
+        # Fetch opportunity details for the sales record
+        opp = (
+            _write_supabase_client.table("opportunities")
+            .select("make,model,year,mileage,state,current_bid,mmr_estimated")
+            .eq("id", opportunity_id)
+            .limit(1)
+            .execute()
+        )
+        opp_data = (opp.data or [{}])[0]
+
+        sale_price = opp_data.get("current_bid") or 0
+        payload = {
+            "user_id": user_id,
+            "opportunity_id": opportunity_id,
+            "make": opp_data.get("make") or "Unknown",
+            "model": opp_data.get("model") or "Unknown",
+            "year": opp_data.get("year") or 0,
+            "mileage": opp_data.get("mileage"),
+            "state": opp_data.get("state"),
+            "sale_price": sale_price,
+            "outcome": "pending",
+            "source": "telegram_buy",
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        _write_supabase_client.table("dealer_sales").upsert(
+            payload, on_conflict="opportunity_id,user_id"
+        ).execute()
+
+        logger.info(
+            "[ROVER] dealer_sales intent recorded: opportunity=%s user=%s...",
+            opportunity_id[:8], user_id[:8],
+        )
+    except Exception as exc:
+        logger.warning("[ROVER] dealer_sales intent write failed (non-fatal): %s", exc)
+
+
 def _apply_rover_action(opportunity_id: str, action: str, user_id: str) -> None:
     if not _write_supabase_client:
         raise HTTPException(status_code=503, detail="Service unavailable")
@@ -226,6 +291,9 @@ def _apply_rover_action(opportunity_id: str, action: str, user_id: str) -> None:
             },
             weight=weight,
         )
+        # Record sale intent in dealer_sales for BUY actions
+        if action == "buy":
+            _record_sale_intent(opportunity_id, user_id)
         return
 
     if action == "pass":
