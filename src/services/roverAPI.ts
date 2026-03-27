@@ -109,7 +109,9 @@ class RoverAPIService {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const resp = await fetch(`${API_BASE}/api/rover/recommendations?limit=${limit}`, {
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("No user session");
+      const resp = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
         headers: {
           Authorization: token ? `Bearer ${token}` : "",
         },
