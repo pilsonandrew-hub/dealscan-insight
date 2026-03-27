@@ -477,26 +477,54 @@ export const api = {
       jjkane: "lvb7T6VMFfNUQpqlq",
       bidspotter: "5Eu3hfCcBBdzp6I1u",
     };
-    const APIFY_TOKEN = import.meta.env.VITE_APIFY_TOKEN || "";
 
     const results = new Map<string, { last_run: string; succeeded: boolean }>();
-    const fetches = Object.entries(ACTOR_IDS).map(async ([source, actorId]) => {
-      try {
-        const res = await fetch(
-          `https://api.apify.com/v2/acts/${actorId}/runs?limit=1&desc=1`,
-          { headers: { Authorization: `Bearer ${APIFY_TOKEN}` } }
-        );
-        if (!res.ok) return;
-        const json = await res.json();
-        const run = json?.data?.items?.[0];
-        const lastRun = run?.finishedAt;
-        const succeeded = run?.status === 'SUCCEEDED';
-        if (lastRun) results.set(source, { last_run: lastRun, succeeded });
-      } catch {
-        // Silently ignore individual fetch failures
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return results;
+
+      const res = await fetch('/api/analytics/scraper-status', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) return results;
+
+      const json = await res.json().catch(() => null);
+      const items = Array.isArray(json?.items)
+        ? json.items
+        : Array.isArray(json?.data)
+          ? json.data
+          : Array.isArray(json)
+            ? json
+            : [];
+
+      for (const item of items) {
+        const source = item?.source || item?.name;
+        const lastRun = item?.last_run || item?.finishedAt || item?.finished_at || null;
+        const succeeded = item?.succeeded ?? item?.status === 'SUCCEEDED';
+        if (source && lastRun) {
+          results.set(source, { last_run: lastRun, succeeded: Boolean(succeeded) });
+        }
       }
-    });
-    await Promise.all(fetches);
+
+      if (results.size === 0 && json && typeof json === 'object' && !Array.isArray(json)) {
+        for (const source of Object.keys(ACTOR_IDS)) {
+          const value = (json as Record<string, any>)[source];
+          if (!value) continue;
+          const lastRun = value.last_run || value.finishedAt || value.finished_at;
+          const succeeded = value.succeeded ?? value.status === 'SUCCEEDED';
+          if (lastRun) {
+            results.set(source, { last_run: lastRun, succeeded: Boolean(succeeded) });
+          }
+        }
+      }
+    } catch {
+      // Silently ignore failures and fall back to an empty map.
+    }
     return results;
   },
 
@@ -545,14 +573,7 @@ export const api = {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const userId = session?.user?.id;
-
-      if (!userId) {
-        throw new Error('Missing authenticated user for Rover recommendations');
-      }
-
-      const params = new URLSearchParams({ user_id: userId });
-      const res = await fetch(`${API_BASE}/api/rover/recommendations?${params.toString()}`, {
+      const res = await fetch(`${API_BASE}/api/rover/recommendations?limit=25`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'

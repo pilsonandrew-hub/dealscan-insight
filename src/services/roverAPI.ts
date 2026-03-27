@@ -1,6 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { logger } from "@/lib/logger";
 
+const API_BASE = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
+
 export interface RoverEvent {
   userId: string;
   event: 'view' | 'click' | 'save' | 'bid' | 'purchase' | 'pass';
@@ -106,17 +108,11 @@ class RoverAPIService {
   async getRecommendations(limit: number = 25): Promise<RoverRecommendations> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
       const token = session?.access_token;
-      if (!user) return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
-
-      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${user.id}&limit=${limit}`, {
-        headers,
+      const resp = await fetch(`${API_BASE}/api/rover/recommendations?limit=${limit}`, {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
       });
 
       if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
@@ -130,10 +126,9 @@ class RoverAPIService {
     }
   }
 
-  async getRecommendationsWithToken(userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
+  async getRecommendationsWithToken(_userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
-      const resp = await fetch(`${apiUrl}/api/rover/recommendations?user_id=${userId}&limit=${limit}`, {
+      const resp = await fetch(`${API_BASE}/api/rover/recommendations?limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!resp.ok) {
@@ -292,17 +287,24 @@ class RoverAPIService {
 
   async saveIntent(query: any, title: string): Promise<void> {
     try {
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) return;
-
-      await supabase.from('crosshair_intents').insert({
-        user_id: user.user.id,
-        title,
-        canonical_query: query,
-        search_options: {},
-        notify_on_first_match: true,
-        is_active: true
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const resp = await fetch(`${API_BASE}/api/saved-searches`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify({
+          name: title,
+          filters: query || {},
+          dos_threshold: 65,
+        }),
       });
+
+      if (!resp.ok) {
+        throw new Error(`Saved search API error: ${resp.status}`);
+      }
 
       logger.info('Rover intent saved', { title });
     } catch (error) {
@@ -314,18 +316,27 @@ class RoverAPIService {
   }
 
   async createIntent(params: { title: string; make?: string; model?: string; year?: number }): Promise<void> {
-    const { error } = await supabase
-      .from("crosshair_intents")
-      .insert({
-        title: params.title,
-        make: params.make,
-        model: params.model,
-        year: params.year,
-        user_id: supabase.auth.getUser().user.id,
-        is_active: true,
-        created_at: new Date().toISOString()
-      });
-    if (error) throw error;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const filters = {
+      make: params.make,
+      model: params.model,
+      yearMin: params.year,
+      yearMax: params.year,
+    };
+    const resp = await fetch(`${API_BASE}/api/saved-searches`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+      body: JSON.stringify({
+        name: params.title,
+        filters,
+        dos_threshold: 65,
+      }),
+    });
+    if (!resp.ok) throw new Error(`Saved search API error: ${resp.status}`);
   }
 
   async getUserIntents(): Promise<any[]> {

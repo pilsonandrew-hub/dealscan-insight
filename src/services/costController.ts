@@ -2,6 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { createLogger } from '@/utils/productionLogger';
 
 const logger = createLogger('CostController');
+const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
 
 export interface StrategyBudget {
   dailyHttpRequests: number;
@@ -383,15 +384,24 @@ export class CostController {
 
     // Record in database for cost tracking
     try {
-      await supabase.from('pipeline_metrics').insert({
-        metric_name: 'cost_tracking',
-        metric_value: operation.amount,
-        metric_unit: operation.type,
-        tags: {
-          site_name: siteName,
-          operation_type: operation.type,
-          strategy: siteBudget.strategy
-        }
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      await fetch(`${API_BASE}/api/pipeline-metrics`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
+          metric_name: 'cost_tracking',
+          metric_value: operation.amount,
+          metric_unit: operation.type,
+          tags: {
+            site_name: siteName,
+            operation_type: operation.type,
+            strategy: siteBudget.strategy
+          }
+        }),
       });
     } catch (error) {
       console.error('Failed to record usage metric:', error);
@@ -511,18 +521,25 @@ export class CostController {
     metadata: any
   ): Promise<void> {
     try {
-      await supabase.from('user_alerts').insert({
-        id: `budget-${alertType}-${Date.now()}`,
-        user_id: (await supabase.auth.getUser()).data.user?.id,
-        type: 'budget',
-        priority: alertType === 'over_budget' ? 'high' : 'medium',
-        title: `Budget Alert: ${siteName}`,
-        message: `Site ${siteName} ${alertType.replace('_', ' ')}`,
-        opportunity_data: {
-          site_name: siteName,
-          alert_type: alertType,
-          ...metadata
-        }
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      await fetch(`${API_BASE}/api/user-alerts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
+          type: 'budget',
+          priority: alertType === 'over_budget' ? 'high' : 'medium',
+          title: `Budget Alert: ${siteName}`,
+          message: `Site ${siteName} ${alertType.replace('_', ' ')}`,
+          opportunity_data: {
+            site_name: siteName,
+            alert_type: alertType,
+            ...metadata
+          }
+        }),
       });
     } catch (error) {
       console.error('Failed to create budget alert:', error);

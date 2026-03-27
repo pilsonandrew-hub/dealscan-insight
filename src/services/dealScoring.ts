@@ -1,6 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+const API_BASE = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
+
 interface VehicleListing {
   id: string;
   source_site: string;
@@ -130,37 +132,44 @@ class DealScoringEngine {
         const lowPrice = Math.min(...prices);
         const highPrice = Math.max(...prices);
 
-        // Get current user for market price caching
-        const { data: { user } } = await supabase.auth.getUser();
-        const userId = user?.id;
-        
-        if (!userId) {
-          // For system-level operations, we'll skip caching market prices
-          // or use service role operations
-          console.warn('No user context for market price caching, skipping');
-          return {
-            avg_price: avgPrice,
-            low_price: lowPrice,
-            high_price: highPrice,
-            sample_size: prices.length,
-            confidence: 0.5  // Add missing confidence property
-          };
-        }
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
 
-        // Cache the result with user ownership
-        await supabase.from('market_prices').upsert({
-          make: make.toLowerCase(),
-          model: model.toLowerCase(),
-          year,
-          state: state?.toLowerCase() || null,
-          avg_price: avgPrice,
-          low_price: lowPrice,
-          high_price: highPrice,
-          sample_size: prices.length,
-          source_api: 'dealer_sales_ml',
-          expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour
-          user_id: userId
-        });
+        if (token) {
+          try {
+            const resp = await fetch(`${API_BASE}/api/ml/predict-price`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                make,
+                model,
+                year,
+                state: state || undefined,
+                condition: 'fair',
+              }),
+            });
+
+            if (resp.ok) {
+              const prediction = await resp.json();
+              const predictedPrice = typeof prediction?.predicted_price === 'number' ? prediction.predicted_price : avgPrice;
+              const priceRange = prediction?.price_range || {};
+              return {
+                avg_price: predictedPrice,
+                low_price: typeof priceRange.low === 'number' ? priceRange.low : lowPrice,
+                high_price: typeof priceRange.high === 'number' ? priceRange.high : highPrice,
+                sample_size: prices.length,
+                confidence: typeof prediction?.confidence === 'number'
+                  ? prediction.confidence
+                  : Math.min(0.9, prices.length / 20)
+              };
+            }
+          } catch {
+            // Fall back to the calculated market data below.
+          }
+        }
 
         return {
           avg_price: avgPrice,
@@ -377,35 +386,25 @@ class DealScoringEngine {
           status = 'good';
         }
 
-        const { error } = await supabase.from('opportunities').insert({
-          listing_id: listing.id,
-          make: listing.make,
-          model: listing.model,
-          year: listing.year,
-          mileage: listing.mileage,
-          vin: listing.vin,
-          current_bid: listing.current_bid,
-          source_site: listing.source_site,
-          location: listing.location,
-          state: listing.state,
-          auction_end: listing.auction_end,
-          estimated_sale_price: metrics.estimated_sale_price,
-          total_cost: metrics.total_cost,
-          potential_profit: metrics.potential_profit,
-          roi_percentage: metrics.roi_percentage,
-          risk_score: metrics.risk_score,
-          confidence_score: metrics.confidence_score,
-          transportation_cost: metrics.transportation_cost,
-          fees_cost: metrics.fees_cost,
-          buyer_premium: metrics.buyer_premium,
-          doc_fee: metrics.doc_fee,
-          profit_margin: (metrics.potential_profit / metrics.estimated_sale_price) * 100,
-          status,
-          is_active: true
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        const resp = await fetch(`${API_BASE}/api/ingest/ingest-vehicle`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : '',
+          },
+          body: JSON.stringify({
+            ...listing,
+            profit_margin: (metrics.potential_profit / metrics.estimated_sale_price) * 100,
+            status,
+            is_active: true,
+            metrics,
+          }),
         });
 
-        if (error) {
-          console.error('Error creating opportunity:', error);
+        if (!resp.ok) {
+          console.error('Error creating opportunity:', await resp.text().catch(() => `HTTP ${resp.status}`));
           return false;
         }
 
