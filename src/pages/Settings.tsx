@@ -6,10 +6,28 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Bell, Globe, Shield, Zap } from "lucide-react";
+import { Settings as SettingsIcon, Bell, Globe, Shield, Zap, Activity } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import api from "@/services/api";
 import { FEDERAL_SITES, STATE_SITES } from "@/types/scraper";
+
+interface ScraperSource {
+  name: string;
+  last_run: string | null;
+  count: number;
+}
+
+function timeAgo(s: string | null | undefined): string {
+  if (!s) return 'Never';
+  const diff = Date.now() - new Date(s).getTime();
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor(diff / 60000);
+  if (h > 24) return `${Math.floor(h / 24)}d ago`;
+  if (h > 0) return `${h}h ago`;
+  if (m > 0) return `${m}m ago`;
+  return 'Just now';
+}
 
 interface SettingsData {
   enabled_sites: string[];
@@ -36,6 +54,7 @@ const Settings = () => {
   
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sources, setSources] = useState<ScraperSource[]>([]);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -70,6 +89,7 @@ const Settings = () => {
 
   useEffect(() => {
     loadSettings();
+    api.getScraperSources().then(setSources).catch(console.error);
   }, []);
 
   const toggleSite = (site: string) => {
@@ -356,6 +376,39 @@ const Settings = () => {
               }))}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Scraper Health */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="w-5 h-5" />
+            Scraper Health
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sources.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No source data available</p>
+          ) : (
+            <div className="space-y-3">
+              {sources.map(src => {
+                const fresh = src.last_run && (Date.now() - new Date(src.last_run).getTime()) < 4 * 3600 * 1000;
+                return (
+                  <div key={src.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className={`h-2 w-2 rounded-full ${fresh ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                      <span className="text-sm font-medium">{src.name}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <span>{src.count} deals</span>
+                      <span>{timeAgo(src.last_run)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
