@@ -9,35 +9,70 @@
       "description": "Max pages to scrape",
       "default": 10,
       "minimum": 1,
-      "maximum": 100
+      "maximum": 100,
+      "editor": "number"
     },
     "minBid": {
       "title": "Minimum Bid",
       "type": "integer",
       "description": "Minimum current bid in USD",
       "default": 500,
-      "minimum": 0
+      "minimum": 0,
+      "editor": "number"
     },
     "maxBid": {
       "title": "Maximum Bid",
       "type": "integer",
       "description": "Maximum current bid in USD",
       "default": 35000,
-      "minimum": 0
+      "minimum": 0,
+      "editor": "number"
     },
     "targetStates": {
       "title": "Target States",
       "type": "array",
       "description": "Low rust states to target",
-      "default": ["AZ","CA","NV","CO","NM","UT","TX","FL","GA","SC","TN","NC","VA","WA","OR","HI"],
-      "items": { "type": "string" }
+      "default": [
+        "AZ",
+        "CA",
+        "NV",
+        "CO",
+        "NM",
+        "UT",
+        "TX",
+        "FL",
+        "GA",
+        "SC",
+        "TN",
+        "NC",
+        "VA",
+        "WA",
+        "OR",
+        "HI"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "editor": "json"
     },
     "vehicleCategories": {
       "title": "Vehicle Categories",
       "type": "array",
       "description": "Categories to scrape",
-      "default": ["Automobiles & Trucks"],
-      "items": { "type": "string" }
+      "default": [
+        "Automobiles & Trucks"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "editor": "json"
+    },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Tesla Model 3)",
+      "editor": "textfield",
+      "default": ""
     }
   }
 }
