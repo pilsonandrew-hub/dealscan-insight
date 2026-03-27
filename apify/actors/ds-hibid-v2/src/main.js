@@ -108,12 +108,15 @@ const {
     minYear = new Date().getFullYear() - 10,
     maxMileage = 100000,
     targetStates = [...TARGET_STATES],
-    searchTerms = [         // Multiple search passes to maximize vehicle coverage
-        'ford', 'chevrolet', 'toyota', 'honda', 'dodge', 'nissan', 'jeep',
-        'gmc', 'hyundai', 'kia', 'subaru', 'mazda', 'bmw', 'mercedes',
-        'audi', 'lexus', 'cadillac', 'lincoln', 'buick', 'mitsubishi',
-        'volkswagen', 'volvo', 'tesla', 'chrysler', 'pontiac', 'saturn',
-    ],
+    searchQuery = "",
+    searchTerms = searchQuery
+        ? [searchQuery]     // Sonar mode: single user query overrides default make list
+        : [                 // Multiple search passes to maximize vehicle coverage
+            'ford', 'chevrolet', 'toyota', 'honda', 'dodge', 'nissan', 'jeep',
+            'gmc', 'hyundai', 'kia', 'subaru', 'mazda', 'bmw', 'mercedes',
+            'audi', 'lexus', 'cadillac', 'lincoln', 'buick', 'mitsubishi',
+            'volkswagen', 'volvo', 'tesla', 'chrysler', 'pontiac', 'saturn',
+        ],
     webhookUrl = null,
     webhookSecret = null,
 } = input;
