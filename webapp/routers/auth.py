@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import time
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
@@ -21,6 +21,7 @@ from webapp.auth import get_current_user, log_security_event
 router = APIRouter()
 security = HTTPBearer()
 _login_attempts: dict = defaultdict(list)
+_login_attempts_by_ip: dict = defaultdict(list)
 
 
 def _check_rate_limit(identifier: str, max_attempts: int = 10, window_seconds: int = 60):
@@ -30,6 +31,20 @@ def _check_rate_limit(identifier: str, max_attempts: int = 10, window_seconds: i
     if len(attempts) >= max_attempts:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     _login_attempts[identifier].append(now)
+
+
+def _check_ip_rate_limit(ip_address: str, max_attempts: int = 20, window_seconds: int = 60):
+    now = time.time()
+    attempts = [t for t in _login_attempts_by_ip[ip_address] if now - t < window_seconds]
+    _login_attempts_by_ip[ip_address] = attempts
+    if len(attempts) >= max_attempts:
+        retry_after = max(1, int(window_seconds - (now - attempts[0]))) if attempts else window_seconds
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts from this IP. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    _login_attempts_by_ip[ip_address].append(now)
 
 # Pydantic models
 class LoginRequest(BaseModel):
@@ -61,9 +76,12 @@ class ChangePasswordRequest(BaseModel):
 @router.post("/login", response_model=LoginResponse)
 async def login(
     login_data: LoginRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Authenticate user and return tokens"""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_ip_rate_limit(client_ip)
     _check_rate_limit(login_data.username)
     
     # Find user
