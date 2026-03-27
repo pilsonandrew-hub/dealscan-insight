@@ -25,7 +25,7 @@ import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
 import { OnboardingFlow } from '@/components/OnboardingFlow';
 import LaneBadge from '@/components/LaneBadge';
-import { SonarTab } from '@/components/SonarTab';
+const SonarTab = React.lazy(() => import('@/components/SonarTab').then(m => ({ default: m.SonarTab })));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'sonar' | 'recon' | 'analytics' | 'settings';
@@ -1998,7 +1998,7 @@ export default function Dashboard() {
       case 'crosshair': return <CrosshairTab />;
       case 'sniper': return <SniperScopeDashboard />;
       case 'rover': return <RoverTab />;
-      case 'sonar': return <SonarTab />;
+      case 'sonar': return <React.Suspense fallback={<div className="flex items-center justify-center py-16 text-gray-500">Loading Sonar...</div>}><SonarTab /></React.Suspense>;
       case 'recon': return <ReconPanel />;
       case 'analytics': return <AnalyticsTab />;
       case 'settings': return <SettingsTab />;

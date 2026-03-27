@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MapPin, Clock, Gauge } from 'lucide-react';
+import { MapPin, Clock, Gauge, ShieldCheck } from 'lucide-react';
 import type { SonarResult } from '@/services/sonarAPI';
 
 interface SonarCardProps {
@@ -16,6 +16,12 @@ function fmt$(n: number): string {
     maximumFractionDigits: 0,
   }).format(n);
 }
+
+const TITLE_STATUS_COLORS: Record<SonarResult['titleStatus'], string> = {
+  Clean: 'bg-green-900/60 text-green-400 border-green-700/50',
+  Salvage: 'bg-red-900/60 text-red-400 border-red-700/50',
+  Rebuilt: 'bg-yellow-900/60 text-yellow-400 border-yellow-700/50',
+};
 
 export const SonarCard: React.FC<SonarCardProps> = ({ result, index }) => {
   return (
@@ -72,6 +78,22 @@ export const SonarCard: React.FC<SonarCardProps> = ({ result, index }) => {
           <p className="text-gray-500 text-xs leading-relaxed line-clamp-2">
             {result.condition}
           </p>
+
+          {/* Trust section */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1 text-xs text-gray-400 bg-gray-800 rounded px-2 py-0.5">
+              <ShieldCheck className="h-3 w-3 text-cyan-500" />
+              {result.issuingAgency}
+            </span>
+            <span className={`inline-block text-xs font-medium rounded px-2 py-0.5 border ${TITLE_STATUS_COLORS[result.titleStatus]}`}>
+              {result.titleStatus} Title
+            </span>
+          </div>
+
+          {/* As-is disclaimer */}
+          {result.isAsIs && (
+            <p className="text-gray-600 text-[11px]">Auction vehicles sold as-is</p>
+          )}
 
           {/* CTA */}
           <a
