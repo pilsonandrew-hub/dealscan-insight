@@ -17,7 +17,7 @@ import {
   LayoutDashboard, Crosshair, Navigation, BarChart2, Settings, Target,
   ExternalLink, RefreshCw, CheckCircle, XCircle, AlertCircle,
   TrendingUp, Car, MapPin, Clock, Star, Filter, ChevronDown,
-  ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff, ScanSearch
+  ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff, ScanSearch, Radar
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
@@ -25,9 +25,10 @@ import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
 import { OnboardingFlow } from '@/components/OnboardingFlow';
 import LaneBadge from '@/components/LaneBadge';
+import { SonarTab } from '@/components/SonarTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'analytics' | 'settings';
+type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'sonar' | 'recon' | 'analytics' | 'settings';
 
 interface ScraperSource {
   name: string;
@@ -1968,6 +1969,7 @@ const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
   { id: 'crosshair', label: 'Crosshair', Icon: Crosshair },
   { id: 'sniper', label: 'Sniper', Icon: Target },
   { id: 'rover', label: 'Rover', Icon: Navigation },
+  { id: 'sonar', label: 'Sonar', Icon: Radar },
   { id: 'recon', label: 'Recon', Icon: ScanSearch },
   { id: 'analytics', label: 'Analytics', Icon: BarChart2 },
   { id: 'settings', label: 'Settings', Icon: Settings },
@@ -1996,6 +1998,7 @@ export default function Dashboard() {
       case 'crosshair': return <CrosshairTab />;
       case 'sniper': return <SniperScopeDashboard />;
       case 'rover': return <RoverTab />;
+      case 'sonar': return <SonarTab />;
       case 'recon': return <ReconPanel />;
       case 'analytics': return <AnalyticsTab />;
       case 'settings': return <SettingsTab />;
