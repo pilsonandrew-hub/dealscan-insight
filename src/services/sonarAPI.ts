@@ -31,7 +31,7 @@ export interface SonarSearchParams {
 }
 
 // Sources we scan, in order
-export const SONAR_SOURCES = ['GovDeals', 'PublicSurplus', 'HiBid'] as const;
+export const SONAR_SOURCES = ['GovDeals', 'PublicSurplus', 'HiBid', 'MuniciBid', 'GSAAuctions', 'AllSurplus', 'GovPlanet', 'Proxibid', 'EquipmentFacts', 'USGovBid', 'JJKane', 'BidSpotter', 'Database'] as const;
 export type SonarSource = (typeof SONAR_SOURCES)[number];
 
 export interface SonarBatch {
@@ -127,9 +127,16 @@ export function sonarSearchStreaming(
           // Deliver new results grouped by source
           for (const source of SONAR_SOURCES) {
             const sourceStatus = data.sources[source] || 'scanning';
-            const sourceResults = data.results.filter(
-              (r) => r.sourceName === source || r.auctionSource === source,
-            );
+            const sourceLower = source.toLowerCase();
+            const sourceResults = source === 'Database'
+              ? data.results.filter(
+                  (r) => !SONAR_SOURCES.some(
+                    (s) => s !== 'Database' && (r.sourceName?.toLowerCase() === s.toLowerCase() || r.auctionSource?.toLowerCase() === s.toLowerCase()),
+                  ),
+                )
+              : data.results.filter(
+                  (r) => r.sourceName?.toLowerCase() === sourceLower || r.auctionSource?.toLowerCase() === sourceLower,
+                );
             const newResults = sourceResults.filter((r) => !seenIds.has(r.id));
             for (const r of newResults) seenIds.add(r.id);
 
