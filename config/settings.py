@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     ml_model_path: str = "./models"
     ml_prediction_timeout: int = 30
 
+    # Supabase
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+
     # External APIs
     manheim_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None

@@ -1,21 +1,20 @@
 """
-Sonar Phase 1 — Live vehicle search across GovDeals, PublicSurplus, HiBid.
+Sonar — Vehicle search via Supabase opportunities index.
 
 Endpoints:
-  POST /api/sonar/search      — kick off parallel Apify actor runs
-  GET  /api/sonar/status/{id}  — poll run status + fetch results when done
+  POST /api/sonar/search      — query Supabase, return results instantly
+  GET  /api/sonar/status/{id}  — retrieve cached results by job ID
 """
 
+import json
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
-import httpx
 import redis.asyncio as redis
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from supabase import create_client
 
 from config.settings import settings
 
@@ -23,28 +22,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sonar", tags=["sonar"])
 
-# ── Apify config ──────────────────────────────────────────────────────────────
-
-APIFY_TOKEN = (os.getenv("APIFY_API_TOKEN") or os.getenv("APIFY_TOKEN") or "").strip()
-APIFY_BASE = "https://api.apify.com/v2"
-
-ACTORS = {
-    "GovDeals":       "CuKaIAcWyFS0EPrAz",
-    "PublicSurplus":  "9xxQLlRsROnSgA42i",
-    "HiBid":          "7s9e0eATTt1kuGGfE",
-    "MuniciBid":      "svmsItf3CRBZuIntp",
-    "GSAAuctions":    "fvDnYmGuFBCrwpEi9",
-    "AllSurplus":     "gYGIfHeYeN3EzmLnB",
-    "GovPlanet":      "pO2t5UDoSVmO1gvKJ",
-    "Proxibid":       "bxhncvtHEP712WX2e",
-    "EquipmentFacts": "0XjoegYZVcPldLstl",
-    "USGovBid":       "6XO9La81aEmtsCT3g",
-    "JJKane":         "lvb7T6VMFfNUQpqlq",
-    "BidSpotter":     "5Eu3hfCcBBdzp6I1u",
-}
-
 JOB_TTL_SECONDS = 300
-POLL_TIMEOUT_SECONDS = 240
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -103,7 +81,6 @@ _memory_store: dict[str, dict] = {}
 async def _store_job(job_id: str, data: dict) -> None:
     r = await _get_redis()
     if r:
-        import json
         await r.set(f"sonar:{job_id}", json.dumps(data), ex=JOB_TTL_SECONDS)
     else:
         _memory_store[job_id] = data
@@ -112,65 +89,12 @@ async def _store_job(job_id: str, data: dict) -> None:
 async def _load_job(job_id: str) -> dict | None:
     r = await _get_redis()
     if r:
-        import json
         raw = await r.get(f"sonar:{job_id}")
         return json.loads(raw) if raw else None
     return _memory_store.get(job_id)
 
 
-# ── Apify helpers ─────────────────────────────────────────────────────────────
-
-async def _start_actor(client: httpx.AsyncClient, actor_id: str, body: dict) -> str | None:
-    """Start an Apify actor run, return the run ID or None on failure."""
-    url = f"{APIFY_BASE}/acts/{actor_id}/runs"
-    try:
-        resp = await client.post(
-            url,
-            json=body,
-            headers={"Authorization": f"Bearer {APIFY_TOKEN}"},
-            timeout=15,
-        )
-        if resp.status_code in (200, 201):
-            return resp.json().get("data", {}).get("id")
-        logger.warning(f"[SONAR] Actor {actor_id} start failed: {resp.status_code} {resp.text[:200]}")
-    except Exception as e:
-        logger.warning(f"[SONAR] Actor {actor_id} start error: {e}")
-    return None
-
-
-async def _get_run_status(client: httpx.AsyncClient, run_id: str) -> str:
-    """Return Apify run status string (READY, RUNNING, SUCCEEDED, FAILED, etc.)."""
-    url = f"{APIFY_BASE}/actor-runs/{run_id}"
-    try:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {APIFY_TOKEN}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            return resp.json().get("data", {}).get("status", "UNKNOWN")
-    except Exception as e:
-        logger.warning(f"[SONAR] Run {run_id} status error: {e}")
-    return "UNKNOWN"
-
-
-async def _get_dataset_items(client: httpx.AsyncClient, run_id: str, limit: int = 50) -> list[dict]:
-    """Fetch dataset items from a completed Apify run."""
-    url = f"{APIFY_BASE}/actor-runs/{run_id}/dataset/items?limit={limit}"
-    try:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {APIFY_TOKEN}"},
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            return resp.json() if isinstance(resp.json(), list) else []
-    except Exception as e:
-        logger.warning(f"[SONAR] Dataset fetch error for run {run_id}: {e}")
-    return []
-
-
-# ── Normalize actor items to SonarResult ──────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _time_remaining(end_str: str | None) -> str:
     if not end_str:
@@ -192,191 +116,108 @@ def _time_remaining(end_str: str | None) -> str:
         return ""
 
 
-def _normalize_item(item: dict, source_name: str) -> dict:
-    """Convert a raw actor dataset item into the SonarResult shape."""
-    year = item.get("year") or ""
-    make = item.get("make") or ""
-    model = item.get("model") or ""
-    title = item.get("title") or f"{year} {make} {model}".strip()
-    current_bid = item.get("current_bid") or item.get("currentBid") or item.get("current_price") or 0
-    ends_at = item.get("auction_end_time") or item.get("endsAt") or item.get("end_time") or ""
-    city = item.get("city") or ""
-    state = item.get("state") or ""
+def _row_to_result(row: dict) -> dict:
+    """Convert a Supabase opportunities row into the SonarResult shape."""
+    year = row.get("year")
+    make = row.get("make") or ""
+    model = row.get("model") or ""
+    title = row.get("title") or f"{year} {make} {model}".strip() if year else f"{make} {model}".strip()
+    ends_at = row.get("auction_end_date") or ""
+    city = row.get("city") or ""
+    state = row.get("state") or ""
     location = f"{city}, {state}".strip(", ")
-    photo_url = item.get("photo_url") or item.get("photoUrl") or item.get("image_url") or ""
-    source_url = item.get("listing_url") or item.get("url") or item.get("sourceUrl") or ""
-    mileage = item.get("mileage") or None
-    agency = item.get("seller") or item.get("agency_name") or item.get("issuingAgency") or ""
-
-    try:
-        year_int = int(year) if year else None
-    except (ValueError, TypeError):
-        year_int = None
 
     return SonarResult(
-        id=source_url or str(hash(str(item))),
+        id=str(row.get("id", "")),
         title=title,
-        year=year_int,
+        year=int(year) if year else None,
         make=make,
         model=model,
-        trim="",
-        currentBid=float(current_bid),
+        trim=row.get("trim") or "",
+        currentBid=float(row.get("current_bid") or 0),
         timeRemaining=_time_remaining(ends_at if ends_at else None),
         endsAt=str(ends_at) if ends_at else "",
         location=location,
         condition="",
-        sourceName=source_name,
-        sourceUrl=source_url,
-        mileage=mileage,
-        auctionSource=source_name,
-        issuingAgency=agency,
+        sourceName=row.get("source") or row.get("source_site") or "",
+        sourceUrl=row.get("listing_url") or "",
+        mileage=row.get("mileage"),
+        auctionSource=row.get("source") or "",
+        issuingAgency="",
         titleStatus="Unknown",
         isAsIs=True,
-        photoUrl=photo_url,
+        photoUrl=row.get("image_url") or "",
     ).model_dump()
+
+
+# ── Supabase client ──────────────────────────────────────────────────────────
+
+def _get_supabase():
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        raise HTTPException(status_code=503, detail="Supabase credentials not configured")
+    return create_client(settings.supabase_url, settings.supabase_service_role_key)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/search")
 async def sonar_search(req: SearchRequest):
-    """Kick off parallel Apify actor runs for a vehicle search query."""
-    if not APIFY_TOKEN:
-        raise HTTPException(status_code=503, detail="Apify token not configured")
-
+    """Query the Supabase opportunities index and return results instantly."""
+    sb = _get_supabase()
     job_id = uuid.uuid4().hex
-    runs: dict[str, str | None] = {}
 
-    actor_input = {
-        "searchQuery": req.query,
-        "minBid": req.min_price,
-        "maxBid": req.max_price,
-        "maxPages": 2,
-    }
+    query = sb.table("opportunities").select("*").eq("is_active", True)
 
-    async with httpx.AsyncClient() as client:
-        import asyncio
-        tasks = {
-            name: _start_actor(client, actor_id, actor_input)
-            for name, actor_id in ACTORS.items()
-        }
-        results = await asyncio.gather(*tasks.values())
-        for name, run_id in zip(tasks.keys(), results):
-            runs[name] = run_id
+    # Price filters
+    if req.min_price > 0:
+        query = query.gte("current_bid", req.min_price)
+    if req.max_price > 0:
+        query = query.lte("current_bid", req.max_price)
 
+    # Text search across title, make, model
+    if req.query.strip():
+        q = req.query.strip()
+        query = query.or_(f"title.ilike.%{q}%,make.ilike.%{q}%,model.ilike.%{q}%")
+
+    # Order and limit
+    query = query.order("dos_score", desc=True).limit(200)
+
+    resp = query.execute()
+    rows = resp.data or []
+
+    results = [_row_to_result(row) for row in rows]
+
+    # Cache in Redis for status endpoint
     job_data = {
         "job_id": job_id,
-        "query": req.query,
-        "runs": runs,
-        "status": "running",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "complete",
+        "results": results,
+        "sources": {"Database": "done"},
+        "timed_out": False,
     }
     await _store_job(job_id, job_data)
 
-    logger.info(f"[SONAR] Search started job={job_id} query={req.query!r} runs={runs}")
-    logger.info(f"[SONAR] APIFY_TOKEN set: {bool(APIFY_TOKEN)}, token prefix: {APIFY_TOKEN[:15] if APIFY_TOKEN else 'NONE'}")
+    logger.info(f"[SONAR] Search complete job={job_id} query={req.query!r} results={len(results)}")
 
-    return {"job_id": job_id, "status": "running"}
+    return {
+        "job_id": job_id,
+        "status": "complete",
+        "results": results,
+        "sources": {"Database": "done"},
+        "timed_out": False,
+    }
 
 
 @router.get("/status/{job_id}")
 async def sonar_status(job_id: str):
-    """Poll status of a Sonar search job. Returns results when actors complete."""
+    """Retrieve cached search results by job ID."""
     job = await _load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
 
-    runs: dict = job.get("runs", {})
-    sources: dict[str, str] = {}
-    all_results: list[dict] = []
-    all_done = True
-
-    async with httpx.AsyncClient() as client:
-        for source_name, run_id in runs.items():
-            if not run_id:
-                sources[source_name] = "error"
-                continue
-
-            run_status = await _get_run_status(client, run_id)
-
-            if run_status == "SUCCEEDED":
-                sources[source_name] = "done"
-                items = await _get_dataset_items(client, run_id)
-                query_lower = job.get("query", "").strip().lower()
-                query_words = [w for w in query_lower.split() if len(w) > 1] if query_lower else []
-                for item in items:
-                    normalized = _normalize_item(item, source_name)
-                    # Hard filter: if query given, only keep results that match
-                    if query_words:
-                        searchable = " ".join([
-                            str(normalized.get("title") or ""),
-                            str(normalized.get("make") or ""),
-                            str(normalized.get("model") or ""),
-                        ]).lower()
-                        if not any(w in searchable for w in query_words):
-                            continue
-                    all_results.append(normalized)
-            elif run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
-                sources[source_name] = "error"
-                logger.warning(f"[SONAR] {source_name} run {run_id} status={run_status}")
-            else:
-                sources[source_name] = "scanning"
-                all_done = False
-
-    # Check if job has timed out
-    created = job.get("created_at", "")
-    timed_out = False
-    if created:
-        try:
-            created_dt = datetime.fromisoformat(created)
-            elapsed = (datetime.now(timezone.utc) - created_dt).total_seconds()
-            if elapsed > POLL_TIMEOUT_SECONDS:
-                timed_out = True
-                all_done = True
-        except Exception:
-            pass
-
-    # Deduplicate by sourceUrl
-    seen_urls = set()
-    deduped = []
-    for r in all_results:
-        url = r.get('sourceUrl','')
-        if url not in seen_urls:
-            seen_urls.add(url)
-            deduped.append(r)
-    all_results = deduped
-
-    overall_status = "complete" if all_done else "running"
-
-    if all_done:
-        job["status"] = "complete"
-        await _store_job(job_id, job)
-
     return {
-        "status": overall_status,
-        "results": all_results,
-        "sources": sources,
-        "timed_out": timed_out,
+        "status": job.get("status", "complete"),
+        "results": job.get("results", []),
+        "sources": job.get("sources", {}),
+        "timed_out": job.get("timed_out", False),
     }
-
-@router.get("/debug-token")
-async def sonar_debug_token():
-    """Debug: check Apify token and connectivity from Railway."""
-    import httpx
-    token = APIFY_TOKEN
-    result = {
-        "token_set": bool(token),
-        "token_prefix": token[:20] if token else "NONE",
-        "token_length": len(token) if token else 0,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://api.apify.com/v2/users/me",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            result["apify_status"] = resp.status_code
-            result["apify_response"] = resp.json().get("data", {}).get("username", "?") if resp.status_code == 200 else resp.text[:200]
-    except Exception as e:
-        result["apify_error"] = str(e)
-    return result
