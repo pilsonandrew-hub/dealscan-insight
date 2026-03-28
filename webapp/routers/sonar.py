@@ -117,6 +117,22 @@ def _time_remaining(end_str: str | None) -> str:
         return ""
 
 
+PARTS_KEYWORDS = [
+    "bulb", "tire", "tires", "wheel", "wheels", "seat", "seats", "door",
+    "mirror", "hood", "bumper", "fender", "engine part", "transmission part",
+    "headlight", "taillight", "brake pad", "oil filter", "air filter",
+    "spark plug", "wiper", "battery charger", "jack stand", "lug nut",
+]
+
+
+def _is_parts_listing(title: str, make: str) -> bool:
+    """Return True if the listing looks like a parts/accessories item."""
+    if make:
+        return False
+    title_lower = title.lower()
+    return any(kw in title_lower for kw in PARTS_KEYWORDS)
+
+
 def _row_to_result(row: dict) -> dict:
     """Convert a Supabase opportunities row into the SonarResult shape."""
     year = row.get("year")
@@ -128,6 +144,10 @@ def _row_to_result(row: dict) -> dict:
     state = row.get("state") or ""
     location = f"{city}, {state}".strip(", ")
 
+    mileage = row.get("mileage")
+    if mileage is None:
+        mileage = row.get("odometer")
+
     return SonarResult(
         id=str(row.get("id", "")),
         title=title,
@@ -136,18 +156,18 @@ def _row_to_result(row: dict) -> dict:
         model=model,
         trim=row.get("trim") or "",
         currentBid=float(row.get("current_bid") or 0),
-        timeRemaining=_time_remaining(ends_at if ends_at else None),
+        timeRemaining=_time_remaining(row.get("auction_end_date")),
         endsAt=str(ends_at) if ends_at else "",
         location=location,
         condition="",
         sourceName=row.get("source") or row.get("source_site") or "",
         sourceUrl=row.get("listing_url") or "",
-        mileage=row.get("mileage"),
+        mileage=mileage,
         auctionSource=row.get("source") or "",
         issuingAgency=row.get("agency_name") or "",
-        titleStatus=row.get("title_status") or "Unknown",
+        titleStatus=row.get("title_status") or row.get("condition_grade") or "Unknown",
         isAsIs=True,
-        photoUrl=row.get("image_url") or row.get("photo_url") or "",
+        photoUrl=row.get("image_url") or row.get("photo_url") or row.get("thumbnail_url") or "",
     ).model_dump()
 
 
@@ -192,6 +212,7 @@ async def sonar_search(req: SearchRequest):
     rows = resp.data or []
 
     results = [_row_to_result(row) for row in rows]
+    results = [r for r in results if not _is_parts_listing(r.get("title", ""), r.get("make", ""))]
 
     # Cache in Redis for status endpoint
     job_data = {
