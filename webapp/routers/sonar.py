@@ -306,15 +306,17 @@ async def sonar_status(job_id: str):
                 query_words = [w for w in query_lower.split() if len(w) > 2] if query_lower else []
                 for item in items:
                     normalized = _normalize_item(item, source_name)
-                    # Post-filter: if query given, only keep results matching ANY query word
+                    # Score relevance — matching results get priority
                     if query_words:
                         searchable = " ".join([
                             str(normalized.get("title", "")),
                             str(normalized.get("make", "")),
                             str(normalized.get("model", "")),
                         ]).lower()
-                        if not any(w in searchable for w in query_words):
-                            continue
+                        score = sum(1 for w in query_words if w in searchable)
+                        normalized["_relevance"] = score
+                    else:
+                        normalized["_relevance"] = 1
                     all_results.append(normalized)
             elif run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 sources[source_name] = "error"
@@ -335,6 +337,12 @@ async def sonar_status(job_id: str):
                 all_done = True
         except Exception:
             pass
+
+    # Sort by relevance (matching results first)
+    all_results.sort(key=lambda r: r.get("_relevance", 0), reverse=True)
+    # Remove internal relevance score
+    for r in all_results:
+        r.pop("_relevance", None)
 
     # Deduplicate by sourceUrl
     seen_urls = set()
