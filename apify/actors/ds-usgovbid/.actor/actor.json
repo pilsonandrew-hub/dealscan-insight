@@ -1,9 +1,9 @@
 {
   "actorSpecification": 1,
   "name": "ds-usgovbid",
-  "title": "DealerScope — USGovBid Impound Vehicle Scraper",
+  "title": "DealerScope \u2014 USGovBid Impound Vehicle Scraper",
   "description": "Scrapes impound and government surplus vehicle listings from usgovbid.com. Uses WordPress Events Calendar REST API to discover active auctions, then Playwright to load individual lot pages from bid.usgovbid.com (Maxanet platform).",
-  "version": "1.0.0",
+  "version": "0.0",
   "input": {
     "schemaVersion": 1,
     "title": "USGovBid Scraper Input",
@@ -35,5 +35,6 @@
         "default": 35000
       }
     }
-  }
+  },
+  "buildTag": "latest"
 }

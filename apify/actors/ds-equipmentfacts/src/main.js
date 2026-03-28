@@ -202,7 +202,9 @@ const {
     minBid = 500,
     maxBid = 50000,
     includeRustStates = false,
+    searchQuery = '',
 } = input;
+const searchQueryLower = searchQuery ? searchQuery.toLowerCase() : '';
 
 let totalFound = 0;
 let totalPassed = 0;
@@ -518,8 +520,12 @@ const crawler = new PlaywrightCrawler({
                 continue;
             }
             if (!passes(lot)) continue;
+            const normalized = normalizeLot(lot);
+            if (searchQueryLower && !normalized.title.toLowerCase().includes(searchQueryLower)) {
+                continue;
+            }
             totalPassed++;
-            await Actor.pushData(normalizeLot(lot));
+            await Actor.pushData(normalized);
         }
         capturedApi.interceptedLots = []; // clear for next URL
 
@@ -590,8 +596,12 @@ async function paginateApi(log, seenIds) {
                     continue;
                 }
                 if (!passes(lot)) continue;
+                const normalized = normalizeLot(lot);
+                if (searchQueryLower && !normalized.title.toLowerCase().includes(searchQueryLower)) {
+                    continue;
+                }
                 totalPassed++;
-                await Actor.pushData(normalizeLot(lot));
+                await Actor.pushData(normalized);
             }
         } catch (err) {
             log.warning(`API page ${page} failed: ${err.message}`);

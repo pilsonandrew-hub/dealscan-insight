@@ -65,7 +65,13 @@ const MAKES = [
 ];
 
 await Actor.init();
-const { minBid = 200, maxBid = 35000 } = (await Actor.getInput()) ?? {};
+const { minBid = 200, maxBid = 35000, searchQuery = "" } = (await Actor.getInput()) ?? {};
+
+// When searchQuery is set, append ?q= to each category URL for server-side keyword filtering.
+// Post-filter on title as a safety net (MuniciBid may ignore unknown params).
+const urls = CATEGORY_URLS.map(url =>
+    searchQuery ? `${url}?q=${encodeURIComponent(searchQuery)}` : url
+);
 
 let found = 0, passed = 0;
 const sampleLocations = [];
@@ -134,7 +140,7 @@ function isPassengerVehicle(title = '') {
 }
 
 const crawler = new CheerioCrawler({
-    maxRequestsPerCrawl: CATEGORY_URLS.length + 5,  // all items on single page, no pagination
+    maxRequestsPerCrawl: urls.length + 5,  // all items on single page, no pagination
     requestHandlerTimeoutSecs: 30,
     async requestHandler({ $, request, log }) {
         const url = request.url;
@@ -209,6 +215,9 @@ const crawler = new CheerioCrawler({
                 /\bno\s+title\b/i,
             ];
 
+            // Keyword post-filter: if searchQuery is set, title must contain it
+            if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) return;
+
             // Filters
             if (!year || !make) return;
             if (conditionRejectPatterns.some((pattern) => pattern.test(lower))) return;
@@ -251,7 +260,8 @@ const crawler = new CheerioCrawler({
     },
 });
 
-await crawler.run(CATEGORY_URLS.map(url => ({ url })));
+if (searchQuery) console.log(`[MUNICIBID] Keyword search: "${searchQuery}"`);
+await crawler.run(urls.map(url => ({ url })));
 console.log('[MUNICIBID] Sample locations:', sampleLocations);
 console.log(`[MUNICIBID] Found: ${found} | Passed: ${passed}`);
 await Actor.exit();

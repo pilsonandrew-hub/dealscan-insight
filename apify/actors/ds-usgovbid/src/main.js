@@ -88,6 +88,7 @@ const {
     maxLotsPerAuction = 500,
     minBid = 500,
     maxBid = 35000,
+    searchQuery = '',
 } = input;
 
 let totalFound = 0;
@@ -304,6 +305,8 @@ const crawler = new PlaywrightCrawler({
         for (const lot of allLots) {
             totalFound++;
             const { title, listing_url, current_bid, auction_end_time, photo_url } = lot;
+
+            if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) continue;
 
             if (!isVehicle(title)) continue;
 

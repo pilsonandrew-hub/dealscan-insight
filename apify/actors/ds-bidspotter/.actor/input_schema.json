@@ -1,0 +1,42 @@
+{
+  "title": "BidSpotter Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Tesla, Ford F-150). When set, adds a keyword search URL and post-filters lot titles.",
+      "editor": "textfield",
+      "default": ""
+    },
+    "maxCatalogues": {
+      "title": "Max Catalogues",
+      "type": "integer",
+      "description": "Maximum number of catalogues to process per list page",
+      "default": 50,
+      "minimum": 1,
+      "editor": "number"
+    },
+    "maxPages": {
+      "title": "Max Pages",
+      "type": "integer",
+      "description": "Maximum number of list/search pages to paginate",
+      "default": 10,
+      "minimum": 1,
+      "editor": "number"
+    },
+    "minYear": {
+      "title": "Minimum Year",
+      "type": "integer",
+      "description": "Minimum vehicle model year",
+      "editor": "number"
+    },
+    "targetStates": {
+      "title": "Target States",
+      "type": "array",
+      "description": "US state codes to include (e.g. [\"TX\", \"FL\", \"CA\"])",
+      "editor": "json"
+    }
+  }
+}

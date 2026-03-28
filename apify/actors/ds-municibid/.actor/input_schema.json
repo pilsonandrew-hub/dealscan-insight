@@ -3,6 +3,13 @@
   "type": "object",
   "schemaVersion": 1,
   "properties": {
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Keyword search (e.g. 'Tesla'). Appended as ?q= to category URLs and post-filtered on title.",
+      "default": "",
+      "editor": "textfield"
+    },
     "maxPages": {
       "title": "Max Pages",
       "type": "integer",
