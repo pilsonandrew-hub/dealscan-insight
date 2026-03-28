@@ -182,8 +182,8 @@ async def sonar_search(req: SearchRequest):
 
     # Text search across title, make, model
     if req.query.strip():
-        q = req.query.strip()
-        query = query.or_(f"title.ilike.%{q}%,make.ilike.%{q}%,model.ilike.%{q}%")
+        q = req.query.strip().replace('%', r'\%').replace('_', r'\_')
+        query = query.or_(f"title.ilike.%25{q}%25,make.ilike.%25{q}%25,model.ilike.%25{q}%25")
 
     # Order and limit
     query = query.order("created_at", desc=True).limit(200) if req.extended else query.order("dos_score", desc=True).limit(200)
