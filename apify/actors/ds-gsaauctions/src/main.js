@@ -152,6 +152,7 @@ const {
     includePreview = false,
     webhookUrl = null,
     webhookSecret = null,
+    searchQuery = null,
 } = input;
 
 const currentYear = new Date().getFullYear();
@@ -205,6 +206,9 @@ for (let page = startPage; page <= totalPages; page++) {
 
         // Vehicle check
         if (!isPassengerVehicle(title, categoryCode)) continue;
+
+        // Keyword search filter
+        if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) continue;
 
         // State filter
         if (stateCode && !TARGET_STATES.has(stateCode)) continue;

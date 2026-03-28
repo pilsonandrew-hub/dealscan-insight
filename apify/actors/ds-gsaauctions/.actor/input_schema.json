@@ -36,6 +36,13 @@
       "minimum": 1990,
       "editor": "number"
     },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Keyword to filter results by title (case-insensitive)",
+      "editor": "textfield",
+      "nullable": true
+    },
     "targetStates": {
       "title": "Target States",
       "type": "array",

@@ -256,11 +256,11 @@ async function getMarketcheckPrice(year, make, model, odometer) {
 
 // ── Algolia Query ─────────────────────────────────────────────────────────────
 
-async function queryAlgolia({ categoryFilter, stateFilter, page = 0, hitsPerPage = 100 }) {
+async function queryAlgolia({ categoryFilter, stateFilter, searchQuery: q = '', page = 0, hitsPerPage = 100 }) {
     const filters = [categoryFilter, stateFilter].filter(Boolean).join(' AND ');
 
     const body = JSON.stringify({
-        query: '',
+        query: q || '',
         filters,
         page,
         hitsPerPage,
@@ -295,6 +295,7 @@ async function queryAlgolia({ categoryFilter, stateFilter, page = 0, hitsPerPage
 
 const {
     targetStates = TARGET_STATES,
+    searchQuery = '',
     minBid = 0,
     maxBid = 75000,
     maxYearAge = 10,
@@ -320,7 +321,7 @@ for (const state of targetStates) {
     console.log(`[JJKANE] Querying state: ${state}`);
 
     try {
-        const firstPage = await queryAlgolia({ categoryFilter, stateFilter, page: 0, hitsPerPage: 100 });
+        const firstPage = await queryAlgolia({ categoryFilter, stateFilter, searchQuery, page: 0, hitsPerPage: 100 });
         const nbHits = firstPage.nbHits ?? 0;
         const nbPages = firstPage.nbPages ?? 1;
 
@@ -330,7 +331,7 @@ for (const state of targetStates) {
 
         for (let p = 1; p < nbPages && statePassed < maxItemsPerState; p++) {
             await new Promise(r => setTimeout(r, 250));
-            const pageData = await queryAlgolia({ categoryFilter, stateFilter, page: p, hitsPerPage: 100 });
+            const pageData = await queryAlgolia({ categoryFilter, stateFilter, searchQuery, page: p, hitsPerPage: 100 });
             allPages.push(pageData);
         }
 

@@ -1,0 +1,14 @@
+{
+  "title": "JJ Kane Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Ford F-150)",
+      "editor": "textfield",
+      "default": ""
+    }
+  }
+}
