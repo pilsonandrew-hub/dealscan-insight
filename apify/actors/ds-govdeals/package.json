@@ -1,6 +1,6 @@
 {
   "name": "ds-govdeals-scraper",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "description": "DealerScope scraper for GovDeals vehicle auctions",
   "type": "module",
   "main": "src/main.js",

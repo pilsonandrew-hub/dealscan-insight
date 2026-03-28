@@ -3,6 +3,7 @@
   "name": "ds-govdeals-scraper",
   "title": "DealerScope GovDeals Vehicle Scraper",
   "description": "Scrapes vehicle listings from GovDeals.com for arbitrage analysis",
-  "version": "1.0",
-  "input": "./input_schema.json"
+  "version": "0.0",
+  "input": "./input_schema.json",
+  "buildTag": "latest"
 }

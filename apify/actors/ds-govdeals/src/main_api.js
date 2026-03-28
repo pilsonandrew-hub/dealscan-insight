@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 /**
  * GovDeals Free Replacement Scraper — Token Capture + Direct API
  *
@@ -32,7 +33,13 @@ const HIGH_RUST_STATES = new Set([
 
 const GOVDEALS_VEHICLE_SEARCH_URL_BASE = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100';
 const GOVDEALS_VEHICLE_CATEGORY_FACETS = [
-    '{!tag=product_category_external_id}product_category_external_id:"4100"',
+    '{!tag=product_category_external_id}product_category_external_id:"t6"',
+    '{!tag=product_category_external_id}product_category_external_id:"94Q"',
+];
+const GOVDEALS_FACET_FIELDS = [
+    'categoryName','auctionTypeID','condition','saleEventName','sellerDisplayName',
+    'product_pricecents','isReserveMet','hasBuyNowPrice','isReserveNotMet',
+    'sellerType','warehouseId','region','currencyTypeCode','categoryName','tierId'
 ];
 const DEFAULT_DISPLAY_ROWS = 50;
 const HARD_MAX_PAGES = 200;
@@ -74,6 +81,8 @@ const GOVDEALS_VEHICLE_SEARCH_URL = searchQuery
 let totalFound = 0, totalPassed = 0;
 const capturedApi = {
     apiKey: null,
+    userId: null,
+    sessionId: null,
     searchUrl: 'https://maestro.lqdt1.com/search/list',
     searchPayload: null,
     requestHeaders: null,
@@ -163,12 +172,14 @@ const crawler = new PlaywrightCrawler({
 
             if (!capturedApi.apiKey && headers['x-api-key']) {
                 capturedApi.apiKey = headers['x-api-key'];
+                capturedApi.userId = headers['x-user-id'] || headers['x-userid'] || 'anonymous';
                 capturedApi.requestHeaders = {
                     accept: headers.accept || 'application/json, text/plain, */*',
                     'content-type': headers['content-type'] || 'application/json',
                     'x-api-key': headers['x-api-key'],
+                    'x-user-id': capturedApi.userId,
                 };
-                log.info(`[API KEY CAPTURED] [REDACTED] via ${url}`);
+                log.info(`[API KEY CAPTURED] [REDACTED] via ${url}, userId=${capturedApi.userId}`);
             }
 
             if (url.includes('/search/list') && request.method() === 'POST') {
@@ -179,7 +190,8 @@ const crawler = new PlaywrightCrawler({
                     if (!capturedApi.searchPayload || isBroaderVehiclePayload(nextPayload, capturedApi.searchPayload)) {
                         capturedApi.searchPayload = nextPayload;
                         capturedApi.searchUrl = url;
-                        log.info(`[SEARCH PAYLOAD CAPTURED] ${url} payload=${JSON.stringify(capturedApi.searchPayload).slice(0,500)}`);
+                        capturedApi.sessionId = capturedApi.searchPayload.sessionId || null;
+                        log.info(`[SEARCH PAYLOAD CAPTURED] ${url} sessionId=${capturedApi.sessionId}`);
                     }
                 } catch (err) {
                     log.warning(`Failed to parse search payload: ${err.message}`);
@@ -257,23 +269,27 @@ const crawler = new PlaywrightCrawler({
                 }
             }
 
-            // Step 2: Attempt direct API pagination from the Maestro REST endpoint.
-            // If searchPayload wasn't intercepted, build a default one from scratch.
-            if (!capturedApi.searchPayload && capturedApi.searchUrl) {
-                log.info('searchPayload not intercepted — building default broad vehicle payload');
+            // Step 2: Build/use Maestro payload
+            // If searchQuery is set OR no payload was intercepted, build fresh payload
+            if (searchQuery || !capturedApi.searchPayload) {
+                log.info(`Building direct Maestro payload with searchText="${searchQuery || '*'}"`);
                 capturedApi.searchPayload = {
-                    categoryIds: '4100',
+                    categoryIds: '',
                     requestType: 'search',
                     responseStyle: 'productsOnly',
                     businessId: 'GD',
                     searchText: searchQuery || '*',
                     isQAL: false,
+                    locationId: null,
+                    model: '',
+                    makebrand: '',
+                    auctionTypeId: null,
                     page: 1,
-                    displayRows: DEFAULT_DISPLAY_ROWS,
+                    displayRows: 24,
                     sortField: 'currentbid',
                     sortOrder: 'desc',
-                    sessionId: `ds-govdeals-${Date.now()}`,
-                    facets: [],
+                    sessionId: capturedApi.sessionId || generateUUID(),
+                    facets: [...GOVDEALS_FACET_FIELDS],
                     facetsFilter: [...GOVDEALS_VEHICLE_CATEGORY_FACETS],
                     timeType: '',
                     sellerTypeId: null,
@@ -294,8 +310,11 @@ const crawler = new PlaywrightCrawler({
             if (capturedApi.searchPayload && !capturedApi.searchPayload.displayRows) {
                 capturedApi.searchPayload.displayRows = DEFAULT_DISPLAY_ROWS;
             }
-            if (capturedApi.searchPayload && !capturedApi.searchPayload.searchText) {
-                capturedApi.searchPayload.searchText = '*';
+            if (capturedApi.searchPayload) {
+                // 1. Force the payload to use our actual search query
+                capturedApi.searchPayload.searchText = searchQuery || '*';
+                // 2. Clear any intercepted page filters that conflict with the keyword
+                capturedApi.searchPayload.facets = [];
             }
             if (capturedApi.searchPayload && capturedApi.searchUrl) {
                 await paginateWithAuth(page, log, seenIds);
@@ -437,6 +456,14 @@ async function scrapeDetailPagesForVin(page, lots, log) {
     log.info(`[VIN DETAIL] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs`);
 }
 
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
 async function paginateWithAuth(page, log, seenIds = new Set()) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
     const pageSize = Number(searchPayload.displayRows || searchPayload.pageSize || DEFAULT_DISPLAY_ROWS);
@@ -453,7 +480,9 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             displayRows: pageSize,
         };
 
-        log.info(`Fetching Maestro page ${pageNum} via Node fetch: ${searchUrl}`);
+        const _debugPayload = {...payload};
+        if (_debugPayload['x-api-key']) delete _debugPayload['x-api-key'];
+        log.info(`Fetching Maestro page ${pageNum} via Node fetch: ${searchUrl} payload=${JSON.stringify(_debugPayload).slice(0,500)}`);
 
         try {
             // Use Node.js fetch (no CORS restrictions, unlike page.evaluate browser fetch)
@@ -464,6 +493,8 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
                     'content-type': 'application/json',
                     'origin': 'https://www.govdeals.com',
                     'referer': 'https://www.govdeals.com/',
+                    'x-user-id': capturedApi.userId || 'anonymous',
+                    'x-api-correlation-id': generateUUID(),
                 },
                 body: JSON.stringify(payload),
             });
@@ -482,7 +513,8 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             }
 
             if (!resp?.ok || !resp.json) {
-                log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'})`);
+                const errBody = await nodeResp.text().catch(() => '');
+                log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'}) body=${errBody.slice(0,300)}`);
                 break;
             }
 
