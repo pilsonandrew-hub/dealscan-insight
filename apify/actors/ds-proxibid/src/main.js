@@ -22,12 +22,7 @@ import { PlaywrightCrawler } from 'crawlee';
 const SOURCE = 'proxibid';
 const BASE = 'https://www.proxibid.com';
 
-// Vehicle category pages to scrape
-const CATEGORY_URLS = [
-    `${BASE}/for-sale/cars-vehicles/pickup-trucks`,
-    `${BASE}/for-sale/cars-vehicles/cars`,
-    `${BASE}/for-sale/cars-vehicles/trucks`,
-];
+// Vehicle category pages to scrape (overridden when searchQuery is provided)
 
 const TARGET_STATES = new Set([
     'AZ','CA','NV','CO','NM','UT','TX','FL','GA','SC','TN','NC','VA','WA','OR','HI',
@@ -79,11 +74,24 @@ await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
+    searchQuery = "",
     maxPages = 5,
     minBid = 500,
     maxBid = 50000,
     minYear = new Date().getFullYear() - 10,
 } = input;
+
+const CATEGORY_URLS = searchQuery
+    ? [
+        `${BASE}/for-sale/cars-vehicles/cars?q=${encodeURIComponent(searchQuery)}`,
+        `${BASE}/for-sale/cars-vehicles/pickup-trucks?q=${encodeURIComponent(searchQuery)}`,
+        `${BASE}/for-sale/cars-vehicles/trucks?q=${encodeURIComponent(searchQuery)}`,
+    ]
+    : [
+        `${BASE}/for-sale/cars-vehicles/pickup-trucks`,
+        `${BASE}/for-sale/cars-vehicles/cars`,
+        `${BASE}/for-sale/cars-vehicles/trucks`,
+    ];
 
 let totalFound = 0;
 let totalPassed = 0;
@@ -268,9 +276,14 @@ const crawler = new PlaywrightCrawler({
             // Pagination: increment page number in URL
             const pageNum = request.userData.page ?? 1;
             if (cards.length > 0 && pageNum < maxPages) {
-                const nextUrl = url.includes('?page=')
-                    ? url.replace(/page=\d+/, `page=${pageNum + 1}`)
-                    : `${url}?page=${pageNum + 1}`;
+                let nextUrl;
+                if (url.match(/[?&]page=\d+/)) {
+                    nextUrl = url.replace(/([?&])page=\d+/, `$1page=${pageNum + 1}`);
+                } else {
+                    nextUrl = url.includes('?')
+                        ? `${url}&page=${pageNum + 1}`
+                        : `${url}?page=${pageNum + 1}`;
+                }
                 await crawler.addRequests([{
                     url: nextUrl,
                     userData: { label: 'LIST', page: pageNum + 1 },

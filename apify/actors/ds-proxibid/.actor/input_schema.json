@@ -10,6 +10,13 @@
       "default": 200,
       "minimum": 1,
       "editor": "number"
+    },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Tesla Model 3)",
+      "editor": "textfield",
+      "default": ""
     }
   }
 }
