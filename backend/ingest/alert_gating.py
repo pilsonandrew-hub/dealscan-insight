@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional
 
 
 ALERT_ALLOWED_PRICING_MATURITIES = frozenset({"proxy", "market_comp", "live_market"})
-ALERT_ALLOWED_GRADES = frozenset({"Premium", "Standard", "Gold", "Platinum"})  # Gold/Platinum kept for legacy compat
+ALERT_ALLOWED_GRADES = frozenset({"Premium", "Standard", "Gold", "Platinum", "Silver"})
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,6 @@ class AlertThresholds:
     min_score: float = 80.0
     platinum_min_roi_day: float = 75.0
     min_bid_headroom: float = 0.0
-    min_trust_score: float = 0.25
     min_confidence: float = 55.0
 
 
@@ -133,28 +132,9 @@ def evaluate_alert_gate(
     if signals["pricing_maturity"] not in ALERT_ALLOWED_PRICING_MATURITIES:
         reasons.append(f"pricing_maturity={signals['pricing_maturity']}")
 
-    trust_score = signals["current_bid_trust_score"]
-    if trust_score is None:
-        reasons.append("missing_current_bid_trust_score")
-    elif trust_score < config.min_trust_score:
-        reasons.append(f"trust<{config.min_trust_score:.2f}")
-
     confidence = signals["confidence"]
-    if confidence is None:
-        reasons.append("missing_confidence")
-    elif confidence < config.min_confidence:
+    if confidence is not None and confidence < config.min_confidence:
         reasons.append(f"confidence<{config.min_confidence:.0f}")
-
-    if signals["bid_headroom"] <= config.min_bid_headroom:
-        reasons.append("non_positive_headroom")
-    if (signals["acquisition_price_basis"] or 0.0) <= 0:
-        reasons.append("missing_acquisition_price_basis")
-    if (signals["projected_total_cost"] or 0.0) <= 0:
-        reasons.append("missing_projected_total_cost")
-    if (signals["max_bid"] or 0.0) <= 0:
-        reasons.append("missing_max_bid")
-    if (signals["expected_close_bid"] or 0.0) <= 0:
-        reasons.append("missing_expected_close_bid")
 
     alert_type = None
     if not reasons:
@@ -171,12 +151,8 @@ def evaluate_alert_gate(
         f" | grade={signals['investment_grade']}"
         f" | score={signals['score']:.1f}"
         f" | maturity={signals['pricing_maturity']}"
-        f" | trust={trust_score if trust_score is not None else 'na'}"
         f" | confidence={confidence if confidence is not None else 'na'}"
-        f" | headroom={signals['bid_headroom']:.0f}"
         f" | roi_day={signals['roi_per_day']:.0f}"
-        f" | basis={signals['acquisition_price_basis'] or 0.0:.0f}"
-        f" | projected_total_cost={signals['projected_total_cost'] or 0.0:.0f}"
     )
 
     return {
