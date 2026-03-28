@@ -293,6 +293,7 @@ async def sonar_search(req: SearchRequest):
     await _store_job(job_id, job_data)
 
     logger.info(f"[SONAR] Search started job={job_id} query={req.query!r} runs={runs}")
+    logger.info(f"[SONAR] APIFY_TOKEN set: {bool(APIFY_TOKEN)}, token prefix: {APIFY_TOKEN[:15] if APIFY_TOKEN else 'NONE'}")
 
     return {"job_id": job_id, "status": "running"}
 
