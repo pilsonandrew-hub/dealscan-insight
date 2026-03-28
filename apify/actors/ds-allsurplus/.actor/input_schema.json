@@ -1,0 +1,14 @@
+{
+  "title": "AllSurplus Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Tesla Model 3). If set, overrides default vehicle search list.",
+      "editor": "textfield",
+      "default": ""
+    }
+  }
+}

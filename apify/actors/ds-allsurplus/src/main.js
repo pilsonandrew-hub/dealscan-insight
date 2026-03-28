@@ -231,6 +231,8 @@ async function searchMaestro(searchText, page, displayRows, facetsFilter = [], s
 const currentYear = new Date().getFullYear();
 const defaultMinYear = currentYear - 4;
 
+const searchQuery = input.searchQuery || "";
+
 const {
     maxSearchPages = 5,
     displayRows = 50,
@@ -240,7 +242,7 @@ const {
     minYear = defaultMinYear,
     targetStatesOnly = false,
     allowHighRust = false,
-    searchTerms = VEHICLE_SEARCHES,
+    searchTerms = searchQuery ? [searchQuery] : VEHICLE_SEARCHES,
 } = input;
 
 const sessionId = `ds-allsurplus-${Date.now()}`;
