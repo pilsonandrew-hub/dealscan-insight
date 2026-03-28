@@ -194,38 +194,19 @@ def _time_remaining(end_str: str | None) -> str:
 
 def _normalize_item(item: dict, source_name: str) -> dict:
     """Convert a raw actor dataset item into the SonarResult shape."""
-    # Common field mappings across all three actors
-    title = item.get("title") or item.get("lead") or ""
-    year = item.get("year") or item.get("modelYear")
-    make = item.get("make") or item.get("makebrand") or ""
+    year = item.get("year") or ""
+    make = item.get("make") or ""
     model = item.get("model") or ""
-    current_bid = (
-        item.get("current_bid")
-        or item.get("currentBid")
-        or item.get("assetBidPrice")
-        or 0
-    )
-    ends_at = (
-        item.get("auction_end_time")
-        or item.get("auction_end_date")
-        or item.get("auctionEndUtc")
-        or item.get("bidCloseDateTime")
-        or ""
-    )
-    state = item.get("state") or item.get("location_state") or ""
-    city = item.get("city") or item.get("locationCity") or ""
-    location = f"{city}, {state}".strip(", ") if city or state else item.get("location", "")
-    photo_url = (
-        item.get("photo_url")
-        or item.get("image_url")
-        or item.get("photoUrl")
-        or ""
-    )
-    source_url = item.get("listing_url") or item.get("listingUrl") or ""
-    mileage = item.get("mileage") or item.get("meterCount")
-    agency = item.get("agency_name") or item.get("seller") or item.get("auction_name") or ""
-    title_status = item.get("title_status") or "Unknown"
-    vin = item.get("vin") or ""
+    title = item.get("title") or f"{year} {make} {model}".strip()
+    current_bid = item.get("current_bid") or item.get("currentBid") or item.get("current_price") or 0
+    ends_at = item.get("auction_end_time") or item.get("endsAt") or item.get("end_time") or ""
+    city = item.get("city") or ""
+    state = item.get("state") or ""
+    location = f"{city}, {state}".strip(", ")
+    photo_url = item.get("photo_url") or item.get("photoUrl") or item.get("image_url") or ""
+    source_url = item.get("listing_url") or item.get("url") or item.get("sourceUrl") or ""
+    mileage = item.get("mileage") or None
+    agency = item.get("seller") or item.get("agency_name") or item.get("issuingAgency") or ""
 
     try:
         year_int = int(year) if year else None
@@ -233,7 +214,7 @@ def _normalize_item(item: dict, source_name: str) -> dict:
         year_int = None
 
     return SonarResult(
-        id=f"snr-{source_name.lower()[:3]}-{uuid.uuid4().hex[:8]}",
+        id=source_url or str(hash(str(item))),
         title=title,
         year=year_int,
         make=make,
@@ -243,13 +224,13 @@ def _normalize_item(item: dict, source_name: str) -> dict:
         timeRemaining=_time_remaining(ends_at if ends_at else None),
         endsAt=str(ends_at) if ends_at else "",
         location=location,
-        condition=vin if vin else "",
+        condition="",
         sourceName=source_name,
         sourceUrl=source_url,
         mileage=mileage,
         auctionSource=source_name,
         issuingAgency=agency,
-        titleStatus=str(title_status).capitalize() if title_status else "Unknown",
+        titleStatus="Unknown",
         isAsIs=True,
         photoUrl=photo_url,
     ).model_dump()
@@ -321,20 +302,19 @@ async def sonar_status(job_id: str):
             if run_status == "SUCCEEDED":
                 sources[source_name] = "done"
                 items = await _get_dataset_items(client, run_id)
+                query_lower = job.get("query", "").strip().lower()
+                query_words = query_lower.split() if query_lower else []
                 for item in items:
                     normalized = _normalize_item(item, source_name)
-                    # Filter by search query
-                    query_lower = job.get("query", "").lower()
-                    title = f"{normalized.get('year','')} {normalized.get('make','')} {normalized.get('model','')} {normalized.get('title','')}".lower()
-                    if query_lower and not any(q in title for q in query_lower.split()):
-                        continue
-                    # Skip zero/suspiciously low bids
-                    bid = normalized.get('currentBid') or 0
-                    try:
-                        if float(bid) < 100:
+                    # Filter by search query — match if ANY query word appears in title/make/model
+                    if query_words:
+                        searchable = " ".join([
+                            str(normalized.get("title", "")),
+                            str(normalized.get("make", "")),
+                            str(normalized.get("model", "")),
+                        ]).lower()
+                        if not any(w in searchable for w in query_words):
                             continue
-                    except (TypeError, ValueError):
-                        pass
                     all_results.append(normalized)
             elif run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 sources[source_name] = "error"
