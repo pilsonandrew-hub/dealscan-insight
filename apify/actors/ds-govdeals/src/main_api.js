@@ -46,7 +46,7 @@ const HARD_MAX_PAGES = 200;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
-const MAX_DETAIL_PAGES = 200;
+const MAX_DETAIL_PAGES = 30;  // Keep under memory limit for 1GB actor
 const CONDITION_REJECT_PATTERNS = [
     /\bsalvage\b/i,
     /\bflood\b/i,

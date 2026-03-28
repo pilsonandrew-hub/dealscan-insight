@@ -81,7 +81,7 @@ def _alert_thresholds() -> Optional["AlertThresholds"]:
     if AlertThresholds is None:
         return None
     return AlertThresholds(
-        min_score=_env_float("HOT_DEAL_MIN_SCORE", 80.0),
+        min_score=_env_float("HOT_DEAL_MIN_SCORE", 70.0),
         platinum_min_roi_day=_env_float("PLATINUM_MIN_ROI_DAY", 75.0),
         min_bid_headroom=_env_float("ALERT_MIN_BID_HEADROOM", 0.0),
         min_trust_score=_env_float("ALERT_MIN_TRUST_SCORE", 0.25),
@@ -1208,7 +1208,7 @@ async def _process_webhook_items(
                     )
                     hot_deals.append(vehicle)
                 elif (
-                    vehicle["dos_score"] >= _env_float("HOT_DEAL_MIN_SCORE", 80.0)
+                    vehicle["dos_score"] >= _env_float("HOT_DEAL_MIN_SCORE", 70.0)
                     or score_result.get("investment_grade") in {"Gold", "Platinum"}
                 ):
                     logger.info(
