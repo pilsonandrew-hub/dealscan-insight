@@ -225,12 +225,18 @@ const crawler = new PlaywrightCrawler({
         });
         await page.waitForTimeout(4000);
 
-        // Navigate to first passenger vehicle category directly
-        for (const categoryUrl of VEHICLE_CATEGORY_URLS) {
-            if (capturedApi.interceptedLots.length >= 20) break;
-            log.info(`Navigating to: ${categoryUrl}`);
-            await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        // Navigate to search URL (with keyword if searchQuery set) or category URLs
+        if (searchQuery) {
+            log.info(`Navigating to search URL with keyword: ${GOVDEALS_VEHICLE_SEARCH_URL}`);
+            await page.goto(GOVDEALS_VEHICLE_SEARCH_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForTimeout(6000);
+        } else {
+            for (const categoryUrl of VEHICLE_CATEGORY_URLS) {
+                if (capturedApi.interceptedLots.length >= 20) break;
+                log.info(`Navigating to: ${categoryUrl}`);
+                await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                await page.waitForTimeout(6000);
+            }
         }
 
         // ── Save results ───────────────────────────────────────
