@@ -1133,6 +1133,11 @@ async def _process_webhook_items(
                 logger.error(f"[SAVE ERROR] failed to save vehicle {vehicle.get('title')} with error: {exc}")
                 _increment_reason_counter(skip_reasons, "save_exception")
                 continue
+            # Write to sonar_listings (unfiltered — every vehicle regardless of DOS/state/mileage)
+            try:
+                _save_to_sonar_listings(vehicle)
+            except Exception as sl_exc:
+                logger.warning(f"[SONAR_LISTINGS] Write failed for {vehicle.get('title', '?')[:50]}: {sl_exc}")
             save_status = vehicle.get("_save_status", "unknown")
             _increment_reason_counter(save_outcomes, save_status)
             if saved_opportunity_id:
@@ -3221,6 +3226,36 @@ def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str],
     except Exception as vin_check_err:
         logger.warning("[DEDUP] VIN duplicate check failed for VIN %s: %s", vin, vin_check_err)
         raise
+
+
+def _save_to_sonar_listings(vehicle: dict) -> None:
+    """Write a simplified record to sonar_listings — NO filters (DOS, state, mileage)."""
+    if supabase_client is None:
+        return
+    row = {
+        "listing_id": vehicle.get("listing_id"),
+        "source": vehicle.get("source") or vehicle.get("source_site"),
+        "title": vehicle.get("title"),
+        "year": vehicle.get("year"),
+        "make": vehicle.get("make"),
+        "model": vehicle.get("model"),
+        "trim": vehicle.get("trim"),
+        "mileage": vehicle.get("mileage"),
+        "state": vehicle.get("state"),
+        "city": vehicle.get("city"),
+        "current_bid": float(vehicle.get("current_bid") or 0),
+        "auction_end_date": vehicle.get("auction_end_date"),
+        "listing_url": vehicle.get("listing_url"),
+        "image_url": vehicle.get("image_url") or vehicle.get("photo_url"),
+        "photo_url": vehicle.get("photo_url") or vehicle.get("image_url"),
+        "agency_name": vehicle.get("agency_name") or vehicle.get("issuing_agency"),
+        "condition": vehicle.get("condition"),
+        "title_status": vehicle.get("title_status"),
+        "vin": vehicle.get("vin"),
+        "source_site": vehicle.get("source_site") or vehicle.get("source"),
+        "dos_score": vehicle.get("dos_score"),
+    }
+    supabase_client.table("sonar_listings").insert(row).execute()
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:

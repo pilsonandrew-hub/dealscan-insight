@@ -31,6 +31,7 @@ class SearchRequest(BaseModel):
     query: str
     min_price: float = Field(default=0, ge=0)
     max_price: float = Field(default=75000, ge=0)
+    extended: bool = False
 
 
 class SonarResult(BaseModel):
@@ -143,10 +144,10 @@ def _row_to_result(row: dict) -> dict:
         sourceUrl=row.get("listing_url") or "",
         mileage=row.get("mileage"),
         auctionSource=row.get("source") or "",
-        issuingAgency="",
-        titleStatus="Unknown",
+        issuingAgency=row.get("agency_name") or "",
+        titleStatus=row.get("title_status") or "Unknown",
         isAsIs=True,
-        photoUrl=row.get("image_url") or "",
+        photoUrl=row.get("image_url") or row.get("photo_url") or "",
     ).model_dump()
 
 
@@ -166,7 +167,12 @@ async def sonar_search(req: SearchRequest):
     sb = _get_supabase()
     job_id = uuid.uuid4().hex
 
-    query = sb.table("opportunities").select("*").eq("is_active", True)
+    if req.extended:
+        # Extended mode — query sonar_listings, no DOS/state/mileage filters
+        query = sb.table("sonar_listings").select("*")
+    else:
+        # Standard mode — filtered opportunities
+        query = sb.table("opportunities").select("*").eq("is_active", True).gte("dos_score", 50)
 
     # Price filters
     if req.min_price > 0:
@@ -180,7 +186,7 @@ async def sonar_search(req: SearchRequest):
         query = query.or_(f"title.ilike.%{q}%,make.ilike.%{q}%,model.ilike.%{q}%")
 
     # Order and limit
-    query = query.order("dos_score", desc=True).limit(200)
+    query = query.order("created_at", desc=True).limit(200) if req.extended else query.order("dos_score", desc=True).limit(200)
 
     resp = query.execute()
     rows = resp.data or []

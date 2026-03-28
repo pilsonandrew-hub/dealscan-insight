@@ -3,7 +3,7 @@
   "name": "ds-hibid-v2",
   "title": "DealerScope HiBid v2 (GraphQL)",
   "description": "Scrapes HiBid Cars & Vehicles via reverse-engineered GraphQL API. US-only, no rented actors, no Playwright.",
-  "version": "2.0",
+  "version": "0.0",
   "buildTag": "latest",
   "environmentVariables": {},
   "dockerfile": "./Dockerfile"
