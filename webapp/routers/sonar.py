@@ -322,7 +322,20 @@ async def sonar_status(job_id: str):
                 sources[source_name] = "done"
                 items = await _get_dataset_items(client, run_id)
                 for item in items:
-                    all_results.append(_normalize_item(item, source_name))
+                    normalized = _normalize_item(item, source_name)
+                    # Filter by search query
+                    query_lower = job.get("query", "").lower()
+                    title = f"{normalized.get('year','')} {normalized.get('make','')} {normalized.get('model','')} {normalized.get('title','')}".lower()
+                    if query_lower and not any(q in title for q in query_lower.split()):
+                        continue
+                    # Skip zero/suspiciously low bids
+                    bid = normalized.get('currentBid') or 0
+                    try:
+                        if float(bid) < 100:
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                    all_results.append(normalized)
             elif run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 sources[source_name] = "error"
                 logger.warning(f"[SONAR] {source_name} run {run_id} status={run_status}")
@@ -342,6 +355,16 @@ async def sonar_status(job_id: str):
                 all_done = True
         except Exception:
             pass
+
+    # Deduplicate by sourceUrl
+    seen_urls = set()
+    deduped = []
+    for r in all_results:
+        url = r.get('sourceUrl','')
+        if url not in seen_urls:
+            seen_urls.add(url)
+            deduped.append(r)
+    all_results = deduped
 
     overall_status = "complete" if all_done else "running"
 
