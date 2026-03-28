@@ -355,3 +355,25 @@ async def sonar_status(job_id: str):
         "sources": sources,
         "timed_out": timed_out,
     }
+
+@router.get("/debug-token")
+async def sonar_debug_token():
+    """Debug: check Apify token and connectivity from Railway."""
+    import httpx
+    token = APIFY_TOKEN
+    result = {
+        "token_set": bool(token),
+        "token_prefix": token[:20] if token else "NONE",
+        "token_length": len(token) if token else 0,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.apify.com/v2/users/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            result["apify_status"] = resp.status_code
+            result["apify_response"] = resp.json().get("data", {}).get("username", "?") if resp.status_code == 200 else resp.text[:200]
+    except Exception as e:
+        result["apify_error"] = str(e)
+    return result
