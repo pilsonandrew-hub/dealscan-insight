@@ -27,6 +27,7 @@ export interface SonarSearchParams {
   query: string;
   minPrice: number;
   maxPrice: number;
+  extended: boolean;
 }
 
 // Sources we scan, in order
@@ -92,6 +93,7 @@ export function sonarSearchStreaming(
           query: params.query,
           min_price: params.minPrice,
           max_price: params.maxPrice,
+          extended: params.extended,
         }),
       });
 

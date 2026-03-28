@@ -38,6 +38,7 @@ export const SonarTab: React.FC = () => {
   const [sourceStatuses, setSourceStatuses] = useState<Record<string, SourceStatus>>({});
   const [excludedCount, setExcludedCount] = useState(0);
   const [shareIcon, setShareIcon] = useState<'share' | 'check'>('share');
+  const [extended, setExtended] = useState(false);
   const abortRef = useRef(false);
 
   const handleSearch = useCallback(async (e?: React.FormEvent) => {
@@ -57,7 +58,7 @@ export const SonarTab: React.FC = () => {
     let nextSourceIdx = 1;
 
     await sonarSearchStreaming(
-      { query, minPrice: priceRange[0], maxPrice: priceRange[1] },
+      { query, minPrice: priceRange[0], maxPrice: priceRange[1], extended },
       (batch) => {
         if (abortRef.current) return;
         const { clean, excluded, excludedResults } = filterQuality(batch.results);
@@ -77,7 +78,7 @@ export const SonarTab: React.FC = () => {
     );
 
     setIsSearching(false);
-  }, [query, priceRange]);
+  }, [query, priceRange, extended]);
 
   const handleShare = useCallback(() => {
     const sorted = sortResults(results, sortKey);
@@ -156,6 +157,39 @@ export const SonarTab: React.FC = () => {
           >
             {isSearching ? 'Scanning...' : 'Search'}
           </Button>
+        </div>
+
+        {/* Standard / Extended toggle */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setExtended(false)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                !extended
+                  ? 'bg-cyan-600 text-white'
+                  : 'text-gray-400 hover:text-gray-300'
+              }`}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => setExtended(true)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                extended
+                  ? 'bg-orange-600 text-white'
+                  : 'text-gray-400 hover:text-gray-300'
+              }`}
+            >
+              Extended
+            </button>
+          </div>
+          {extended && (
+            <span className="text-xs text-orange-400/80">
+              Shows all auction vehicles including those outside dealer criteria
+            </span>
+          )}
         </div>
 
         {/* Budget range — dual slider + number inputs */}
