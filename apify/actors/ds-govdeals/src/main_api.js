@@ -187,7 +187,7 @@ const crawler = new PlaywrightCrawler({
                 if (!postData) return;
                 try {
                     const nextPayload = JSON.parse(postData);
-                    if (!capturedApi.searchPayload || isBroaderVehiclePayload(nextPayload, capturedApi.searchPayload)) {
+                    if (!capturedApi.searchPayload) {
                         capturedApi.searchPayload = nextPayload;
                         capturedApi.searchUrl = url;
                         capturedApi.sessionId = capturedApi.searchPayload.sessionId || null;
@@ -322,8 +322,12 @@ const crawler = new PlaywrightCrawler({
                 log.warning('Cannot paginate — searchPayload or searchUrl missing');
             }
 
-            // Step 3: VIN enrichment before pushing so populated VINs are preserved in the dataset
-            await scrapeDetailPagesForVin(page, passingLots, log);
+            // Step 3: VIN enrichment — only run for Sonar searches, skip for scheduled scrapes
+            if (searchQuery) {
+                await scrapeDetailPagesForVin(page, passingLots, log);
+            } else {
+                log.info("[VIN DETAIL] Skipping detail scrape for scheduled run (no searchQuery)");
+            }
 
             // Step 4: Push all passing lots after VIN enrichment completes
             for (const lot of passingLots) {
