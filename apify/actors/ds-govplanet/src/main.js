@@ -205,9 +205,15 @@ const {
     maxBid = 40000,
     maxMileage = 100000,
     maxAgeYears = 10,
+    searchQuery = '',
     webhookUrl = null,
     webhookSecret = null,
 } = input;
+
+// If searchQuery is set, replace category URLs with a single keyword search URL
+const startUrls = searchQuery
+    ? [{ url: `${BASE}/for-sale?q=${encodeURIComponent(searchQuery)}&ct=3&l2=USA`, label: 'search_results' }]
+    : CATEGORY_URLS;
 
 let totalPushed = 0;
 let totalSkipped = 0;
@@ -217,7 +223,11 @@ const pendingPages  = new Map(); // categoryLabel → Set of pstart values alrea
 const queue = await RequestQueue.open();
 
 // Seed initial pages
-for (const cat of CATEGORY_URLS) {
+if (searchQuery) {
+    console.log(`[GOVPLANET] Keyword search: "${searchQuery}"`);
+}
+
+for (const cat of startUrls) {
     await queue.addRequest({
         url: cat.url,
         uniqueKey: `${cat.label}:pstart=0`,

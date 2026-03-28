@@ -1,0 +1,46 @@
+{
+  "title": "DealerScope Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxPages": {
+      "title": "Max Pages",
+      "type": "integer",
+      "description": "Maximum pages to crawl",
+      "default": 15,
+      "minimum": 1,
+      "maximum": 100,
+      "editor": "number"
+    },
+    "minBid": {
+      "title": "Minimum Bid ($)",
+      "type": "integer",
+      "description": "Minimum current bid",
+      "default": 500,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "maxBid": {
+      "title": "Maximum Bid ($)",
+      "type": "integer",
+      "description": "Maximum current bid",
+      "default": 50000,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "includeRustStates": {
+      "title": "Include Rust Belt States",
+      "type": "boolean",
+      "description": "Include vehicles from high-rust states",
+      "default": false,
+      "editor": "checkbox"
+    },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Keyword to filter results by title (case-insensitive)",
+      "editor": "textfield",
+      "nullable": true
+    }
+  }
+}

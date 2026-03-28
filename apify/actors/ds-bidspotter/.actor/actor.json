@@ -2,5 +2,6 @@
   "actorSpecification": 1,
   "name": "ds-bidspotter",
   "title": "DealerScope BidSpotter Vehicle Auction Scraper",
-  "version": "1.0"
+  "version": "0.0",
+  "buildTag": "latest"
 }

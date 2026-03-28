@@ -155,6 +155,7 @@ await Actor.init();
 
 const input = await Actor.getInput() ?? {};
 const {
+    searchQuery = '',
     maxCatalogues = 50,
     maxPages = 10,
     minYear = new Date().getFullYear() - 10,
@@ -162,6 +163,7 @@ const {
 } = input;
 
 const targetStateSet = new Set(targetStates.map((s) => String(s).toUpperCase()));
+const searchQueryLower = searchQuery ? searchQuery.toLowerCase() : '';
 const seenListings = new Set();
 
 let totalFound = 0;
@@ -367,6 +369,12 @@ function applyFilters(listing, log) {
 
     if (listing.mileage !== null && listing.mileage > 100000) {
         log.debug(`[BS] Skip high mileage ${listing.mileage}: ${listing.title}`);
+        return false;
+    }
+
+    // searchQuery post-filter: title must contain the search keyword
+    if (searchQueryLower && !listing.title.toLowerCase().includes(searchQueryLower)) {
+        log.debug(`[BS] Skip non-matching searchQuery "${searchQuery}": ${listing.title}`);
         return false;
     }
 
@@ -798,6 +806,56 @@ const crawler = new HttpCrawler({
             return;
         }
 
+        // ── Search results page ──────────────────────────────────────────────
+        if (label === 'SEARCH') {
+            const pageNum = request.userData?.pageNum ?? 1;
+            log.info(`[BS] Search results page ${pageNum}: ${request.url}`);
+
+            // Search results contain catalogue links — enqueue them
+            const catalogueLinks = extractCatalogueLinks(html);
+            log.info(`[BS] Search found ${catalogueLinks.length} catalogue links`);
+
+            let enqueued = 0;
+            for (const catPath of catalogueLinks) {
+                if (enqueued >= maxCatalogues) break;
+                const catUrl = `${BASE_URL}${catPath}`;
+                await crawler.requestQueue.addRequest({
+                    url: catUrl,
+                    label: 'CATALOGUE',
+                    headers: BROWSER_HEADERS,
+                });
+                enqueued++;
+            }
+
+            // Also check for direct lot links in search results
+            const lotLinks = extractLotLinks(html);
+            if (lotLinks.length > 0) {
+                log.info(`[BS] Search found ${lotLinks.length} direct lot links`);
+                for (const lotPath of lotLinks) {
+                    const lotUrl = `${BASE_URL}${lotPath}`;
+                    await crawler.requestQueue.addRequest({
+                        url: lotUrl,
+                        uniqueKey: lotPath,
+                        label: 'LOT',
+                        headers: buildDetailHeaders(DETAIL_UA_ROTATION[0]),
+                        userData: { detailAttempt: 0 },
+                    });
+                }
+            }
+
+            // Paginate search results
+            if ((catalogueLinks.length + lotLinks.length) >= 20 && pageNum < maxPages) {
+                const nextUrl = `${BASE_URL}/en-us/search?q=${encodeURIComponent(searchQuery)}&category=vehicles&page=${pageNum + 1}`;
+                await crawler.requestQueue.addRequest({
+                    url: nextUrl,
+                    label: 'SEARCH',
+                    headers: BROWSER_HEADERS,
+                    userData: { pageNum: pageNum + 1 },
+                });
+            }
+            return;
+        }
+
         // ── Catalogue list page ───────────────────────────────────────────────
         const pageNum = request.userData?.pageNum ?? 1;
         log.info(`[BS] Catalogue list page ${pageNum}: ${request.url}`);
@@ -840,13 +898,30 @@ const crawler = new HttpCrawler({
     },
 });
 
-const startUrl = `${BASE_URL}/en-us/auction-catalogues/search-filter?categorytags=Automobiles%2c+Trucks+%26+Vans&country=US`;
-await crawler.run([{
-    url: startUrl,
+const startRequests = [];
+
+// When searchQuery is provided, add a keyword search URL (BidSpotter search endpoint)
+if (searchQuery) {
+    const searchUrl = `${BASE_URL}/en-us/search?q=${encodeURIComponent(searchQuery)}&category=vehicles`;
+    startRequests.push({
+        url: searchUrl,
+        label: 'SEARCH',
+        headers: BROWSER_HEADERS,
+        userData: { pageNum: 1 },
+    });
+    console.log(`[BS] searchQuery="${searchQuery}" → ${searchUrl}`);
+}
+
+// Always include category crawl (searchQuery post-filter will narrow results)
+const categoryUrl = `${BASE_URL}/en-us/auction-catalogues/search-filter?categorytags=Automobiles%2c+Trucks+%26+Vans&country=US`;
+startRequests.push({
+    url: categoryUrl,
     label: 'CATALOGUE_LIST',
     headers: BROWSER_HEADERS,
     userData: { pageNum: 1 },
-}]);
+});
+
+await crawler.run(startRequests);
 
 console.log(`[BIDSPOTTER COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
 console.log(`[BIDSPOTTER STATS] Catalogues processed: ${cataloguesProcessed} | Skipped non-US: ${cataloguesSkippedNonUS} | Skipped WAF: ${cataloguesSkippedWAF}`);

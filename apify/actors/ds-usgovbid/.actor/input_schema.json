@@ -1,0 +1,47 @@
+{
+  "title": "DealerScope USGovBid Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxAuctions": {
+      "title": "Max Auctions",
+      "type": "integer",
+      "description": "Maximum auctions to process",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 50,
+      "editor": "number"
+    },
+    "maxLotsPerAuction": {
+      "title": "Max Lots Per Auction",
+      "type": "integer",
+      "description": "Maximum lots to parse per auction",
+      "default": 500,
+      "minimum": 1,
+      "editor": "number"
+    },
+    "minBid": {
+      "title": "Minimum Bid ($)",
+      "type": "integer",
+      "description": "Minimum current bid",
+      "default": 500,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "maxBid": {
+      "title": "Maximum Bid ($)",
+      "type": "integer",
+      "description": "Maximum current bid",
+      "default": 35000,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Keyword to filter results by title (case-insensitive)",
+      "editor": "textfield",
+      "nullable": true
+    }
+  }
+}

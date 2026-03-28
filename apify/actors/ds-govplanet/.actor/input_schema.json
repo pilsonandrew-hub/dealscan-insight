@@ -1,0 +1,48 @@
+{
+  "title": "GovPlanet Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxItemsPerCategory": {
+      "title": "Max Items Per Category",
+      "type": "integer",
+      "description": "Safety cap per category (0 for unlimited)",
+      "default": 500,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "minBid": {
+      "title": "Min Bid",
+      "type": "integer",
+      "description": "Minimum bid price filter",
+      "default": 200,
+      "editor": "number"
+    },
+    "maxBid": {
+      "title": "Max Bid",
+      "type": "integer",
+      "description": "Maximum bid price filter",
+      "default": 40000,
+      "editor": "number"
+    },
+    "searchQuery": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Vehicle search keyword (e.g. Tesla Model 3). When set, searches GovPlanet instead of scraping category pages.",
+      "editor": "textfield",
+      "default": ""
+    },
+    "webhookUrl": {
+      "title": "Webhook URL",
+      "type": "string",
+      "description": "URL to POST results summary to on completion",
+      "editor": "textfield"
+    },
+    "webhookSecret": {
+      "title": "Webhook Secret",
+      "type": "string",
+      "description": "Secret sent in x-apify-webhook-secret header",
+      "editor": "textfield"
+    }
+  }
+}
