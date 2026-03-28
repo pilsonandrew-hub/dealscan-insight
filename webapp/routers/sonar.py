@@ -302,8 +302,19 @@ async def sonar_status(job_id: str):
             if run_status == "SUCCEEDED":
                 sources[source_name] = "done"
                 items = await _get_dataset_items(client, run_id)
+                query_lower = job.get("query", "").strip().lower()
+                query_words = [w for w in query_lower.split() if len(w) > 2] if query_lower else []
                 for item in items:
                     normalized = _normalize_item(item, source_name)
+                    # Post-filter: if query given, only keep results matching ANY query word
+                    if query_words:
+                        searchable = " ".join([
+                            str(normalized.get("title", "")),
+                            str(normalized.get("make", "")),
+                            str(normalized.get("model", "")),
+                        ]).lower()
+                        if not any(w in searchable for w in query_words):
+                            continue
                     all_results.append(normalized)
             elif run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 sources[source_name] = "error"
