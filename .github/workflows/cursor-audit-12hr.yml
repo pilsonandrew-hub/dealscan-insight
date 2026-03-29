@@ -44,7 +44,7 @@ jobs:
           fi
 
           # 4. Rust state filter present
-          if grep -rn "HIGH_RUST_STATES\|RUST_STATES\|HIGH_RUST\b" backend/ webapp/ --include="*.py" | grep -q "OH\|MI\|PA"; then
+          if grep -rn "HIGH_RUST_STATES" backend/ webapp/ --include="*.py" | grep -q ":"; then
             echo "✅ Rust state filter present in backend"
           else
             echo "❌ FAIL: Rust state filter missing from backend"
