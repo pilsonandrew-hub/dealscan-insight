@@ -92,7 +92,7 @@ jobs:
       - name: AI Code Review (Cursor)
         if: github.event_name == 'pull_request'
         env:
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
         run: |
           # Get changed files
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
@@ -105,15 +105,15 @@ jobs:
           fi
 
           PAYLOAD=$(jq -n --arg diff "$DIFF" '{
-            "model": "cursor-fast",
+            "model": "deepseek/deepseek-v3.2",
             "messages": [
               {"role": "system", "content": "You are a senior code reviewer for DealerScope, a vehicle arbitrage platform. Review the diff and flag: 1) Auth/security issues, 2) Business rule violations (bid ceiling 0.88/0.80, min margin $1500/$2500, max age 4yr, max mileage 50k, rust state filter), 3) Silent failures, 4) Data integrity issues. Be concise and actionable."},
               {"role": "user", "content": $diff}
             ]
           }')
 
-          RESPONSE=$(curl -s -X POST https://api.cursor.sh/v1/chat/completions \
-            -H "Authorization: Bearer $CURSOR_API_KEY" \
+          RESPONSE=$(curl -s -X POST https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_KEY" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
 
