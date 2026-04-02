@@ -71,8 +71,10 @@ def _parse_datetime(value: object) -> Optional[datetime]:
 
 def determine_vehicle_tier(year, mileage) -> str:
     current_year = _current_year()
-    premium_year_cutoff = current_year - 4
-    standard_year_cutoff = current_year - 10
+    # Business rule: max vehicle age = 4 years (non-negotiable)
+    # Vehicles <=2 years old = premium, 3-4 years = standard, >4 years = rejected
+    premium_year_cutoff = current_year - 2   # model_year >= this -> premium
+    standard_year_cutoff = current_year - 4  # model_year >= this -> standard, else rejected
     model_year = _coerce_year(year)
     if model_year is None:
         return "rejected"
