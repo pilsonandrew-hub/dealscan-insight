@@ -1738,6 +1738,8 @@ def normalize_apify_vehicle(
             "title": title,
             "title_status": item.get("title_status") or item.get("titleStatus") or "",
             "current_bid": current_bid,
+            "actual_current_bid": _extract_numeric_key("actual_current_bid", "actualCurrentBid") or 0,
+            "estimated_auction_price": _extract_numeric_key("estimated_auction_price", "estimatedAuctionPrice") or 0,
             "buyer_premium_pct": buyer_premium_pct,
             "buyer_premium": buyer_premium,
             "doc_fee": doc_fee,
@@ -2032,6 +2034,46 @@ def score_vehicle(vehicle: dict) -> dict:
             "ai_confidence_score",
         ):
             vehicle[key] = result.get(key)
+
+        try:
+            actual_current_bid = float(vehicle.get("actual_current_bid") or 0)
+        except (TypeError, ValueError):
+            actual_current_bid = 0.0
+        try:
+            estimated_auction_price = float(vehicle.get("estimated_auction_price") or 0)
+        except (TypeError, ValueError):
+            estimated_auction_price = 0.0
+        source_site_lower = (vehicle.get("source_site") or "").lower()
+        if source_site_lower == "jjkane" and (actual_current_bid or 0) <= 0 and (estimated_auction_price or 0) > 0:
+            scored_vehicle_tier = result.get("vehicle_tier") or vehicle.get("vehicle_tier")
+            min_margin_target = float(result.get("min_margin_target") or 0)
+            gross_margin = float(result.get("gross_margin") or 0)
+            max_bid = float(result.get("max_bid") or 0)
+            bid_value = float(vehicle.get("current_bid") or 0)
+            structural_ceiling_pass = bid_value > 0 and bid_value <= max_bid and gross_margin >= min_margin_target and scored_vehicle_tier != "rejected"
+            if structural_ceiling_pass:
+                lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
+                result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
+                result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
+                result["pricing_maturity"] = "market_comp"
+                result["expected_close_source"] = "jjkane_estimated_auction_price"
+                result["acquisition_basis_source"] = "jjkane_estimated_auction_price"
+                result["ceiling_reason"] = "jjkane_estimated_close_bid"
+                result["ceiling_pass"] = True
+                roi_pct = float(result.get("roi_pct") or 0)
+                dos_score = float(result.get("dos_score") or 0)
+                if scored_vehicle_tier == "rejected":
+                    investment_grade = "Rejected"
+                elif dos_score >= 80 and roi_pct >= 20:
+                    investment_grade = "Platinum"
+                elif dos_score >= 65 and roi_pct >= 12:
+                    investment_grade = "Gold"
+                elif dos_score >= 50:
+                    investment_grade = "Silver"
+                else:
+                    investment_grade = "Bronze"
+                result["investment_grade"] = investment_grade
+
         return result
 
     except Exception as e:
