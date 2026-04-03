@@ -2077,12 +2077,12 @@ def score_vehicle(vehicle: dict) -> dict:
                 investment_grade = "Bronze"
             result["investment_grade"] = investment_grade
 
-        if source_site_lower == "proxibid" and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
+        if source_site_lower in {"proxibid", "hibid"} and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
             lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
             result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
             result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
             result["pricing_maturity"] = "market_comp"
-            result["ceiling_reason"] = "proxibid_live_bid_near_close"
+            result["ceiling_reason"] = f"{source_site_lower}_live_bid_near_close"
             result["ceiling_pass"] = True
             roi_pct = float(result.get("roi_pct") or 0)
             dos_score = float(result.get("dos_score") or 0)
