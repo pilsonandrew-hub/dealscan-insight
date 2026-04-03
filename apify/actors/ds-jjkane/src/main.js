@@ -30,13 +30,13 @@ const MARKETCHECK_URL = 'https://mc-api.marketcheck.com/v2/search/car/active';
 
 await Actor.init();
 const input = await Actor.getInput() || {};
-const ALGOLIA_APP_ID = input.algoliaAppId || process.env.ALGOLIA_APP_ID;
-const ALGOLIA_SEARCH_KEY = input.algoliaSearchKey || process.env.ALGOLIA_SEARCH_KEY;
+const ALGOLIA_APP_ID = input.algoliaAppId || process.env.ALGOLIA_APP_ID || 'ICB6K32PD0';
+const ALGOLIA_SEARCH_KEY = input.algoliaSearchKey || process.env.ALGOLIA_SEARCH_KEY || '9d3241f7a3ee8947997deaa33cb0b249';
 const ALGOLIA_URL = `https://${ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/${ALGOLIA_INDEX}/query`;
 
 const MARKETCHECK_KEY = input.marketcheckKey || process.env.MARKETCHECK_KEY;
 if (!MARKETCHECK_KEY) {
-    throw new Error('Missing MARKETCHECK_KEY in actor input');
+    console.warn('[JJKANE] MARKETCHECK_KEY missing — continuing without Marketcheck pricing');
 }
 
 // Auction-to-retail discount factor (government surplus clears at 60-75% retail)
@@ -161,7 +161,7 @@ const MAX_MARKETCHECK_CALLS_PER_RUN = 50; // Protect 500/month quota
 let marketcheckCallsThisRun = 0;
 
 async function getMarketcheckPrice(year, make, model, odometer) {
-    if (!year || !make || !model) return null;
+    if (!MARKETCHECK_KEY || !year || !make || !model) return null;
 
     const makeLower = make.toLowerCase().trim();
     const modelRaw = model.toLowerCase().trim();
@@ -300,7 +300,7 @@ const {
     maxBid = 75000,
     maxYearAge = 10,
     maxItemsPerState = 500,
-    enableMarketcheck = true,
+    enableMarketcheck = Boolean(MARKETCHECK_KEY),
     webhookUrl = null,
     webhookSecret = null,
 } = input;
@@ -390,14 +390,19 @@ for (const state of targetStates) {
                 // Existing currentBid from Algolia (may be 0 early in auction)
                 const currentBid = parseBid(hit.currentBid);
 
-                // Skip pre-auction items with no pricing — cannot be scored
-                if (estimatedAuctionPrice === 0 || currentBid === 0) {
+                // Use whichever pricing signal is available.
+                // If Marketcheck is unavailable, fall back to live current bid so actor still runs.
+                const effectiveBid = currentBid > 0 ? currentBid : estimatedAuctionPrice;
+
+                // Skip only when both pricing signals are missing.
+                if (effectiveBid === 0) {
                     console.log(`[SKIP-ZERO-BID] ${title || `${year} ${make} ${model}`} | estimatedAuctionPrice=$${estimatedAuctionPrice} currentBid=$${currentBid}`);
                     continue;
                 }
 
-                // Use whichever is higher: actual current bid or estimated floor
-                const effectiveBid = currentBid > 0 ? currentBid : estimatedAuctionPrice;
+                if (currentBid > 0 && !marketcheckMedian) {
+                    pricingSource = 'jjkane_live_bid_only';
+                }
 
                 // Bid range filter (only applies if we have a real bid or estimate)
                 if (effectiveBid > 0 && effectiveBid > maxBid) continue;
@@ -471,7 +476,9 @@ if (effectiveWebhookUrl && totalPassed > 0) {
             },
             body: JSON.stringify({
                 source: SOURCE,
+                actorId: process.env.APIFY_ACT_ID ?? null,
                 actorRunId: process.env.APIFY_ACTOR_RUN_ID ?? 'local',
+                defaultDatasetId: process.env.APIFY_DEFAULT_DATASET_ID ?? null,
                 itemCount: totalPassed,
                 totalScraped: totalFound,
                 marketcheckPriced: totalMarketcheck,
