@@ -3,5 +3,7 @@
   "name": "ds-jjkane",
   "version": "0.0",
   "buildTag": "latest",
-  "environmentVariables": {}
+  "environmentVariables": {
+    "MARKETCHECK_KEY": "@MARKETCHECK_KEY"
+  }
 }
