@@ -765,7 +765,10 @@ def _find_recent_webhook_replay(
 def _select_recent_replay_row(rows: list[dict]) -> Optional[dict]:
     for row in rows:
         status = str(row.get("processing_status") or "").lower()
-        if status in {"processed", "pending", "ignored_replay"}:
+        # Only block replays if already successfully processed.
+        # 'pending' means received but not yet processed — allow retry.
+        # 'ignored_replay' should not cascade-block future legitimate runs.
+        if status in {"processed"}:
             return row
     return None
 
