@@ -565,6 +565,8 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         or nested_resource.get("actId")
         or nested_resource.get("actorId")
         or event_data.get("actorId")
+        or payload.get("actId")
+        or payload.get("actorId")
         or payload.get("actor_id")
     )
     run_id = (
@@ -572,6 +574,7 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         or nested_resource.get("id")
         or event_data.get("actorRunId")
         or event_data.get("runId")
+        or payload.get("id")
         or payload.get("run_id")
     )
     dataset_id = (
@@ -579,6 +582,7 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         or nested_resource.get("defaultDatasetId")
         or event_data.get("defaultDatasetId")
         or payload.get("defaultDatasetId")
+        or payload.get("defaultDatasetID")
         or payload.get("datasetId")
     )
 
