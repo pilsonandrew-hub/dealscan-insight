@@ -2046,35 +2046,57 @@ def score_vehicle(vehicle: dict) -> dict:
         except (TypeError, ValueError):
             estimated_auction_price = 0.0
         source_site_lower = (vehicle.get("source_site") or "").lower()
-        if source_site_lower == "jjkane" and (actual_current_bid or 0) <= 0 and (estimated_auction_price or 0) > 0:
-            scored_vehicle_tier = result.get("vehicle_tier") or vehicle.get("vehicle_tier")
-            min_margin_target = float(result.get("min_margin_target") or 0)
-            gross_margin = float(result.get("gross_margin") or 0)
-            max_bid = float(result.get("max_bid") or 0)
-            bid_value = float(vehicle.get("current_bid") or 0)
-            structural_ceiling_pass = bid_value > 0 and bid_value <= max_bid and gross_margin >= min_margin_target and scored_vehicle_tier != "rejected"
-            if structural_ceiling_pass:
-                lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
-                result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
-                result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
-                result["pricing_maturity"] = "market_comp"
-                result["expected_close_source"] = "jjkane_estimated_auction_price"
-                result["acquisition_basis_source"] = "jjkane_estimated_auction_price"
-                result["ceiling_reason"] = "jjkane_estimated_close_bid"
-                result["ceiling_pass"] = True
-                roi_pct = float(result.get("roi_pct") or 0)
-                dos_score = float(result.get("dos_score") or 0)
-                if scored_vehicle_tier == "rejected":
-                    investment_grade = "Rejected"
-                elif dos_score >= 80 and roi_pct >= 20:
-                    investment_grade = "Platinum"
-                elif dos_score >= 65 and roi_pct >= 12:
-                    investment_grade = "Gold"
-                elif dos_score >= 50:
-                    investment_grade = "Silver"
-                else:
-                    investment_grade = "Bronze"
-                result["investment_grade"] = investment_grade
+        scored_vehicle_tier = result.get("vehicle_tier") or vehicle.get("vehicle_tier")
+        min_margin_target = float(result.get("min_margin_target") or 0)
+        gross_margin = float(result.get("gross_margin") or 0)
+        max_bid = float(result.get("max_bid") or 0)
+        bid_value = float(vehicle.get("current_bid") or 0)
+        auction_stage_hours_remaining = result.get("auction_stage_hours_remaining")
+        structural_ceiling_pass = bid_value > 0 and bid_value <= max_bid and gross_margin >= min_margin_target and scored_vehicle_tier != "rejected"
+
+        if source_site_lower == "jjkane" and (actual_current_bid or 0) <= 0 and (estimated_auction_price or 0) > 0 and structural_ceiling_pass:
+            lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
+            result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
+            result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
+            result["pricing_maturity"] = "market_comp"
+            result["expected_close_source"] = "jjkane_estimated_auction_price"
+            result["acquisition_basis_source"] = "jjkane_estimated_auction_price"
+            result["ceiling_reason"] = "jjkane_estimated_close_bid"
+            result["ceiling_pass"] = True
+            roi_pct = float(result.get("roi_pct") or 0)
+            dos_score = float(result.get("dos_score") or 0)
+            if scored_vehicle_tier == "rejected":
+                investment_grade = "Rejected"
+            elif dos_score >= 80 and roi_pct >= 20:
+                investment_grade = "Platinum"
+            elif dos_score >= 65 and roi_pct >= 12:
+                investment_grade = "Gold"
+            elif dos_score >= 50:
+                investment_grade = "Silver"
+            else:
+                investment_grade = "Bronze"
+            result["investment_grade"] = investment_grade
+
+        if source_site_lower == "proxibid" and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
+            lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
+            result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
+            result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
+            result["pricing_maturity"] = "market_comp"
+            result["ceiling_reason"] = "proxibid_live_bid_near_close"
+            result["ceiling_pass"] = True
+            roi_pct = float(result.get("roi_pct") or 0)
+            dos_score = float(result.get("dos_score") or 0)
+            if scored_vehicle_tier == "rejected":
+                investment_grade = "Rejected"
+            elif dos_score >= 80 and roi_pct >= 20:
+                investment_grade = "Platinum"
+            elif dos_score >= 65 and roi_pct >= 12:
+                investment_grade = "Gold"
+            elif dos_score >= 50:
+                investment_grade = "Silver"
+            else:
+                investment_grade = "Bronze"
+            result["investment_grade"] = investment_grade
 
         return result
 
