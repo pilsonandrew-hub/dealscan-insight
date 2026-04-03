@@ -1505,8 +1505,8 @@ def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] =
     matched = False
     for pattern, unit in (
         (r"(\d+)\s*day", "days"),
-        (r"(\d+)\s*hour", "hours"),
-        (r"(\d+)\s*min", "minutes"),
+        (r"(\d+)\s*(?:hour|hr|hrs|h)\b", "hours"),
+        (r"(\d+)\s*(?:min|mins|minute|minutes|m)\b", "minutes"),
     ):
         match = re.search(pattern, lower_text)
         if match:
@@ -1643,10 +1643,10 @@ def normalize_apify_vehicle(
         # Bid: parseforge uses currentBid, ours uses current_bid
         current_bid = float(item.get("currentBid") or item.get("current_bid") or 0)
 
-        # Mileage: parseforge puts in meterCount when type is odometer; jjkane uses odometer
+        # Mileage: parseforge puts in meterCount when type is odometer; jjkane uses odometer.
+        # Some sources (for example Proxibid) often omit mileage entirely; allow None and let
+        # downstream scoring/gating decide instead of blanket normalization rejection.
         mileage = item.get("mileage") or item.get("meterCount") or item.get("odometer")
-        if not mileage and mileage != 0:
-            return None
 
         def _extract_numeric_key(*keys: str) -> Optional[float]:
             for key in keys:
@@ -1668,7 +1668,9 @@ def normalize_apify_vehicle(
             item.get("auctionEndUtc") or
             item.get("auction_end_time") or
             item.get("auction_end_date") or
-            item.get("auction_end"),
+            item.get("auction_end") or
+            item.get("time_left") or
+            item.get("timeLeft"),
             reference_dt=time_anchor,
         )
 
