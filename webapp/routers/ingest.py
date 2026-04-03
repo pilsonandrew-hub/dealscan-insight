@@ -574,6 +574,8 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         or nested_resource.get("id")
         or event_data.get("actorRunId")
         or event_data.get("runId")
+        or payload.get("actorRunId")
+        or payload.get("runId")
         or payload.get("id")
         or payload.get("run_id")
     )
@@ -584,6 +586,7 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         or payload.get("defaultDatasetId")
         or payload.get("defaultDatasetID")
         or payload.get("datasetId")
+        or payload.get("defaultDataset")
     )
 
     return {
@@ -594,6 +597,7 @@ def extract_apify_webhook_metadata(payload: dict) -> dict:
         "item_count": item_count,
         "created_at": _parse_datetime_utc(
             payload.get("createdAt")
+            or payload.get("timestamp")
             or event_data.get("createdAt") if isinstance(event_data, dict) else None
             or resource.get("createdAt")
             or resource.get("startedAt")
