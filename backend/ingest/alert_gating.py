@@ -15,6 +15,7 @@ class AlertThresholds:
     min_score: float = 80.0
     platinum_min_roi_day: float = 75.0
     min_bid_headroom: float = 0.0
+    min_trust_score: float = 0.25
     min_confidence: float = 55.0
 
 
@@ -135,6 +136,14 @@ def evaluate_alert_gate(
     confidence = signals["confidence"]
     if confidence is not None and confidence < config.min_confidence:
         reasons.append(f"confidence<{config.min_confidence:.0f}")
+
+    current_bid_trust_score = signals["current_bid_trust_score"]
+    if current_bid_trust_score is not None and current_bid_trust_score < config.min_trust_score:
+        reasons.append(f"trust<{config.min_trust_score:.2f}")
+
+    bid_headroom = signals["bid_headroom"]
+    if bid_headroom is not None and bid_headroom < config.min_bid_headroom:
+        reasons.append(f"headroom<{config.min_bid_headroom:.0f}")
 
     alert_type = None
     if not reasons:
