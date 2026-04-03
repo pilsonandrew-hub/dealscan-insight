@@ -2077,7 +2077,7 @@ def score_vehicle(vehicle: dict) -> dict:
                 investment_grade = "Bronze"
             result["investment_grade"] = investment_grade
 
-        if source_site_lower in {"proxibid", "hibid"} and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
+        if source_site_lower in {"proxibid", "hibid", "gsaauctions"} and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
             lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
             result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
             result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
@@ -3329,6 +3329,7 @@ def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str],
             existing_score = float(existing.get("dos_score") or 0)
             should_update = new_dos_score > existing_score
             return existing_id, should_update
+        return None, False
     except Exception as vin_check_err:
         logger.warning("[DEDUP] VIN duplicate check failed for VIN %s: %s", vin, vin_check_err)
         raise
