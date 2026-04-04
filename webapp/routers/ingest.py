@@ -1118,23 +1118,6 @@ async def _process_webhook_items(
                 )
                 continue
 
-            if score_result.get("investment_grade") == "Bronze":
-                logger.info(f"[CEILING] bronze reject: {vehicle.get('title','?')[:60]}")
-                skipped += 1
-                _increment_reason_counter(skip_reasons, "bronze_reject")
-                _record_delivery_log(
-                    run_id=vehicle.get("run_id") or apify_run_id,
-                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
-                    listing_url=vehicle.get("listing_url"),
-                    opportunity_id=None,
-                    channel="db_save",
-                    status="skipped_bronze",
-                    error_message="bronze_reject",
-                    require_durable=True,
-                    audit_state=audit_state,
-                )
-                continue
-
             if not score_result.get("ceiling_pass", True):
                 logger.info(
                     f"[CEILING] rejected — {score_result.get('ceiling_reason')} | "

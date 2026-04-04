@@ -1,11 +1,13 @@
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from backend.ingest.manheim_market import get_manheim_market_data
+from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 from backend.ingest.score import CURRENT_YEAR, determine_vehicle_tier, resolve_expected_close_bid, score_deal
-from webapp.routers.ingest import normalize_apify_vehicle, passes_basic_gates, score_vehicle
+from webapp.routers.ingest import _normalize_auction_end_time, normalize_apify_vehicle, passes_basic_gates, score_vehicle
 
 
 def test_passes_basic_gates_rejects_title_brand_keywords():
@@ -111,6 +113,48 @@ def test_normalize_apify_vehicle_keeps_percent_and_flat_fee_fields_separate():
     assert normalized["buyer_premium"] == 1250.0
     assert normalized["doc_fee"] == 75.0
     assert normalized["auction_fees"] == 150.0
+
+
+def test_normalize_apify_vehicle_reads_actor_end_date_alias():
+    item = {
+        "title": "2024 Toyota Camry",
+        "current_bid": 10000,
+        "mileage": 25000,
+        "state": "CA",
+        "auction_end_date": "2026-03-26T18:00:00.000Z",
+        "listing_url": "https://example.com/lot/1",
+        "source_site": "allsurplus",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="run-1")
+
+    assert normalized is not None
+    assert normalized["auction_end_time"] == "2026-03-26T18:00:00+00:00"
+
+
+def test_normalize_auction_end_time_handles_actor_iso_and_compact_relative_formats():
+    reference = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
+
+    assert _normalize_auction_end_time("2026-03-26T18:00:00.000Z") == "2026-03-26T18:00:00+00:00"
+    assert _normalize_auction_end_time("1d 2h", reference_dt=reference) == "2026-04-04T14:00:00+00:00"
+    assert _normalize_auction_end_time("45:00", reference_dt=reference) == "2026-04-03T12:45:00+00:00"
+
+
+def test_alert_gate_blocks_proxy_only_low_confidence_rows():
+    record = {
+        "dos_score": 85,
+        "investment_grade": "Gold",
+        "pricing_maturity": "proxy",
+        "current_bid_trust_score": 0.5,
+        "mmr_confidence_proxy": 45.0,
+        "bid_headroom": 500,
+        "roi_per_day": 80,
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is False
+    assert "confidence<55" in gate["blocking_reasons"]
 
 
 def test_score_deal_subtracts_recon_reserve_from_margin():
@@ -271,6 +315,7 @@ def test_score_deal_keeps_weak_retail_evidence_on_proxy_path():
     assert result["pricing_maturity"] == "proxy"
     assert result["retail_proxy_multiplier"] is not None
     assert result["retail_asking_price_estimate"] < 27000
+    assert result["mmr_confidence_proxy"] == 90.0
 
 
 def test_expected_close_gets_more_conservative_when_confidence_is_weak():
