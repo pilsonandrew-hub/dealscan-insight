@@ -172,11 +172,11 @@ def _make_velocity_score(vehicle: dict) -> float:
         "gsaauctions": 75.0,
         "municibid": 70.0,
         "govplanet": 82.0,
-        "allsurplus": 65.0,
+        "allsurplus": 68.0,
         "jjkane": 68.0,
-        "hibid": 60.0,
-        "proxibid": 58.0,
-        "bidspotter": 55.0,
+        "hibid": 68.0,
+        "proxibid": 68.0,
+        "bidspotter": 60.0,
         "usgovbid": 74.0,
     }
     return source_scores.get(source, 55.0)
