@@ -449,6 +449,14 @@ def compute_canonical_id(vehicle: dict) -> str:
     vin = (vehicle.get("vin") or "").strip().upper()
     if len(vin) == 17:
         return hashlib.sha256(vin.encode()).hexdigest()[:32]
+
+    # Use listing_url as high-entropy fallback when VIN is missing.
+    # This prevents AllSurplus, GSA, and other no-VIN sources from false-deduplicating
+    # distinct vehicles that share year/make/model/state but have no mileage/VIN.
+    listing_url = (vehicle.get("listing_url") or "").strip()
+    if listing_url:
+        return hashlib.sha256(listing_url.encode()).hexdigest()[:32]
+
     year = str(vehicle.get("year") or vehicle.get("model_year") or "")
     make = _normalize_make(vehicle.get("make") or "")
     model = _normalize_model(vehicle.get("model") or "")
@@ -1503,20 +1511,33 @@ def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] =
     lower_text = text.lower()
     total_delta = timedelta(0)
     matched = False
-    for pattern, unit in (
-        (r"(\d+)\s*day", "days"),
-        (r"(\d+)\s*(?:hour|hr|hrs|h)\b", "hours"),
-        (r"(\d+)\s*(?:min|mins|minute|minutes|m)\b", "minutes"),
-    ):
-        match = re.search(pattern, lower_text)
-        if match:
-            matched = True
-            total_delta += timedelta(**{unit: int(match.group(1))})
+
+    # Handle HH:MM:SS or MM:SS countdown format (e.g. "12:34:56" or "45:00")
+    hms_match = re.fullmatch(r'(\d+):(\d{2}):(\d{2})', text.strip())
+    ms_match = re.fullmatch(r'(\d+):(\d{2})', text.strip()) if not hms_match else None
+    if hms_match:
+        h, m, s = int(hms_match.group(1)), int(hms_match.group(2)), int(hms_match.group(3))
+        total_delta = timedelta(hours=h, minutes=m, seconds=s)
+        matched = True
+    elif ms_match:
+        m, s = int(ms_match.group(1)), int(ms_match.group(2))
+        total_delta = timedelta(minutes=m, seconds=s)
+        matched = True
+    else:
+        # Spelled-out and compact relative formats:
+        # "2 days 4 hours", "1d 2h", "45 minutes", "45m", "3 hrs"
+        for pattern, unit in (
+            (r'(\d+)\s*d(?:ay(?:s)?)?\b', "days"),
+            (r'(\d+)\s*(?:hour|hr|hrs|h)\b', "hours"),
+            (r'(\d+)\s*(?:min(?:ute)?(?:s)?|m)\b', "minutes"),
+        ):
+            match = re.search(pattern, lower_text)
+            if match:
+                matched = True
+                total_delta += timedelta(**{unit: int(match.group(1))})
 
     if matched:
-        anchor = reference_dt or _parse_datetime_utc(datetime.now(timezone.utc))
-        if anchor is None:
-            return None
+        anchor = reference_dt or datetime.now(timezone.utc)
         return (anchor + total_delta).astimezone(timezone.utc).isoformat()
 
     return None
