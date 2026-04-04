@@ -31,6 +31,13 @@ const BASE_UI_URL = 'https://www.gsaauctions.gov';
 // Vehicle category codes
 const VEHICLE_CATEGORY_CODES = new Set(['300', '310', '320', '330', '340', '350', '360', '370']);
 
+const US_STATES = new Set([
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC'
+]);
+
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
     'AL', 'LA', 'OK', 'AR', 'MS', 'KY', 'WV', 'MD', 'DE', 'NJ', 'PA', 'OH', 'MI', 'IN', 'IL',
@@ -210,16 +217,10 @@ for (let page = startPage; page <= totalPages; page++) {
         // Keyword search filter
         if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) continue;
 
-        // State filter
-        if (stateCode && !TARGET_STATES.has(stateCode)) continue;
-
-        // Rust state filter
-        if (stateCode && HIGH_RUST_STATES.has(stateCode)) {
-            const { year } = parseVehicleTitle(title);
-            if (!year || year < currentYear - 2) {
-                console.log(`[GSA] Skipping rust-state ${stateCode} old vehicle: ${title}`);
-                continue;
-            }
+        // State filter: only reject non-US states — let ingest pipeline apply rust/target-state logic
+        if (stateCode && !US_STATES.has(stateCode)) {
+            console.log(`[GSA] Skipping non-US state ${stateCode}: ${title}`);
+            continue;
         }
 
         const currentBid = parseBid(item.currentBid);
