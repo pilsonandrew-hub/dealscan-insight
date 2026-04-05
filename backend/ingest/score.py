@@ -632,6 +632,14 @@ def score_deal(
     fees_cfg: Optional[dict] = None,
     rates_cfg: Optional[dict] = None,
     miles_cfg: Optional[dict] = None,
+    # Condition-relevant fields for ai_confidence scoring.
+    # Without these, vehicle_proxy uses "unknown" title_status and no photos,
+    # capping ai_confidence at ~66.5 and making the gate unreachable.
+    title_status: Optional[str] = None,
+    description: Optional[str] = None,
+    photos: Optional[list] = None,
+    damage_type: Optional[str] = None,
+    title: Optional[str] = None,
 ) -> dict:
     """
     Primary DOS scoring function.
@@ -763,8 +771,14 @@ def score_deal(
         "auction_end_date": auction_end,
         "pricing_updated_at": pricing_updated_at,
         "scraped_at": pricing_updated_at,
-        "title_status": "unknown",
-        "description": "",
+        # Pass through real condition fields so ai_confidence reflects actual vehicle quality.
+        # Without these, condition_score is stuck at 65 (unknown title) and missing_photos
+        # always fires, capping the formula at 66.5 and making the gate effectively dead.
+        "title_status": title_status or "unknown",
+        "description": description or "",
+        "photos": photos or [],
+        "damage_type": damage_type or "",
+        "title": title or "",
     }
 
     risk_flags = compute_risk_flags(vehicle_proxy, vehicle_tier)
@@ -838,26 +852,31 @@ def score_deal(
     )
 
     # AI confidence gate — lane-aware thresholds
-    # Premium >= 70, Standard >= 80
-    # Note: standard max possible score on proxy pricing = (0.5*100*0.35)+(100*0.25)+(100*0.40) = 82.5
-    # The prior threshold of 85 (tightened 2026-03-27) made it mathematically impossible
-    # for standard-tier proxy-priced vehicles to pass, filtering ~458 legit deals/day.
-    # Recalibrated to 80 on 2026-04-05 (Codex audit finding).
+    # Premium >= 65, Standard >= 75
+    # Formula: (trust*100*0.35) + ((100-risk_penalty)*0.25) + (condition_score*0.40)
+    # Real achievable maxes through score_deal (2026-04-05 Claude Code audit):
+    #   proxy pricing, clean title, 0 risk flags: (0.5*100*0.35)+(100*0.25)+(90*0.40) = 78.5
+    #   proxy pricing, unknown title, 0 flags:   (0.5*100*0.35)+(100*0.25)+(65*0.40) = 68.5
+    #   proxy pricing, unknown, missing_photos:   17.5 + (100-8)*0.25 + 65*0.40  = 66.5
+    # Threshold is set below the clean-title max (78.5) to allow good-quality vehicles through
+    # while still requiring meaningful confidence.
     ai_conf_threshold = 0.0
     if vehicle_tier == "premium":
-        ai_conf_threshold = 70.0
+        ai_conf_threshold = 65.0
     elif vehicle_tier == "standard":
-        ai_conf_threshold = 80.0
+        ai_conf_threshold = 75.0
 
     # Strong-structural-economics bypass: if bid is <=50% of max_bid (extreme headroom),
     # the deal economics are so compelling that a weak AI confidence score on proxy
     # pricing is not a meaningful signal — it just means no comps exist yet (early auction).
     # We still require ceiling_pass (bid <= max_bid, margin >= floor) to be True.
+    # Explicitly exclude frame_damage — structural defects invalidate economic headroom signals.
     _strong_structural = (
         ceiling_pass
         and max_bid > 0
         and bid_value > 0
         and (bid_value / max_bid) <= 0.50
+        and "frame_damage" not in risk_flags
     )
     ceiling_pass = ceiling_pass and (
         vehicle_tier == "rejected"
