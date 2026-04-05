@@ -823,8 +823,17 @@ def score_deal(
     acquisition_price_basis = _round_price_basis(bid_value)
     ctm_pct = (bid_value / mmr) if mmr > 0 else None
 
+    # Weighted risk penalty: severity-aware rather than uniform 15pts/flag.
+    # frame_damage = high-severity (15pts), others = low-severity (8pts).
+    # This prevents benign flags like 'missing_photos' from unconditionally
+    # blocking structurally sound vehicles — a single missing-photo flag
+    # was enough to drop below threshold and reject a deal with $8k headroom.
+    _risk_penalty = sum(
+        15.0 if f == "frame_damage" else 8.0
+        for f in risk_flags
+    )
     ai_confidence_score = round(
-        _clamp((trust_score * 100.0 * 0.35) + ((100.0 - len(risk_flags) * 15.0) * 0.25) + (_condition_score(vehicle_proxy) * 0.40)),
+        _clamp((trust_score * 100.0 * 0.35) + ((100.0 - _risk_penalty) * 0.25) + (_condition_score(vehicle_proxy) * 0.40)),
         1,
     )
 
