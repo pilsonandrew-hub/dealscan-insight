@@ -10,9 +10,21 @@ from webapp.database import get_db
 from webapp.models.user import User
 from webapp.models.vehicle import Vehicle, Opportunity, MLModel
 from webapp.auth import get_current_user, get_current_admin_user
-from webapp.ml.price_predictor import PricePredictor
-from webapp.ml.risk_assessor import RiskAssessor
-from webapp.ml.opportunity_scorer import OpportunityScorer
+
+# Lazy-import ML modules so numpy/sklearn missing doesn't crash router registration.
+# All ML endpoints check ml_enabled before calling these.
+try:
+    from webapp.ml.price_predictor import PricePredictor
+    from webapp.ml.risk_assessor import RiskAssessor
+    from webapp.ml.opportunity_scorer import OpportunityScorer
+    _ML_AVAILABLE = True
+except ImportError as _ml_import_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "ML modules unavailable (numpy/sklearn not installed): %s", _ml_import_err
+    )
+    PricePredictor = RiskAssessor = OpportunityScorer = None  # type: ignore[assignment,misc]
+    _ML_AVAILABLE = False
 
 router = APIRouter()
 
@@ -49,10 +61,10 @@ class ModelPerformanceResponse(BaseModel):
     last_trained: str
     status: str
 
-# Initialize ML models
-price_predictor = PricePredictor()
-risk_assessor = RiskAssessor()
-opportunity_scorer = OpportunityScorer()
+# Initialize ML models (only when packages are available)
+price_predictor = PricePredictor() if _ML_AVAILABLE else None
+risk_assessor = RiskAssessor() if _ML_AVAILABLE else None
+opportunity_scorer = OpportunityScorer() if _ML_AVAILABLE else None
 
 @router.post("/predict-price", response_model=PredictionResponse)
 async def predict_price(

@@ -1,7 +1,12 @@
 """
 File upload validation utilities
 """
-import magic
+try:
+    import magic
+    _MAGIC_AVAILABLE = True
+except ImportError:
+    magic = None  # type: ignore
+    _MAGIC_AVAILABLE = False
 from typing import Dict, List
 from fastapi import UploadFile
 from config.settings import settings

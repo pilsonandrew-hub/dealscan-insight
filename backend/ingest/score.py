@@ -839,7 +839,22 @@ def score_deal(
         ai_conf_threshold = 70.0
     elif vehicle_tier == "standard":
         ai_conf_threshold = 80.0
-    ceiling_pass = ceiling_pass and (vehicle_tier == "rejected" or ai_confidence_score >= ai_conf_threshold)
+
+    # Strong-structural-economics bypass: if bid is <=50% of max_bid (extreme headroom),
+    # the deal economics are so compelling that a weak AI confidence score on proxy
+    # pricing is not a meaningful signal — it just means no comps exist yet (early auction).
+    # We still require ceiling_pass (bid <= max_bid, margin >= floor) to be True.
+    _strong_structural = (
+        ceiling_pass
+        and max_bid > 0
+        and bid_value > 0
+        and (bid_value / max_bid) <= 0.50
+    )
+    ceiling_pass = ceiling_pass and (
+        vehicle_tier == "rejected"
+        or ai_confidence_score >= ai_conf_threshold
+        or _strong_structural
+    )
 
     return {
         "dos_score": selected_dos,

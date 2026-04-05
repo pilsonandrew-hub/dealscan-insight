@@ -1,7 +1,10 @@
 """
 CSV processing utilities with data validation and sanitization
 """
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None  # type: ignore
 import re
 from typing import Dict, List, Any
 from datetime import datetime
