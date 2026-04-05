@@ -550,7 +550,7 @@ for (const searchText of searchTerms) {
 const effectiveWebhookUrl = webhookUrl
     || process.env.WEBHOOK_URL
     || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
-const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || '';
+const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
 
 if (effectiveWebhookUrl && totalPassed > 0) {
     try {
@@ -558,7 +558,7 @@ if (effectiveWebhookUrl && totalPassed > 0) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-webhook-secret': effectiveWebhookSecret,
+                'x-apify-webhook-secret': effectiveWebhookSecret,
             },
             body: JSON.stringify({
                 source: SOURCE,

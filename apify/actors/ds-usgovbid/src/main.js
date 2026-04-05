@@ -152,45 +152,54 @@ function parseDate(v) {
 /**
  * Parse lot cards from ALS (bid.auctionlistservices.com) auction catalog HTML.
  *
- * Card structure:
- *   <div class="card lot-list-item" id="lot-list-item-{uuid}" data-lot-id="{uuid}">
- *     <a href="/auctions/{id}/{ref}/lot-details/{uuid}">  ← lot URL + image
- *       <img class="lot-grid-image" src="...">
- *     </a>
- *     <div class="content lot-grid-content">
- *       <div class="meta lot-number">1A</div>
- *       <a class="header lot-grid-header" name="lot-title" href="...">TITLE</a>
- *       <div class="current-bid-value" data-current-bid="1234.0">1,234</div>
- *       ...
+ * Card structure (updated 2026-04-05):
+ *   <div class="ui items">
+ *     <div class="item">
+ *       <div class="content overflow-wrap">
+ *         <div class="item lot-number">
+ *           <div class="ui small header lot-number-header">Lot 1A</div>
+ *         </div>
+ *         <a class="header" alt="Title here" href="/past-auctions/{ref}/lot-details/{uuid}">TITLE</a>
+ *         <div class="description">...</div>
+ *         <div class="ui list">
+ *           <div class="item current-bid">
+ *             <div class="content flexable">
+ *               <div class="list-item-info-header">Current Bid</div>
+ *               <div class="description description-en-gb"><span class="current-bid-value">$1,234</span></div>
+ *             </div>
+ *           </div>
+ *         </div>
+ *       </div>
  *     </div>
  *   </div>
  */
 function extractAuctionItems($, auctionEndDate) {
     const items = [];
 
-    $('.lot-list-item').each((i, el) => {
+    // :has() not supported in Cheerio v1 — filter with JS instead
+    $('div.ui.items .item').filter((i, el) => $(el).find('.lot-number-header').length > 0).each((i, el) => {
         const $el = $(el);
 
         // Title
-        const titleEl = $el.find('a[name="lot-title"], a.lot-grid-header').first();
-        const title = normalizeText(titleEl.text() || titleEl.attr('title') || '');
+        const titleEl = $el.find('a.header[href*="/lot-details/"], a.header[href*="/past-auctions/"]').first();
+        const title = normalizeText(titleEl.text() || titleEl.attr('alt') || '');
         if (!title) return;
 
         // Lot URL — href is relative, prepend BID_BASE
         const href = titleEl.attr('href') || $el.find('a[href*="lot-details"]').first().attr('href') || '';
         const listing_url = href ? (href.startsWith('http') ? href : `${BID_BASE}${href}`) : '';
 
-        // Current bid — prefer data-current-bid attribute (numeric, always present even if 0)
-        const bidEl = $el.find('.current-bid-value').first();
-        const bidAttr = bidEl.attr('data-current-bid');
-        const current_bid = bidAttr !== undefined ? parseFloat(bidAttr) : parseBid(bidEl.text());
+        // Current bid — text inside .current-bid-value span, strip $ and commas
+        const bidEl = $el.find('.item.current-bid .current-bid-value').first();
+        const bidText = normalizeText(bidEl.text());
+        const current_bid = bidText ? parseFloat(bidText.replace(/[$,]/g, '')) || 0 : 0;
 
-        // Photo
-        const imgEl = $el.find('img.lot-grid-image').first();
-        const photo_url = imgEl.attr('src') || imgEl.attr('data-zoom-src') || '';
+        // Photo — CDN image from globalauctionplatform
+        const imgEl = $el.find('img[src*="globalauctionplatform"], img[src*="cdn."]').first();
+        const photo_url = imgEl.attr('src') || '';
 
         // Lot number
-        const lot_num = normalizeText($el.find('.meta.lot-number').first().text());
+        const lot_num = normalizeText($el.find('.lot-number-header').first().text());
 
         items.push({ title, listing_url, current_bid, auction_end_time: auctionEndDate, photo_url, lot_num });
     });
@@ -257,8 +266,8 @@ const crawler = new PlaywrightCrawler({
         log.info(`Processing auction: ${auctionMeta.title} [${auctionMeta.state}] — ${request.url}`);
 
         // Wait for lot cards to render
-        await page.waitForSelector('.lot-list-item', { timeout: 30000 }).catch(() => {
-            log.warning(`No .lot-list-item found on ${request.url}`);
+        await page.waitForSelector('.lot-number-header', { timeout: 30000 }).catch(() => {
+            log.warning(`No .lot-number-header found on ${request.url}`);
         });
         await page.waitForTimeout(2000);
 
@@ -294,7 +303,7 @@ const crawler = new PlaywrightCrawler({
 
             if (!nextHref) break;
             await page.goto(nextHref, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('.lot-list-item', { timeout: 20000 }).catch(() => {});
+            await page.waitForSelector('.lot-number-header', { timeout: 20000 }).catch(() => {});
             await page.waitForTimeout(1000);
             pageNum++;
         }

@@ -574,6 +574,35 @@ try {
     console.log(`[GOVDEALS FREE] Found: ${totalFound} | Passed: ${totalPassed}`);
     console.log(`[GOVDEALS] Auth initialized`);
     console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} passing lots`);
+
+    // ── Webhook notification ─────────────────────────────────────────────────────
+    const webhookUrl = process.env.WEBHOOK_URL || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
+    const webhookSecret = process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
+
+    if (webhookUrl && totalPassed > 0) {
+        try {
+            const env = Actor.getEnv();
+            const dataset = await Actor.openDataset();
+            const datasetInfo = await dataset.getInfo();
+            const resp = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-apify-webhook-secret': webhookSecret,
+                },
+                body: JSON.stringify({
+                    source: 'govdeals',
+                    runId: env.actorRunId || 'local',
+                    actorId: env.actorId || '',
+                    datasetId: datasetInfo?.id || '',
+                    itemCount: totalPassed,
+                }),
+            });
+            console.log(`[WEBHOOK] Notified ingest: HTTP ${resp.status}`);
+        } catch (err) {
+            console.warn(`[WEBHOOK] Failed: ${err.message}`);
+        }
+    }
 } catch (err) {
     console.error(`[GOVDEALS] Fatal error: ${err.message}`);
 } finally {
