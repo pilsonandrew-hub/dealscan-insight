@@ -15,7 +15,14 @@ from webapp.models.user import User
 from webapp.models.audit_log import AuditLog
 from webapp.security.password import hash_password, verify_password
 from webapp.security.jwt import create_access_token, create_refresh_token, verify_token, token_blacklist
-from webapp.security.totp import generate_totp_secret, generate_qr_code, verify_totp_code, generate_backup_codes
+try:
+    from webapp.security.totp import generate_totp_secret, generate_qr_code, verify_totp_code, generate_backup_codes
+    _TOTP_AVAILABLE = True
+except ImportError:
+    import logging as _log
+    _log.getLogger(__name__).warning("pyotp not installed — TOTP/2FA endpoints will return 503")
+    generate_totp_secret = generate_qr_code = verify_totp_code = generate_backup_codes = None  # type: ignore
+    _TOTP_AVAILABLE = False
 from webapp.auth import get_current_user, log_security_event
 
 router = APIRouter()

@@ -1,15 +1,24 @@
 """
 File upload API endpoints with security validation
 """
-import defusedxml
-defusedxml.defuse_stdlib()
+try:
+    import defusedxml
+    defusedxml.defuse_stdlib()  # Patch stdlib XML parsers against XXE attacks
+except ImportError:
+    import logging as _log
+    _log.getLogger(__name__).warning("defusedxml not installed — XML upload security hardening disabled")
 
 import io
 import csv
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-import pandas as pd
+try:
+    import pandas as pd
+    _PANDAS_AVAILABLE = True
+except ImportError:
+    pd = None  # type: ignore
+    _PANDAS_AVAILABLE = False
 from pydantic import BaseModel
 
 from webapp.database import get_db
