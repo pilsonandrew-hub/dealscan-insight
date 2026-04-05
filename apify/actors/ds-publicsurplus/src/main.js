@@ -658,5 +658,32 @@ if (vinQueue.length > 0) {
 }
 
 console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
+// ── Webhook notification ──────────────────────────────────────────────────────
+const webhookUrl = process.env.WEBHOOK_URL || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
+const webhookSecret = process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
+if (webhookUrl && totalAfterFilters > 0) {
+    try {
+        const env = Actor.getEnv();
+        const dataset = await Actor.openDataset();
+        const datasetInfo = await dataset.getInfo();
+        const resp = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-apify-webhook-secret': webhookSecret,
+            },
+            body: JSON.stringify({
+                source: 'publicsurplus',
+                runId: env.actorRunId || 'local',
+                actorId: env.actorId || '',
+                datasetId: datasetInfo?.id || '',
+                itemCount: totalAfterFilters,
+            }),
+        });
+        console.log(`[WEBHOOK] Notified ingest: HTTP ${resp.status}`);
+    } catch (err) {
+        console.warn(`[WEBHOOK] Failed: ${err.message}`);
+    }
+}
 
 await Actor.exit();
