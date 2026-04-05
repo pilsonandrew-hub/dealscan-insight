@@ -13,9 +13,26 @@ import os
 import logging
 import json
 from datetime import datetime, timezone, timedelta
+from collections import Counter
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 logger = logging.getLogger(__name__)
+
+SOURCE_ACTOR_MAP = {
+    "ds-govdeals": {"actor_id": "CuKaIAcWyFS0EPrAz", "source_site": "govdeals"},
+    "ds-publicsurplus": {"actor_id": "9xxQLlRsROnSgA42i", "source_site": "publicsurplus"},
+    "ds-municibid": {"actor_id": "svmsItf3CRBZuIntp", "source_site": "municibid"},
+    "ds-gsaauctions": {"actor_id": "fvDnYmGuFBCrwpEi9", "source_site": "gsaauctions"},
+    "ds-allsurplus": {"actor_id": "gYGIfHeYeN3EzmLnB", "source_site": "allsurplus"},
+    "ds-govplanet": {"actor_id": "pO2t5UDoSVmO1gvKJ", "source_site": "govplanet"},
+    "ds-proxibid": {"actor_id": "bxhncvtHEP712WX2e", "source_site": "proxibid"},
+    "ds-equipmentfacts": {"actor_id": "0XjoegYZVcPldLstl", "source_site": "equipmentfacts"},
+    "ds-usgovbid": {"actor_id": "6XO9La81aEmtsCT3g", "source_site": "usgovbid"},
+    "ds-jjkane": {"actor_id": "lvb7T6VMFfNUQpqlq", "source_site": "jjkane"},
+    "ds-hibid-v2": {"actor_id": "7s9e0eATTt1kuGGfE", "source_site": "hibid"},
+    "ds-bidspotter": {"actor_id": "5Eu3hfCcBBdzp6I1u", "source_site": "bidspotter"},
+}
+ACTOR_TO_SOURCE = {details["actor_id"]: details["source_site"] for details in SOURCE_ACTOR_MAP.values()}
 
 _supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 _supabase_key = (
@@ -319,4 +336,200 @@ async def dos_calibration(authorization: Optional[str] = Header(None)):
         },
         "recommendations": recommendations,
         "next_calibration_target": "velocity" if outcomes_with_bids < 10 else "margin",
+    }
+
+
+@router.get("/source-health")
+async def source_health(authorization: Optional[str] = Header(None)):
+    """
+    Return operational source-health metrics separated from portfolio summary.
+
+    This endpoint is intentionally ops-focused rather than outcome-history-focused.
+    It answers:
+      - Which sources ran recently?
+      - Which sources processed recently?
+      - Which sources are actually creating fresh opportunities?
+      - What is the fetched / saved / skipped picture for the latest observed run?
+    """
+    user_id = _verify_auth(authorization)
+    if supa is None:
+        return {"sources": [], "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    now = datetime.now(timezone.utc)
+    window_7d = (now - timedelta(days=7)).isoformat()
+
+    try:
+        opp_resp = (
+            supa.table("opportunities")
+            .select("source_site,created_at,auction_end_date")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        opp_rows = opp_resp.data or []
+
+        webhook_resp = (
+            supa.table("webhook_log")
+            .select("received_at,actor_id,run_id,item_count,processing_status,error_message")
+            .order("received_at", desc=True)
+            .limit(250)
+            .execute()
+        )
+        webhook_rows = webhook_resp.data or []
+    except Exception as exc:
+        logger.error(f"[ANALYTICS] source-health query error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Source health query failed")
+
+    counts_total: Counter[str] = Counter()
+    counts_7d: Counter[str] = Counter()
+    counts_active: Counter[str] = Counter()
+    latest_opp_by_source: dict[str, datetime] = {}
+
+    for row in opp_rows:
+        source = (row.get("source_site") or "unknown").lower()
+        counts_total[source] += 1
+
+        created_at = row.get("created_at")
+        if created_at:
+            try:
+                created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+                if source not in latest_opp_by_source or created_dt > latest_opp_by_source[source]:
+                    latest_opp_by_source[source] = created_dt
+                if created_dt >= datetime.fromisoformat(window_7d.replace("Z", "+00:00")):
+                    counts_7d[source] += 1
+            except Exception:
+                pass
+
+        auction_end = row.get("auction_end_date")
+        if auction_end in {None, ""}:
+            counts_active[source] += 1
+        else:
+            try:
+                auction_end_dt = datetime.fromisoformat(str(auction_end).replace("Z", "+00:00"))
+                if auction_end_dt > now:
+                    counts_active[source] += 1
+            except Exception:
+                pass
+
+    latest_webhook_by_source: dict[str, dict] = {}
+    for row in webhook_rows:
+        actor_id = row.get("actor_id")
+        source = ACTOR_TO_SOURCE.get(actor_id)
+        if not source:
+            continue
+        if source not in latest_webhook_by_source:
+            latest_webhook_by_source[source] = row
+
+    def _extract_counts(error_message: Optional[str]) -> dict[str, int]:
+        if not error_message:
+            return {}
+        counts: dict[str, int] = {}
+        marker = "save_outcomes={"
+        if marker in error_message:
+            try:
+                fragment = error_message.split(marker, 1)[1].split("}", 1)[0]
+                if fragment.strip():
+                    for part in fragment.split(","):
+                        if ":" not in part:
+                            continue
+                        key, value = part.split(":", 1)
+                        counts[key.strip().strip("'\"")] = int(value.strip())
+            except Exception:
+                return {}
+        return counts
+
+    def _extract_funnel(error_message: Optional[str]) -> dict[str, int]:
+        if not error_message or "funnel=" not in error_message:
+            return {}
+        try:
+            fragment = error_message.split("funnel=", 1)[1].split(";", 1)[0]
+            values: dict[str, int] = {}
+            for part in fragment.split(","):
+                if ":" not in part:
+                    continue
+                key, value = part.split(":", 1)
+                values[key.strip()] = int(value.strip())
+            return values
+        except Exception:
+            return {}
+
+    def _extract_skip_reasons(error_message: Optional[str]) -> dict[str, int]:
+        if not error_message:
+            return {}
+        counts: dict[str, int] = {}
+        marker = "skip_reasons={"
+        if marker in error_message:
+            try:
+                fragment = error_message.split(marker, 1)[1].split("}", 1)[0]
+                if fragment.strip():
+                    for part in fragment.split(","):
+                        if ":" not in part:
+                            continue
+                        key, value = part.split(":", 1)
+                        counts[key.strip().strip("'\"")] = int(value.strip())
+            except Exception:
+                return {}
+        return counts
+
+    sources = []
+    for actor_name, details in SOURCE_ACTOR_MAP.items():
+        source = details["source_site"]
+        webhook = latest_webhook_by_source.get(source, {})
+        latest_opp = latest_opp_by_source.get(source)
+        latest_opp_age_hours = None
+        if latest_opp is not None:
+            latest_opp_age_hours = round((now - latest_opp).total_seconds() / 3600, 1)
+
+        save_outcomes = _extract_counts(webhook.get("error_message"))
+        skip_reasons = _extract_skip_reasons(webhook.get("error_message"))
+        funnel = _extract_funnel(webhook.get("error_message"))
+        saved_count = funnel.get("saved")
+        if saved_count is None:
+            saved_count = sum(value for key, value in save_outcomes.items() if key.startswith("saved_"))
+        duplicate_count = funnel.get("existing")
+        if duplicate_count is None:
+            duplicate_count = save_outcomes.get("duplicate_existing", 0)
+        latest_item_count = funnel.get("items", webhook.get("item_count") or 0)
+        skipped_count = funnel.get("skipped")
+        if skipped_count is None:
+            skipped_count = max(0, int(latest_item_count) - int(saved_count) - int(duplicate_count)) if latest_item_count else None
+
+        health = "red"
+        if counts_7d.get(source, 0) > 0:
+            health = "green" if latest_opp_age_hours is not None and latest_opp_age_hours <= 24 else "yellow"
+        elif webhook.get("received_at"):
+            health = "yellow"
+
+        sources.append({
+            "actor_name": actor_name,
+            "source_site": source,
+            "health": health,
+            "latest_webhook_at": webhook.get("received_at"),
+            "latest_webhook_status": webhook.get("processing_status"),
+            "latest_run_id": webhook.get("run_id"),
+            "latest_fetched_items": latest_item_count,
+            "latest_saved_items": saved_count,
+            "latest_duplicate_items": duplicate_count,
+            "latest_skipped_items_estimate": skipped_count,
+            "latest_error_summary": webhook.get("error_message"),
+            "latest_skip_reasons": skip_reasons,
+            "latest_top_skip_reason": max(skip_reasons.items(), key=lambda item: item[1])[0] if skip_reasons else None,
+            "fresh_opportunities_7d": counts_7d.get(source, 0),
+            "total_opportunities": counts_total.get(source, 0),
+            "active_opportunities": counts_active.get(source, 0),
+            "latest_opportunity_at": latest_opp.isoformat() if latest_opp else None,
+            "latest_opportunity_age_hours": latest_opp_age_hours,
+        })
+
+    sources.sort(key=lambda row: (row["health"], row.get("latest_opportunity_age_hours") or 10**9, row["source_site"]))
+    return {
+        "generated_at": now.isoformat(),
+        "sources": sources,
+        "notes": {
+            "purpose": "operational source health, separate from portfolio summary",
+            "health_logic": {
+                "green": "fresh opportunities landed within 24h",
+                "yellow": "webhooks/runs exist but fresh opportunity contribution is stale or weak",
+                "red": "no fresh opportunity contribution and no meaningful recent signal",
+            },
+        },
     }

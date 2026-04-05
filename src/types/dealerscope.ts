@@ -205,6 +205,36 @@ export interface UploadResult {
   opportunities_generated?: number;
 }
 
+export interface SourceHealthRow {
+  actor_name: string;
+  source_site: string;
+  health: 'green' | 'yellow' | 'red';
+  latest_webhook_at: string | null;
+  latest_webhook_status: string | null;
+  latest_run_id: string | null;
+  latest_fetched_items: number | null;
+  latest_saved_items: number | null;
+  latest_duplicate_items: number | null;
+  latest_skipped_items_estimate: number | null;
+  latest_error_summary: string | null;
+  latest_skip_reasons?: Record<string, number>;
+  latest_top_skip_reason?: string | null;
+  fresh_opportunities_7d: number;
+  total_opportunities: number;
+  active_opportunities: number;
+  latest_opportunity_at: string | null;
+  latest_opportunity_age_hours: number | null;
+}
+
+export interface SourceHealthResponse {
+  generated_at: string;
+  sources: SourceHealthRow[];
+  notes?: {
+    purpose?: string;
+    health_logic?: Record<string, string>;
+  };
+}
+
 export interface ApiResponse<T> {
   data: T;
   status: "success" | "error";

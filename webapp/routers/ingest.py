@@ -440,7 +440,12 @@ def _find_title_brand_issue(vehicle: dict) -> Optional[str]:
         if not value:
             continue
         for label, pattern in _TITLE_BRAND_PATTERNS:
-            if re.search(pattern, value, re.IGNORECASE):
+            matched = re.search(pattern, value, re.IGNORECASE)
+            if not matched and field_name == "vin":
+                compact_pattern = pattern.replace(r"\b", "")
+                if compact_pattern != pattern:
+                    matched = re.search(compact_pattern, value, re.IGNORECASE)
+            if matched:
                 return f"title_brand_rejected ({field_name} matched '{label}')"
     return None
 
@@ -1270,17 +1275,31 @@ async def _process_webhook_items(
             skip_reasons,
         )
 
+        summary_message = _format_ingest_run_summary(
+            dataset_item_count=dataset_item_count,
+            evaluated=evaluated,
+            saved_count=saved_count,
+            duplicate_existing=save_outcomes.get("duplicate_existing", 0),
+            failed_save_count=failed_save_count,
+            skipped=skipped,
+            duplicate_count=duplicate_count,
+            notion_sync_count=notion_sync_count,
+            hot_deals_count=len(hot_deals),
+        )
+        detail_message = (
+            None
+            if failed_save_count == 0
+            and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
+            else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
+        )
+        combined_message = summary_message if not detail_message else f"{summary_message}; {detail_message}"
+
         update_webhook_log(
             webhook_log_id,
             "processed" if failed_save_count == 0 else "degraded",
             item_count=dataset_item_count,
             error_message=_merge_audit_error_message(
-                (
-                    None
-                    if failed_save_count == 0
-                    and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
-                    else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
-                ),
+                combined_message,
                 _audit_fallbacks(audit_state),
             ),
             require_durable=True,
@@ -1771,7 +1790,7 @@ def normalize_apify_vehicle(
             "dos_standard": None,
             "risk_flags": [],
             "bid_ceiling_pct": 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None,
-            "min_margin_target": 500 if vehicle_tier in {"premium", "standard"} else None,
+            "min_margin_target": 1500 if vehicle_tier == "premium" else 2500 if vehicle_tier == "standard" else None,
             "run_id": run_id,
             "source_run_id": run_id,
         }
@@ -2081,7 +2100,7 @@ def score_vehicle(vehicle: dict) -> dict:
                 investment_grade = "Bronze"
             result["investment_grade"] = investment_grade
 
-        if source_site_lower in {"proxibid", "hibid", "gsaauctions", "allsurplus", "municibid", "usgovbid", "govplanet"} and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
+        if source_site_lower in {"govdeals", "proxibid", "hibid", "gsaauctions", "allsurplus", "municibid", "usgovbid", "govplanet"} and structural_ceiling_pass and auction_stage_hours_remaining is not None and float(auction_stage_hours_remaining) <= 24:
             lane_floor = 85.0 if scored_vehicle_tier == "standard" else 70.0 if scored_vehicle_tier == "premium" else float(result.get("ai_confidence_score") or 0)
             result["current_bid_trust_score"] = max(float(result.get("current_bid_trust_score") or 0), 0.85)
             result["ai_confidence_score"] = max(float(result.get("ai_confidence_score") or 0), lane_floor)
@@ -2838,6 +2857,32 @@ def _merge_audit_error_message(
     return f"{error_message}; {marker}"
 
 
+def _format_ingest_run_summary(
+    *,
+    dataset_item_count: int,
+    evaluated: int,
+    saved_count: int,
+    duplicate_existing: int,
+    failed_save_count: int,
+    skipped: int,
+    duplicate_count: int,
+    notion_sync_count: int,
+    hot_deals_count: int,
+) -> str:
+    return (
+        "funnel="
+        f"items:{dataset_item_count},"
+        f"evaluated:{evaluated},"
+        f"saved:{saved_count},"
+        f"existing:{duplicate_existing},"
+        f"failed:{failed_save_count},"
+        f"skipped:{skipped},"
+        f"duplicates:{duplicate_count},"
+        f"notion_sync:{notion_sync_count},"
+        f"hot_deals:{hot_deals_count}"
+    )
+
+
 def _attach_audit_state(response: dict[str, Any], audit_state: Optional[dict[str, Any]]) -> None:
     fallbacks = _audit_fallbacks(audit_state)
     response["audit_status"] = "fallback" if fallbacks else "ok"
@@ -3532,8 +3577,8 @@ def build_opportunity_row(vehicle: dict) -> dict:
     if bid_ceiling_pct is None:
         bid_ceiling_pct = 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None
     min_margin_target = score_result.get("min_margin_target")
-    if min_margin_target is None and vehicle_tier in {"premium", "standard"}:
-        min_margin_target = 500
+    if min_margin_target is None:
+        min_margin_target = 1500 if vehicle_tier == "premium" else 2500 if vehicle_tier == "standard" else None
     return {
         "listing_id": _compute_listing_id(source_site, vehicle.get("listing_url") or ""),
         "listing_url": vehicle.get("listing_url", ""),
