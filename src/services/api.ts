@@ -3,7 +3,7 @@
  * Supabase for opportunity data, Railway for ML/rover endpoints
  */
 
-import { Opportunity, PipelineStatus, UploadResult } from '@/types/dealerscope';
+import { Opportunity, PipelineStatus, UploadResult, SourceHealthResponse } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
@@ -702,6 +702,19 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
+    return res.json();
+  },
+
+  async getSourceHealth(): Promise<SourceHealthResponse> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${API_BASE}/api/analytics/source-health`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+    });
+    if (!res.ok) throw new Error(`Source health fetch failed: ${res.status}`);
     return res.json();
   },
 

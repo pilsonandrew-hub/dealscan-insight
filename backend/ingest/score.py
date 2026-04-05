@@ -2,9 +2,20 @@ from datetime import datetime
 import re
 from typing import Optional
 
+from backend.ingest.transport import calc_transport_cost
+
+try:
+    from backend.ingest.condition import compute_condition_grade as _compute_condition_grade
+except ImportError:  # pragma: no cover - exercised in minimal local environments
+    def _compute_condition_grade(**kwargs):
+        return None
+
 
 def _current_year() -> int:
     return datetime.now().year
+
+
+CURRENT_YEAR = _current_year()
 
 HIGH_RUST_STATES = {
     "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD", "NE", "KS", "WV",
@@ -384,6 +395,48 @@ def _round_price_basis(price: float) -> float:
     return round(price / magnitude) * magnitude
 
 
+def resolve_expected_close_bid(
+    *,
+    current_bid: Optional[float],
+    max_bid: Optional[float],
+    current_bid_trust_score: Optional[float] = None,
+    auction_stage_hours_remaining: Optional[float] = None,
+    pricing_maturity: str = "proxy",
+    confidence_proxy: Optional[float] = None,
+) -> dict:
+    bid_value = _coerce_float(current_bid) or 0.0
+    cap_value = _coerce_float(max_bid) or bid_value
+    if bid_value <= 0:
+        return {
+            "expected_close_bid": 0.0,
+            "expected_close_source": "zero_bid",
+            "current_bid_trust_score": 0.0,
+            "auction_stage_hours_remaining": auction_stage_hours_remaining,
+        }
+
+    trust_score = current_bid_trust_score
+    if trust_score is None:
+        trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
+    trust_score = max(0.0, min(1.0, float(trust_score)))
+
+    confidence = _coerce_float(confidence_proxy)
+    confidence_norm = 0.5 if confidence is None else max(0.0, min(1.0, confidence / 100.0 if confidence > 1 else confidence))
+    maturity_bonus = {"live_market": 0.15, "market_comp": 0.08, "proxy": 0.0}.get(pricing_maturity, 0.0)
+    confidence_strength = max(0.0, min(1.0, (trust_score * 0.6) + (confidence_norm * 0.4) + maturity_bonus))
+
+    spread = max(0.0, cap_value - bid_value)
+    conservative_factor = max(0.05, 1.0 - (confidence_strength * 0.85))
+    expected_close_bid = bid_value + (spread * conservative_factor)
+    expected_close_bid = min(cap_value, max(bid_value, expected_close_bid))
+
+    return {
+        "expected_close_bid": round(expected_close_bid, 2),
+        "expected_close_source": "confidence_adjusted_current_bid",
+        "current_bid_trust_score": round(trust_score, 3),
+        "auction_stage_hours_remaining": auction_stage_hours_remaining,
+    }
+
+
 def _normalize_pct(value: Optional[float], default: float) -> float:
     pct = _coerce_float(value)
     if pct is None:
@@ -564,6 +617,9 @@ def score_deal(
     manheim_updated_at=None,
     buyer_premium_pct: Optional[float] = None,
     auction_fees: Optional[float] = None,
+    fees_cfg: Optional[dict] = None,
+    rates_cfg: Optional[dict] = None,
+    miles_cfg: Optional[dict] = None,
 ) -> dict:
     """
     Primary DOS scoring function.
@@ -572,6 +628,27 @@ def score_deal(
     mmr = manheim_mmr_mid or mmr_ca or 0
     bid_value = _coerce_float(bid)
     vehicle_tier = determine_vehicle_tier(year, mileage)
+
+    source_key = (source_site or "").strip() or "GovDeals"
+    fee_lookup = fees_cfg.get(source_key) if isinstance(fees_cfg, dict) and source_key in fees_cfg else None
+    if fee_lookup is None and isinstance(fees_cfg, dict):
+        fee_lookup = fees_cfg.get(source_key.lower())
+    if buyer_premium_pct is None and isinstance(fee_lookup, dict):
+        buyer_premium_pct = fee_lookup.get("buyers_premium_pct") or fee_lookup.get("buyer_premium_pct")
+    if auction_fees is None and isinstance(fee_lookup, dict):
+        auction_fees = fee_lookup.get("doc_fee") or fee_lookup.get("auction_fees")
+
+    transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg) if state else 350.0
+    condition_grade = _compute_condition_grade(
+        title=f"{year or ''} {make or ''} {model or ''}".strip(),
+        description="",
+        mileage=mileage or 0,
+        year=year or 0,
+        damage_type="",
+    )
+    recon_reserve = 650.0
+    if is_police_or_fleet:
+        recon_reserve += 300.0
     if bid_value is None or bid_value <= 0:
         buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
         bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88 if vehicle_tier == "premium" else None
@@ -603,6 +680,9 @@ def score_deal(
             "auction_stage_hours_remaining": None,
             "acquisition_price_basis": 0.0,
             "acquisition_basis_source": "zero_bid",
+            "transport": transport,
+            "recon_reserve": recon_reserve,
+            "condition_grade": condition_grade,
             "total_cost": 0.0,
             "projected_total_cost": 0.0,
             "manheim_mmr_mid": manheim_mmr_mid,
@@ -687,7 +767,7 @@ def score_deal(
     buyer_premium_amount = round((bid_value or 0) * buyer_premium_pct_value, 2) if bid_value and bid_value > 0 else 0.0
     auction_fees_value = _coerce_float(auction_fees)
     auction_fees_amount = round(auction_fees_value if auction_fees_value is not None else 200.0, 2)
-    gross_margin = round(mmr - bid_value - buyer_premium_amount - auction_fees_amount, 2) if mmr > 0 else 0.0
+    gross_margin = round(mmr - bid_value - buyer_premium_amount - auction_fees_amount - transport - recon_reserve, 2) if mmr > 0 else 0.0
     wholesale_margin = gross_margin
     retail_price = retail_comp_price_estimate or (mmr * 1.35 if mmr > 0 else 0)
 
@@ -721,7 +801,7 @@ def score_deal(
     min_margin_target = 2500.0 if vehicle_tier == "standard" else 1500.0
     ceiling_pass = bid_value <= max_bid and gross_margin >= min_margin_target and vehicle_tier != "rejected"
 
-    all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount
+    all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount + transport + recon_reserve
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
     if vehicle_tier == "rejected":
         investment_grade = "Rejected"
@@ -779,6 +859,9 @@ def score_deal(
         "auction_stage_hours_remaining": auction_stage_hours_remaining,
         "acquisition_price_basis": acquisition_price_basis,
         "acquisition_basis_source": "current_bid",
+        "transport": transport,
+        "recon_reserve": recon_reserve,
+        "condition_grade": condition_grade,
         "total_cost": all_in_cost,
         "projected_total_cost": all_in_cost,
         "manheim_mmr_mid": manheim_mmr_mid,

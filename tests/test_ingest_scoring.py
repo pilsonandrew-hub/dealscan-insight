@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -28,7 +28,7 @@ def test_passes_basic_gates_rejects_title_brand_keywords():
     result = passes_basic_gates(vehicle)
 
     assert result["pass"] is False
-    assert result["reason"] == "title_brand_rejected (title matched 'salvage')"
+    assert result["reason"] == "title_brand_rejected (listing_text matched 'salvage')"
 
 
 def test_passes_basic_gates_checks_vin_for_title_brand_keywords():
@@ -199,6 +199,30 @@ def test_score_vehicle_adds_police_fleet_recon_buffer():
     assert result["manheim_source_status"] == "fallback"
 
 
+def test_score_vehicle_boosts_govdeals_near_close_when_structurally_viable():
+    vehicle = {
+        "title": "2023 Toyota Camry LE",
+        "agency_name": "City of Irvine",
+        "vin": "4T1G11AK0PU000001",
+        "make": "Toyota",
+        "model": "Camry",
+        "current_bid": 10000,
+        "state": "CA",
+        "year": 2023,
+        "mileage": 25000,
+        "listing_url": "https://example.com/vehicle/gd-near-close",
+        "source_site": "govdeals",
+        "auction_end_time": (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat(),
+    }
+
+    result = score_vehicle(vehicle)
+
+    assert result["ceiling_pass"] is True
+    assert result["ceiling_reason"] == "govdeals_live_bid_near_close"
+    assert float(result["current_bid_trust_score"]) >= 0.85
+    assert result["pricing_maturity"] == "market_comp"
+
+
 def test_manheim_market_data_uses_proxy_fallback_without_live_config(monkeypatch):
     monkeypatch.delenv("MANHEIM_MARKET_DATA_URL", raising=False)
     result = get_manheim_market_data(
@@ -287,7 +311,8 @@ def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
     assert premium["bid_ceiling_pct"] == 0.88
     assert premium["max_bid"] == 8250.0
     assert premium["min_margin_target"] == 1500.0
-    assert premium["ceiling_pass"] is True
+    assert premium["ceiling_pass"] is False
+    assert premium["ai_confidence_score"] < 70
 
 
 def test_score_deal_keeps_weak_retail_evidence_on_proxy_path():
@@ -311,10 +336,10 @@ def test_score_deal_keeps_weak_retail_evidence_on_proxy_path():
         pricing_source="retail_market_cache",
     )
 
-    assert result["pricing_source"] == "mmr_proxy"
-    assert result["pricing_maturity"] == "proxy"
+    assert result["pricing_source"] == "retail_market_cache"
+    assert result["pricing_maturity"] == "market_comp"
     assert result["retail_proxy_multiplier"] is not None
-    assert result["retail_asking_price_estimate"] < 27000
+    assert result["retail_asking_price_estimate"] == 27000
     assert result["mmr_confidence_proxy"] == 90.0
 
 

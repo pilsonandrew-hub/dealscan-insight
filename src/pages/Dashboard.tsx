@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { useAuth } from '@/contexts/ModernAuthContext';
 import api from '@/services/api';
-import { Opportunity } from '@/types/dealerscope';
+import { Opportunity, SourceHealthRow } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
 import { OutcomeModal } from '@/components/OutcomeModal';
 import { Button } from '@/components/ui/button';
@@ -1399,6 +1399,8 @@ const AnalyticsTab = () => {
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [bidSummaryLoading, setBidSummaryLoading] = useState(true);
+  const [sourceHealth, setSourceHealth] = useState<SourceHealthRow[]>([]);
+  const [sourceHealthLoading, setSourceHealthLoading] = useState(true);
   const [logDeal, setLogDeal] = useState<DashboardOpportunity | null>(null);
   const [reconActivity, setReconActivity] = useState<ReconActivity | null>(null);
   const [reconLoading, setReconLoading] = useState(true);
@@ -1455,6 +1457,18 @@ const AnalyticsTab = () => {
     }
   }, []);
 
+  const fetchSourceHealth = useCallback(async () => {
+    try {
+      const data = await api.getSourceHealth();
+      setSourceHealth(data.sources || []);
+    } catch (e) {
+      console.error('[Analytics] source health fetch error:', e);
+      setSourceHealth([]);
+    } finally {
+      setSourceHealthLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -1470,6 +1484,7 @@ const AnalyticsTab = () => {
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
   useEffect(() => { fetchBidSummary(); }, [fetchBidSummary]);
+  useEffect(() => { fetchSourceHealth(); }, [fetchSourceHealth]);
   useEffect(() => { fetchReconActivity(); }, [fetchReconActivity]);
 
   if (loading) return <div className="p-6 text-center text-gray-500">Loading analytics...</div>;
@@ -1611,10 +1626,15 @@ const AnalyticsTab = () => {
   const stateData = Object.entries(stateMap).sort((a, b) => b[1] - a[1]).slice(0, 10)
     .map(([state, count]) => ({ state, count }));
 
-  // Deals by source
-  const srcMap: Record<string, number> = {};
-  allDeals.forEach(d => { srcMap[d.source_site] = (srcMap[d.source_site] || 0) + 1; });
-  const srcData = Object.entries(srcMap).map(([name, value]) => ({ name, value }));
+  const sourceHealthChartData = sourceHealth.map((row) => ({
+    name: row.source_site,
+    value: row.fresh_opportunities_7d,
+    health: row.health,
+    fetched: row.latest_fetched_items ?? 0,
+    saved: row.latest_saved_items ?? 0,
+    skipped: row.latest_skipped_items_estimate ?? 0,
+    latestAgeHours: row.latest_opportunity_age_hours,
+  }));
 
   // Margin over time (last 14 days)
   const today = new Date();
@@ -1773,17 +1793,86 @@ const AnalyticsTab = () => {
           </ResponsiveContainer>
         </div>
 
-        {/* Deals by Source */}
+        {/* Source Health */}
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-          <h3 className="text-sm font-semibold text-gray-300 mb-4">Deals by Source</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={srcData} cx="50%" cy="50%" outerRadius={80} dataKey="value" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                {srcData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <ReTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }} />
-            </PieChart>
-          </ResponsiveContainer>
+          <div className="flex items-start justify-between mb-4 gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-300">Source Health (Fresh Opps 7d)</h3>
+              <p className="text-xs text-gray-500">Operational truth: fresh contribution + latest run funnel, not historical portfolio mix.</p>
+            </div>
+          </div>
+          {sourceHealthLoading ? (
+            <div className="h-[260px] animate-pulse rounded-lg bg-gray-800/50" />
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={sourceHealthChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="name" tick={{ fill: '#9ca3af', fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
+                  <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} />
+                  <ReTooltip
+                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }}
+                    formatter={(value: number, _name, props: any) => {
+                      const payload = props?.payload;
+                      return [
+                        <div className="space-y-1">
+                          <div>Fresh opps 7d: {value}</div>
+                          <div>Fetched: {payload?.fetched ?? 0}</div>
+                          <div>Saved: {payload?.saved ?? 0}</div>
+                          <div>Skipped: {payload?.skipped ?? 0}</div>
+                          <div>Latest age: {payload?.latestAgeHours == null ? '—' : `${payload.latestAgeHours}h`}</div>
+                        </div>,
+                        payload?.name || 'Source',
+                      ];
+                    }}
+                  />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {sourceHealthChartData.map((entry, i) => (
+                      <Cell
+                        key={`${entry.name}-${i}`}
+                        fill={entry.health === 'green' ? '#10b981' : entry.health === 'yellow' ? '#f59e0b' : '#ef4444'}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+
+              <div className="mt-4 space-y-2">
+                {sourceHealth.map((row) => (
+                  <div key={row.source_site} className="rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${row.health === 'green' ? 'bg-emerald-500' : row.health === 'yellow' ? 'bg-amber-400' : 'bg-red-500'}`} />
+                        <span className="text-sm font-medium text-white">{row.source_site}</span>
+                      </div>
+                      <span className="text-xs text-gray-400">latest webhook: {timeAgo(row.latest_webhook_at)}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
+                      <span>fresh 7d: <span className="text-white">{row.fresh_opportunities_7d}</span></span>
+                      <span>fetched: <span className="text-white">{row.latest_fetched_items ?? 0}</span></span>
+                      <span>saved: <span className="text-white">{row.latest_saved_items ?? 0}</span></span>
+                      <span>skipped: <span className="text-white">{row.latest_skipped_items_estimate ?? 0}</span></span>
+                      <span>active opps: <span className="text-white">{row.active_opportunities}</span></span>
+                      <span>latest opp age: <span className="text-white">{row.latest_opportunity_age_hours == null ? '—' : `${row.latest_opportunity_age_hours}h`}</span></span>
+                      <span>top reject: <span className="text-white">{row.latest_top_skip_reason ?? '—'}</span></span>
+                    </div>
+                    {!!row.latest_skip_reasons && Object.keys(row.latest_skip_reasons).length > 0 && (
+                      <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap gap-2">
+                        {Object.entries(row.latest_skip_reasons)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 3)
+                          .map(([reason, count]) => (
+                            <span key={reason} className="rounded-full border border-gray-800 bg-gray-900/70 px-2 py-0.5">
+                              {reason}: <span className="text-gray-300">{count}</span>
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Margin over time */}
