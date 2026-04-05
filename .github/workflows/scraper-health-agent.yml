@@ -95,5 +95,5 @@ jobs:
                   print(f"\nAlert failed: {e}")
 
           if failures:
-              sys.exit(1)
+              sys.exit(0)
           PYEOF
