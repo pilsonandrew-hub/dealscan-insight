@@ -1,7 +1,7 @@
 """
 Audit log model for security and compliance
 """
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Index
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Text, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSON, INET
 from webapp.database import Base
