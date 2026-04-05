@@ -103,14 +103,11 @@ async def check_db_health() -> bool:
         logger.error(f"Database health check failed: {e}")
         return False
 
-# Database event listeners for monitoring (only if engine was created)
+# Database event listeners for monitoring (only if engine was created).
+# Note: 'disconnect' is a Pool-level event in SQLAlchemy 2.x, not Engine-level;
+# only register 'connect' which is valid on both Engine and Pool.
 if engine is not None:
     @event.listens_for(engine, "connect")
     def receive_connect(dbapi_connection, connection_record):
-        """Log database connections"""
+        """Log database connections."""
         logger.debug("Database connection established")
-
-    @event.listens_for(engine, "disconnect")
-    def receive_disconnect(dbapi_connection, connection_record):
-        """Log database disconnections"""
-        logger.debug("Database connection closed")
