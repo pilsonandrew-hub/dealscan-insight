@@ -260,6 +260,7 @@ _prefix_map = {
     "ml": "/api/ml",
     "admin": "/api/admin",
     "ingest": "",
+    "telegram": "/api/telegram",  # Telegram callback webhooks
     "rover": "",
     "outcomes": "",
     "analytics": "",
@@ -276,6 +277,14 @@ for _name, _mod in _routers.items():
         logger.info(f"Registered router: {_name}")
     except Exception as e:
         logger.warning(f"Could not register router {_name}: {e}")
+
+# Register Telegram callback router (separate router from ingest module)
+try:
+    from webapp.routers.ingest import telegram_router as _telegram_router
+    app.include_router(_telegram_router)
+    logger.info("Registered router: telegram_callback")
+except Exception as _e:
+    logger.warning(f"Could not register telegram_router: {_e}")
 
 
 # ---------------------------------------------------------------------------
