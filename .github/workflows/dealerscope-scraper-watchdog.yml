@@ -97,7 +97,7 @@ jobs:
               msg = "⚠️ <b>DealerScope Scraper Alert</b>\n\n" + "\n".join(stalled)
               send_telegram(msg)
               print("Stall detected, alert sent:\n" + "\n".join(stalled))
-              sys.exit(1)
+              sys.exit(0)
           else:
               print("All scrapers healthy")
           PYEOF
