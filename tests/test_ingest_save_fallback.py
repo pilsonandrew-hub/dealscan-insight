@@ -31,12 +31,28 @@ class _StubHTTPException(Exception):
         self.detail = detail
 
 
-fastapi_stub = types.ModuleType("fastapi")
-fastapi_stub.APIRouter = _StubRouter
-fastapi_stub.Request = object
-fastapi_stub.HTTPException = _StubHTTPException
-fastapi_stub.Header = lambda default=None, **kwargs: default
-sys.modules.setdefault("fastapi", fastapi_stub)
+# Only install the fastapi stub if a real fastapi isn't already loaded.
+# This prevents poisoning sys.modules for other test files when pytest
+# collects the full suite.
+if "fastapi" not in sys.modules:
+    fastapi_stub = types.ModuleType("fastapi")
+    fastapi_stub.APIRouter = _StubRouter
+    fastapi_stub.Request = object
+    fastapi_stub.HTTPException = _StubHTTPException
+    fastapi_stub.Header = lambda default=None, **kwargs: default
+    fastapi_stub.BackgroundTasks = object
+    fastapi_stub.Depends = lambda f=None: f
+    fastapi_stub.status = types.SimpleNamespace(
+        HTTP_200_OK=200, HTTP_400_BAD_REQUEST=400,
+        HTTP_401_UNAUTHORIZED=401, HTTP_403_FORBIDDEN=403,
+        HTTP_404_NOT_FOUND=404, HTTP_500_INTERNAL_SERVER_ERROR=500,
+    )
+    # Stub fastapi.responses submodule
+    _responses_stub = types.ModuleType("fastapi.responses")
+    _responses_stub.JSONResponse = dict
+    fastapi_stub.__path__ = []  # make it look like a package
+    sys.modules["fastapi"] = fastapi_stub
+    sys.modules["fastapi.responses"] = _responses_stub
 
 from webapp.routers import ingest
 

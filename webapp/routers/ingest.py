@@ -753,6 +753,12 @@ def _match_webhook_secret(presented_secret: Optional[str]) -> Optional[str]:
 
 
 def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
+    """Return True only if presented secret matches a configured entry AND the
+    current (active) secret is actually set.  A previous/rotation secret alone
+    is not sufficient when no active secret exists — that would mean we have no
+    rotation baseline and any prior-round secret would be accepted forever."""
+    if not WEBHOOK_SECRET.strip():
+        return False
     return _match_webhook_secret(presented_secret) is not None
 
 
