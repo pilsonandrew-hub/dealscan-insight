@@ -2061,6 +2061,12 @@ def score_vehicle(vehicle: dict) -> dict:
             manheim_updated_at=manheim_result.get("manheim_updated_at"),
             buyer_premium_pct=vehicle.get("buyer_premium_pct"),
             auction_fees=vehicle.get("auction_fees"),
+            # Condition-relevant fields — wire through so ai_confidence reflects actual quality
+            title_status=vehicle.get("title_status"),
+            description=vehicle.get("description"),
+            photos=vehicle.get("photos") or vehicle.get("photo_urls"),
+            damage_type=vehicle.get("damage_type"),
+            title=vehicle.get("title"),
         )
         result["mmr_estimated"] = mmr
         vehicle["mmr_estimated"] = mmr
