@@ -16,6 +16,7 @@ jobs:
           fetch-depth: 0
 
       - name: Cursor AI Code Review (PR diff)
+        continue-on-error: true
         if: github.event_name == 'pull_request'
         env:
           OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
@@ -26,11 +27,12 @@ jobs:
           if [ -z "$DIFF" ]; then echo "No code changes to review."; exit 0; fi
           PAYLOAD=$(jq -n --arg diff "$DIFF" '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"system","content":"You are a senior code reviewer for DealerScope. Flag: 1) Auth/security issues 2) Business rule violations (bid ceiling 0.88/0.80, margins, age, mileage, rust states) 3) Silent failures 4) Data integrity 5) UX/consumer trust issues. Be concise."},{"role":"user","content":$diff}]}')
           RESPONSE=$(curl -s -X POST https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
-          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"')
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"' 2>/dev/null || echo "Review unavailable")
           echo "## 🤖 Cursor AI Review" >> $GITHUB_STEP_SUMMARY
           echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
 
       - name: Cursor AI Code Review (push to main)
+        continue-on-error: true
         if: github.event_name == 'push'
         env:
           OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
@@ -42,7 +44,7 @@ jobs:
           if [ -z "$DIFF" ]; then echo "No code changes."; exit 0; fi
           PAYLOAD=$(jq -n --arg diff "$DIFF" '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"system","content":"You are a senior code reviewer for DealerScope. Flag: 1) Auth/security issues 2) Business rule violations (bid ceiling 0.88/0.80, margins, age, mileage, rust states) 3) Silent failures 4) Data integrity 5) UX/consumer trust issues. Be concise."},{"role":"user","content":$diff}]}')
           RESPONSE=$(curl -s -X POST https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
-          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"')
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"' 2>/dev/null || echo "Review unavailable")
           echo "## 🤖 Cursor AI Review (push)" >> $GITHUB_STEP_SUMMARY
           echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
 
