@@ -363,3 +363,59 @@ def test_expected_close_gets_more_conservative_when_confidence_is_weak():
 
     assert low_confidence["expected_close_bid"] >= high_confidence["expected_close_bid"]
     assert low_confidence["expected_close_bid"] > 10000
+
+
+# ─────────────────────────────────────────────────────────────
+# _auction_stage_hours_remaining — must be importable and correct
+# ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# _auction_stage_hours_remaining — must be importable and correct
+# ─────────────────────────────────────────────────────────────
+# Regression: function must exist as a standalone export in score.py.
+# The near-close trust boost in ingest.py silently broke when this
+# function was not exported — auction_stage_hours_remaining stayed
+# None forever, so govdeals/govplanet/gsaauctions/proxibid/hibid
+# near-close trust boost NEVER fired.
+
+from backend.ingest.score import _auction_stage_hours_remaining
+
+
+def test_auction_hours_remaining_importable():
+    """Must be importable directly — ingest.py relies on this."""
+    assert callable(_auction_stage_hours_remaining)
+
+
+def test_auction_hours_remaining_future():
+    future = (datetime.now(timezone.utc) + timedelta(hours=18)).isoformat()
+    result = _auction_stage_hours_remaining(future)
+    assert result is not None
+    assert result > 0
+    assert abs(result - 18.0) < 0.1
+
+
+def test_auction_hours_remaining_past_returns_none():
+    past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    assert _auction_stage_hours_remaining(past) is None, "past time must return None"
+
+
+def test_auction_hours_remaining_none_input():
+    assert _auction_stage_hours_remaining(None) is None
+
+
+def test_auction_hours_remaining_garbage_input():
+    assert _auction_stage_hours_remaining("not-a-date") is None
+
+
+def test_auction_hours_remaining_within_24h():
+    close_in_12h = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
+    result = _auction_stage_hours_remaining(close_in_12h)
+    assert result is not None
+    assert result <= 24
+
+
+def test_auction_hours_remaining_far_future_above_24h():
+    far = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    result = _auction_stage_hours_remaining(far)
+    assert result is not None
+    assert result > 24
