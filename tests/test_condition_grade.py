@@ -6,7 +6,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from backend.ingest.condition import compute_condition_grade
 
-CURRENT_YEAR = __import__("datetime").datetime.utcnow().year
+import datetime as _dt
+CURRENT_YEAR = _dt.datetime.now(_dt.timezone.utc).year
 
 
 def test_flood_damage_type_is_poor():

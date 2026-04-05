@@ -5,7 +5,10 @@ import importlib
 import logging
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.ext.declarative import declarative_base
+try:
+    from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.x
+except ImportError:
+    from sqlalchemy.ext.declarative import declarative_base  # SQLAlchemy 1.x fallback
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -94,9 +97,12 @@ def get_db() -> Session:
 
 async def check_db_health() -> bool:
     """Check database connectivity"""
+    if SessionLocal is None:
+        return False
     try:
+        from sqlalchemy import text
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))  # text() required for SQLAlchemy 2.x
         db.close()
         return True
     except Exception as e:

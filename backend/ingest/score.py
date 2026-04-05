@@ -790,13 +790,7 @@ def score_deal(
     else:
         pricing_maturity = "proxy"
 
-    hours_remaining = _parse_datetime(auction_end)
-    auction_stage_hours_remaining = None
-    if hours_remaining is not None:
-        try:
-            auction_stage_hours_remaining = (hours_remaining - datetime.now(hours_remaining.tzinfo)).total_seconds() / 3600
-        except Exception:
-            auction_stage_hours_remaining = None
+    auction_stage_hours_remaining = _auction_stage_hours_remaining(auction_end)
 
     trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
 
@@ -834,13 +828,17 @@ def score_deal(
         1,
     )
 
-    # AI confidence gate — lane-aware thresholds (tightened 2026-03-27)
-    # Premium >= 70, Standard >= 85 (higher bar for older/higher-mile vehicles)
+    # AI confidence gate — lane-aware thresholds
+    # Premium >= 70, Standard >= 80
+    # Note: standard max possible score on proxy pricing = (0.5*100*0.35)+(100*0.25)+(100*0.40) = 82.5
+    # The prior threshold of 85 (tightened 2026-03-27) made it mathematically impossible
+    # for standard-tier proxy-priced vehicles to pass, filtering ~458 legit deals/day.
+    # Recalibrated to 80 on 2026-04-05 (Codex audit finding).
     ai_conf_threshold = 0.0
     if vehicle_tier == "premium":
         ai_conf_threshold = 70.0
     elif vehicle_tier == "standard":
-        ai_conf_threshold = 85.0
+        ai_conf_threshold = 80.0
     ceiling_pass = ceiling_pass and (vehicle_tier == "rejected" or ai_confidence_score >= ai_conf_threshold)
 
     return {
