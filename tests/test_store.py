@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import tempfile
 import pytest
 import sys
 from unittest.mock import patch, MagicMock
@@ -11,8 +12,17 @@ from src.ingest.scrapers.structures import PublicListing
 
 @pytest.fixture
 def setup_test_db():
-    """Setup test database environment."""
-    os.environ['DB_PATH'] = ':memory:'
+    """Setup an isolated temp-file SQLite DB for each test and clean up after."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp_path = tmp.name
+    os.environ['DB_PATH'] = tmp_path
+    yield tmp_path
+    # Teardown: remove temp DB
+    os.environ.pop('DB_PATH', None)
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
 
 
 def example_listing(**overrides):

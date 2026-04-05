@@ -10,13 +10,20 @@ from src.ingest.scrapers.structures import PublicListing
 logger = logging.getLogger(__name__)
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-DB_PATH = os.getenv("DB_PATH", os.path.join(APP_ROOT, "data", "auction.db"))
+_DEFAULT_DB_PATH = os.path.join(APP_ROOT, "data", "auction.db")
+
+
+def _db_path() -> str:
+    """Read DB_PATH from environment at call time so tests can override it."""
+    return os.getenv("DB_PATH", _DEFAULT_DB_PATH)
 
 
 @contextmanager
 def db_connection():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    path = _db_path()
+    if path != ":memory:":
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS public_listings (

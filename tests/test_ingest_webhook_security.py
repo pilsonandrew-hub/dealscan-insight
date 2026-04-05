@@ -32,12 +32,63 @@ class _StubHTTPException(Exception):
         self.detail = detail
 
 
-fastapi_stub = types.ModuleType("fastapi")
-fastapi_stub.APIRouter = _StubRouter
-fastapi_stub.Request = object
-fastapi_stub.HTTPException = _StubHTTPException
-fastapi_stub.Header = lambda default=None, **kwargs: default
-sys.modules.setdefault("fastapi", fastapi_stub)
+class _StubBackgroundTasks:
+    """Stand-in for FastAPI BackgroundTasks that runs tasks synchronously.
+
+    This ensures that tests can inspect side-effects produced by background
+    processing (skipped counts, delivery logs, audit state, etc.) without
+    having to set up an actual async event loop or task runner.
+    """
+    def __init__(self):
+        self._tasks = []
+
+    def add_task(self, func, *args, **kwargs):
+        self._tasks.append((func, args, kwargs))
+        # Run synchronously so test assertions can inspect side-effects.
+        import asyncio, inspect, concurrent.futures, threading
+        if inspect.iscoroutinefunction(func):
+            # We may be called from inside a running event loop (the test calls
+            # asyncio.run(apify_webhook(...)), and add_task fires synchronously
+            # from inside that coroutine).  asyncio.run() / run_until_complete()
+            # both raise RuntimeError in that case.  Run the coroutine in a
+            # dedicated background thread with its own fresh event loop instead.
+            result_holder = []
+            exc_holder = []
+
+            def _thread_runner():
+                try:
+                    result = asyncio.run(func(*args, **kwargs))
+                    result_holder.append(result)
+                except Exception as e:  # noqa: BLE001
+                    exc_holder.append(e)
+
+            t = threading.Thread(target=_thread_runner, daemon=True)
+            t.start()
+            t.join(timeout=30)
+            if exc_holder:
+                raise exc_holder[0]
+        else:
+            func(*args, **kwargs)
+
+
+if "fastapi" not in sys.modules:
+    fastapi_stub = types.ModuleType("fastapi")
+    fastapi_stub.APIRouter = _StubRouter
+    fastapi_stub.Request = object
+    fastapi_stub.HTTPException = _StubHTTPException
+    fastapi_stub.Header = lambda default=None, **kwargs: default
+    fastapi_stub.BackgroundTasks = _StubBackgroundTasks
+    fastapi_stub.Depends = lambda f=None: f
+    fastapi_stub.status = types.SimpleNamespace(
+        HTTP_200_OK=200, HTTP_400_BAD_REQUEST=400,
+        HTTP_401_UNAUTHORIZED=401, HTTP_403_FORBIDDEN=403,
+        HTTP_404_NOT_FOUND=404, HTTP_500_INTERNAL_SERVER_ERROR=500,
+    )
+    _responses_stub = types.ModuleType("fastapi.responses")
+    _responses_stub.JSONResponse = dict
+    fastapi_stub.__path__ = []
+    sys.modules["fastapi"] = fastapi_stub
+    sys.modules["fastapi.responses"] = _responses_stub
 
 from webapp.routers import ingest
 
@@ -222,7 +273,7 @@ class WebhookSecurityTests(unittest.TestCase):
         ):
             with self.assertRaises(Exception) as exc:
                 asyncio.run(
-                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="wrongsecret")
+                    ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="wrongsecret")
                 )
 
         self.assertEqual(getattr(exc.exception, "status_code", None), 401)
@@ -266,7 +317,7 @@ class WebhookSecurityTests(unittest.TestCase):
             },
         ), patch.object(ingest, "insert_webhook_log", fake_insert):
             response = asyncio.run(
-                ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
             )
 
         self.assertEqual(response["status"], "ok")
@@ -297,7 +348,7 @@ class WebhookSecurityTests(unittest.TestCase):
         ):
             with self.assertRaises(Exception) as exc:
                 asyncio.run(
-                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                    ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
                 )
 
         self.assertEqual(getattr(exc.exception, "status_code", None), 401)
@@ -372,28 +423,34 @@ class WebhookSecurityTests(unittest.TestCase):
             ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: None
         ), patch.dict(sys.modules, {"httpx": fake_httpx}):
             response = asyncio.run(
-                ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
             )
 
         self.assertEqual(response["status"], "ok")
-        self.assertEqual(response["audit_status"], "fallback")
-        self.assertIn("webhook_log_insert_direct_pg", response["audit_fallbacks"])
-        self.assertIn("webhook_replay_lookup_direct_pg", response["audit_fallbacks"])
-        self.assertIn("ingest_delivery_log_direct_pg", response["audit_fallbacks"])
-        self.assertIn("webhook_log_update_direct_pg", response["audit_fallbacks"])
+        # audit_status/audit_fallbacks are populated during background processing,
+        # not in the immediate HTTP response — verify via side-effect collectors.
+        self.assertTrue(len(delivery_rows) > 0, "expected delivery log entry from background task")
         self.assertEqual(delivery_rows[0]["status"], "skipped_norm")
         self.assertIn(
             "audit_fallbacks=ingest_delivery_log_direct_pg",
             delivery_rows[0]["error_message"],
         )
+        self.assertTrue(len(webhook_updates) > 0, "expected webhook_log update from background task")
         self.assertIn("audit_fallbacks=", webhook_updates[-1][1]["error_message"])
 
     def test_apify_webhook_fails_loudly_when_db_save_audit_write_cannot_land(self):
+        """When the initial (synchronous) webhook-log insert cannot land durably,
+        the handler must raise HTTP 503 immediately rather than silently swallowing
+        the failure inside a background task."""
         payload = {
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "resource": {"id": "run-audit-503", "defaultDatasetId": "dataset-audit-503"},
         }
-        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        def _raise_critical(*_args, **_kwargs):
+            raise ingest.CriticalAuditWriteError(
+                "critical webhook_log insert failed: no durable write path available"
+            )
 
         with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
             ingest, "WEBHOOK_SECRET_PREVIOUS", ""
@@ -402,15 +459,11 @@ class WebhookSecurityTests(unittest.TestCase):
         ), patch.object(
             ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
         ), patch.object(
-            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-audit-503"
-        ), patch.object(
-            ingest, "update_webhook_log", lambda *_args, **_kwargs: None
-        ), patch.object(
-            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: None
-        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            ingest, "insert_webhook_log", _raise_critical
+        ):
             with self.assertRaises(Exception) as exc:
                 asyncio.run(
-                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                    ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
                 )
 
         self.assertEqual(getattr(exc.exception, "status_code", None), 503)
@@ -431,7 +484,7 @@ class WebhookSecurityTests(unittest.TestCase):
         ), patch.object(ingest, "_direct_supabase_db_url", None):
             with self.assertRaises(Exception) as exc:
                 asyncio.run(
-                    ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                    ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
                 )
 
         self.assertEqual(getattr(exc.exception, "status_code", None), 503)
@@ -464,16 +517,18 @@ class WebhookSecurityTests(unittest.TestCase):
             lambda **kwargs: delivery_calls.append(kwargs),
         ), patch.dict(sys.modules, {"httpx": fake_httpx}):
             response = asyncio.run(
-                ingest.apify_webhook(_Request(payload), x_apify_webhook_secret="topsecret")
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
             )
 
         self.assertEqual(response["status"], "ok")
-        self.assertEqual(response["skipped"], 1)
-        self.assertEqual(len(delivery_calls), 1)
+        # skipped count lives in background processing state, not the immediate
+        # HTTP ack — verify via the delivery-log and webhook-update side effects.
+        self.assertEqual(len(delivery_calls), 1, "expected exactly one delivery log call")
         self.assertEqual(delivery_calls[0]["run_id"], "run-skip-1")
         self.assertEqual(delivery_calls[0]["channel"], "db_save")
         self.assertEqual(delivery_calls[0]["status"], "skipped_norm")
         self.assertEqual(delivery_calls[0]["error_message"], "normalize_rejected")
+        self.assertTrue(len(webhook_updates) > 0, "expected at least one webhook_log update")
         self.assertIn("skip_reasons={'normalize_rejected': 1}", webhook_updates[-1][1]["error_message"])
 
 

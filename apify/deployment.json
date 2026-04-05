@@ -50,7 +50,7 @@
       "scheduleId": "uJyfnyv7p5UmTzPmn",
       "webhookId": "lcQSaKEq2yb3EfoZb",
       "status": "enabled",
-      "notes": "Sandhills Cloud platform — ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Schedule: every 3hr."
+      "notes": "Sandhills Cloud platform \u2014 ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Schedule: every 3hr."
     },
     "ds-usgovbid": {
       "id": "6XO9La81aEmtsCT3g",
@@ -66,7 +66,7 @@
       "webhookId": "vZW5IhQw7uTpXeFG2",
       "status": "enabled",
       "schedule": "0 */3 * * *",
-      "notes": "JJ Kane Government Surplus (jjkane.com) — Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
+      "notes": "JJ Kane Government Surplus (jjkane.com) \u2014 Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
     },
     "ds-hibid-v2": {
       "id": "7s9e0eATTt1kuGGfE",
@@ -81,17 +81,17 @@
       "webhookId": "N699FBbtfzjjhHshJ",
       "status": "enabled",
       "schedule": "0 */3 * * *",
-      "notes": "BidSpotter.com — 3-level Playwright crawler (catalogue list → catalogue → lot). AWS WAF protected, uses Apify browser fingerprinting. US-only filter applied. Build 1.0.16."
+      "notes": "BidSpotter.com \u2014 3-level Playwright crawler (catalogue list \u2192 catalogue \u2192 lot). AWS WAF protected, uses Apify browser fingerprinting. US-only filter applied. Build 1.0.16."
     },
     "ds-hibid": {
       "id": "e8UeyRvQ6QSnX5fhP",
       "status": "RETIRED",
-      "notes": "Replaced by ds-hibid-v2 (GraphQL). Lexis-solutions rented actor — disable to eliminate rental cost."
+      "notes": "Replaced by ds-hibid-v2 (GraphQL). Lexis-solutions rented actor \u2014 disable to eliminate rental cost."
     },
     "ds-bidcal": {
       "id": "DF1THdFOBSYlxyNjD",
       "status": "RETIRED",
-      "notes": "BidCal catalog lives on hibid.com — covered by ds-hibid-v2. No separate actor needed."
+      "notes": "BidCal catalog lives on hibid.com \u2014 covered by ds-hibid-v2. No separate actor needed."
     },
     "ds-auctiontime": {
       "id": "eb4oYXDf8qs1Ckbth",
@@ -100,7 +100,6 @@
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
-  "webhookSecret": "rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA",
   "scheduleInterval": "0 */3 * * *",
   "deployedAt": "2026-03-14T11:10:00.000Z",
   "lastAudit": "2026-03-21"
