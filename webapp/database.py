@@ -31,6 +31,7 @@ except Exception as exc:
     logger.warning("Supabase client init failed in webapp.database (non-fatal): %s", exc)
 
 # Create engine with proper pooling
+engine = None  # type: ignore[assignment]
 if settings.database_url.startswith("sqlite"):
     # SQLite for testing only
     engine = create_engine(
@@ -39,7 +40,7 @@ if settings.database_url.startswith("sqlite"):
         connect_args={"check_same_thread": False},
         echo=settings.debug
     )
-else:
+elif settings.database_url:
     # PostgreSQL for production
     engine = create_engine(
         settings.database_url,
@@ -49,9 +50,14 @@ else:
         pool_recycle=3600,  # Recycle connections every hour
         echo=settings.debug
     )
+else:
+    logger.warning(
+        "DATABASE_URL not set — SQLAlchemy engine not created. "
+        "Routes that depend on SessionLocal will fail at request time, not import time."
+    )
 
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Session factory — only bind to engine if one was successfully created
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None  # type: ignore[arg-type]
 
 # Base class for models
 Base = declarative_base()
@@ -97,13 +103,14 @@ async def check_db_health() -> bool:
         logger.error(f"Database health check failed: {e}")
         return False
 
-# Database event listeners for monitoring
-@event.listens_for(engine, "connect")
-def receive_connect(dbapi_connection, connection_record):
-    """Log database connections"""
-    logger.debug("Database connection established")
+# Database event listeners for monitoring (only if engine was created)
+if engine is not None:
+    @event.listens_for(engine, "connect")
+    def receive_connect(dbapi_connection, connection_record):
+        """Log database connections"""
+        logger.debug("Database connection established")
 
-@event.listens_for(engine, "disconnect") 
-def receive_disconnect(dbapi_connection, connection_record):
-    """Log database disconnections"""
-    logger.debug("Database connection closed")
+    @event.listens_for(engine, "disconnect")
+    def receive_disconnect(dbapi_connection, connection_record):
+        """Log database disconnections"""
+        logger.debug("Database connection closed")
