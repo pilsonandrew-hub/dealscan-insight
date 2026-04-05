@@ -27,3 +27,10 @@ __pycache__/
 *.pyc
 *.pyo
 runtime-artifacts/
+
+# Local data files
+data/*.db
+data/*.sqlite
+
+# Codex session artifacts
+codex-session-summary-*.md
