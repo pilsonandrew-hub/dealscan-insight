@@ -377,6 +377,18 @@ def score_deal_standard(vehicle: dict) -> float:
     return round(_clamp(score), 1)
 
 
+def _auction_stage_hours_remaining(auction_end: object) -> Optional[float]:
+    """Return hours remaining until auction_end, or None if unparseable / already ended."""
+    dt = _parse_datetime(auction_end)
+    if dt is None:
+        return None
+    try:
+        hours = (dt - datetime.now(dt.tzinfo)).total_seconds() / 3600
+        return hours if hours >= 0 else None
+    except Exception:
+        return None
+
+
 def _current_bid_trust_score(auction_stage_hours_remaining: Optional[float] = None,
                               pricing_maturity: str = "proxy") -> float:
     base = {"live_market": 0.9, "market_comp": 0.75, "proxy": 0.5}.get(pricing_maturity, 0.5)

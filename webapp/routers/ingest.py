@@ -1139,6 +1139,16 @@ async def _process_webhook_items(
                     skip_reasons,
                     f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
                 )
+                _ceiling_reason = score_result.get("ceiling_reason") or "ceiling_reject"
+                _bid = score_result.get("current_bid") or vehicle.get("current_bid") or 0
+                _max_bid = score_result.get("max_bid") or 0
+                _mmr = score_result.get("mmr_estimated") or 0
+                _headroom = score_result.get("bid_headroom") or (_max_bid - float(_bid))
+                _ceiling_msg = (
+                    f"{_ceiling_reason} | bid=${float(_bid):,.0f} max_bid=${float(_max_bid):,.0f} "
+                    f"mmr=${float(_mmr):,.0f} headroom=${float(_headroom):,.0f} "
+                    f"tier={score_result.get('vehicle_tier','?')}"
+                )
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1146,7 +1156,7 @@ async def _process_webhook_items(
                     opportunity_id=None,
                     channel="db_save",
                     status="skipped_ceiling",
-                    error_message=score_result.get("ceiling_reason") or "ceiling_reject",
+                    error_message=_ceiling_msg,
                     require_durable=True,
                     audit_state=audit_state,
                 )
