@@ -366,7 +366,12 @@ async def source_health(authorization: Optional[str] = Header(None)):
             .execute()
         )
         opp_rows = opp_resp.data or []
+    except Exception as exc:
+        logger.error(f"[ANALYTICS] source-health opportunities query error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Source health query failed")
 
+    webhook_rows = []
+    try:
         webhook_resp = (
             supa.table("webhook_log")
             .select("received_at,actor_id,run_id,item_count,processing_status,error_message")
@@ -376,8 +381,7 @@ async def source_health(authorization: Optional[str] = Header(None)):
         )
         webhook_rows = webhook_resp.data or []
     except Exception as exc:
-        logger.error(f"[ANALYTICS] source-health query error: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Source health query failed")
+        logger.warning(f"[ANALYTICS] source-health webhook_log query degraded: {exc}")
 
     counts_total: Counter[str] = Counter()
     counts_7d: Counter[str] = Counter()
