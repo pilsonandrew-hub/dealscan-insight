@@ -1613,30 +1613,30 @@ const AnalyticsTab = () => {
         {/* Top KPI row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            label="Total Opportunities"
-            value={safeSummary.total_opportunities.toLocaleString()}
-            sub="All-time pipeline"
+            label="Active Opportunities"
+            value={safeSummary.pipeline.active_opportunities.toLocaleString()}
+            sub={`${safeSummary.pipeline.fresh_opportunities_7d.toLocaleString()} fresh in 7d`}
           />
           <StatCard
             label="Bids Placed"
-            value={safeSummary.total_bids.toLocaleString()}
-            sub={`${safeSummary.total_wins} win${safeSummary.total_wins !== 1 ? 's' : ''}`}
-            accent={safeSummary.total_bids > 0}
+            value={safeSummary.execution.bids_placed.toLocaleString()}
+            sub={`${safeSummary.execution.wins} win${safeSummary.execution.wins !== 1 ? 's' : ''}`}
+            accent={safeSummary.execution.bids_placed > 0}
           />
           <StatCard
             label="Win Rate"
-            value={safeSummary.win_rate != null ? `${safeSummary.win_rate}%` : '—'}
-            sub={safeSummary.total_bids > 0 ? `${safeSummary.total_wins} / ${safeSummary.total_bids} bids` : 'No bids logged'}
-            accent={safeSummary.win_rate != null && safeSummary.win_rate > 0}
+            value={safeSummary.execution.win_rate != null ? `${safeSummary.execution.win_rate}%` : '—'}
+            sub={safeSummary.execution.bids_placed > 0 ? `${safeSummary.execution.wins} / ${safeSummary.execution.bids_placed} bids` : 'No bids logged'}
+            accent={safeSummary.execution.win_rate != null && safeSummary.execution.win_rate > 0}
           />
           <StatCard
             label="Avg Purchase vs Ceiling"
-            value={safeSummary.avg_purchase_price != null ? fmt$(safeSummary.avg_purchase_price) : '—'}
-            sub={safeSummary.avg_max_bid != null ? `ceiling ${fmt$(safeSummary.avg_max_bid)}` : 'No wins logged'}
+            value={safeSummary.execution.avg_purchase_price != null ? fmt$(safeSummary.execution.avg_purchase_price) : '—'}
+            sub={safeSummary.execution.avg_max_bid != null ? `ceiling ${fmt$(safeSummary.execution.avg_max_bid)}` : 'No wins logged'}
             accent={
-              safeSummary.avg_purchase_price != null &&
-              safeSummary.avg_max_bid != null &&
-              safeSummary.avg_purchase_price <= safeSummary.avg_max_bid
+              safeSummary.execution.avg_purchase_price != null &&
+              safeSummary.execution.avg_max_bid != null &&
+              safeSummary.execution.avg_purchase_price <= safeSummary.execution.avg_max_bid
             }
           />
         </div>
@@ -1645,26 +1645,27 @@ const AnalyticsTab = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="Recorded Outcomes"
-            value={safeSummary.total_outcomes.toLocaleString()}
+            value={safeSummary.outcomes.recorded_outcomes.toLocaleString()}
             sub="Closed deals tracked"
             accent
           />
           <StatCard
             label="Avg Gross Margin"
-            value={safeSummary.avg_gross_margin != null ? fmt$(safeSummary.avg_gross_margin) : '—'}
+            value={safeSummary.outcomes.avg_gross_margin != null ? fmt$(safeSummary.outcomes.avg_gross_margin) : '—'}
             sub="From closed outcomes"
-            accent={safeSummary.avg_gross_margin != null && safeSummary.avg_gross_margin > 0}
+            accent={safeSummary.outcomes.avg_gross_margin != null && safeSummary.outcomes.avg_gross_margin > 0}
           />
           <StatCard
             label="Avg ROI %"
-            value={safeSummary.avg_roi_pct != null ? fmtPct(safeSummary.avg_roi_pct) : '—'}
+            value={safeSummary.outcomes.avg_roi != null ? fmtPct(safeSummary.outcomes.avg_roi) : '—'}
             sub="From closed outcomes"
-            accent={safeSummary.avg_roi_pct != null && safeSummary.avg_roi_pct > 0}
+            accent={safeSummary.outcomes.avg_roi != null && safeSummary.outcomes.avg_roi > 0}
           />
           <StatCard
-            label="Alerts (30d)"
-            value={safeSummary.alerts_sent_last_30d.toLocaleString()}
-            sub="Hot deal notifications"
+            label="Summary Trust"
+            value={safeSummary.trust.completeness_score != null ? `${Math.round(safeSummary.trust.completeness_score * 100)}%` : '—'}
+            sub={safeSummary.trust.degraded_sections.length > 0 ? `Degraded: ${safeSummary.trust.degraded_sections.join(', ')}` : 'All sections healthy'}
+            accent={safeSummary.trust.degraded_sections.length === 0}
           />
         </div>
 
@@ -1673,11 +1674,11 @@ const AnalyticsTab = () => {
           {/* Wins by source */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source</p>
-            {safeSummary.wins_by_source.length === 0 ? (
+            {safeSummary.outcomes.wins_by_source.length === 0 ? (
               <p className="text-sm text-gray-500">No outcome data yet</p>
             ) : (
               <div className="space-y-1.5">
-                {safeSummary.wins_by_source.map(({ source, count }) => (
+                {safeSummary.outcomes.wins_by_source.map(({ source, count }) => (
                   <div key={source} className="flex items-center justify-between text-sm">
                     <span className="text-gray-300 truncate">{source}</span>
                     <span className="text-white font-medium ml-2 shrink-0">{count}</span>
@@ -1690,11 +1691,11 @@ const AnalyticsTab = () => {
           {/* Top makes */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by DOS Score</p>
-            {safeSummary.top_makes.length === 0 ? (
+            {safeSummary.outcomes.top_makes_by_realized_performance.length === 0 ? (
               <p className="text-sm text-gray-500">No data yet</p>
             ) : (
               <div className="space-y-1.5">
-                {safeSummary.top_makes.map(({ make, avg_dos_score, count }) => (
+                {safeSummary.outcomes.top_makes_by_realized_performance.map(({ make, avg_dos_score, count }) => (
                   <div key={make} className="flex items-center justify-between text-sm">
                     <span className="text-gray-300">{make}</span>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
