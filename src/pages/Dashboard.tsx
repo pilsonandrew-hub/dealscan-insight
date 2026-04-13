@@ -1569,12 +1569,21 @@ const AnalyticsTab = () => {
     const executionEmpty = safeSummary.execution.status === 'empty';
     const outcomesEmpty = safeSummary.outcomes.status === 'empty';
     const trustDegraded = safeSummary.trust.status === 'degraded';
+    const lowCompleteness = (safeSummary.trust.completeness_score ?? 1) < 0.5;
 
     if (pipelineActive && trustDegraded && executionEmpty && outcomesEmpty) {
       analyticsLogger.warn('Analytics summary shows live pipeline with degraded execution/outcomes context', {
         pipelineActiveOpportunities: safeSummary.pipeline.active_opportunities,
         completenessScore: safeSummary.trust.completeness_score,
         degradedSections: safeSummary.trust.degraded_sections,
+      });
+    }
+
+    if (trustDegraded && lowCompleteness) {
+      analyticsLogger.warn('Analytics trust completeness fell below threshold', {
+        completenessScore: safeSummary.trust.completeness_score,
+        degradedSections: safeSummary.trust.degraded_sections,
+        summaryRefreshedAt: safeSummary.trust.summary_refreshed_at,
       });
     }
   }, [safeSummary]);
