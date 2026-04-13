@@ -1610,6 +1610,19 @@ const AnalyticsTab = () => {
     if (!safeSummary) return null;
     return (
       <div className="space-y-4">
+        {safeSummary.trust.status === 'degraded' && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+            <p className="text-sm font-medium text-amber-300">Analytics partially degraded</p>
+            <p className="text-xs text-amber-200/80 mt-1">
+              {safeSummary.trust.degraded_sections.length > 0
+                ? `Affected: ${safeSummary.trust.degraded_sections.join(', ')}`
+                : 'Some analytics sections are currently partial.'}
+            </p>
+            {safeSummary.trust.notes.length > 0 && (
+              <p className="text-xs text-amber-200/70 mt-1">{safeSummary.trust.notes[0]}</p>
+            )}
+          </div>
+        )}
         {/* Top KPI row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
