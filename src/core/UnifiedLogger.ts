@@ -58,6 +58,10 @@ class ConsoleBackend implements LogBackend {
   }
 }
 
+const remoteLogsEnabled = import.meta.env.VITE_ENABLE_REMOTE_LOGS === 'true';
+const remoteLogsEndpoint = import.meta.env.VITE_LOGS_ENDPOINT?.trim();
+const safeRemoteLogsEndpoint = remoteLogsEnabled && remoteLogsEndpoint ? remoteLogsEndpoint : undefined;
+
 class RemoteBackend implements LogBackend {
   private buffer: LogEntry[] = [];
   private flushInterval: number;
@@ -86,8 +90,12 @@ class RemoteBackend implements LogBackend {
     this.buffer = [];
 
     try {
+      if (!safeRemoteLogsEndpoint) {
+        return;
+      }
+
       // Send to remote logging service
-      await fetch('/api/logs', {
+      await fetch(safeRemoteLogsEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -161,8 +169,8 @@ class UnifiedLogger {
     // Always use console backend
     this.backends.push(new ConsoleBackend());
     
-    // Add remote backend for production
-    if (configService.isProduction) {
+    // Add remote backend for production only when explicitly configured
+    if (configService.isProduction && safeRemoteLogsEndpoint) {
       this.backends.push(new RemoteBackend());
     }
 
