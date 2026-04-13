@@ -373,7 +373,7 @@ async def source_health(authorization: Optional[str] = Header(None)):
         opp_resp = (
             supa.table("opportunities")
             .select("source_site,created_at,auction_end_date")
-            .eq("user_id", user_id)
+            .limit(5000)
             .execute()
         )
         opp_rows = opp_resp.data or []
