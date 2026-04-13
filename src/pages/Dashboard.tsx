@@ -11,6 +11,7 @@ import { Opportunity, SourceHealthRow } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
 import { OutcomeModal } from '@/components/OutcomeModal';
 import { Button } from '@/components/ui/button';
+import { createLogger } from '@/utils/productionLogger';
 
 // ─── Icons (lucide-react is in package.json) ──────────────────────────────────
 import {
@@ -37,6 +38,8 @@ interface ScraperSource {
 }
 
 type DashboardOpportunity = Opportunity & { created_at?: string };
+
+const analyticsLogger = createLogger('AnalyticsPage');
 
 interface RoverRecommendation {
   id?: string;
@@ -1558,6 +1561,23 @@ const AnalyticsTab = () => {
     active_opportunities: toFiniteNumber(row?.active_opportunities),
     latest_skip_reasons: toPlainRecord(row?.latest_skip_reasons),
   }));
+
+  useEffect(() => {
+    if (!safeSummary) return;
+
+    const pipelineActive = safeSummary.pipeline.active_opportunities > 0;
+    const executionEmpty = safeSummary.execution.status === 'empty';
+    const outcomesEmpty = safeSummary.outcomes.status === 'empty';
+    const trustDegraded = safeSummary.trust.status === 'degraded';
+
+    if (pipelineActive && trustDegraded && executionEmpty && outcomesEmpty) {
+      analyticsLogger.warn('Analytics summary shows live pipeline with degraded execution/outcomes context', {
+        pipelineActiveOpportunities: safeSummary.pipeline.active_opportunities,
+        completenessScore: safeSummary.trust.completeness_score,
+        degradedSections: safeSummary.trust.degraded_sections,
+      });
+    }
+  }, [safeSummary]);
 
   const fetchReconActivity = useCallback(async () => {
     const userId = session?.user?.id;
