@@ -698,8 +698,13 @@ export const api = {
     avg_purchase_price: number | null;
     avg_max_bid: number | null;
   }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
     const res = await fetch(`${API_BASE}/api/analytics/summary`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
     });
     if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
     return res.json();
@@ -723,8 +728,13 @@ export const api = {
     total_gross_margin: number;
     avg_roi: number | null;
   }> {
-    const res = await fetch(`${API_BASE}/api/outcomes/summary`, {
-      headers: { 'Content-Type': 'application/json' },
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${API_BASE}/outcomes/summary`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
     });
     if (!res.ok) throw new Error(`Outcome summary fetch failed: ${res.status}`);
     return res.json();
