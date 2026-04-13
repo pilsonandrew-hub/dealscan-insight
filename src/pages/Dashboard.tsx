@@ -1621,6 +1621,10 @@ const AnalyticsTab = () => {
             {safeSummary.trust.notes.length > 0 && (
               <p className="text-xs text-amber-200/70 mt-1">{safeSummary.trust.notes[0]}</p>
             )}
+            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-amber-100/70">
+              <span>Completeness: {safeSummary.trust.completeness_score != null ? `${Math.round(safeSummary.trust.completeness_score * 100)}%` : '—'}</span>
+              <span>Refreshed: {safeSummary.trust.summary_refreshed_at ? new Date(safeSummary.trust.summary_refreshed_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}</span>
+            </div>
           </div>
         )}
         {/* Top KPI row */}
