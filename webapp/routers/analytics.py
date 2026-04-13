@@ -72,6 +72,8 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
       - alerts_sent_last_30d     (count from alert_log where sent_at > now()-30d)
     """
     user_id = _verify_auth(authorization)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     if supa is None:
         # Return zeroed structure so the UI still renders
         return {
@@ -87,6 +89,54 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             "win_rate": None,
             "avg_purchase_price": None,
             "avg_max_bid": None,
+            "pipeline": {
+                "status": "empty",
+                "scope": "system",
+                "updated_at": now_iso,
+                "active_opportunities": 0,
+                "fresh_opportunities_24h": 0,
+                "fresh_opportunities_7d": 0,
+                "hot_deals_count": 0,
+                "good_plus_deals_count": 0,
+                "avg_dos_score": None,
+                "unique_sources": 0,
+                "unique_states": 0,
+            },
+            "execution": {
+                "status": "empty",
+                "scope": "user_execution",
+                "updated_at": now_iso,
+                "bids_placed": 0,
+                "wins": 0,
+                "losses": 0,
+                "passes": 0,
+                "pending_outcomes": 0,
+                "win_rate": None,
+                "avg_max_bid": None,
+                "avg_purchase_price": None,
+                "ceiling_compliance": None,
+            },
+            "outcomes": {
+                "status": "empty",
+                "scope": "user_outcomes",
+                "updated_at": now_iso,
+                "recorded_outcomes": 0,
+                "total_gross_margin": None,
+                "avg_gross_margin": None,
+                "avg_roi": None,
+                "wins_by_source": [],
+                "top_makes_by_realized_performance": [],
+            },
+            "trust": {
+                "status": "degraded",
+                "scope": "trust",
+                "updated_at": now_iso,
+                "summary_refreshed_at": now_iso,
+                "completeness_score": 0.0,
+                "degraded_sections": ["pipeline", "execution", "outcomes", "trust"],
+                "freshness_age": 0,
+                "notes": ["Supabase client unavailable"],
+            },
         }
 
     total_opportunities = 0
@@ -101,17 +151,69 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     win_rate = None
     avg_purchase_price = None
     avg_max_bid = None
+    fresh_opportunities_24h = 0
+    fresh_opportunities_7d = 0
+    hot_deals_count = 0
+    good_plus_deals_count = 0
+    avg_dos_score = None
+    unique_sources = 0
+    unique_states = 0
+    losses = 0
+    passes = 0
+    pending_outcomes = 0
+    ceiling_compliance = None
+    degraded_sections: list[str] = []
+    notes: list[str] = []
 
     try:
         opp_resp = (
             supa.table("opportunities")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
+            .select("id,created_at,dos_score,source_site,state")
+            .limit(5000)
             .execute()
         )
-        total_opportunities = opp_resp.count or 0
+        opp_rows = opp_resp.data or []
+        total_opportunities = len(opp_rows)
+        cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+        cutoff_7d = datetime.now(timezone.utc) - timedelta(days=7)
+        scores = []
+        source_set = set()
+        state_set = set()
+        for row in opp_rows:
+            created_at_raw = row.get("created_at")
+            if created_at_raw:
+                try:
+                    created_at = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
+                    if created_at >= cutoff_24h:
+                        fresh_opportunities_24h += 1
+                    if created_at >= cutoff_7d:
+                        fresh_opportunities_7d += 1
+                except Exception:
+                    pass
+            score = row.get("dos_score")
+            if score is not None:
+                try:
+                    score_f = float(score)
+                    scores.append(score_f)
+                    if score_f >= 80:
+                        hot_deals_count += 1
+                    if score_f >= 65:
+                        good_plus_deals_count += 1
+                except Exception:
+                    pass
+            src = row.get("source_site")
+            st = row.get("state")
+            if src:
+                source_set.add(src)
+            if st:
+                state_set.add(st)
+        avg_dos_score = round(sum(scores) / len(scores), 1) if scores else None
+        unique_sources = len(source_set)
+        unique_states = len(state_set)
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary opportunities query degraded: {exc}")
+        degraded_sections.append("pipeline")
+        notes.append("Pipeline metrics degraded")
 
     try:
         outcomes_resp = (
@@ -164,6 +266,9 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         avg_max_bid = round(sum(max_bids_on_bid_rows) / len(max_bids_on_bid_rows), 2) if max_bids_on_bid_rows else None
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary outcomes query degraded: {exc}")
+        degraded_sections.append("execution")
+        degraded_sections.append("outcomes")
+        notes.append("Execution and outcomes metrics degraded")
 
     try:
         makes_resp = (
@@ -188,6 +293,9 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         top_makes = top_makes[:5]
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary top-makes query degraded: {exc}")
+        if "outcomes" not in degraded_sections:
+            degraded_sections.append("outcomes")
+        notes.append("Top makes metrics degraded")
 
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -201,6 +309,15 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         alerts_sent_last_30d = alerts_resp.count or 0
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary alerts query degraded: {exc}")
+        if "trust" not in degraded_sections:
+            degraded_sections.append("trust")
+        notes.append("Alert metrics degraded")
+
+    completeness_score = round(max(0.0, 1 - (len(set(degraded_sections)) / 4)), 2)
+    trust_status = "healthy" if not degraded_sections else "degraded"
+    execution_status = "empty" if total_bids == 0 and total_wins == 0 and losses == 0 and passes == 0 and pending_outcomes == 0 else ("degraded" if "execution" in degraded_sections else "healthy")
+    outcomes_status = "empty" if total_outcomes == 0 else ("degraded" if "outcomes" in degraded_sections else "healthy")
+    pipeline_status = "empty" if total_opportunities == 0 else ("degraded" if "pipeline" in degraded_sections else "healthy")
 
     return {
         "total_opportunities": total_opportunities,
@@ -215,6 +332,54 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         "win_rate": win_rate,
         "avg_purchase_price": avg_purchase_price,
         "avg_max_bid": avg_max_bid,
+        "pipeline": {
+            "status": pipeline_status,
+            "scope": "system",
+            "updated_at": now_iso,
+            "active_opportunities": total_opportunities,
+            "fresh_opportunities_24h": fresh_opportunities_24h,
+            "fresh_opportunities_7d": fresh_opportunities_7d,
+            "hot_deals_count": hot_deals_count,
+            "good_plus_deals_count": good_plus_deals_count,
+            "avg_dos_score": avg_dos_score,
+            "unique_sources": unique_sources,
+            "unique_states": unique_states,
+        },
+        "execution": {
+            "status": execution_status,
+            "scope": "user_execution",
+            "updated_at": now_iso,
+            "bids_placed": total_bids,
+            "wins": total_wins,
+            "losses": losses,
+            "passes": passes,
+            "pending_outcomes": pending_outcomes,
+            "win_rate": win_rate,
+            "avg_max_bid": avg_max_bid,
+            "avg_purchase_price": avg_purchase_price,
+            "ceiling_compliance": ceiling_compliance,
+        },
+        "outcomes": {
+            "status": outcomes_status,
+            "scope": "user_outcomes",
+            "updated_at": now_iso,
+            "recorded_outcomes": total_outcomes,
+            "total_gross_margin": avg_gross_margin,
+            "avg_gross_margin": avg_gross_margin,
+            "avg_roi": avg_roi_pct,
+            "wins_by_source": wins_by_source,
+            "top_makes_by_realized_performance": top_makes,
+        },
+        "trust": {
+            "status": trust_status,
+            "scope": "trust",
+            "updated_at": now_iso,
+            "summary_refreshed_at": now_iso,
+            "completeness_score": completeness_score,
+            "degraded_sections": sorted(set(degraded_sections)),
+            "freshness_age": 0,
+            "notes": notes,
+        },
     }
 
 
