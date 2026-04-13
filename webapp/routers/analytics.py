@@ -89,8 +89,20 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             "avg_max_bid": None,
         }
 
+    total_opportunities = 0
+    total_outcomes = 0
+    avg_gross_margin = None
+    avg_roi_pct = None
+    wins_by_source = []
+    top_makes = []
+    alerts_sent_last_30d = 0
+    total_bids = 0
+    total_wins = 0
+    win_rate = None
+    avg_purchase_price = None
+    avg_max_bid = None
+
     try:
-        # ── 1. Total opportunities ────────────────────────────────────────────
         opp_resp = (
             supa.table("opportunities")
             .select("id", count="exact")
@@ -98,11 +110,13 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             .execute()
         )
         total_opportunities = opp_resp.count or 0
+    except Exception as exc:
+        logger.warning(f"[ANALYTICS] summary opportunities query degraded: {exc}")
 
-        # ── 2. Outcomes (rows with outcome_recorded_at set) ───────────────────
+    try:
         outcomes_resp = (
             supa.table("opportunities")
-            .select("id,gross_margin,roi,source,outcome_notes,outcome_sale_price,max_bid", count="exact")
+            .select("id,gross_margin,roi,source,source_site,outcome_notes,outcome_sale_price,max_bid", count="exact")
             .eq("user_id", user_id)
             .not_.is_("outcome_recorded_at", "null")
             .execute()
@@ -112,10 +126,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         avg_gross_margin = _safe_avg(outcome_rows, "gross_margin")
         avg_roi_pct = _safe_avg(outcome_rows, "roi")
 
-        # ── 3. Wins by source + bid outcome stats ─────────────────────────────
         source_map: dict[str, int] = {}
-        total_bids = 0
-        total_wins = 0
         purchase_prices: list[float] = []
         max_bids_on_bid_rows: list[float] = []
 
@@ -130,7 +141,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
                 pass
 
             if bid_data:
-                # This is a bid outcome row
                 if bid_data.get("bid"):
                     total_bids += 1
                     mb = row.get("max_bid")
@@ -142,7 +152,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
                     if pp is not None:
                         purchase_prices.append(float(pp))
             else:
-                # Legacy sale-outcome row — count toward wins_by_source
                 src = row.get("source") or row.get("source_site") or "unknown"
                 source_map[src] = source_map.get(src, 0) + 1
 
@@ -153,8 +162,10 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         win_rate = round(total_wins / total_bids * 100, 1) if total_bids > 0 else None
         avg_purchase_price = round(sum(purchase_prices) / len(purchase_prices), 2) if purchase_prices else None
         avg_max_bid = round(sum(max_bids_on_bid_rows) / len(max_bids_on_bid_rows), 2) if max_bids_on_bid_rows else None
+    except Exception as exc:
+        logger.warning(f"[ANALYTICS] summary outcomes query degraded: {exc}")
 
-        # ── 4. Top makes by avg DOS score ─────────────────────────────────────
+    try:
         makes_resp = (
             supa.table("opportunities")
             .select("make,dos_score")
@@ -175,8 +186,10 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         ]
         top_makes.sort(key=lambda x: -x["avg_dos_score"])
         top_makes = top_makes[:5]
+    except Exception as exc:
+        logger.warning(f"[ANALYTICS] summary top-makes query degraded: {exc}")
 
-        # ── 5. Alerts sent in last 30 days ────────────────────────────────────
+    try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         alerts_resp = (
             supa.table("alert_log")
@@ -186,25 +199,23 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             .execute()
         )
         alerts_sent_last_30d = alerts_resp.count or 0
-
-        return {
-            "total_opportunities": total_opportunities,
-            "total_outcomes": total_outcomes,
-            "avg_gross_margin": avg_gross_margin,
-            "avg_roi_pct": avg_roi_pct,
-            "wins_by_source": wins_by_source,
-            "top_makes": top_makes,
-            "alerts_sent_last_30d": alerts_sent_last_30d,
-            "total_bids": total_bids,
-            "total_wins": total_wins,
-            "win_rate": win_rate,
-            "avg_purchase_price": avg_purchase_price,
-            "avg_max_bid": avg_max_bid,
-        }
-
     except Exception as exc:
-        logger.error(f"[ANALYTICS] summary error: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Analytics query failed")
+        logger.warning(f"[ANALYTICS] summary alerts query degraded: {exc}")
+
+    return {
+        "total_opportunities": total_opportunities,
+        "total_outcomes": total_outcomes,
+        "avg_gross_margin": avg_gross_margin,
+        "avg_roi_pct": avg_roi_pct,
+        "wins_by_source": wins_by_source,
+        "top_makes": top_makes,
+        "alerts_sent_last_30d": alerts_sent_last_30d,
+        "total_bids": total_bids,
+        "total_wins": total_wins,
+        "win_rate": win_rate,
+        "avg_purchase_price": avg_purchase_price,
+        "avg_max_bid": avg_max_bid,
+    }
 
 
 @router.get("/dos-calibration")
