@@ -1659,19 +1659,19 @@ const AnalyticsTab = () => {
           <StatCard
             label="Recorded Outcomes"
             value={safeSummary.outcomes.recorded_outcomes.toLocaleString()}
-            sub="Closed deals tracked"
+            sub="User-scoped closed outcomes"
             accent
           />
           <StatCard
             label="Avg Gross Margin"
             value={safeSummary.outcomes.avg_gross_margin != null ? fmt$(safeSummary.outcomes.avg_gross_margin) : '—'}
-            sub="From closed outcomes"
+            sub="From recorded user outcomes"
             accent={safeSummary.outcomes.avg_gross_margin != null && safeSummary.outcomes.avg_gross_margin > 0}
           />
           <StatCard
             label="Avg ROI %"
             value={safeSummary.outcomes.avg_roi != null ? fmtPct(safeSummary.outcomes.avg_roi) : '—'}
-            sub="From closed outcomes"
+            sub="From recorded user outcomes"
             accent={safeSummary.outcomes.avg_roi != null && safeSummary.outcomes.avg_roi > 0}
           />
           <StatCard
@@ -1688,7 +1688,7 @@ const AnalyticsTab = () => {
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source</p>
             {safeSummary.outcomes.wins_by_source.length === 0 ? (
-              <p className="text-sm text-gray-500">No outcome data yet</p>
+              <p className="text-sm text-gray-500">No recorded user outcome data yet</p>
             ) : (
               <div className="space-y-1.5">
                 {safeSummary.outcomes.wins_by_source.map(({ source, count }) => (
@@ -1705,7 +1705,7 @@ const AnalyticsTab = () => {
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by DOS Score</p>
             {safeSummary.outcomes.top_makes_by_realized_performance.length === 0 ? (
-              <p className="text-sm text-gray-500">No data yet</p>
+              <p className="text-sm text-gray-500">No realized user outcome data yet</p>
             ) : (
               <div className="space-y-1.5">
                 {safeSummary.outcomes.top_makes_by_realized_performance.map(({ make, avg_dos_score, count }) => (
