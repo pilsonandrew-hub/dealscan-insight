@@ -1245,6 +1245,54 @@ interface AnalyticsSummary {
   win_rate: number | null;
   avg_purchase_price: number | null;
   avg_max_bid: number | null;
+  pipeline?: {
+    status: 'healthy' | 'degraded' | 'empty';
+    scope: 'system';
+    updated_at: string | null;
+    active_opportunities: number;
+    fresh_opportunities_24h: number;
+    fresh_opportunities_7d: number;
+    hot_deals_count: number;
+    good_plus_deals_count: number;
+    avg_dos_score: number | null;
+    unique_sources: number;
+    unique_states: number;
+  };
+  execution?: {
+    status: 'healthy' | 'degraded' | 'empty';
+    scope: 'user_execution';
+    updated_at: string | null;
+    bids_placed: number;
+    wins: number;
+    losses: number;
+    passes: number;
+    pending_outcomes: number;
+    win_rate: number | null;
+    avg_max_bid: number | null;
+    avg_purchase_price: number | null;
+    ceiling_compliance: number | null;
+  };
+  outcomes?: {
+    status: 'healthy' | 'degraded' | 'empty';
+    scope: 'user_outcomes';
+    updated_at: string | null;
+    recorded_outcomes: number;
+    total_gross_margin: number | null;
+    avg_gross_margin: number | null;
+    avg_roi: number | null;
+    wins_by_source: { source: string; count: number }[];
+    top_makes_by_realized_performance: { make: string; avg_dos_score: number; count: number }[];
+  };
+  trust?: {
+    status: 'healthy' | 'degraded' | 'empty';
+    scope: 'trust';
+    updated_at: string | null;
+    summary_refreshed_at: string | null;
+    completeness_score: number | null;
+    degraded_sections: string[];
+    freshness_age: number | null;
+    notes: string[];
+  };
 }
 
 interface BidOutcomeSummary {
