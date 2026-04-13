@@ -1405,6 +1405,64 @@ const AnalyticsTab = () => {
   const [reconActivity, setReconActivity] = useState<ReconActivity | null>(null);
   const [reconLoading, setReconLoading] = useState(true);
 
+  const toFiniteNumber = (value: unknown, fallback = 0): number => {
+    const num = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  };
+
+  const toNullableFiniteNumber = (value: unknown): number | null => {
+    const num = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const toPlainRecord = (value: unknown): Record<string, number> => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.entries(value as Record<string, unknown>).reduce((acc, [key, raw]) => {
+      const count = toFiniteNumber(raw, NaN);
+      if (Number.isFinite(count)) acc[key] = count;
+      return acc;
+    }, {} as Record<string, number>);
+  };
+
+  const safeSummary = summary ? {
+    ...summary,
+    total_opportunities: toFiniteNumber(summary.total_opportunities),
+    total_outcomes: toFiniteNumber(summary.total_outcomes),
+    alerts_sent_last_30d: toFiniteNumber(summary.alerts_sent_last_30d),
+    total_bids: toFiniteNumber(summary.total_bids),
+    total_wins: toFiniteNumber(summary.total_wins),
+    avg_gross_margin: toNullableFiniteNumber(summary.avg_gross_margin),
+    avg_roi_pct: toNullableFiniteNumber(summary.avg_roi_pct),
+    win_rate: toNullableFiniteNumber(summary.win_rate),
+    avg_purchase_price: toNullableFiniteNumber(summary.avg_purchase_price),
+    avg_max_bid: toNullableFiniteNumber(summary.avg_max_bid),
+    wins_by_source: Array.isArray(summary.wins_by_source) ? summary.wins_by_source : [],
+    top_makes: Array.isArray(summary.top_makes) ? summary.top_makes : [],
+  } : null;
+
+  const safeBidSummary = bidSummary ? {
+    count_by_outcome: {
+      won: toFiniteNumber(bidSummary.count_by_outcome?.won),
+      lost: toFiniteNumber(bidSummary.count_by_outcome?.lost),
+      passed: toFiniteNumber(bidSummary.count_by_outcome?.passed),
+      pending: toFiniteNumber(bidSummary.count_by_outcome?.pending),
+    },
+    total_gross_margin: toFiniteNumber(bidSummary.total_gross_margin),
+    avg_roi: toNullableFiniteNumber(bidSummary.avg_roi),
+  } : null;
+
+  const normalizedSourceHealth = (Array.isArray(sourceHealth) ? sourceHealth : []).map((row) => ({
+    ...row,
+    source_site: row?.source_site || 'unknown',
+    fresh_opportunities_7d: toFiniteNumber(row?.fresh_opportunities_7d),
+    latest_fetched_items: toFiniteNumber(row?.latest_fetched_items),
+    latest_saved_items: toFiniteNumber(row?.latest_saved_items),
+    latest_skipped_items_estimate: toFiniteNumber(row?.latest_skipped_items_estimate),
+    latest_opportunity_age_hours: toNullableFiniteNumber(row?.latest_opportunity_age_hours),
+    active_opportunities: toFiniteNumber(row?.active_opportunities),
+    latest_skip_reasons: toPlainRecord(row?.latest_skip_reasons),
+  }));
+
   const fetchReconActivity = useCallback(async () => {
     const userId = session?.user?.id;
     if (!userId) { setReconLoading(false); return; }
@@ -1501,36 +1559,36 @@ const AnalyticsTab = () => {
         ))}
       </div>
     );
-    if (!summary) return null;
+    if (!safeSummary) return null;
     return (
       <div className="space-y-4">
         {/* Top KPI row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="Total Opportunities"
-            value={summary.total_opportunities.toLocaleString()}
+            value={safeSummary.total_opportunities.toLocaleString()}
             sub="All-time pipeline"
           />
           <StatCard
             label="Bids Placed"
-            value={summary.total_bids.toLocaleString()}
-            sub={`${summary.total_wins} win${summary.total_wins !== 1 ? 's' : ''}`}
-            accent={summary.total_bids > 0}
+            value={safeSummary.total_bids.toLocaleString()}
+            sub={`${safeSummary.total_wins} win${safeSummary.total_wins !== 1 ? 's' : ''}`}
+            accent={safeSummary.total_bids > 0}
           />
           <StatCard
             label="Win Rate"
-            value={summary.win_rate != null ? `${summary.win_rate}%` : '—'}
-            sub={summary.total_bids > 0 ? `${summary.total_wins} / ${summary.total_bids} bids` : 'No bids logged'}
-            accent={summary.win_rate != null && summary.win_rate > 0}
+            value={safeSummary.win_rate != null ? `${safeSummary.win_rate}%` : '—'}
+            sub={safeSummary.total_bids > 0 ? `${safeSummary.total_wins} / ${safeSummary.total_bids} bids` : 'No bids logged'}
+            accent={safeSummary.win_rate != null && safeSummary.win_rate > 0}
           />
           <StatCard
             label="Avg Purchase vs Ceiling"
-            value={summary.avg_purchase_price != null ? fmt$(summary.avg_purchase_price) : '—'}
-            sub={summary.avg_max_bid != null ? `ceiling ${fmt$(summary.avg_max_bid)}` : 'No wins logged'}
+            value={safeSummary.avg_purchase_price != null ? fmt$(safeSummary.avg_purchase_price) : '—'}
+            sub={safeSummary.avg_max_bid != null ? `ceiling ${fmt$(safeSummary.avg_max_bid)}` : 'No wins logged'}
             accent={
-              summary.avg_purchase_price != null &&
-              summary.avg_max_bid != null &&
-              summary.avg_purchase_price <= summary.avg_max_bid
+              safeSummary.avg_purchase_price != null &&
+              safeSummary.avg_max_bid != null &&
+              safeSummary.avg_purchase_price <= safeSummary.avg_max_bid
             }
           />
         </div>
@@ -1539,25 +1597,25 @@ const AnalyticsTab = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="Recorded Outcomes"
-            value={summary.total_outcomes.toLocaleString()}
+            value={safeSummary.total_outcomes.toLocaleString()}
             sub="Closed deals tracked"
             accent
           />
           <StatCard
             label="Avg Gross Margin"
-            value={summary.avg_gross_margin != null ? fmt$(summary.avg_gross_margin) : '—'}
+            value={safeSummary.avg_gross_margin != null ? fmt$(safeSummary.avg_gross_margin) : '—'}
             sub="From closed outcomes"
-            accent={summary.avg_gross_margin != null && summary.avg_gross_margin > 0}
+            accent={safeSummary.avg_gross_margin != null && safeSummary.avg_gross_margin > 0}
           />
           <StatCard
             label="Avg ROI %"
-            value={summary.avg_roi_pct != null ? fmtPct(summary.avg_roi_pct) : '—'}
+            value={safeSummary.avg_roi_pct != null ? fmtPct(safeSummary.avg_roi_pct) : '—'}
             sub="From closed outcomes"
-            accent={summary.avg_roi_pct != null && summary.avg_roi_pct > 0}
+            accent={safeSummary.avg_roi_pct != null && safeSummary.avg_roi_pct > 0}
           />
           <StatCard
             label="Alerts (30d)"
-            value={summary.alerts_sent_last_30d.toLocaleString()}
+            value={safeSummary.alerts_sent_last_30d.toLocaleString()}
             sub="Hot deal notifications"
           />
         </div>
@@ -1567,11 +1625,11 @@ const AnalyticsTab = () => {
           {/* Wins by source */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source</p>
-            {summary.wins_by_source.length === 0 ? (
+            {safeSummary.wins_by_source.length === 0 ? (
               <p className="text-sm text-gray-500">No outcome data yet</p>
             ) : (
               <div className="space-y-1.5">
-                {summary.wins_by_source.map(({ source, count }) => (
+                {safeSummary.wins_by_source.map(({ source, count }) => (
                   <div key={source} className="flex items-center justify-between text-sm">
                     <span className="text-gray-300 truncate">{source}</span>
                     <span className="text-white font-medium ml-2 shrink-0">{count}</span>
@@ -1584,11 +1642,11 @@ const AnalyticsTab = () => {
           {/* Top makes */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
             <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by DOS Score</p>
-            {summary.top_makes.length === 0 ? (
+            {safeSummary.top_makes.length === 0 ? (
               <p className="text-sm text-gray-500">No data yet</p>
             ) : (
               <div className="space-y-1.5">
-                {summary.top_makes.map(({ make, avg_dos_score, count }) => (
+                {safeSummary.top_makes.map(({ make, avg_dos_score, count }) => (
                   <div key={make} className="flex items-center justify-between text-sm">
                     <span className="text-gray-300">{make}</span>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -1617,7 +1675,7 @@ const AnalyticsTab = () => {
   ];
   const dosHist = dosBuckets.map(b => ({
     range: b.range,
-    count: allDeals.filter(d => (d.score || 0) >= b.min && (d.score || 0) < b.max).length
+    count: allDeals.filter(d => toFiniteNumber(d.score) >= b.min && toFiniteNumber(d.score) < b.max).length
   }));
 
   // Deals by state (top 10)
@@ -1626,14 +1684,14 @@ const AnalyticsTab = () => {
   const stateData = Object.entries(stateMap).sort((a, b) => b[1] - a[1]).slice(0, 10)
     .map(([state, count]) => ({ state, count }));
 
-  const sourceHealthChartData = sourceHealth.map((row) => ({
+  const sourceHealthChartData = normalizedSourceHealth.map((row) => ({
     name: row.source_site,
-    value: row.fresh_opportunities_7d,
+    value: toFiniteNumber(row.fresh_opportunities_7d),
     health: row.health,
-    fetched: row.latest_fetched_items ?? 0,
-    saved: row.latest_saved_items ?? 0,
-    skipped: row.latest_skipped_items_estimate ?? 0,
-    latestAgeHours: row.latest_opportunity_age_hours,
+    fetched: toFiniteNumber(row.latest_fetched_items),
+    saved: toFiniteNumber(row.latest_saved_items),
+    skipped: toFiniteNumber(row.latest_skipped_items_estimate),
+    latestAgeHours: toNullableFiniteNumber(row.latest_opportunity_age_hours),
   }));
 
   // Margin over time (last 14 days)
@@ -1648,7 +1706,7 @@ const AnalyticsTab = () => {
   allDeals.forEach((d) => {
     if (!d.created_at) return;
     const day = new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    if (marginByDay[day]) marginByDay[day].push(d.profit_margin || 0);
+    if (marginByDay[day]) marginByDay[day].push(toFiniteNumber(d.profit_margin));
   });
   const marginData = Object.entries(marginByDay).map(([day, vals]) => ({
     day,
@@ -1680,38 +1738,38 @@ const AnalyticsTab = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 label="Won"
-                value={(bidSummary?.count_by_outcome?.won ?? 0).toLocaleString()}
+                value={(safeBidSummary?.count_by_outcome?.won ?? 0).toLocaleString()}
                 sub="Closed wins"
-                accent={(bidSummary?.count_by_outcome?.won ?? 0) > 0}
+                accent={(safeBidSummary?.count_by_outcome?.won ?? 0) > 0}
               />
               <StatCard
                 label="Lost"
-                value={(bidSummary?.count_by_outcome?.lost ?? 0).toLocaleString()}
+                value={(safeBidSummary?.count_by_outcome?.lost ?? 0).toLocaleString()}
                 sub="Lost bids"
               />
               <StatCard
                 label="Passed"
-                value={(bidSummary?.count_by_outcome?.passed ?? 0).toLocaleString()}
+                value={(safeBidSummary?.count_by_outcome?.passed ?? 0).toLocaleString()}
                 sub="Intentional passes"
               />
               <StatCard
                 label="Pending"
-                value={(bidSummary?.count_by_outcome?.pending ?? 0).toLocaleString()}
+                value={(safeBidSummary?.count_by_outcome?.pending ?? 0).toLocaleString()}
                 sub="Still open"
               />
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <StatCard
                 label="Total Gross Margin"
-                value={bidSummary ? fmt$(bidSummary.total_gross_margin) : '—'}
+                value={safeBidSummary ? fmt$(safeBidSummary.total_gross_margin) : '—'}
                 sub="From dealer_sales"
-                accent={!!bidSummary && bidSummary.total_gross_margin > 0}
+                accent={!!safeBidSummary && safeBidSummary.total_gross_margin > 0}
               />
               <StatCard
                 label="Avg ROI"
-                value={bidSummary?.avg_roi != null ? fmtPct(bidSummary.avg_roi) : '—'}
+                value={safeBidSummary?.avg_roi != null ? fmtPct(safeBidSummary.avg_roi) : '—'}
                 sub="Across recorded outcomes"
-                accent={bidSummary?.avg_roi != null && bidSummary.avg_roi > 0}
+                accent={safeBidSummary?.avg_roi != null && safeBidSummary.avg_roi > 0}
               />
             </div>
           </div>
@@ -1838,7 +1896,7 @@ const AnalyticsTab = () => {
               </ResponsiveContainer>
 
               <div className="mt-4 space-y-2">
-                {sourceHealth.map((row) => (
+                {normalizedSourceHealth.map((row) => (
                   <div key={row.source_site} className="rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 flex flex-col gap-1">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
@@ -1856,7 +1914,7 @@ const AnalyticsTab = () => {
                       <span>latest opp age: <span className="text-white">{row.latest_opportunity_age_hours == null ? '—' : `${row.latest_opportunity_age_hours}h`}</span></span>
                       <span>top reject: <span className="text-white">{row.latest_top_skip_reason ?? '—'}</span></span>
                     </div>
-                    {!!row.latest_skip_reasons && Object.keys(row.latest_skip_reasons).length > 0 && (
+                    {Object.keys(row.latest_skip_reasons).length > 0 && (
                       <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap gap-2">
                         {Object.entries(row.latest_skip_reasons)
                           .sort((a, b) => b[1] - a[1])

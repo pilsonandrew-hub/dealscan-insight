@@ -7,6 +7,10 @@ import { createLogger } from '@/utils/productionLogger';
 
 const logger = createLogger('AuditLogger');
 
+const remoteAuditEnabled = import.meta.env.VITE_ENABLE_REMOTE_AUDIT === 'true';
+const remoteAuditEndpoint = import.meta.env.VITE_AUDIT_ENDPOINT?.trim();
+const safeRemoteAuditEndpoint = remoteAuditEnabled && remoteAuditEndpoint ? remoteAuditEndpoint : undefined;
+
 export interface AuditEvent {
   id: string;
   timestamp: number;
@@ -264,8 +268,8 @@ class AuditLogger {
 
 // Global audit logger instance
 export const auditLogger = new AuditLogger({
-  enableRemoteLogging: process.env.NODE_ENV === 'production',
-  endpoint: '/api/audit',
+  enableRemoteLogging: Boolean(safeRemoteAuditEndpoint),
+  endpoint: safeRemoteAuditEndpoint,
   batchSize: 5,
   flushInterval: 15000
 });
