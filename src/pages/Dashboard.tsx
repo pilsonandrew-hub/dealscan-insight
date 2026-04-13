@@ -1632,7 +1632,7 @@ const AnalyticsTab = () => {
           <StatCard
             label="Active Opportunities"
             value={safeSummary.pipeline.active_opportunities.toLocaleString()}
-            sub={`${safeSummary.pipeline.fresh_opportunities_7d.toLocaleString()} fresh in 7d`}
+            sub={`${safeSummary.pipeline.fresh_opportunities_7d.toLocaleString()} fresh in 7d, system-wide`}
           />
           <StatCard
             label="Bids Placed"
@@ -1690,7 +1690,7 @@ const AnalyticsTab = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Wins by source */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source</p>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source (User Outcomes)</p>
             {safeSummary.outcomes.wins_by_source.length === 0 ? (
               <p className="text-sm text-gray-500">No recorded user outcome data yet</p>
             ) : (
@@ -1707,7 +1707,7 @@ const AnalyticsTab = () => {
 
           {/* Top makes */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by DOS Score</p>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by Realized User Outcomes</p>
             {safeSummary.outcomes.top_makes_by_realized_performance.length === 0 ? (
               <p className="text-sm text-gray-500">No realized user outcome data yet</p>
             ) : (
