@@ -1678,6 +1678,11 @@ const AnalyticsTab = () => {
     count: allDeals.filter(d => toFiniteNumber(d.score) >= b.min && toFiniteNumber(d.score) < b.max).length
   }));
 
+  const srcMap: Record<string, number> = {};
+  allDeals.forEach((d) => {
+    if (d.source_site) srcMap[d.source_site] = (srcMap[d.source_site] || 0) + 1;
+  });
+
   // Deals by state (top 10)
   const stateMap: Record<string, number> = {};
   allDeals.forEach(d => { if (d.state) stateMap[d.state] = (stateMap[d.state] || 0) + 1; });
