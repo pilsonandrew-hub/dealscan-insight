@@ -1,10 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { SniperButton } from '@/components/SniperButton';
-import {
-  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend
-} from 'recharts';
 import { useAuth } from '@/contexts/ModernAuthContext';
 import api from '@/services/api';
 import { Opportunity, SourceHealthRow } from '@/types/dealerscope';
@@ -27,6 +23,10 @@ import { roverAPI } from '@/services/roverAPI';
 import { OnboardingFlow } from '@/components/OnboardingFlow';
 import LaneBadge from '@/components/LaneBadge';
 const SonarTab = React.lazy(() => import('@/components/SonarTab').then(m => ({ default: m.SonarTab })));
+const AnalyticsOpenTrustCasesPanel = React.lazy(() => import('@/components/AnalyticsOpenTrustCasesPanel'));
+const AnalyticsBidOutcomesSection = React.lazy(() => import('@/components/AnalyticsBidOutcomesSection'));
+const AnalyticsSummarySection = React.lazy(() => import('@/components/AnalyticsSummarySection'));
+const AnalyticsChartsSection = React.lazy(() => import('@/components/AnalyticsChartsSection'));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'dashboard' | 'crosshair' | 'sniper' | 'rover' | 'sonar' | 'recon' | 'analytics' | 'settings';
@@ -177,11 +177,13 @@ const DealCard = ({
   deal,
   onAction,
   onSendToSniperScope,
+  onRefresh,
   whySignals,
 }: {
   deal: Opportunity;
   onAction?: (deal: Opportunity, action: 'view' | 'save' | 'pass') => void;
   onSendToSniperScope?: (deal: Opportunity) => void;
+  onRefresh?: () => void;
   whySignals?: string[];
 }) => {
   const [showWhy, setShowWhy] = React.useState(false);
@@ -410,6 +412,7 @@ const DealCard = ({
         open={outcomeOpen}
         onOpenChange={setOutcomeOpen}
         opportunity={{ id: deal.id, year: deal.year, make: deal.make, model: deal.model, current_bid: deal.current_bid }}
+        onSaved={onRefresh}
       />
     )}
   </div>
@@ -597,7 +600,7 @@ const DashboardTab = () => {
                 key={deal.id}
                 className={`transition-all duration-300 ${fadingIds.has(deal.id!) ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
               >
-                <DealCard deal={deal} onAction={handleDashboardAction} />
+                <DealCard deal={deal} onAction={handleDashboardAction} onRefresh={load} />
               </div>
             ))}
           </div>
@@ -1241,7 +1244,7 @@ interface AnalyticsSummary {
   avg_gross_margin: number | null;
   avg_roi_pct: number | null;
   wins_by_source: { source: string; count: number }[];
-  top_makes: { make: string; avg_dos_score: number; count: number }[];
+  top_makes: { make: string; avg_gross_margin: number; count: number }[];
   alerts_sent_last_30d: number;
   total_bids: number;
   total_wins: number;
@@ -1261,19 +1264,27 @@ interface AnalyticsSummary {
     unique_sources: number;
     unique_states: number;
   };
+  source_health?: {
+    status: 'healthy' | 'degraded' | 'empty';
+    scope: 'system';
+    updated_at: string | null;
+    sources: SourceHealthRow[];
+    notes: string[];
+  };
   execution?: {
     status: 'healthy' | 'degraded' | 'empty';
     scope: 'user_execution';
     updated_at: string | null;
     bids_placed: number;
     wins: number;
-    losses: number;
-    passes: number;
-    pending_outcomes: number;
+    losses: number | null;
+    passes: number | null;
+    pending_outcomes: number | null;
     win_rate: number | null;
     avg_max_bid: number | null;
     avg_purchase_price: number | null;
     ceiling_compliance: number | null;
+    notes?: string[];
   };
   outcomes?: {
     status: 'healthy' | 'degraded' | 'empty';
@@ -1284,7 +1295,7 @@ interface AnalyticsSummary {
     avg_gross_margin: number | null;
     avg_roi: number | null;
     wins_by_source: { source: string; count: number }[];
-    top_makes_by_realized_performance: { make: string; avg_dos_score: number; count: number }[];
+    top_makes_by_realized_performance: { make: string; avg_gross_margin: number; count: number }[];
   };
   trust?: {
     status: 'healthy' | 'degraded' | 'empty';
@@ -1348,12 +1359,14 @@ const LogOutcomeModal = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-white font-semibold text-base mb-1">Log Outcome</h3>
-        <p className="text-gray-400 text-xs mb-5">{deal.year} {deal.make} {deal.model} — Max Bid {fmt$(deal.max_bid)}</p>
+        <h3 className="text-white font-semibold text-base mb-1">Log Bid Result</h3>
+        <p className="text-gray-400 text-xs mb-2">{deal.year} {deal.make} {deal.model} — Max Bid {fmt$(deal.max_bid)}</p>
+        <p className="text-[11px] text-amber-300/80 mb-2">This updates bid-history evidence, not the final realized sale outcome.</p>
+        <p className="text-[11px] text-amber-200/80 mb-5">Passed means no bid was placed. Lost means you bid but did not win. Won means you bid and bought it.</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Bid toggle */}
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-300">Did you bid?</span>
+            <span className="text-sm text-gray-300">Did you place a bid?</span>
             <div className="flex gap-2">
               {([true, false] as const).map(v => (
                 <button key={String(v)} type="button"
@@ -1372,7 +1385,7 @@ const LogOutcomeModal = ({
           {/* Won toggle — only shown if bid */}
           {form.bid && (
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-300">Did you win?</span>
+              <span className="text-sm text-gray-300">Did that bid win?</span>
               <div className="flex gap-2">
                 {([true, false] as const).map(v => (
                   <button key={String(v)} type="button"
@@ -1392,7 +1405,7 @@ const LogOutcomeModal = ({
           {/* Purchase price — only shown if won */}
           {form.bid && form.won && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Final Purchase Price</label>
+              <label className="block text-xs text-gray-400 mb-1">Winning Purchase Price</label>
               <input
                 type="number"
                 min={0}
@@ -1407,7 +1420,7 @@ const LogOutcomeModal = ({
 
           {/* Notes */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Notes (optional)</label>
+            <label className="block text-xs text-gray-400 mb-1">Bid notes (optional)</label>
             <textarea
               rows={2}
               placeholder="Any context..."
@@ -1452,9 +1465,41 @@ const AnalyticsTab = () => {
   const [bidSummaryLoading, setBidSummaryLoading] = useState(true);
   const [sourceHealth, setSourceHealth] = useState<SourceHealthRow[]>([]);
   const [sourceHealthLoading, setSourceHealthLoading] = useState(true);
+  const [recentTrustEvents, setRecentTrustEvents] = useState<Array<{
+    id: string | null;
+    level: string | null;
+    message: string | null;
+    event: string | null;
+    severity: 'low' | 'medium' | 'high' | null;
+    rule_ids: string[];
+    notes: string[];
+    degraded_sections: string[];
+    completeness_score: number | null;
+    summary_refreshed_at: string | null;
+    freshness_age: number | null;
+    paperclip: {
+      status: string | null;
+      issue_id: string | null;
+      identifier: string | null;
+      title: string | null;
+      issue_status: string | null;
+      correlation_key: string | null;
+      is_open: boolean;
+    };
+    timestamp: string | null;
+  }>>([]);
+  const [recentTrustEventsLoading, setRecentTrustEventsLoading] = useState(true);
   const [logDeal, setLogDeal] = useState<DashboardOpportunity | null>(null);
   const [reconActivity, setReconActivity] = useState<ReconActivity | null>(null);
   const [reconLoading, setReconLoading] = useState(true);
+
+  const isPaperclipIssueOpen = (status: string | null | undefined) => {
+    if (!status) return false;
+    return !['done', 'closed', 'resolved', 'cancelled'].includes(status.toLowerCase());
+  };
+
+  const recentOpenTrustEvents = recentTrustEvents.filter((event) => event.paperclip?.is_open);
+  const recentNeedsActionCount = recentTrustEvents.filter((event) => event.severity === 'high' && event.paperclip?.is_open).length;
 
   const toFiniteNumber = (value: unknown, fallback = 0): number => {
     const num = typeof value === 'number' ? value : Number(value);
@@ -1502,19 +1547,27 @@ const AnalyticsTab = () => {
       unique_sources: toFiniteNumber(summary.pipeline?.unique_sources),
       unique_states: toFiniteNumber(summary.pipeline?.unique_states),
     },
+    source_health: {
+      status: summary.source_health?.status ?? 'empty',
+      scope: summary.source_health?.scope ?? 'system',
+      updated_at: summary.source_health?.updated_at ?? null,
+      sources: Array.isArray(summary.source_health?.sources) ? summary.source_health.sources : [],
+      notes: Array.isArray(summary.source_health?.notes) ? summary.source_health.notes : [],
+    },
     execution: {
       status: summary.execution?.status ?? 'empty',
       scope: summary.execution?.scope ?? 'user_execution',
       updated_at: summary.execution?.updated_at ?? null,
-      bids_placed: toFiniteNumber(summary.execution?.bids_placed, toFiniteNumber(summary.total_bids)),
-      wins: toFiniteNumber(summary.execution?.wins, toFiniteNumber(summary.total_wins)),
-      losses: toFiniteNumber(summary.execution?.losses),
-      passes: toFiniteNumber(summary.execution?.passes),
-      pending_outcomes: toFiniteNumber(summary.execution?.pending_outcomes),
-      win_rate: toNullableFiniteNumber(summary.execution?.win_rate ?? summary.win_rate),
-      avg_max_bid: toNullableFiniteNumber(summary.execution?.avg_max_bid ?? summary.avg_max_bid),
-      avg_purchase_price: toNullableFiniteNumber(summary.execution?.avg_purchase_price ?? summary.avg_purchase_price),
-      ceiling_compliance: toNullableFiniteNumber(summary.execution?.ceiling_compliance),
+      bids_placed: toFiniteNumber(summary.execution?.bid_metrics?.bids_placed, toFiniteNumber(summary.total_bids)),
+      wins: toFiniteNumber(summary.execution?.workflow_counts?.wins, toFiniteNumber(summary.total_wins)),
+      losses: toNullableFiniteNumber(summary.execution?.workflow_counts?.losses),
+      passes: toNullableFiniteNumber(summary.execution?.workflow_counts?.passes),
+      pending_outcomes: toNullableFiniteNumber(summary.execution?.workflow_counts?.pending),
+      win_rate: toNullableFiniteNumber(summary.execution?.bid_metrics?.win_rate ?? summary.win_rate),
+      avg_max_bid: toNullableFiniteNumber(summary.execution?.bid_metrics?.avg_max_bid ?? summary.avg_max_bid),
+      avg_purchase_price: toNullableFiniteNumber(summary.execution?.bid_metrics?.avg_purchase_price ?? summary.avg_purchase_price),
+      ceiling_compliance: toNullableFiniteNumber(summary.execution?.bid_metrics?.ceiling_compliance),
+      notes: Array.isArray(summary.execution?.notes) ? summary.execution.notes : [],
     },
     outcomes: {
       status: summary.outcomes?.status ?? 'empty',
@@ -1535,6 +1588,8 @@ const AnalyticsTab = () => {
       completeness_score: toNullableFiniteNumber(summary.trust?.completeness_score),
       degraded_sections: Array.isArray(summary.trust?.degraded_sections) ? summary.trust.degraded_sections : [],
       freshness_age: toNullableFiniteNumber(summary.trust?.freshness_age),
+      severity: summary.trust?.severity ?? 'low',
+      rule_ids: Array.isArray(summary.trust?.rule_ids) ? summary.trust.rule_ids : [],
       notes: Array.isArray(summary.trust?.notes) ? summary.trust.notes : [],
     },
   } : null;
@@ -1572,18 +1627,40 @@ const AnalyticsTab = () => {
     const lowCompleteness = (safeSummary.trust.completeness_score ?? 1) < 0.5;
 
     if (pipelineActive && trustDegraded && executionEmpty && outcomesEmpty) {
-      analyticsLogger.warn('Analytics summary shows live pipeline with degraded execution/outcomes context', {
+      analyticsLogger.logAnalyticsTrustEvent('pipeline_active_with_missing_execution_and_outcomes', safeSummary.trust.severity ?? 'medium', {
         pipelineActiveOpportunities: safeSummary.pipeline.active_opportunities,
         completenessScore: safeSummary.trust.completeness_score,
         degradedSections: safeSummary.trust.degraded_sections,
+        trustSeverity: safeSummary.trust.severity,
+        trustRuleIds: safeSummary.trust.rule_ids,
       });
     }
 
     if (trustDegraded && lowCompleteness) {
-      analyticsLogger.warn('Analytics trust completeness fell below threshold', {
+      analyticsLogger.logAnalyticsTrustEvent('trust_completeness_below_threshold', safeSummary.trust.severity ?? 'medium', {
         completenessScore: safeSummary.trust.completeness_score,
         degradedSections: safeSummary.trust.degraded_sections,
         summaryRefreshedAt: safeSummary.trust.summary_refreshed_at,
+        trustSeverity: safeSummary.trust.severity,
+        trustRuleIds: safeSummary.trust.rule_ids,
+      });
+    }
+
+    const suspiciousNotes = safeSummary.trust.notes.filter((note) =>
+      note.includes('wins but no recorded outcomes') ||
+      note.includes('Bid metrics are incomplete despite recorded bid activity') ||
+      note.includes('Winning bid records exist without purchase-price support') ||
+      note.includes('Recorded outcomes exist without outcome-source distribution') ||
+      note.includes('Source health appears healthy while summary freshness is stale')
+    );
+
+    if (suspiciousNotes.length > 0) {
+      analyticsLogger.logAnalyticsTrustEvent('suspicious_business_truth_combinations_detected', safeSummary.trust.severity ?? 'medium', {
+        suspiciousNotes,
+        degradedSections: safeSummary.trust.degraded_sections,
+        summaryRefreshedAt: safeSummary.trust.summary_refreshed_at,
+        trustSeverity: safeSummary.trust.severity,
+        trustRuleIds: safeSummary.trust.rule_ids,
       });
     }
   }, [safeSummary]);
@@ -1652,6 +1729,18 @@ const AnalyticsTab = () => {
     }
   }, []);
 
+  const fetchRecentTrustEvents = useCallback(async () => {
+    try {
+      const data = await api.getRecentAnalyticsTrustEvents(8);
+      setRecentTrustEvents(Array.isArray(data.events) ? data.events : []);
+    } catch (e) {
+      console.error('[Analytics] recent trust events fetch error:', e);
+      setRecentTrustEvents([]);
+    } finally {
+      setRecentTrustEventsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -1668,145 +1757,10 @@ const AnalyticsTab = () => {
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
   useEffect(() => { fetchBidSummary(); }, [fetchBidSummary]);
   useEffect(() => { fetchSourceHealth(); }, [fetchSourceHealth]);
+  useEffect(() => { fetchRecentTrustEvents(); }, [fetchRecentTrustEvents]);
   useEffect(() => { fetchReconActivity(); }, [fetchReconActivity]);
 
   if (loading) return <div className="p-6 text-center text-gray-500">Loading analytics...</div>;
-
-  // ── Render summary section ─────────────────────────────────────────────────
-  const SummarySection = () => {
-    if (summaryLoading) return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse">
-            <div className="h-3 w-24 bg-gray-700 rounded mb-3" />
-            <div className="h-7 w-16 bg-gray-700 rounded" />
-          </div>
-        ))}
-      </div>
-    );
-    if (!safeSummary) return null;
-    return (
-      <div className="space-y-4">
-        {safeSummary.trust.status === 'degraded' && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
-            <p className="text-sm font-medium text-amber-300">Analytics partially degraded</p>
-            <p className="text-xs text-amber-200/80 mt-1">
-              {safeSummary.trust.degraded_sections.length > 0
-                ? `Affected: ${safeSummary.trust.degraded_sections.join(', ')}`
-                : 'Some analytics sections are currently partial.'}
-            </p>
-            {safeSummary.trust.notes.length > 0 && (
-              <p className="text-xs text-amber-200/70 mt-1">{safeSummary.trust.notes[0]}</p>
-            )}
-            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-amber-100/70">
-              <span>Completeness: {safeSummary.trust.completeness_score != null ? `${Math.round(safeSummary.trust.completeness_score * 100)}%` : '—'}</span>
-              <span>Refreshed: {safeSummary.trust.summary_refreshed_at ? new Date(safeSummary.trust.summary_refreshed_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}</span>
-            </div>
-          </div>
-        )}
-        {/* Top KPI row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            label="Active Opportunities"
-            value={safeSummary.pipeline.active_opportunities.toLocaleString()}
-            sub={`${safeSummary.pipeline.fresh_opportunities_7d.toLocaleString()} fresh in 7d, system-wide`}
-          />
-          <StatCard
-            label="Bids Placed"
-            value={safeSummary.execution.bids_placed.toLocaleString()}
-            sub={`${safeSummary.execution.wins} win${safeSummary.execution.wins !== 1 ? 's' : ''}`}
-            accent={safeSummary.execution.bids_placed > 0}
-          />
-          <StatCard
-            label="Win Rate"
-            value={safeSummary.execution.win_rate != null ? `${safeSummary.execution.win_rate}%` : '—'}
-            sub={safeSummary.execution.bids_placed > 0 ? `${safeSummary.execution.wins} / ${safeSummary.execution.bids_placed} bids` : 'No bids logged'}
-            accent={safeSummary.execution.win_rate != null && safeSummary.execution.win_rate > 0}
-          />
-          <StatCard
-            label="Avg Purchase vs Ceiling"
-            value={safeSummary.execution.avg_purchase_price != null ? fmt$(safeSummary.execution.avg_purchase_price) : '—'}
-            sub={safeSummary.execution.avg_max_bid != null ? `ceiling ${fmt$(safeSummary.execution.avg_max_bid)}` : 'No wins logged'}
-            accent={
-              safeSummary.execution.avg_purchase_price != null &&
-              safeSummary.execution.avg_max_bid != null &&
-              safeSummary.execution.avg_purchase_price <= safeSummary.execution.avg_max_bid
-            }
-          />
-        </div>
-
-        {/* Second KPI row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            label="Recorded Outcomes"
-            value={safeSummary.outcomes.recorded_outcomes.toLocaleString()}
-            sub="User-scoped closed outcomes"
-            accent
-          />
-          <StatCard
-            label="Avg Gross Margin"
-            value={safeSummary.outcomes.avg_gross_margin != null ? fmt$(safeSummary.outcomes.avg_gross_margin) : '—'}
-            sub="From recorded user outcomes"
-            accent={safeSummary.outcomes.avg_gross_margin != null && safeSummary.outcomes.avg_gross_margin > 0}
-          />
-          <StatCard
-            label="Avg ROI %"
-            value={safeSummary.outcomes.avg_roi != null ? fmtPct(safeSummary.outcomes.avg_roi) : '—'}
-            sub="From recorded user outcomes"
-            accent={safeSummary.outcomes.avg_roi != null && safeSummary.outcomes.avg_roi > 0}
-          />
-          <StatCard
-            label="Summary Trust"
-            value={safeSummary.trust.completeness_score != null ? `${Math.round(safeSummary.trust.completeness_score * 100)}%` : '—'}
-            sub={safeSummary.trust.degraded_sections.length > 0 ? `Degraded: ${safeSummary.trust.degraded_sections.join(', ')}` : 'All sections healthy'}
-            accent={safeSummary.trust.degraded_sections.length === 0}
-          />
-        </div>
-
-        {/* Third row — source breakdown + top makes */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Wins by source */}
-          <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Wins by Source (User Outcomes)</p>
-            {safeSummary.outcomes.wins_by_source.length === 0 ? (
-              <p className="text-sm text-gray-500">No recorded user outcome data yet</p>
-            ) : (
-              <div className="space-y-1.5">
-                {safeSummary.outcomes.wins_by_source.map(({ source, count }) => (
-                  <div key={source} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-300 truncate">{source}</span>
-                    <span className="text-white font-medium ml-2 shrink-0">{count}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Top makes */}
-          <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-3">Top Makes by Realized User Outcomes</p>
-            {safeSummary.outcomes.top_makes_by_realized_performance.length === 0 ? (
-              <p className="text-sm text-gray-500">No realized user outcome data yet</p>
-            ) : (
-              <div className="space-y-1.5">
-                {safeSummary.outcomes.top_makes_by_realized_performance.map(({ make, avg_dos_score, count }) => (
-                  <div key={make} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-300">{make}</span>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${dosColor(avg_dos_score)}`}>
-                        {avg_dos_score}
-                      </span>
-                      <span className="text-gray-500 text-xs">{count}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   // DOS distribution
   const dosBuckets = [
@@ -1861,8 +1815,6 @@ const AnalyticsTab = () => {
     avg_margin: vals.length > 0 ? parseFloat((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)) : null
   }));
 
-  const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
-
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -1870,59 +1822,14 @@ const AnalyticsTab = () => {
         <p className="text-sm text-gray-400">{allDeals.length} active deals analyzed</p>
       </div>
 
-      <div className="space-y-3">
-        <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Bid Outcomes</p>
-        {bidSummaryLoading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse">
-                <div className="h-3 w-24 bg-gray-700 rounded mb-3" />
-                <div className="h-7 w-16 bg-gray-700 rounded" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard
-                label="Won"
-                value={(safeBidSummary?.count_by_outcome?.won ?? 0).toLocaleString()}
-                sub="Closed wins"
-                accent={(safeBidSummary?.count_by_outcome?.won ?? 0) > 0}
-              />
-              <StatCard
-                label="Lost"
-                value={(safeBidSummary?.count_by_outcome?.lost ?? 0).toLocaleString()}
-                sub="Lost bids"
-              />
-              <StatCard
-                label="Passed"
-                value={(safeBidSummary?.count_by_outcome?.passed ?? 0).toLocaleString()}
-                sub="Intentional passes"
-              />
-              <StatCard
-                label="Pending"
-                value={(safeBidSummary?.count_by_outcome?.pending ?? 0).toLocaleString()}
-                sub="Still open"
-              />
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <StatCard
-                label="Total Gross Margin"
-                value={safeBidSummary ? fmt$(safeBidSummary.total_gross_margin) : '—'}
-                sub="From dealer_sales"
-                accent={!!safeBidSummary && safeBidSummary.total_gross_margin > 0}
-              />
-              <StatCard
-                label="Avg ROI"
-                value={safeBidSummary?.avg_roi != null ? fmtPct(safeBidSummary.avg_roi) : '—'}
-                sub="Across recorded outcomes"
-                accent={safeBidSummary?.avg_roi != null && safeBidSummary.avg_roi > 0}
-              />
-            </div>
-          </div>
-        )}
-      </div>
+      <Suspense fallback={<div className="space-y-3"><p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Bid Outcomes</p><div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[...Array(6)].map((_, i) => (<div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse"><div className="h-3 w-24 bg-gray-700 rounded mb-3" /><div className="h-7 w-16 bg-gray-700 rounded" /></div>))}</div></div>}>
+        <AnalyticsBidOutcomesSection
+          bidSummaryLoading={bidSummaryLoading}
+          safeBidSummary={safeBidSummary}
+          fmt$={fmt$}
+          fmtPct={fmtPct}
+        />
+      </Suspense>
 
       {/* ── Recon Activity layer ── */}
       <div className="space-y-3">
@@ -1968,133 +1875,33 @@ const AnalyticsTab = () => {
       </div>
 
       {/* ── Real outcome KPIs from dealer_sales / alert_log ── */}
-      <SummarySection />
+      <Suspense fallback={<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => (<div key={i} className="bg-gray-900 rounded-xl border border-gray-800 p-4 animate-pulse"><div className="h-3 w-24 bg-gray-700 rounded mb-3" /><div className="h-7 w-16 bg-gray-700 rounded" /></div>))}</div>}>
+        <AnalyticsSummarySection
+          summaryLoading={summaryLoading}
+          safeSummary={safeSummary}
+          recentTrustEventsLoading={recentTrustEventsLoading}
+          recentTrustEvents={recentTrustEvents}
+          recentOpenTrustEvents={recentOpenTrustEvents}
+          recentNeedsActionCount={recentNeedsActionCount}
+          fmt$={fmt$}
+          fmtPct={fmtPct}
+          StatCard={StatCard}
+          AnalyticsOpenTrustCasesPanel={AnalyticsOpenTrustCasesPanel}
+        />
+      </Suspense>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* DOS Distribution */}
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-          <h3 className="text-sm font-semibold text-gray-300 mb-4">DOS Score Distribution</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={dosHist}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="range" tick={{ fill: '#9ca3af', fontSize: 12 }} />
-              <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} />
-              <ReTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }} />
-              <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Deals by State */}
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-          <h3 className="text-sm font-semibold text-gray-300 mb-4">Deals by State (Top 10)</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={stateData} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis type="number" tick={{ fill: '#9ca3af', fontSize: 12 }} />
-              <YAxis type="category" dataKey="state" tick={{ fill: '#9ca3af', fontSize: 12 }} width={30} />
-              <ReTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }} />
-              <Bar dataKey="count" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Source Health */}
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-          <div className="flex items-start justify-between mb-4 gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-300">Source Health (Fresh Opps 7d)</h3>
-              <p className="text-xs text-gray-500">Operational truth: fresh contribution + latest run funnel, not historical portfolio mix.</p>
-            </div>
-          </div>
-          {sourceHealthLoading ? (
-            <div className="h-[260px] animate-pulse rounded-lg bg-gray-800/50" />
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={sourceHealthChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="name" tick={{ fill: '#9ca3af', fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                  <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} />
-                  <ReTooltip
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }}
-                    formatter={(value: number, _name, props: any) => {
-                      const payload = props?.payload;
-                      return [
-                        <div className="space-y-1">
-                          <div>Fresh opps 7d: {value}</div>
-                          <div>Fetched: {payload?.fetched ?? 0}</div>
-                          <div>Saved: {payload?.saved ?? 0}</div>
-                          <div>Skipped: {payload?.skipped ?? 0}</div>
-                          <div>Latest age: {payload?.latestAgeHours == null ? '—' : `${payload.latestAgeHours}h`}</div>
-                        </div>,
-                        payload?.name || 'Source',
-                      ];
-                    }}
-                  />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {sourceHealthChartData.map((entry, i) => (
-                      <Cell
-                        key={`${entry.name}-${i}`}
-                        fill={entry.health === 'green' ? '#10b981' : entry.health === 'yellow' ? '#f59e0b' : '#ef4444'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-
-              <div className="mt-4 space-y-2">
-                {normalizedSourceHealth.map((row) => (
-                  <div key={row.source_site} className="rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${row.health === 'green' ? 'bg-emerald-500' : row.health === 'yellow' ? 'bg-amber-400' : 'bg-red-500'}`} />
-                        <span className="text-sm font-medium text-white">{row.source_site}</span>
-                      </div>
-                      <span className="text-xs text-gray-400">latest webhook: {timeAgo(row.latest_webhook_at)}</span>
-                    </div>
-                    <div className="text-xs text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
-                      <span>fresh 7d: <span className="text-white">{row.fresh_opportunities_7d}</span></span>
-                      <span>fetched: <span className="text-white">{row.latest_fetched_items ?? 0}</span></span>
-                      <span>saved: <span className="text-white">{row.latest_saved_items ?? 0}</span></span>
-                      <span>skipped: <span className="text-white">{row.latest_skipped_items_estimate ?? 0}</span></span>
-                      <span>active opps: <span className="text-white">{row.active_opportunities}</span></span>
-                      <span>latest opp age: <span className="text-white">{row.latest_opportunity_age_hours == null ? '—' : `${row.latest_opportunity_age_hours}h`}</span></span>
-                      <span>top reject: <span className="text-white">{row.latest_top_skip_reason ?? '—'}</span></span>
-                    </div>
-                    {Object.keys(row.latest_skip_reasons).length > 0 && (
-                      <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap gap-2">
-                        {Object.entries(row.latest_skip_reasons)
-                          .sort((a, b) => b[1] - a[1])
-                          .slice(0, 3)
-                          .map(([reason, count]) => (
-                            <span key={reason} className="rounded-full border border-gray-800 bg-gray-900/70 px-2 py-0.5">
-                              {reason}: <span className="text-gray-300">{count}</span>
-                            </span>
-                          ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Margin over time */}
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-          <h3 className="text-sm font-semibold text-gray-300 mb-4">Avg Margin — Last 14 Days</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={marginData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="day" tick={{ fill: '#9ca3af', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} tickFormatter={(value: number) => fmt$(value)} />
-              <ReTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }} formatter={(value: number) => [fmt$(value), 'Avg Margin']} />
-              <Line type="monotone" dataKey="avg_margin" stroke="#10b981" strokeWidth={2} dot={false} connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      <Suspense fallback={<div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><div className="bg-gray-900 rounded-xl border border-gray-800 p-4 h-[232px] animate-pulse" /><div className="bg-gray-900 rounded-xl border border-gray-800 p-4 h-[232px] animate-pulse" /><div className="bg-gray-900 rounded-xl border border-gray-800 p-4 h-[292px] animate-pulse" /><div className="bg-gray-900 rounded-xl border border-gray-800 p-4 h-[232px] animate-pulse" /></div>}>
+        <AnalyticsChartsSection
+          dosHist={dosHist}
+          stateData={stateData}
+          sourceHealthLoading={sourceHealthLoading}
+          sourceHealthChartData={sourceHealthChartData}
+          normalizedSourceHealth={normalizedSourceHealth}
+          marginData={marginData}
+          fmt$={fmt$}
+          timeAgo={timeAgo}
+        />
+      </Suspense>
 
       {/* Summary stats */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
@@ -2167,7 +1974,10 @@ const AnalyticsTab = () => {
         <LogOutcomeModal
           deal={logDeal}
           onClose={() => setLogDeal(null)}
-          onSaved={() => { fetchSummary(); }}
+          onSaved={() => {
+            fetchSummary();
+            fetchBidSummary();
+          }}
         />
       )}
     </div>
