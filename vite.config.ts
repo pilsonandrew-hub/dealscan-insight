@@ -34,9 +34,11 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          supabase: ['@supabase/supabase-js'],
+        manualChunks(id) {
+          if (id.includes('node_modules/recharts')) return 'charts';
+          if (id.includes('node_modules/@radix-ui')) return 'radix';
+          if (id.includes('node_modules/@supabase/supabase-js')) return 'supabase';
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'vendor';
         }
       }
     }
