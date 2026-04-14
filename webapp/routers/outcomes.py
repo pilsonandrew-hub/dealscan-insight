@@ -28,6 +28,13 @@ class BidOutcomePayload(BaseModel):
     notes: Optional[str] = None
 
 
+class BidOutcomeNormalized(BaseModel):
+    bid: bool
+    outcome: Literal["won", "lost", "passed", "pending"]
+    purchase_price: Optional[float] = None
+    bid_amount: Optional[float] = None
+
+
 class OutcomePatchPayload(BaseModel):
     outcome: Literal["won", "lost", "passed"]
     sold_price: Optional[float] = None
@@ -59,6 +66,29 @@ def _safe_float(value: object) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_bid_outcome(payload: BidOutcomePayload, opportunity: dict) -> BidOutcomeNormalized:
+    if payload.won and not payload.bid:
+        raise HTTPException(status_code=400, detail="Cannot mark won=true when bid=false")
+    if payload.purchase_price is not None and not payload.won:
+        raise HTTPException(status_code=400, detail="purchase_price is only valid when won=true")
+
+    if not payload.bid:
+        return BidOutcomeNormalized(
+            bid=False,
+            outcome="passed",
+            purchase_price=None,
+            bid_amount=None,
+        )
+
+    bid_amount = _safe_float(opportunity.get("current_bid"))
+    return BidOutcomeNormalized(
+        bid=True,
+        outcome="won" if payload.won else "lost",
+        purchase_price=payload.purchase_price if payload.won else None,
+        bid_amount=bid_amount,
+    )
 
 
 def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = None) -> dict:
@@ -144,9 +174,10 @@ async def patch_outcome(
     else:
         sold_price = None
 
-    outcome_map = {"won": "sold", "lost": "passed", "passed": "passed"}
+    outcome_map = {"won": "won", "lost": "lost", "passed": "passed"}
     mapped_outcome = outcome_map[payload.outcome]
 
+    timestamp = datetime.now(timezone.utc).isoformat()
     upsert_payload = {
         "opportunity_id": opportunity_id,
         "user_id": user_id,
@@ -160,11 +191,24 @@ async def patch_outcome(
         "gross_margin": gross_margin,
         "roi_pct": roi_pct,
         "state": opportunity.get("state"),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": timestamp,
     }
 
     try:
         supabase_client.table("dealer_sales").upsert(upsert_payload, on_conflict="opportunity_id,user_id").execute()
+
+        opportunity_update = {
+            "won": payload.outcome == "won",
+            "outcome_sale_price": sold_price,
+            "outcome_recorded_at": timestamp,
+            "outcome_notes": json.dumps({
+                "type": "manual_outcome",
+                "outcome": payload.outcome,
+                "sold_price": sold_price,
+            }),
+        }
+        supabase_client.table("opportunities").update(opportunity_update).eq("id", opportunity_id).eq("user_id", user_id).execute()
+
         return {
             "success": True,
             "opportunity_id": opportunity_id,
@@ -199,9 +243,17 @@ async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
         counts = {"pending": 0, "won": 0, "lost": 0, "passed": 0}
         gross_margin_total = 0.0
         roi_values: list[float] = []
+        outcome_aliases = {
+            "sold": "won",
+            "won": "won",
+            "lost": "lost",
+            "passed": "passed",
+            "pending": "pending",
+        }
 
         for row in rows:
-            outcome = (row.get("outcome") or "pending").strip().lower()
+            raw_outcome = (row.get("outcome") or "pending").strip().lower()
+            outcome = outcome_aliases.get(raw_outcome, "pending")
             counts[outcome] = counts.get(outcome, 0) + 1
             margin = _safe_float(row.get("gross_margin"))
             if margin is not None:
@@ -247,24 +299,28 @@ async def create_bid_outcome(
     user_id = _verify_auth(authorization)
     opportunity = _fetch_opportunity(payload.opportunity_id, require_user_id=user_id)
 
+    normalized = _normalize_bid_outcome(payload, opportunity)
+
     notes_blob = json.dumps(
         {
             "type": "bid_outcome",
-            "bid": payload.bid,
-            "won": payload.won,
-            "purchase_price": payload.purchase_price,
+            "bid": normalized.bid,
+            "outcome": normalized.outcome,
+            "won": normalized.outcome == "won",
+            "purchase_price": normalized.purchase_price,
+            "bid_amount": normalized.bid_amount,
             "user_notes": payload.notes or "",
         }
     )
 
     update_payload = {
-        "bid_amount": payload.purchase_price if payload.purchase_price is not None else _safe_float(opportunity.get("current_bid")),
-        "won": payload.won,
+        "bid_amount": normalized.bid_amount,
+        "won": normalized.outcome == "won",
         "outcome_notes": notes_blob,
         "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
     }
-    if payload.won and payload.purchase_price is not None:
-        update_payload["outcome_sale_price"] = payload.purchase_price
+    if normalized.outcome == "won" and normalized.purchase_price is not None:
+        update_payload["outcome_sale_price"] = normalized.purchase_price
 
     try:
         supabase_client.table("opportunities").update(update_payload).eq("id", payload.opportunity_id).execute()

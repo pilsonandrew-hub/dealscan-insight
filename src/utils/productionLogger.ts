@@ -221,6 +221,19 @@ class ProductionLogger {
       ...context
     });
   }
+
+  /**
+   * Log analytics trust event
+   */
+  logAnalyticsTrustEvent(event: string, severity: 'low' | 'medium' | 'high', context?: LogContext): void {
+    const level: LogLevel = severity === 'high' ? 'error' : severity === 'medium' ? 'warn' : 'info';
+    this.log(level, `Analytics trust event: ${event}`, {
+      type: 'analytics_trust_event',
+      event,
+      severity,
+      ...context,
+    });
+  }
   
   /**
    * Log circuit breaker state change
