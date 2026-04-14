@@ -6,7 +6,7 @@ type AnalyticsSummary = {
   avg_gross_margin: number | null;
   avg_roi_pct: number | null;
   wins_by_source: { source: string; count: number }[];
-  top_makes: { make: string; avg_dos_score: number; count: number }[];
+  top_makes: { make: string; avg_gross_margin: number; count: number }[];
   alerts_sent_last_30d: number;
   total_bids: number;
   total_wins: number;
@@ -30,15 +30,19 @@ type AnalyticsSummary = {
     status: 'healthy' | 'degraded' | 'empty';
     scope: 'user_execution';
     updated_at: string | null;
-    bids_placed: number;
-    wins: number;
-    losses: number;
-    passes: number;
-    pending_outcomes: number;
-    win_rate: number | null;
-    avg_max_bid: number | null;
-    avg_purchase_price: number | null;
-    ceiling_compliance: number | null;
+    workflow_counts?: {
+      wins: number;
+      losses: number | null;
+      passes: number | null;
+      pending: number | null;
+    };
+    bid_metrics?: {
+      bids_placed: number;
+      win_rate: number | null;
+      avg_max_bid: number | null;
+      avg_purchase_price: number | null;
+      ceiling_compliance: number | null;
+    };
   };
   outcomes?: {
     status: 'healthy' | 'degraded' | 'empty';
@@ -49,7 +53,7 @@ type AnalyticsSummary = {
     avg_gross_margin: number | null;
     avg_roi: number | null;
     wins_by_source: { source: string; count: number }[];
-    top_makes_by_realized_performance: { make: string; avg_dos_score: number; count: number }[];
+    top_makes_by_realized_performance: { make: string; avg_gross_margin: number; count: number }[];
   };
   trust?: {
     status: 'healthy' | 'degraded' | 'empty';
@@ -72,8 +76,12 @@ const normalizeSummary = (summary: AnalyticsSummary) => ({
   execution: {
     status: summary.execution?.status ?? 'empty',
     scope: summary.execution?.scope ?? 'user_execution',
-    bids_placed: summary.execution?.bids_placed ?? summary.total_bids ?? 0,
-    wins: summary.execution?.wins ?? summary.total_wins ?? 0,
+    bids_placed: summary.execution?.bid_metrics?.bids_placed ?? summary.total_bids ?? 0,
+    wins: summary.execution?.workflow_counts?.wins ?? summary.total_wins ?? 0,
+    losses: summary.execution?.workflow_counts?.losses ?? null,
+    passes: summary.execution?.workflow_counts?.passes ?? null,
+    pending: summary.execution?.workflow_counts?.pending ?? null,
+    win_rate: summary.execution?.bid_metrics?.win_rate ?? summary.win_rate ?? null,
   },
   outcomes: {
     status: summary.outcomes?.status ?? 'empty',
@@ -117,18 +125,22 @@ describe('Analytics summary contract transition', () => {
         unique_states: 5,
       },
       execution: {
-        status: 'empty',
+        status: 'degraded',
         scope: 'user_execution',
         updated_at: null,
-        bids_placed: 0,
-        wins: 0,
-        losses: 0,
-        passes: 0,
-        pending_outcomes: 0,
-        win_rate: null,
-        avg_max_bid: null,
-        avg_purchase_price: null,
-        ceiling_compliance: null,
+        workflow_counts: {
+          wins: 0,
+          losses: 0,
+          passes: 0,
+          pending: null,
+        },
+        bid_metrics: {
+          bids_placed: 0,
+          win_rate: null,
+          avg_max_bid: null,
+          avg_purchase_price: null,
+          ceiling_compliance: null,
+        },
       },
       outcomes: {
         status: 'empty',
@@ -155,6 +167,10 @@ describe('Analytics summary contract transition', () => {
 
     expect(normalized.pipeline.active_opportunities).toBe(100);
     expect(normalized.execution.scope).toBe('user_execution');
+    expect(normalized.execution.wins).toBe(0);
+    expect(normalized.execution.losses).toBe(0);
+    expect(normalized.execution.passes).toBe(0);
+    expect(normalized.execution.pending).toBeNull();
     expect(normalized.outcomes.scope).toBe('user_outcomes');
     expect(normalized.trust.status).toBe('degraded');
   });
@@ -178,6 +194,10 @@ describe('Analytics summary contract transition', () => {
     expect(normalized.pipeline.active_opportunities).toBe(500);
     expect(normalized.execution.bids_placed).toBe(3);
     expect(normalized.execution.wins).toBe(1);
+    expect(normalized.execution.losses).toBeNull();
+    expect(normalized.execution.passes).toBeNull();
+    expect(normalized.execution.pending).toBeNull();
+    expect(normalized.execution.win_rate).toBe(33.3);
     expect(normalized.outcomes.recorded_outcomes).toBe(0);
     expect(normalized.outcomes.wins_by_source).toEqual([{ source: 'govdeals', count: 2 }]);
     expect(normalized.trust.status).toBe('healthy');

@@ -58,8 +58,8 @@ export function OutcomeModal({ open, onOpenChange, opportunity, onSaved }: Outco
         title: "Outcome recorded",
         description: `${opportunity.year ?? ""} ${opportunity.make ?? ""} ${opportunity.model ?? ""}`.trim(),
       });
-      onOpenChange(false);
       onSaved?.();
+      onOpenChange(false);
     } catch (error) {
       console.error("Failed to record outcome:", error);
       toast({

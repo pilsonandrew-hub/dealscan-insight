@@ -690,13 +690,75 @@ export const api = {
     avg_gross_margin: number | null;
     avg_roi_pct: number | null;
     wins_by_source: { source: string; count: number }[];
-    top_makes: { make: string; avg_dos_score: number; count: number }[];
+    top_makes: { make: string; avg_gross_margin: number; count: number }[];
     alerts_sent_last_30d: number;
     total_bids: number;
     total_wins: number;
     win_rate: number | null;
     avg_purchase_price: number | null;
     avg_max_bid: number | null;
+    pipeline?: {
+      status: 'healthy' | 'degraded' | 'empty';
+      scope: 'system';
+      updated_at: string | null;
+      active_opportunities: number;
+      fresh_opportunities_24h: number;
+      fresh_opportunities_7d: number;
+      hot_deals_count: number;
+      good_plus_deals_count: number;
+      avg_dos_score: number | null;
+      unique_sources: number;
+      unique_states: number;
+    };
+    source_health?: {
+      status: 'healthy' | 'degraded' | 'empty';
+      scope: 'system';
+      updated_at: string | null;
+      sources: SourceHealthRow[];
+      notes: string[];
+    };
+    execution?: {
+      status: 'healthy' | 'degraded' | 'empty';
+      scope: 'user_execution';
+      updated_at: string | null;
+      workflow_counts?: {
+        wins: number;
+        losses: number | null;
+        passes: number | null;
+        pending: number | null;
+      };
+      bid_metrics?: {
+        bids_placed: number;
+        win_rate: number | null;
+        avg_max_bid: number | null;
+        avg_purchase_price: number | null;
+        ceiling_compliance: number | null;
+      };
+      notes?: string[];
+    };
+    outcomes?: {
+      status: 'healthy' | 'degraded' | 'empty';
+      scope: 'user_outcomes';
+      updated_at: string | null;
+      recorded_outcomes: number;
+      total_gross_margin: number | null;
+      avg_gross_margin: number | null;
+      avg_roi: number | null;
+      wins_by_source: { source: string; count: number }[];
+      top_makes_by_realized_performance: { make: string; avg_gross_margin: number; count: number }[];
+    };
+    trust?: {
+      status: 'healthy' | 'degraded' | 'empty';
+      scope: 'trust';
+      updated_at: string | null;
+      summary_refreshed_at: string | null;
+      completeness_score: number | null;
+      degraded_sections: string[];
+      freshness_age: number | null;
+      severity?: 'low' | 'medium' | 'high';
+      rule_ids?: string[];
+      notes: string[];
+    };
   }> {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
@@ -720,6 +782,46 @@ export const api = {
       },
     });
     if (!res.ok) throw new Error(`Source health fetch failed: ${res.status}`);
+    return res.json();
+  },
+
+  async getRecentAnalyticsTrustEvents(limit: number = 25): Promise<{
+    events: Array<{
+      id: string | null;
+      level: string | null;
+      message: string | null;
+      event: string | null;
+      severity: 'low' | 'medium' | 'high' | null;
+      rule_ids: string[];
+      notes: string[];
+      degraded_sections: string[];
+      completeness_score: number | null;
+      summary_refreshed_at: string | null;
+      freshness_age: number | null;
+      paperclip: {
+        status: string | null;
+        issue_id: string | null;
+        identifier: string | null;
+        title: string | null;
+        issue_status: string | null;
+        correlation_key: string | null;
+        is_open: boolean;
+      };
+      timestamp: string | null;
+    }>;
+    count: number;
+    limit: number;
+    notes: string[];
+  }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+    });
+    if (!res.ok) throw new Error(`Recent trust events fetch failed: ${res.status}`);
     return res.json();
   },
 
@@ -769,6 +871,12 @@ export const api = {
     purchase_price?: number;
     notes?: string;
   }): Promise<void> {
+    if (payload.won && !payload.bid) {
+      throw new Error('Cannot log a win when no bid was placed');
+    }
+    if (payload.purchase_price != null && !payload.won) {
+      throw new Error('Winning purchase price is only valid when the bid was won');
+    }
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
     const res = await fetch(`${API_BASE}/api/outcomes/bid`, {
