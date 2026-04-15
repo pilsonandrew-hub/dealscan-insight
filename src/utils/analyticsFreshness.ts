@@ -13,6 +13,8 @@ export function deriveLegacyFreshnessEntry(
   isEmpty: boolean,
   trustAgeSeconds: number | null
 ): AnalyticsFreshnessEntry {
+  // Empty means the section has no underlying records.
+  // Unknown means we could not compute freshness for a populated section.
   if (isEmpty) {
     return {
       updated_at: updatedAt ?? null,
@@ -50,6 +52,7 @@ export function deriveNoRecordAwareFreshnessEntry({
   hasRecords,
   trustAgeSeconds,
 }: LegacyFreshnessArgs): AnalyticsFreshnessEntry {
+  // Preserve empty for the no-record case even if the parent summary is degraded.
   if (!hasRecords) {
     return {
       updated_at: updatedAt ?? null,
