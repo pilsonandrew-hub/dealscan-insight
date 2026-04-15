@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import type { AnalyticsFreshness, AnalyticsFreshnessStatus } from '@/services/api';
 
 interface TrustData {
   status: string;
@@ -8,6 +9,12 @@ interface TrustData {
   rule_ids: string[];
   completeness_score: number | null;
   summary_refreshed_at: string | null;
+}
+
+interface FreshnessEntry {
+  updated_at: string | null;
+  age_seconds: number | null;
+  status: AnalyticsFreshnessStatus;
 }
 
 interface SafeSummary {
@@ -30,6 +37,7 @@ interface SafeSummary {
     top_makes_by_realized_performance: { make: string; avg_gross_margin: number; count: number }[];
   };
   trust: TrustData;
+  freshness: AnalyticsFreshness;
 }
 
 interface AnalyticsSummarySectionProps {
@@ -48,6 +56,38 @@ interface AnalyticsSummarySectionProps {
     accent?: boolean;
   }>;
   AnalyticsOpenTrustCasesPanel: React.ComponentType<any>;
+}
+
+function freshnessLabel(status: AnalyticsFreshnessStatus): string {
+  switch (status) {
+    case 'fresh':
+      return 'fresh';
+    case 'stale':
+      return 'stale';
+    case 'empty':
+      return 'empty';
+    default:
+      return 'unknown';
+  }
+}
+
+function freshnessMeta(entry: FreshnessEntry): string {
+  if (entry.status === 'empty') return 'No underlying records';
+  if (entry.status === 'unknown') return 'Freshness could not be computed';
+  if (entry.age_seconds == null) return 'Age unavailable';
+
+  const hours = Math.floor(entry.age_seconds / 3600);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d old`;
+  if (hours >= 1) return `${hours}h old`;
+  const minutes = Math.max(1, Math.floor(entry.age_seconds / 60));
+  return `${minutes}m old`;
+}
+
+function freshnessTone(status: AnalyticsFreshnessStatus): string {
+  if (status === 'fresh') return 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10';
+  if (status === 'stale') return 'text-amber-300 border-amber-500/30 bg-amber-500/10';
+  if (status === 'empty') return 'text-slate-300 border-slate-500/30 bg-slate-500/10';
+  return 'text-slate-200 border-slate-500/30 bg-slate-500/10';
 }
 
 export default function AnalyticsSummarySection({
@@ -77,12 +117,24 @@ export default function AnalyticsSummarySection({
 
   if (!safeSummary) return null;
 
+  const freshnessItems = [
+    { key: 'pipeline', label: 'System ingest', entry: safeSummary.freshness.pipeline },
+    { key: 'source_health', label: 'Source health', entry: safeSummary.freshness.source_health },
+    { key: 'execution', label: 'Execution', entry: safeSummary.freshness.execution },
+    { key: 'outcomes', label: 'Outcomes', entry: safeSummary.freshness.outcomes },
+  ];
+  const freshnessSummary = freshnessItems.map((item) => `${item.label.toLowerCase()} is ${freshnessLabel(item.entry.status)}`).join(', ');
+  const freshnessNeedsAttention = freshnessItems.some((item) => item.entry.status !== 'fresh');
+
   return (
     <div className="space-y-4">
       {safeSummary.trust.status === 'degraded' && (
         <div className={`${safeSummary.trust.severity === 'high' ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'} border rounded-xl p-3`}>
           <p className={`text-sm font-medium ${safeSummary.trust.severity === 'high' ? 'text-red-300' : 'text-amber-300'}`}>
             {safeSummary.trust.severity === 'high' ? 'Analytics high-risk contradiction detected' : 'Analytics partially degraded'}
+          </p>
+          <p className="text-xs text-amber-100/80 mt-1">
+            {`Analytics trust is mixed: ${freshnessSummary}.`}
           </p>
           <p className="text-xs text-amber-200/80 mt-1">
             {safeSummary.trust.degraded_sections.length > 0
@@ -107,6 +159,21 @@ export default function AnalyticsSummarySection({
           </div>
         </div>
       )}
+
+      <div className={`${freshnessNeedsAttention ? 'border-sky-500/25 bg-sky-500/10' : 'border-gray-800 bg-gray-900'} rounded-xl border p-3`}>
+        <p className="text-xs font-medium text-sky-200 uppercase tracking-wide">Freshness snapshot</p>
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          {freshnessItems.map((item) => (
+            <div key={item.key} className="rounded-lg border border-white/10 bg-black/20 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">{item.label}</p>
+              <p className={`mt-1 text-sm font-semibold ${freshnessTone(item.entry.status)}`}>
+                {freshnessLabel(item.entry.status)}
+              </p>
+              <p className="mt-1 text-[11px] text-gray-400">{freshnessMeta(item.entry)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard

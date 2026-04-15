@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { SniperButton } from '@/components/SniperButton';
 import { useAuth } from '@/contexts/ModernAuthContext';
-import api from '@/services/api';
+import api, { type AnalyticsFreshness, type AnalyticsFreshnessEntry, type AnalyticsFreshnessStatus } from '@/services/api';
 import { Opportunity, SourceHealthRow } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
 import { OutcomeModal } from '@/components/OutcomeModal';
@@ -129,6 +129,60 @@ function fmtConfidence(n: number | null | undefined): string {
 function fmtNum(n: number | null | undefined, digits = 0): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toFixed(digits);
+}
+
+function isAnalyticsFreshnessStatus(value: unknown): value is AnalyticsFreshnessStatus {
+  return value === 'fresh' || value === 'stale' || value === 'empty' || value === 'unknown';
+}
+
+function normalizeFreshnessEntry(value: unknown, fallback: AnalyticsFreshnessEntry): AnalyticsFreshnessEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return fallback;
+  }
+
+  const raw = value as Partial<AnalyticsFreshnessEntry>;
+  return {
+    updated_at: typeof raw.updated_at === 'string' || raw.updated_at === null ? raw.updated_at : fallback.updated_at,
+    age_seconds: typeof raw.age_seconds === 'number' && Number.isFinite(raw.age_seconds) ? raw.age_seconds : fallback.age_seconds,
+    status: isAnalyticsFreshnessStatus(raw.status) ? raw.status : fallback.status,
+  };
+}
+
+function deriveLegacyFreshnessEntry(
+  status: string | undefined,
+  updatedAt: string | null | undefined,
+  isEmpty: boolean,
+  trustAgeSeconds: number | null
+): AnalyticsFreshnessEntry {
+  if (isEmpty) {
+    return {
+      updated_at: updatedAt ?? null,
+      age_seconds: null,
+      status: 'empty',
+    };
+  }
+
+  if (status === 'healthy') {
+    return {
+      updated_at: updatedAt ?? null,
+      age_seconds: trustAgeSeconds,
+      status: trustAgeSeconds != null && trustAgeSeconds > 86400 ? 'stale' : 'fresh',
+    };
+  }
+
+  if (status === 'degraded') {
+    return {
+      updated_at: updatedAt ?? null,
+      age_seconds: trustAgeSeconds,
+      status: trustAgeSeconds != null && trustAgeSeconds > 86400 ? 'stale' : 'unknown',
+    };
+  }
+
+  return {
+    updated_at: updatedAt ?? null,
+    age_seconds: trustAgeSeconds,
+    status: 'unknown',
+  };
 }
 
 function fmtDate(s: string | null | undefined): string {
@@ -1307,6 +1361,7 @@ interface AnalyticsSummary {
     freshness_age: number | null;
     notes: string[];
   };
+  freshness?: AnalyticsFreshness;
 }
 
 interface BidOutcomeSummary {
@@ -1477,6 +1532,7 @@ const AnalyticsTab = () => {
     completeness_score: number | null;
     summary_refreshed_at: string | null;
     freshness_age: number | null;
+    freshness?: AnalyticsFreshness;
     paperclip: {
       status: string | null;
       issue_id: string | null;
@@ -1519,6 +1575,8 @@ const AnalyticsTab = () => {
       return acc;
     }, {} as Record<string, number>);
   };
+
+  const trustFreshnessAge = summary ? toNullableFiniteNumber(summary.trust?.freshness_age) : null;
 
   const safeSummary = summary ? {
     ...summary,
@@ -1592,6 +1650,17 @@ const AnalyticsTab = () => {
       rule_ids: Array.isArray(summary.trust?.rule_ids) ? summary.trust.rule_ids : [],
       notes: Array.isArray(summary.trust?.notes) ? summary.trust.notes : [],
     },
+    freshness: summary.freshness ? {
+      pipeline: normalizeFreshnessEntry(summary.freshness.pipeline, deriveLegacyFreshnessEntry(summary.pipeline?.status, summary.pipeline?.updated_at ?? null, toFiniteNumber(summary.pipeline?.active_opportunities, toFiniteNumber(summary.total_opportunities)) === 0, trustFreshnessAge)),
+      source_health: normalizeFreshnessEntry(summary.freshness.source_health, deriveLegacyFreshnessEntry(summary.source_health?.status, summary.source_health?.updated_at ?? null, (Array.isArray(summary.source_health?.sources) ? summary.source_health.sources.length : 0) === 0, trustFreshnessAge)),
+      execution: normalizeFreshnessEntry(summary.freshness.execution, deriveLegacyFreshnessEntry(summary.execution?.status, summary.execution?.updated_at ?? null, (summary.execution?.status ?? 'empty') === 'empty', trustFreshnessAge)),
+      outcomes: normalizeFreshnessEntry(summary.freshness.outcomes, deriveLegacyFreshnessEntry(summary.outcomes?.status, summary.outcomes?.updated_at ?? null, (summary.outcomes?.status ?? 'empty') === 'empty', trustFreshnessAge)),
+    } : {
+      pipeline: deriveLegacyFreshnessEntry(summary.pipeline?.status, summary.pipeline?.updated_at ?? null, toFiniteNumber(summary.pipeline?.active_opportunities, toFiniteNumber(summary.total_opportunities)) === 0, trustFreshnessAge),
+      source_health: deriveLegacyFreshnessEntry(summary.source_health?.status, summary.source_health?.updated_at ?? null, (Array.isArray(summary.source_health?.sources) ? summary.source_health.sources.length : 0) === 0, trustFreshnessAge),
+      execution: deriveLegacyFreshnessEntry(summary.execution?.status, summary.execution?.updated_at ?? null, (summary.execution?.status ?? 'empty') === 'empty', trustFreshnessAge),
+      outcomes: deriveLegacyFreshnessEntry(summary.outcomes?.status, summary.outcomes?.updated_at ?? null, (summary.outcomes?.status ?? 'empty') === 'empty', trustFreshnessAge),
+    },
   } : null;
 
   const safeBidSummary = bidSummary ? {
@@ -1651,7 +1720,8 @@ const AnalyticsTab = () => {
       note.includes('Bid metrics are incomplete despite recorded bid activity') ||
       note.includes('Winning bid records exist without purchase-price support') ||
       note.includes('Recorded outcomes exist without outcome-source distribution') ||
-      note.includes('Source health appears healthy while summary freshness is stale')
+      note.includes('Source health appears healthy while execution/outcomes freshness is stale or empty') ||
+      note.includes('System and source signals are current while execution/outcomes freshness is stale or empty')
     );
 
     if (suspiciousNotes.length > 0) {
