@@ -7,6 +7,10 @@ import { Opportunity, SourceHealthRow } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
 import { OutcomeModal } from '@/components/OutcomeModal';
 import { Button } from '@/components/ui/button';
+import {
+  deriveLegacyFreshnessEntry,
+  deriveNoRecordAwareFreshnessEntry,
+} from '@/utils/analyticsFreshness';
 import { createLogger } from '@/utils/productionLogger';
 
 // ─── Icons (lucide-react is in package.json) ──────────────────────────────────
@@ -145,43 +149,6 @@ function normalizeFreshnessEntry(value: unknown, fallback: AnalyticsFreshnessEnt
     updated_at: typeof raw.updated_at === 'string' || raw.updated_at === null ? raw.updated_at : fallback.updated_at,
     age_seconds: typeof raw.age_seconds === 'number' && Number.isFinite(raw.age_seconds) ? raw.age_seconds : fallback.age_seconds,
     status: isAnalyticsFreshnessStatus(raw.status) ? raw.status : fallback.status,
-  };
-}
-
-function deriveLegacyFreshnessEntry(
-  status: string | undefined,
-  updatedAt: string | null | undefined,
-  isEmpty: boolean,
-  trustAgeSeconds: number | null
-): AnalyticsFreshnessEntry {
-  if (isEmpty) {
-    return {
-      updated_at: updatedAt ?? null,
-      age_seconds: null,
-      status: 'empty',
-    };
-  }
-
-  if (status === 'healthy') {
-    return {
-      updated_at: updatedAt ?? null,
-      age_seconds: trustAgeSeconds,
-      status: trustAgeSeconds != null && trustAgeSeconds > 86400 ? 'stale' : 'fresh',
-    };
-  }
-
-  if (status === 'degraded') {
-    return {
-      updated_at: updatedAt ?? null,
-      age_seconds: trustAgeSeconds,
-      status: trustAgeSeconds != null && trustAgeSeconds > 86400 ? 'stale' : 'unknown',
-    };
-  }
-
-  return {
-    updated_at: updatedAt ?? null,
-    age_seconds: trustAgeSeconds,
-    status: 'unknown',
   };
 }
 
@@ -1653,13 +1620,49 @@ const AnalyticsTab = () => {
     freshness: summary.freshness ? {
       pipeline: normalizeFreshnessEntry(summary.freshness.pipeline, deriveLegacyFreshnessEntry(summary.pipeline?.status, summary.pipeline?.updated_at ?? null, toFiniteNumber(summary.pipeline?.active_opportunities, toFiniteNumber(summary.total_opportunities)) === 0, trustFreshnessAge)),
       source_health: normalizeFreshnessEntry(summary.freshness.source_health, deriveLegacyFreshnessEntry(summary.source_health?.status, summary.source_health?.updated_at ?? null, (Array.isArray(summary.source_health?.sources) ? summary.source_health.sources.length : 0) === 0, trustFreshnessAge)),
-      execution: normalizeFreshnessEntry(summary.freshness.execution, deriveLegacyFreshnessEntry(summary.execution?.status, summary.execution?.updated_at ?? null, (summary.execution?.status ?? 'empty') === 'empty', trustFreshnessAge)),
-      outcomes: normalizeFreshnessEntry(summary.freshness.outcomes, deriveLegacyFreshnessEntry(summary.outcomes?.status, summary.outcomes?.updated_at ?? null, (summary.outcomes?.status ?? 'empty') === 'empty', trustFreshnessAge)),
+      execution: normalizeFreshnessEntry(summary.freshness.execution, deriveNoRecordAwareFreshnessEntry({
+        status: summary.execution?.status,
+        updatedAt: summary.execution?.updated_at ?? null,
+        hasRecords: toFiniteNumber(summary.execution?.bid_metrics?.bids_placed, toFiniteNumber(summary.total_bids)) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.wins, toFiniteNumber(summary.total_wins)) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.losses, 0) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.passes, 0) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.pending, 0) > 0
+          || summary.execution?.bid_metrics?.win_rate != null
+          || summary.execution?.bid_metrics?.avg_max_bid != null
+          || summary.execution?.bid_metrics?.avg_purchase_price != null
+          || summary.execution?.bid_metrics?.ceiling_compliance != null,
+        trustAgeSeconds: trustFreshnessAge,
+      })),
+      outcomes: normalizeFreshnessEntry(summary.freshness.outcomes, deriveNoRecordAwareFreshnessEntry({
+        status: summary.outcomes?.status,
+        updatedAt: summary.outcomes?.updated_at ?? null,
+        hasRecords: toFiniteNumber(summary.outcomes?.recorded_outcomes, toFiniteNumber(summary.total_outcomes)) > 0,
+        trustAgeSeconds: trustFreshnessAge,
+      })),
     } : {
       pipeline: deriveLegacyFreshnessEntry(summary.pipeline?.status, summary.pipeline?.updated_at ?? null, toFiniteNumber(summary.pipeline?.active_opportunities, toFiniteNumber(summary.total_opportunities)) === 0, trustFreshnessAge),
       source_health: deriveLegacyFreshnessEntry(summary.source_health?.status, summary.source_health?.updated_at ?? null, (Array.isArray(summary.source_health?.sources) ? summary.source_health.sources.length : 0) === 0, trustFreshnessAge),
-      execution: deriveLegacyFreshnessEntry(summary.execution?.status, summary.execution?.updated_at ?? null, (summary.execution?.status ?? 'empty') === 'empty', trustFreshnessAge),
-      outcomes: deriveLegacyFreshnessEntry(summary.outcomes?.status, summary.outcomes?.updated_at ?? null, (summary.outcomes?.status ?? 'empty') === 'empty', trustFreshnessAge),
+      execution: deriveNoRecordAwareFreshnessEntry({
+        status: summary.execution?.status,
+        updatedAt: summary.execution?.updated_at ?? null,
+        hasRecords: toFiniteNumber(summary.execution?.bid_metrics?.bids_placed, toFiniteNumber(summary.total_bids)) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.wins, toFiniteNumber(summary.total_wins)) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.losses, 0) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.passes, 0) > 0
+          || toFiniteNumber(summary.execution?.workflow_counts?.pending, 0) > 0
+          || summary.execution?.bid_metrics?.win_rate != null
+          || summary.execution?.bid_metrics?.avg_max_bid != null
+          || summary.execution?.bid_metrics?.avg_purchase_price != null
+          || summary.execution?.bid_metrics?.ceiling_compliance != null,
+        trustAgeSeconds: trustFreshnessAge,
+      }),
+      outcomes: deriveNoRecordAwareFreshnessEntry({
+        status: summary.outcomes?.status,
+        updatedAt: summary.outcomes?.updated_at ?? null,
+        hasRecords: toFiniteNumber(summary.outcomes?.recorded_outcomes, toFiniteNumber(summary.total_outcomes)) > 0,
+        trustAgeSeconds: trustFreshnessAge,
+      }),
     },
   } : null;
 

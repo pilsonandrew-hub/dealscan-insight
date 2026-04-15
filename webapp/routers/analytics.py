@@ -800,6 +800,12 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         source_health_status = "empty" if not source_health_sources else "healthy"
         source_health_notes = []
         source_health_timestamps = []
+        source_health_generated_at = source_health_payload.get("generated_at")
+        if source_health_generated_at:
+            try:
+                source_health_timestamps.append(datetime.fromisoformat(str(source_health_generated_at).replace("Z", "+00:00")))
+            except Exception:
+                pass
         for source in source_health_sources:
             for ts_key in ("last_webhook_at", "last_seen_at"):
                 ts_raw = source.get(ts_key)

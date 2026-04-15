@@ -125,6 +125,34 @@ class AnalyticsTrustModelTests(BaseAnalyticsTrustModelTests):
         self.assertEqual(summary["trust"]["rule_ids"], ["healthy_source_health_with_stale_summary"])
         self.assertIn("System and source signals are current while execution/outcomes freshness is stale or empty", summary["trust"]["notes"])
 
+    def test_source_health_freshness_uses_generated_at_when_source_timestamps_are_missing(self):
+        now = datetime(2026, 4, 15, 18, 0, 0, tzinfo=timezone.utc)
+        analytics.datetime = _FixedDatetime
+
+        async def _fake_source_health(authorization=None):
+            return {
+                "generated_at": now.isoformat(),
+                "sources": [
+                    {"source_site": "govdeals", "health": "green"},
+                    {"source_site": "publicsurplus", "health": "yellow"},
+                ],
+            }
+
+        analytics.source_health = _fake_source_health
+        analytics.supa = _FakeSupabase({
+            "opportunities": {"data": [
+                {"created_at": now.isoformat(), "dos_score": 88, "source_site": "govdeals", "state": "CA"}
+            ]},
+            "dealer_sales": {"data": [], "count": 0},
+            "alert_log": {"data": [], "count": 0},
+        })
+
+        summary = _run(analytics.analytics_summary("Bearer token"))
+
+        self.assertEqual(summary["freshness"]["source_health"]["updated_at"], now.isoformat())
+        self.assertEqual(summary["freshness"]["source_health"]["age_seconds"], 0)
+        self.assertEqual(summary["freshness"]["source_health"]["status"], "fresh")
+
     def test_recent_trust_events_include_freshness_context(self):
         analytics.supabase_client = _FakeSupabase({
             "system_logs": {
