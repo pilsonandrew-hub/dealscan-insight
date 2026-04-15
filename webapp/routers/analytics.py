@@ -74,6 +74,8 @@ def _build_execution_notes(*, pending_outcomes, ceiling_compliance) -> list[str]
 
 
 FRESHNESS_STALE_THRESHOLD_SECONDS = 86400
+# Keep the 24h cutoff aligned with the frontend trust summary for this sweep.
+# Changing the threshold would alter alerting semantics, so leave it untouched.
 
 
 def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
@@ -85,6 +87,8 @@ def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
 
 
 def _build_freshness_entry(*, updated_at: Optional[datetime], has_records: bool, query_failed: bool = False) -> dict:
+    # Empty means there are no underlying records to judge.
+    # Unknown means we expected data, but the timestamp is missing or the query failed.
     if query_failed:
         return {
             "updated_at": None,
@@ -140,7 +144,7 @@ TRUST_RULE_REGISTRY = [
         "condition": lambda ctx: ctx["total_outcomes"] > 0 and not ctx["wins_by_source"],
     },
     {
-        "id": "healthy_source_health_with_stale_summary",
+        "id": "fresh_source_health_with_stale_execution_or_outcomes",
         "severity": "medium",
         "message": "System and source signals are current while execution/outcomes freshness is stale or empty",
         "condition": lambda ctx: ctx["pipeline_freshness_status"] == "fresh"
@@ -442,12 +446,23 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if supa is None:
-        # Return zeroed structure so the UI still renders
+        # Return zeroed structure so the UI still renders.
+        # Execution/outcomes are intentionally marked empty here because the
+        # summary has no records to judge, even though freshness timestamps are
+        # unavailable in this no-DB path.
         freshness = {
             "pipeline": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
             "source_health": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
-            "execution": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
-            "outcomes": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
+            "execution": {
+                "updated_at": None,
+                "age_seconds": None,
+                "status": "empty",
+            },
+            "outcomes": {
+                "updated_at": None,
+                "age_seconds": None,
+                "status": "empty",
+            },
         }
         return {
             "total_opportunities": 0,
@@ -802,6 +817,8 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         source_health_timestamps = []
         source_health_generated_at = source_health_payload.get("generated_at")
         if source_health_generated_at:
+            # `generated_at` is the snapshot build time for source health, not a
+            # per-source event timestamp. Use it as a fallback when rows are sparse.
             try:
                 source_health_timestamps.append(datetime.fromisoformat(str(source_health_generated_at).replace("Z", "+00:00")))
             except Exception:
@@ -1239,6 +1256,7 @@ async def source_health(authorization: Optional[str] = Header(None)):
     """
     user_id = _verify_auth(authorization)
     if supa is None:
+        # `generated_at` is the snapshot assembly time for the current source-health view.
         return {"sources": [], "generated_at": datetime.now(timezone.utc).isoformat()}
 
     now = datetime.now(timezone.utc)
