@@ -65,6 +65,28 @@ type AnalyticsSummary = {
     freshness_age: number | null;
     notes: string[];
   };
+  freshness?: {
+    pipeline: {
+      updated_at: string | null;
+      age_seconds: number | null;
+      status: 'fresh' | 'stale' | 'empty' | 'unknown';
+    };
+    source_health: {
+      updated_at: string | null;
+      age_seconds: number | null;
+      status: 'fresh' | 'stale' | 'empty' | 'unknown';
+    };
+    execution: {
+      updated_at: string | null;
+      age_seconds: number | null;
+      status: 'fresh' | 'stale' | 'empty' | 'unknown';
+    };
+    outcomes: {
+      updated_at: string | null;
+      age_seconds: number | null;
+      status: 'fresh' | 'stale' | 'empty' | 'unknown';
+    };
+  };
 };
 
 const normalizeSummary = (summary: AnalyticsSummary) => ({
@@ -93,6 +115,12 @@ const normalizeSummary = (summary: AnalyticsSummary) => ({
     status: summary.trust?.status ?? 'healthy',
     scope: summary.trust?.scope ?? 'trust',
     degraded_sections: summary.trust?.degraded_sections ?? [],
+  },
+  freshness: {
+    pipeline: summary.freshness?.pipeline ?? { updated_at: null, age_seconds: null, status: 'unknown' as const },
+    source_health: summary.freshness?.source_health ?? { updated_at: null, age_seconds: null, status: 'unknown' as const },
+    execution: summary.freshness?.execution ?? { updated_at: null, age_seconds: null, status: 'unknown' as const },
+    outcomes: summary.freshness?.outcomes ?? { updated_at: null, age_seconds: null, status: 'unknown' as const },
   },
 });
 
@@ -163,6 +191,28 @@ describe('Analytics summary contract transition', () => {
         freshness_age: null,
         notes: ['partial'],
       },
+      freshness: {
+        pipeline: {
+          updated_at: '2026-04-15T17:00:00+00:00',
+          age_seconds: 3600,
+          status: 'fresh',
+        },
+        source_health: {
+          updated_at: '2026-04-15T17:00:00+00:00',
+          age_seconds: 3600,
+          status: 'fresh',
+        },
+        execution: {
+          updated_at: '2026-04-13T17:00:00+00:00',
+          age_seconds: 172800,
+          status: 'stale',
+        },
+        outcomes: {
+          updated_at: null,
+          age_seconds: null,
+          status: 'empty',
+        },
+      },
     });
 
     expect(normalized.pipeline.active_opportunities).toBe(100);
@@ -173,6 +223,9 @@ describe('Analytics summary contract transition', () => {
     expect(normalized.execution.pending).toBeNull();
     expect(normalized.outcomes.scope).toBe('user_outcomes');
     expect(normalized.trust.status).toBe('degraded');
+    expect(normalized.freshness.pipeline.status).toBe('fresh');
+    expect(normalized.freshness.execution.status).toBe('stale');
+    expect(normalized.freshness.outcomes.status).toBe('empty');
   });
 
   it('falls back to legacy flat fields during transition', () => {
@@ -201,5 +254,7 @@ describe('Analytics summary contract transition', () => {
     expect(normalized.outcomes.recorded_outcomes).toBe(0);
     expect(normalized.outcomes.wins_by_source).toEqual([{ source: 'govdeals', count: 2 }]);
     expect(normalized.trust.status).toBe('healthy');
+    expect(normalized.freshness.pipeline.status).toBe('unknown');
+    expect(normalized.freshness.execution.status).toBe('unknown');
   });
 });

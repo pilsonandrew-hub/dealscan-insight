@@ -73,6 +73,47 @@ def _build_execution_notes(*, pending_outcomes, ceiling_compliance) -> list[str]
     return notes
 
 
+FRESHNESS_STALE_THRESHOLD_SECONDS = 86400
+
+
+def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _build_freshness_entry(*, updated_at: Optional[datetime], has_records: bool, query_failed: bool = False) -> dict:
+    if query_failed:
+        return {
+            "updated_at": None,
+            "age_seconds": None,
+            "status": "unknown",
+        }
+    if not has_records:
+        return {
+            "updated_at": None,
+            "age_seconds": None,
+            "status": "empty",
+        }
+    if updated_at is None:
+        return {
+            "updated_at": None,
+            "age_seconds": None,
+            "status": "unknown",
+        }
+
+    updated_at_utc = updated_at if updated_at.tzinfo else updated_at.replace(tzinfo=timezone.utc)
+    updated_at_utc = updated_at_utc.astimezone(timezone.utc)
+    age_seconds = max(0, int((datetime.now(timezone.utc) - updated_at_utc).total_seconds()))
+    return {
+        "updated_at": updated_at_utc.isoformat(),
+        "age_seconds": age_seconds,
+        "status": "fresh" if age_seconds <= FRESHNESS_STALE_THRESHOLD_SECONDS else "stale",
+    }
+
+
 TRUST_RULE_REGISTRY = [
     {
         "id": "wins_without_recorded_outcomes",
@@ -101,13 +142,29 @@ TRUST_RULE_REGISTRY = [
     {
         "id": "healthy_source_health_with_stale_summary",
         "severity": "medium",
-        "message": "Source health appears healthy while summary freshness is stale",
-        "condition": lambda ctx: ctx["source_health_status"] == "healthy" and ctx["freshness_age"] is not None and ctx["freshness_age"] > 86400,
+        "message": "System and source signals are current while execution/outcomes freshness is stale or empty",
+        "condition": lambda ctx: ctx["pipeline_freshness_status"] == "fresh"
+        and ctx["source_health_freshness_status"] == "fresh"
+        and (
+            ctx["execution_freshness_status"] in {"stale", "empty"}
+            or ctx["outcomes_freshness_status"] in {"stale", "empty"}
+        ),
     },
 ]
 
 
-def _evaluate_trust_rules(*, total_wins, total_outcomes, total_bids, win_rate, avg_purchase_price, wins_by_source, source_health_status, freshness_age) -> list[dict]:
+def _evaluate_trust_rules(
+    *,
+    total_wins,
+    total_outcomes,
+    total_bids,
+    win_rate,
+    avg_purchase_price,
+    wins_by_source,
+    source_health_status,
+    freshness_age,
+    freshness,
+) -> list[dict]:
     rules: list[dict] = []
     ctx = {
         "total_wins": total_wins,
@@ -118,6 +175,10 @@ def _evaluate_trust_rules(*, total_wins, total_outcomes, total_bids, win_rate, a
         "wins_by_source": wins_by_source,
         "source_health_status": source_health_status,
         "freshness_age": freshness_age,
+        "pipeline_freshness_status": freshness["pipeline"]["status"],
+        "source_health_freshness_status": freshness["source_health"]["status"],
+        "execution_freshness_status": freshness["execution"]["status"],
+        "outcomes_freshness_status": freshness["outcomes"]["status"],
     }
     for rule in TRUST_RULE_REGISTRY:
         try:
@@ -132,7 +193,19 @@ def _evaluate_trust_rules(*, total_wins, total_outcomes, total_bids, win_rate, a
     return rules
 
 
-def _emit_trust_events(*, user_id: Optional[str], trust_status: str, trust_severity: str, trust_rule_ids: list[str], trust_notes: list[str], degraded_sections: list[str], completeness_score, summary_refreshed_at, freshness_age) -> dict:
+def _emit_trust_events(
+    *,
+    user_id: Optional[str],
+    trust_status: str,
+    trust_severity: str,
+    trust_rule_ids: list[str],
+    trust_notes: list[str],
+    degraded_sections: list[str],
+    completeness_score,
+    summary_refreshed_at,
+    freshness_age,
+    freshness,
+) -> dict:
     if trust_status != "degraded":
         return {
             "event": None,
@@ -156,6 +229,7 @@ def _emit_trust_events(*, user_id: Optional[str], trust_status: str, trust_sever
         "completenessScore": completeness_score,
         "summaryRefreshedAt": summary_refreshed_at,
         "freshnessAge": freshness_age,
+        "freshness": freshness,
     }
 
     logger.log(
@@ -369,6 +443,12 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
 
     if supa is None:
         # Return zeroed structure so the UI still renders
+        freshness = {
+            "pipeline": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
+            "source_health": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
+            "execution": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
+            "outcomes": _build_freshness_entry(updated_at=None, has_records=False, query_failed=True),
+        }
         return {
             "total_opportunities": 0,
             "total_outcomes": 0,
@@ -432,6 +512,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
                 "wins_by_source": [],
                 "top_makes_by_realized_performance": [],
             },
+            "freshness": freshness,
             "trust": {
                 "status": "degraded",
                 "scope": "trust",
@@ -479,6 +560,10 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     source_health_updated_at = None
     execution_updated_at = None
     outcomes_updated_at = None
+    pipeline_query_failed = False
+    source_health_query_failed = False
+    execution_query_failed = False
+    outcomes_query_failed = False
 
     try:
         opp_resp = (
@@ -529,6 +614,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         unique_states = len(state_set)
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary opportunities query degraded: {exc}")
+        pipeline_query_failed = True
         degraded_sections.append("pipeline")
         notes.append("Pipeline metrics degraded")
 
@@ -589,6 +675,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         top_makes = top_makes[:5]
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary outcomes query degraded: {exc}")
+        outcomes_query_failed = True
         if "outcomes" not in degraded_sections:
             degraded_sections.append("outcomes")
         notes.append("Outcome metrics degraded")
@@ -701,6 +788,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         avg_max_bid = round(sum(max_bids_on_bid_rows) / len(max_bids_on_bid_rows), 2) if max_bids_on_bid_rows else None
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary execution query degraded: {exc}")
+        execution_query_failed = True
         if "execution" not in degraded_sections:
             degraded_sections.append("execution")
         notes.append("Execution metrics degraded")
@@ -724,6 +812,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         source_health_updated_at = max(source_health_timestamps) if source_health_timestamps else None
     except HTTPException as exc:
         logger.warning(f"[ANALYTICS] summary source-health query degraded: {exc.detail}")
+        source_health_query_failed = True
         source_health_sources = []
         source_health_status = "degraded"
         source_health_notes = [str(exc.detail)]
@@ -732,6 +821,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         notes.append("Source health degraded")
     except Exception as exc:
         logger.warning(f"[ANALYTICS] summary source-health query degraded: {exc}")
+        source_health_query_failed = True
         source_health_sources = []
         source_health_status = "degraded"
         source_health_notes = ["Source health metrics degraded"]
@@ -769,23 +859,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         pending_outcomes=pending_outcomes,
         ceiling_compliance=ceiling_compliance,
     )
-    trust_rule_results = _evaluate_trust_rules(
-        total_wins=total_wins,
-        total_outcomes=total_outcomes,
-        total_bids=total_bids,
-        win_rate=win_rate,
-        avg_purchase_price=avg_purchase_price,
-        wins_by_source=wins_by_source,
-        source_health_status=source_health_status,
-        freshness_age=freshness_age,
-    )
-    trust_rule_notes = [rule["message"] for rule in trust_rule_results]
-    trust_rule_ids = [rule["id"] for rule in trust_rule_results]
-    trust_severity = "high" if any(rule["severity"] == "high" for rule in trust_rule_results) else ("medium" if trust_rule_results else "low")
-    if trust_rule_notes:
-        notes.extend(trust_rule_notes)
-        if "trust" not in degraded_sections:
-            degraded_sections.append("trust")
     execution_has_data = (
         total_bids > 0
         or total_wins > 0
@@ -795,10 +868,51 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         or ceiling_compliance is not None
     )
     execution_status = "degraded" if execution_has_data else "empty"
-    if execution_has_data and "execution" not in degraded_sections:
-        degraded_sections.append("execution")
     outcomes_status = "empty" if total_outcomes == 0 else ("degraded" if "outcomes" in degraded_sections else "healthy")
     pipeline_status = "empty" if total_opportunities == 0 else ("degraded" if "pipeline" in degraded_sections else "healthy")
+    freshness = {
+        "pipeline": _build_freshness_entry(
+            updated_at=pipeline_updated_at,
+            has_records=total_opportunities > 0,
+            query_failed=pipeline_query_failed,
+        ),
+        "source_health": _build_freshness_entry(
+            updated_at=source_health_updated_at,
+            has_records=bool(source_health_sources),
+            query_failed=source_health_query_failed,
+        ),
+        "execution": _build_freshness_entry(
+            updated_at=execution_updated_at,
+            has_records=execution_has_data,
+            query_failed=execution_query_failed,
+        ),
+        "outcomes": _build_freshness_entry(
+            updated_at=outcomes_updated_at,
+            has_records=total_outcomes > 0,
+            query_failed=outcomes_query_failed,
+        ),
+    }
+    trust_rule_results = _evaluate_trust_rules(
+        total_wins=total_wins,
+        total_outcomes=total_outcomes,
+        total_bids=total_bids,
+        win_rate=win_rate,
+        avg_purchase_price=avg_purchase_price,
+        wins_by_source=wins_by_source,
+        source_health_status=source_health_status,
+        freshness_age=freshness_age,
+        freshness=freshness,
+    )
+    trust_rule_notes = [rule["message"] for rule in trust_rule_results]
+    trust_rule_ids = [rule["id"] for rule in trust_rule_results]
+    trust_severity = "high" if any(rule["severity"] == "high" for rule in trust_rule_results) else ("medium" if trust_rule_results else "low")
+    if trust_rule_notes:
+        notes.extend(trust_rule_notes)
+        if "trust" not in degraded_sections:
+            degraded_sections.append("trust")
+    if execution_has_data and "execution" not in degraded_sections:
+        degraded_sections.append("execution")
+    trust_status = "healthy" if not degraded_sections else "degraded"
 
     response = {
         "total_opportunities": total_opportunities,
@@ -863,6 +977,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             "wins_by_source": wins_by_source,
             "top_makes_by_realized_performance": top_makes,
         },
+        "freshness": freshness,
         "trust": {
             "status": trust_status,
             "scope": "trust",
@@ -887,6 +1002,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         completeness_score=completeness_score,
         summary_refreshed_at=summary_refreshed_at_value,
         freshness_age=freshness_age,
+        freshness=freshness,
     )
 
     return response
@@ -1074,6 +1190,7 @@ async def recent_trust_events(limit: int = 25, authorization: Optional[str] = He
                 "completeness_score": context.get("completenessScore"),
                 "summary_refreshed_at": context.get("summaryRefreshedAt"),
                 "freshness_age": context.get("freshnessAge"),
+                "freshness": context.get("freshness") or {},
                 "paperclip": {
                     "status": paperclip.get("status"),
                     "issue_id": paperclip.get("issue_id"),

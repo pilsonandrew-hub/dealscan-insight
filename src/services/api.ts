@@ -22,6 +22,21 @@ export interface CrosshairSearchFilters {
   offset?: number;
 }
 
+export type AnalyticsFreshnessStatus = 'fresh' | 'stale' | 'empty' | 'unknown';
+
+export interface AnalyticsFreshnessEntry {
+  updated_at: string | null;
+  age_seconds: number | null;
+  status: AnalyticsFreshnessStatus;
+}
+
+export interface AnalyticsFreshness {
+  pipeline: AnalyticsFreshnessEntry;
+  source_health: AnalyticsFreshnessEntry;
+  execution: AnalyticsFreshnessEntry;
+  outcomes: AnalyticsFreshnessEntry;
+}
+
 export interface OpportunityDetail {
   id: string;
   make: string;
@@ -759,6 +774,7 @@ export const api = {
       rule_ids?: string[];
       notes: string[];
     };
+    freshness?: AnalyticsFreshness;
   }> {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
@@ -798,6 +814,7 @@ export const api = {
       completeness_score: number | null;
       summary_refreshed_at: string | null;
       freshness_age: number | null;
+      freshness?: AnalyticsFreshness;
       paperclip: {
         status: string | null;
         issue_id: string | null;
