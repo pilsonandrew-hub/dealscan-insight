@@ -26,7 +26,7 @@ describe('Analytics trust banner', () => {
             severity: 'medium',
             degraded_sections: ['execution', 'outcomes', 'trust'],
             notes: ['Analytics trust is mixed: some system signals are current, but execution/outcomes freshness is stale or empty.'],
-            rule_ids: ['healthy_source_health_with_stale_summary'],
+            rule_ids: ['fresh_source_health_with_stale_execution_or_outcomes'],
             completeness_score: 0.25,
             summary_refreshed_at: '2026-04-13T18:28:17.109326+00:00',
           },
@@ -51,6 +51,7 @@ describe('Analytics trust banner', () => {
     expect(screen.getByText('Analytics partially degraded')).toBeInTheDocument();
     expect(screen.getByText('Analytics trust is mixed: system ingest is fresh, source health is fresh, execution is stale, outcomes is empty.')).toBeInTheDocument();
     expect(screen.getByText('Freshness snapshot')).toBeInTheDocument();
+    expect(screen.getByText('Empty means there are no underlying records. Unknown means freshness could not be computed.')).toBeInTheDocument();
     expect(screen.getByText('System ingest')).toBeInTheDocument();
     expect(screen.getByText('Source health')).toBeInTheDocument();
     expect(screen.getByText('Execution')).toBeInTheDocument();
@@ -71,7 +72,7 @@ describe('Analytics trust banner', () => {
             severity: 'high',
             degraded_sections: ['trust', 'execution'],
             notes: ['Source health appears healthy while execution/outcomes freshness is stale or empty.'],
-            rule_ids: ['healthy_source_health_with_stale_summary'],
+            rule_ids: ['fresh_source_health_with_stale_execution_or_outcomes'],
             completeness_score: 0.6,
             summary_refreshed_at: '2026-04-13T18:28:17.109326+00:00',
           },
@@ -110,7 +111,7 @@ describe('Analytics trust banner', () => {
             severity: 'medium',
             degraded_sections: ['trust', 'source_health'],
             notes: ['Source health appears healthy while execution/outcomes freshness is stale or empty.'],
-            rule_ids: ['healthy_source_health_with_stale_summary'],
+            rule_ids: ['fresh_source_health_with_stale_execution_or_outcomes'],
             completeness_score: 0.4,
             summary_refreshed_at: '2026-04-13T18:28:17.109326+00:00',
           },
