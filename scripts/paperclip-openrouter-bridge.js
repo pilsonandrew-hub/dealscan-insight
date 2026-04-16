@@ -395,9 +395,10 @@ function validateAgainstSchema(schema, value, pathName = 'result') {
 function coerceParsedExternalReviewResult(parsed, routingMetadata) {
   const topRisks = Array.isArray(parsed?.top_risks) ? parsed.top_risks.slice(0, 3) : [];
   const confidenceValue = typeof parsed?.confidence === 'number' ? parsed.confidence : Number(parsed?.confidence);
+  const normalizedDecision = normalizeString(parsed?.decision).toUpperCase();
   return {
-    decision: normalizeString(parsed?.decision),
-    confidence: Number.isFinite(confidenceValue) ? confidenceValue : 0,
+    decision: normalizedDecision,
+    confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0,
     top_risks: topRisks.map((item) => {
       if (typeof item === 'string') return item.trim();
       if (item && typeof item === 'object') {
@@ -415,6 +416,95 @@ function coerceParsedExternalReviewResult(parsed, routingMetadata) {
       ...(routingMetadata && typeof routingMetadata === 'object' ? routingMetadata : {}),
     },
   };
+}
+
+function extractQuotedValue(block, key) {
+  const match = block.match(new RegExp(`"${key}"\\s*:\\s*"([^\\"]*)"`, 'i'));
+  return normalizeString(match?.[1]);
+}
+
+function extractPossiblyTruncatedQuotedValue(block, key) {
+  const exact = extractQuotedValue(block, key);
+  if (exact) return exact;
+  const index = block.toLowerCase().indexOf(`"${String(key).toLowerCase()}"`);
+  if (index === -1) return '';
+  const remainder = block.slice(index);
+  const colonIndex = remainder.indexOf(':');
+  if (colonIndex === -1) return '';
+  const afterColon = remainder.slice(colonIndex + 1).trimStart();
+  if (!afterColon.startsWith('"')) return '';
+  const partial = afterColon.slice(1);
+  const nextQuote = partial.indexOf('"');
+  if (nextQuote !== -1) return normalizeString(partial.slice(0, nextQuote));
+  return normalizeString(partial);
+}
+
+function extractBooleanValue(block, key) {
+  const match = block.match(new RegExp(`"${key}"\\s*:\\s*(true|false)`, 'i'));
+  return match ? match[1].toLowerCase() === 'true' : null;
+}
+
+function extractRiskDescriptions(rawContent) {
+  const text = normalizeString(rawContent);
+  if (!text) return [];
+
+  const objectDescriptions = [...text.matchAll(/"description"\s*:\s*"([^\"]+)"/gi)]
+    .map((match) => normalizeString(match[1]))
+    .filter(Boolean);
+  if (objectDescriptions.length) return objectDescriptions.slice(0, 3);
+
+  const riskObjects = [...text.matchAll(/\{[^{}]*"risk"\s*:\s*"([^\"]+)"[^{}]*?(?:"severity"\s*:\s*"([^\"]+)")?[^{}]*?(?:"impact"\s*:\s*"([^\"]+)")?[^{}]*\}/gi)]
+    .map((match) => {
+      const risk = normalizeString(match[1]);
+      const severity = normalizeString(match[2]);
+      const impact = normalizeString(match[3]);
+      const parts = [risk];
+      if (severity) parts.push(`severity: ${severity}`);
+      if (impact) parts.push(`impact: ${impact}`);
+      return parts.filter(Boolean).join(' | ');
+    })
+    .filter(Boolean);
+  if (riskObjects.length) return riskObjects.slice(0, 3);
+
+  const quotedBlockMatch = text.match(/"top_risks"\s*:\s*\[([\s\S]*?)\]/i);
+  if (!quotedBlockMatch) return [];
+  return [...quotedBlockMatch[1].matchAll(/"([^\"]+)"/g)]
+    .map((match) => normalizeString(match[1]))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function buildHeuristicExternalReviewResult(rawContent, routingMetadata) {
+  const text = normalizeString(rawContent);
+  if (!text) return null;
+
+  const decisionMatch = text.match(/"decision"\s*:\s*"([^"]+)"/i);
+  const confidenceMatch = text.match(/"confidence"\s*:\s*([0-9.]+)/i);
+  const escalation = extractBooleanValue(text, 'escalation_suggested');
+  const risks = extractRiskDescriptions(text);
+  let nextStep = extractPossiblyTruncatedQuotedValue(text, 'recommended_next_step');
+  if (!nextStep) {
+    const summaryMatch = text.match(/request complete design documentation[^,.\n]*/i);
+    if (summaryMatch) nextStep = normalizeString(summaryMatch[0]);
+  }
+  if (!nextStep && risks.length) {
+    nextStep = `Address highest risk first: ${risks[0]}`;
+  }
+
+  const normalized = {
+    decision: normalizeString(decisionMatch?.[1]).toUpperCase(),
+    confidence: confidenceMatch ? Math.max(0, Math.min(1, Number(confidenceMatch[1]))) : 0,
+    top_risks: risks,
+    recommended_next_step: nextStep,
+    escalation_suggested: escalation === null ? false : escalation,
+    routing_metadata: {
+      ...(routingMetadata && typeof routingMetadata === 'object' ? routingMetadata : {}),
+      heuristic_fallback: true,
+    },
+  };
+
+  const validationErrors = validateAgainstSchema(getExternalReviewResultSchema(), normalized);
+  return validationErrors.length === 0 ? normalized : null;
 }
 
 function buildExternalReviewRepairPrompt(rawOutput, validationErrors) {
@@ -634,6 +724,26 @@ const server = http.createServer(async (req, res) => {
             repaired: true,
           });
         }
+
+        const heuristic = buildHeuristicExternalReviewResult(repairedRaw, routingMetadata);
+        if (heuristic) {
+          return sendJson(res, 200, {
+            ok: true,
+            agent: packet.agent,
+            task_class: packet.taskClass,
+            lane,
+            model,
+            summary: `OpenRouter ${model}`,
+            result: heuristic,
+            usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
+            provider: repairAttempt.data?.provider || laneConfig.provider,
+            routing: bridgeRequest.routing,
+            raw_result: repairedRaw,
+            repaired: true,
+            fallback_normalized: true,
+          });
+        }
+
         return sendJson(res, 422, {
           ok: false,
           error: 'invalid_model_output',
@@ -644,6 +754,25 @@ const server = http.createServer(async (req, res) => {
           routing: bridgeRequest.routing,
         });
       } catch (error) {
+        const heuristic = buildHeuristicExternalReviewResult(repairedRaw, routingMetadata);
+        if (heuristic) {
+          return sendJson(res, 200, {
+            ok: true,
+            agent: packet.agent,
+            task_class: packet.taskClass,
+            lane,
+            model,
+            summary: `OpenRouter ${model}`,
+            result: heuristic,
+            usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
+            provider: repairAttempt.data?.provider || laneConfig.provider,
+            routing: bridgeRequest.routing,
+            raw_result: repairedRaw,
+            repaired: true,
+            fallback_normalized: true,
+          });
+        }
+
         return sendJson(res, 422, {
           ok: false,
           error: 'invalid_model_output',
