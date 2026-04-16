@@ -1073,6 +1073,16 @@ export default function ExternalReviewLauncherPanel() {
     return null;
   }, [host]);
 
+  function buildAuditIntent(reason, entryId, extras = {}) {
+    return {
+      actor: currentOwnerLabel || 'Operator',
+      reason,
+      correlationId: extras.correlationId || `${entryId || 'review'}-${reason}-${Date.now()}`,
+      sourceSurface: 'external_review_ui',
+      ...extras,
+    };
+  }
+
   useEffect(() => {
     if (historyQuery.data && typeof historyQuery.data === "object") {
       const scoped = Array.isArray(historyQuery.data.scoped) ? historyQuery.data.scoped : [];
@@ -1225,9 +1235,12 @@ export default function ExternalReviewLauncherPanel() {
       context: {
         companyId: host?.companyId ?? undefined,
         entityId: host?.entityId ?? undefined,
+        userName: currentOwnerLabel || undefined,
+        userDisplayName: currentOwnerLabel || undefined,
       },
       entryId,
       outcome,
+      ...buildAuditIntent('manual_outcome_update', entryId),
     }).then((next) => {
       if (next && typeof next === "object") {
         setHistory({
@@ -1252,9 +1265,12 @@ export default function ExternalReviewLauncherPanel() {
       context: {
         companyId: host?.companyId ?? undefined,
         entityId: host?.entityId ?? undefined,
+        userName: currentOwnerLabel || undefined,
+        userDisplayName: currentOwnerLabel || undefined,
       },
       entryId,
       pinned,
+      ...buildAuditIntent(pinned ? 'manual_pin' : 'manual_unpin', entryId),
     }).then((next) => {
       if (next && typeof next === "object") {
         setHistory({
@@ -1276,8 +1292,13 @@ export default function ExternalReviewLauncherPanel() {
     exportReviewRecord({
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
-      context: host,
+      context: {
+        ...host,
+        userName: currentOwnerLabel || undefined,
+        userDisplayName: currentOwnerLabel || undefined,
+      },
       entry: normalizedEntry,
+      ...buildAuditIntent('manual_export', normalizedEntry.id),
     }).then((result) => {
       if (result?.history && typeof result.history === "object") {
         setHistory({
@@ -1300,11 +1321,16 @@ export default function ExternalReviewLauncherPanel() {
     setExportedReviewArchived({
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
-      context: host,
+      context: {
+        ...host,
+        userName: currentOwnerLabel || undefined,
+        userDisplayName: currentOwnerLabel || undefined,
+      },
       recordId: record.id,
       entryId,
       externalId: entryId,
       archived,
+      ...buildAuditIntent(archived ? 'manual_archive_export' : 'manual_restore_export', entryId),
     }).then((result) => {
       if (result?.history && typeof result.history === "object") {
         setHistory({
