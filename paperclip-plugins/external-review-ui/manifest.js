@@ -8,7 +8,8 @@ export default {
   categories: ["automation", "ui"],
   capabilities: ["agents.invoke", "ui.action.register"],
   entrypoints: {
-    worker: "./worker.js"
+    worker: "./worker.js",
+    ui: "./ui.js"
   },
   launchers: [
     {
@@ -18,13 +19,12 @@ export default {
       placementZone: "toolbarButton",
       entityTypes: ["agent"],
       action: {
-        type: "performAction",
-        target: "invoke_external_review",
-        params: {
-          reviewType: "architecture_review",
-          priority: "normal",
-          content: "Please review the current agent context and provide a decision, risks, and recommended next step."
-        }
+        type: "openDrawer",
+        target: "ExternalReviewLauncherPanel"
+      },
+      render: {
+        environment: "hostOverlay",
+        bounds: "wide"
       }
     }
   ]
