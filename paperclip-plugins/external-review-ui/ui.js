@@ -432,7 +432,7 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
   );
 }
 
-function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArchivedFilter, onToggleArchived }) {
+function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArchivedFilter, onToggleArchived, onRestoreRecord }) {
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading exported records...");
   }
@@ -479,11 +479,23 @@ function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArch
         React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
           record.data?.archived ? React.createElement("span", { style: badgeStyle("neutral") }, "Archived") : null,
           record.status ? React.createElement("span", { style: badgeStyle(record.data?.archived ? "neutral" : "success") }, record.status) : null,
+          React.createElement("button", { type: "button", onClick: () => onRestoreRecord(record), style: buttonStyle("secondary") }, "Restore into form"),
           React.createElement("button", { type: "button", onClick: () => onToggleArchived(record, !record.data?.archived), style: buttonStyle(record.data?.archived ? "secondary" : "primary") }, record.data?.archived ? "Restore" : "Archive")
         )
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${record.entityType} • ${record.updatedAt || record.createdAt || 'unknown time'}`),
-      record.data?.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, record.data.recommendedNextStep) : null
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+        record.data?.reviewType ? React.createElement("span", { style: badgeStyle("info") }, record.data.reviewType) : null,
+        record.data?.priority ? React.createElement("span", { style: badgeStyle("warn") }, record.data.priority) : null,
+        record.data?.scopeId ? React.createElement("span", { style: badgeStyle("neutral") }, `scope ${record.data.scopeId}`) : null,
+        record.data?.decision ? React.createElement("span", { style: badgeStyle(decisionTone(record.data.decision)) }, formatDecision(record.data.decision)) : null,
+        record.data?.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(record.data.outcome)) }, formatOutcome(record.data.outcome)) : null
+      ),
+      record.data?.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, record.data.recommendedNextStep) : null,
+      React.createElement("details", { style: { display: "grid", gap: 8 } },
+        React.createElement("summary", { style: { cursor: "pointer", color: "#93c5fd", fontWeight: 600 } }, "Show record details"),
+        React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#bfdbfe" } }, JSON.stringify(record.data || {}, null, 2))
+      )
     ))
   );
 }
@@ -850,6 +862,18 @@ export default function ExternalReviewLauncherPanel() {
     });
   }
 
+  function handleRestoreExportedRecord(record) {
+    const data = record?.data || {};
+    setReviewType(data.reviewType || "architecture_review");
+    setPriority(data.priority || "normal");
+    setTaskSummary(data.taskSummary || record?.title || summaryFromContext(host));
+    setContent(data.content || "");
+    setContextNotes(data.contextNotes || buildContextNotes(host));
+    setCurrentOutcome(data.outcome || null);
+    setError(null);
+    toast({ tone: "success", title: "Exported review restored", body: "The exported review has been loaded back into the form." });
+  }
+
   function handleClearHistory() {
     setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
@@ -933,7 +957,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
     React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
-    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived }),
+    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
