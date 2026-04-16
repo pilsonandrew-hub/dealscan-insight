@@ -400,10 +400,14 @@ function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sor
 }
 
 function formatAuditCopy(entry) {
-  if (!entry?.lastReassignedAt && !entry?.lastReassignedBy) return null;
+  if (!entry?.lastAuditEventAt && !entry?.lastAuditEventActor && !entry?.lastReassignedAt && !entry?.lastReassignedBy) return null;
   const parts = [];
-  if (entry?.lastReassignedBy) parts.push(`reassigned by ${entry.lastReassignedBy}`);
-  if (entry?.lastReassignedAt) parts.push(entry.lastReassignedAt);
+  if (entry?.lastAuditEventType) parts.push(entry.lastAuditEventType.replace(/^review\./, '').replaceAll('_', ' '));
+  else if (entry?.lastReassignedBy) parts.push('reassigned');
+  if (entry?.lastAuditEventActor) parts.push(`by ${entry.lastAuditEventActor}`);
+  else if (entry?.lastReassignedBy) parts.push(`by ${entry.lastReassignedBy}`);
+  if (entry?.lastAuditEventAt) parts.push(entry.lastAuditEventAt);
+  else if (entry?.lastReassignedAt) parts.push(entry.lastReassignedAt);
   return parts.length ? parts.join(' • ') : null;
 }
 
@@ -458,6 +462,15 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
 }
 
 function AuditTimelinePanel({ events, loading, error, entryId }) {
+  const [eventTypeFilter, setEventTypeFilter] = useState('all');
+  const [actorFilter, setActorFilter] = useState('all');
+  const eventTypes = useMemo(() => Array.from(new Set((events || []).map((event) => event?.eventType).filter(Boolean))).sort(), [events]);
+  const actors = useMemo(() => Array.from(new Set((events || []).map((event) => event?.actor).filter(Boolean))).sort(), [events]);
+  const filteredEvents = useMemo(() => (events || []).filter((event) => {
+    if (eventTypeFilter !== 'all' && event?.eventType !== eventTypeFilter) return false;
+    if (actorFilter !== 'all' && event?.actor !== actorFilter) return false;
+    return true;
+  }), [events, eventTypeFilter, actorFilter]);
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading audit timeline...");
   }
@@ -471,19 +484,33 @@ function AuditTimelinePanel({ events, loading, error, entryId }) {
     );
   }
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
-    React.createElement("div", { style: mutedHeadingStyle() }, "Audit timeline"),
-    ...events.map((event) => React.createElement("div", {
-      key: event.id,
-      style: { display: "grid", gap: 4, padding: 10, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(59,130,246,0.12)" }
-    },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" } },
-        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#f8fafc" } }, event.eventType || "review.updated"),
-        React.createElement("div", { style: { fontSize: 11, color: "#94a3b8" } }, event.at || "unknown time")
-      ),
-      React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1" } }, `${event.actor || 'Unknown actor'}${event.to ? ` → ${event.to}` : ''}`),
-      event.from || event.reason ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, [event.from ? `from ${event.from}` : null, event.reason ? `reason: ${event.reason}` : null].filter(Boolean).join(' • ')) : null,
-      event.correlationId ? React.createElement("div", { style: { fontSize: 11, color: "#475569" } }, `correlation: ${event.correlationId}`) : null
-    ))
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Audit timeline"),
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        React.createElement("select", { value: eventTypeFilter, onChange: (e) => setEventTypeFilter(e.target.value), style: inputStyle(false) },
+          React.createElement("option", { value: "all" }, "All event types"),
+          ...eventTypes.map((value) => React.createElement("option", { key: value, value }, value))
+        ),
+        React.createElement("select", { value: actorFilter, onChange: (e) => setActorFilter(e.target.value), style: inputStyle(false) },
+          React.createElement("option", { value: "all" }, "All actors"),
+          ...actors.map((value) => React.createElement("option", { key: value, value }, value))
+        )
+      )
+    ),
+    !filteredEvents.length
+      ? React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "No audit events match the current filters.")
+      : filteredEvents.map((event) => React.createElement("div", {
+          key: event.id,
+          style: { display: "grid", gap: 4, padding: 10, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(59,130,246,0.12)" }
+        },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#f8fafc" } }, event.eventType || "review.updated"),
+            React.createElement("div", { style: { fontSize: 11, color: "#94a3b8" } }, event.at || "unknown time")
+          ),
+          React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1" } }, `${event.actor || 'Unknown actor'}${event.to ? ` → ${event.to}` : ''}`),
+          event.from || event.reason ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, [event.from ? `from ${event.from}` : null, event.reason ? `reason: ${event.reason}` : null].filter(Boolean).join(' • ')) : null,
+          event.correlationId ? React.createElement("div", { style: { fontSize: 11, color: "#475569" } }, `correlation: ${event.correlationId}`) : null
+        ))
   );
 }
 
