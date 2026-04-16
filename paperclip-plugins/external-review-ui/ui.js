@@ -364,12 +364,14 @@ function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, 
   );
 }
 
-function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sortMode) {
+function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sortMode, ownerFilter = "all") {
   const query = String(searchText || "").trim().toLowerCase();
   const filtered = entries.filter((entry) => {
     const matchesOutcome = outcomeFilter === "all" ? true : String(entry.outcome || "") === outcomeFilter;
     const matchesPin = pinFilter === "all" ? true : pinFilter === "pinned" ? Boolean(entry.pinned) : !entry.pinned;
-    if (!matchesOutcome || !matchesPin) return false;
+    const normalizedOwner = String(entry.owner || "unassigned");
+    const matchesOwner = ownerFilter === "all" ? true : ownerFilter === "assigned" ? normalizedOwner !== "unassigned" : normalizedOwner === ownerFilter;
+    if (!matchesOutcome || !matchesPin || !matchesOwner) return false;
     if (!query) return true;
     const haystack = [
       entry.taskSummary,
@@ -377,6 +379,7 @@ function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sor
       entry.priority,
       entry.decision,
       entry.outcome,
+      entry.owner,
       entry.recommendedNextStep,
       entry.scopeId,
       entry.model,
@@ -549,10 +552,14 @@ function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords })
   const needsHuman = companyEntries.filter((entry) => entry?.outcome === "needs_human");
   const blocked = companyEntries.filter((entry) => entry?.outcome === "blocked");
   const escalated = companyEntries.filter((entry) => entry?.outcome === "escalated");
+  const assigned = companyEntries.filter((entry) => entry?.owner && entry.owner !== "unassigned");
+  const assignedToAndrew = companyEntries.filter((entry) => entry?.owner === "Andrew");
   return [
     { label: "Current context", value: scopedEntries.length, tone: "info", filterKey: "current" },
     { label: "Company history", value: companyEntries.length, tone: "neutral", filterKey: "company" },
     { label: "Pinned", value: pinnedHistory.length, tone: "warn", filterKey: "pinned" },
+    { label: "Assigned", value: assigned.length, tone: assigned.length ? "info" : "neutral", filterKey: "assigned" },
+    { label: "Andrew", value: assignedToAndrew.length, tone: assignedToAndrew.length ? "success" : "neutral", filterKey: "owner_Andrew" },
     { label: "Needs human", value: needsHuman.length, tone: needsHuman.length ? "warn" : "neutral", filterKey: "needs_human" },
     { label: "Blocked", value: blocked.length, tone: blocked.length ? "danger" : "neutral", filterKey: "blocked" },
     { label: "Escalated", value: escalated.length, tone: escalated.length ? "info" : "neutral", filterKey: "escalated" },
@@ -579,6 +586,10 @@ function applyDashboardHistoryFilter(entries, activeDashboardFilter, scope) {
       return scope === "company" ? entries : [];
     case "pinned":
       return entries.filter((entry) => entry?.pinned);
+    case "assigned":
+      return entries.filter((entry) => entry?.owner && entry.owner !== "unassigned");
+    case "owner_Andrew":
+      return entries.filter((entry) => entry?.owner === "Andrew");
     case "needs_human":
       return entries.filter((entry) => entry?.outcome === "needs_human");
     case "blocked":
@@ -610,10 +621,15 @@ function getAgingState(entry) {
   return { label: "Fresh", tone: "success", stale: false };
 }
 
-function buildPriorityQueue(companyEntries) {
+function buildPriorityQueue(companyEntries, ownerFilter = null) {
   const priorityOrder = { blocked: 0, needs_human: 1, escalated: 2 };
   return companyEntries
     .filter((entry) => ["blocked", "needs_human", "escalated"].includes(entry?.outcome))
+    .filter((entry) => {
+      if (!ownerFilter) return true;
+      if (ownerFilter === "assigned") return entry?.owner && entry.owner !== "unassigned";
+      return String(entry?.owner || "unassigned") === ownerFilter;
+    })
     .sort((a, b) => {
       const left = priorityOrder[a?.outcome] ?? 99;
       const right = priorityOrder[b?.outcome] ?? 99;
@@ -659,18 +675,22 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onS
   );
 }
 
-function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onSetOwner, onExport }) {
+function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onSetOwner, onExport, initialOwnerFilter = "all" }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [pinFilter, setPinFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState(initialOwnerFilter);
   const [sortMode, setSortMode] = useState("newest");
+  useEffect(() => {
+    setOwnerFilter(initialOwnerFilter);
+  }, [initialOwnerFilter]);
   const filteredScopedEntries = useMemo(
-    () => filterHistoryEntries(scopedEntries, "", "all", "all", sortMode),
-    [scopedEntries, sortMode]
+    () => filterHistoryEntries(scopedEntries, "", "all", "all", sortMode, ownerFilter),
+    [scopedEntries, sortMode, ownerFilter]
   );
   const filteredCompanyEntries = useMemo(
-    () => filterHistoryEntries(companyEntries, searchText, outcomeFilter, pinFilter, sortMode),
-    [companyEntries, searchText, outcomeFilter, pinFilter, sortMode]
+    () => filterHistoryEntries(companyEntries, searchText, outcomeFilter, pinFilter, sortMode, ownerFilter),
+    [companyEntries, searchText, outcomeFilter, pinFilter, sortMode, ownerFilter]
   );
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading review history...");
@@ -684,7 +704,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       React.createElement("div", { style: mutedHeadingStyle() }, "Review history"),
       React.createElement("button", { type: "button", onClick: onClear, style: buttonStyle("secondary") }, "Clear current scope")
     ),
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px 160px 160px", gap: 10 } },
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px 160px 180px 160px", gap: 10 } },
       React.createElement("input", {
         value: searchText,
         onChange: (e) => setSearchText(e.target.value),
@@ -707,6 +727,15 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
         React.createElement("option", { value: "all" }, "All pins"),
         React.createElement("option", { value: "pinned" }, "Pinned only"),
         React.createElement("option", { value: "unpinned" }, "Unpinned only")
+      ),
+      React.createElement("select", {
+        value: ownerFilter,
+        onChange: (e) => setOwnerFilter(e.target.value),
+        style: inputStyle(false),
+      },
+        React.createElement("option", { value: "all" }, "All owners"),
+        React.createElement("option", { value: "assigned" }, "Assigned only"),
+        ...OWNER_OPTIONS.map((option) => React.createElement("option", { key: option.value, value: option.value }, option.label))
       ),
       React.createElement("select", {
         value: sortMode,
@@ -1159,8 +1188,8 @@ export default function ExternalReviewLauncherPanel() {
       activeDashboardFilter,
       onSelectFilter: handleSelectDashboardFilter,
     }),
-    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
-    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord }),
+    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_Andrew" ? "Andrew" : null), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
+    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_Andrew" ? "Andrew" : "all" }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
