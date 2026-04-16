@@ -1684,6 +1684,4 @@ export function ExternalReviewLauncherPanel() {
   );
 }
 
-export default {
-  ExternalReviewLauncherPanel,
-};
+export default ExternalReviewLauncherPanel;
