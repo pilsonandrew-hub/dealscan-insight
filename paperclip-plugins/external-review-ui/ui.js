@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useHostContext, usePluginAction, usePluginToast } from "@paperclipai/plugin-sdk/ui";
 
 const REVIEW_TYPES = [
@@ -210,7 +210,11 @@ async function copyToClipboard(text) {
   return false;
 }
 
-function ResultPanel({ result, onReuseAsFollowUp, onEscalate, toast }) {
+function rerunPresetButton(label, onClick) {
+  return React.createElement("button", { type: "button", onClick, style: buttonStyle("secondary") }, label);
+}
+
+function ResultPanel({ result, onReuseAsFollowUp, onEscalate, onApplyPreset, toast }) {
   const normalized = normalizeResultEnvelope(result);
   const summaryText = buildSummaryText(normalized);
   async function handleCopySummary() {
@@ -262,6 +266,15 @@ function ResultPanel({ result, onReuseAsFollowUp, onEscalate, toast }) {
       React.createElement("button", { type: "button", onClick: () => onReuseAsFollowUp(normalized), style: buttonStyle("secondary") }, "Use as follow-up draft"),
       React.createElement("button", { type: "button", onClick: () => onEscalate(normalized), style: buttonStyle("primary") }, "Escalate")
     ),
+    React.createElement("div", { style: { display: "grid", gap: 8 } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Quick rerun presets"),
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+        rerunPresetButton("Security pass", () => onApplyPreset({ reviewType: "security_review", priority: "high", taskSummaryPrefix: "Security pass" }, normalized)),
+        rerunPresetButton("Operational pass", () => onApplyPreset({ reviewType: "operational_review", priority: "high", taskSummaryPrefix: "Operational pass" }, normalized)),
+        rerunPresetButton("Product pass", () => onApplyPreset({ reviewType: "product_review", priority: "normal", taskSummaryPrefix: "Product pass" }, normalized)),
+        rerunPresetButton("Urgent architecture", () => onApplyPreset({ reviewType: "architecture_review", priority: "urgent", taskSummaryPrefix: "Urgent architecture follow-up" }, normalized))
+      )
+    ),
     React.createElement("details", { style: { display: "grid", gap: 8 } },
       React.createElement("summary", { style: { cursor: "pointer", color: "#93c5fd", fontWeight: 600 } }, "Show routing and raw details"),
       React.createElement("div", { style: { display: "grid", gap: 10 } },
@@ -281,6 +294,32 @@ function ResultPanel({ result, onReuseAsFollowUp, onEscalate, toast }) {
   );
 }
 
+function HistoryPanel({ entries, onRestore }) {
+  if (!entries.length) return null;
+  return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Recent review attempts"),
+      React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entries.length} stored locally in drawer state`)
+    ),
+    ...entries.map((entry, index) => React.createElement("div", {
+      key: entry.id || `${index}-${entry.taskSummary}`,
+      style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(59,130,246,0.12)" }
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+        React.createElement("div", { style: { display: "grid", gap: 4 } },
+          React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
+          React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`)
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+          entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
+          React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
+        )
+      ),
+      entry.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep) : null
+    ))
+  );
+}
+
 export default function ExternalReviewLauncherPanel() {
   const host = useHostContext();
   const invoke = usePluginAction("invoke_external_review");
@@ -292,6 +331,7 @@ export default function ExternalReviewLauncherPanel() {
   const [contextNotes, setContextNotes] = useState(() => buildContextNotes(host));
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [history, setHistory] = useState([]);
   const [error, setError] = useState(null);
 
   const contextPreview = useMemo(() => ({
@@ -302,6 +342,25 @@ export default function ExternalReviewLauncherPanel() {
     parentEntityId: host?.parentEntityId ?? null,
     userId: host?.userId ?? null,
   }), [host]);
+
+  useEffect(() => {
+    if (!result) return;
+    const normalized = normalizeResultEnvelope(result);
+    const entry = {
+      id: normalized.correlationId || `${Date.now()}`,
+      createdAtLabel: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      taskSummary,
+      reviewType,
+      priority,
+      content,
+      contextNotes,
+      decision: normalized.decision,
+      recommendedNextStep: normalized.recommendedNextStep,
+      lane: normalized.lane,
+      model: normalized.model,
+    };
+    setHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, 3));
+  }, [result]);
 
   function handleReuseAsFollowUp(normalized) {
     const followUpLines = [
@@ -334,6 +393,30 @@ export default function ExternalReviewLauncherPanel() {
     });
     setError(null);
     toast({ tone: "success", title: "Escalation draft ready", body: "The drawer has been prefilled for a higher-priority follow-up review." });
+  }
+
+  function handleApplyPreset(preset, normalized) {
+    const prefix = preset?.taskSummaryPrefix ? `${preset.taskSummaryPrefix}: ` : "";
+    setReviewType(preset?.reviewType || reviewType);
+    setPriority(preset?.priority || priority);
+    setTaskSummary(`${prefix}${taskSummary}`);
+    setContent([
+      normalized?.recommendedNextStep ? `Focus first on: ${normalized.recommendedNextStep}` : null,
+      normalized?.topRisks?.length ? `Reassess these risks: ${normalized.topRisks.join('; ')}` : null,
+      content,
+    ].filter(Boolean).join("\n\n"));
+    setError(null);
+    toast({ tone: "success", title: "Preset applied", body: "The form has been prefilled for a targeted rerun." });
+  }
+
+  function handleRestoreHistory(entry) {
+    setReviewType(entry.reviewType || "architecture_review");
+    setPriority(entry.priority || "normal");
+    setTaskSummary(entry.taskSummary || summaryFromContext(host));
+    setContent(entry.content || "");
+    setContextNotes(entry.contextNotes || buildContextNotes(host));
+    setError(null);
+    toast({ tone: "success", title: "Review restored", body: "A recent review attempt has been restored into the form." });
   }
 
   async function handleSubmit(event) {
@@ -385,6 +468,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
+    React.createElement(HistoryPanel, { entries: history, onRestore: handleRestoreHistory }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
@@ -415,6 +499,6 @@ export default function ExternalReviewLauncherPanel() {
     React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 10 } },
       React.createElement("button", { type: "submit", disabled: submitting, style: buttonStyle("primary") }, submitting ? "Submitting..." : "Submit external review")
     ),
-    result ? React.createElement(ResultPanel, { result, onReuseAsFollowUp: handleReuseAsFollowUp, onEscalate: handleEscalate, toast }) : null
+    result ? React.createElement(ResultPanel, { result, onReuseAsFollowUp: handleReuseAsFollowUp, onEscalate: handleEscalate, onApplyPreset: handleApplyPreset, toast }) : null
   );
 }
