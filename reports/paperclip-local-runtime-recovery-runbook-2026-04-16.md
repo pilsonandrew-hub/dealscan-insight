@@ -46,6 +46,32 @@ Healthy state:
 
 ## Standard recovery procedure
 
+### Preferred one-shot helper
+
+Use this first:
+
+```bash
+/Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
+```
+
+What it does:
+- stops existing Paperclip run process
+- starts Paperclip through the supported `run` path
+- waits for embedded Postgres and web API health
+- reapplies the local plugin loader cache-busting patch
+- restarts Paperclip again
+- verifies the local `external-review-ui` plugin with a real upgrade call
+
+Optional environment overrides:
+
+```bash
+PAPERCLIP_SKIP_PATCH=1 /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
+PAPERCLIP_SKIP_VERIFY=1 /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
+PAPERCLIP_PLUGIN_ID=<plugin-id> PAPERCLIP_PLUGIN_PATH=<local-plugin-path> /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
+```
+
+### Manual recovery sequence
+
 ### 1. Restart Paperclip through the supported run path
 
 ```bash
