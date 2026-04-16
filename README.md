@@ -64,6 +64,26 @@ docker-compose up
 # API      → http://localhost:8000
 ```
 
+## Python Backend Tests
+
+This repo targets Python 3.11 for backend work. The backend test dependencies are
+kept in `requirements-dev.txt` as a narrow test/dev set for analytics and router
+coverage, so local backend test setup does not need the full production runtime
+stack.
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+bash scripts/run_backend_tests.sh
+```
+
+`bash scripts/run_backend_tests.sh` uses `pytest` and defaults to the
+analytics trust-model backend test path (`tests/test_analytics_trust_model.py`).
+Pass one or more test files/modules explicitly once the test dependency set is
+installed. If `pytest` is missing, the script fails clearly instead of
+switching frameworks under the hood.
+
 ### Run the pipeline manually
 
 ```bash
