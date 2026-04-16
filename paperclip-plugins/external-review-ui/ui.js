@@ -572,17 +572,91 @@ function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords, c
   ].filter(Boolean);
 }
 
+function buildOwnerLoad(entries) {
+  const owners = new Map();
+  for (const entry of entries || []) {
+    const owner = entry?.owner && entry.owner !== "unassigned" ? entry.owner : null;
+    if (!owner) continue;
+    const current = owners.get(owner) || { owner, total: 0, queue: 0, stale: 0, blocked: 0, needsHuman: 0, escalated: 0 };
+    current.total += 1;
+    if (["blocked", "needs_human", "escalated"].includes(entry?.outcome)) current.queue += 1;
+    if (entry?.outcome === "blocked") current.blocked += 1;
+    if (entry?.outcome === "needs_human") current.needsHuman += 1;
+    if (entry?.outcome === "escalated") current.escalated += 1;
+    if (["blocked", "needs_human", "escalated"].includes(entry?.outcome) && getAgingState(entry).stale) current.stale += 1;
+    owners.set(owner, current);
+  }
+  return [...owners.values()].sort((a, b) => {
+    if (b.queue !== a.queue) return b.queue - a.queue;
+    if (b.stale !== a.stale) return b.stale - a.stale;
+    return a.owner.localeCompare(b.owner);
+  });
+}
+
+function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashboardFilter }) {
+  const ownerLoad = useMemo(() => buildOwnerLoad(entries), [entries]);
+  if (!ownerLoad.length) return null;
+  return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Team load"),
+      React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, "Queue pressure by assigned owner")
+    ),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 } },
+      ...ownerLoad.map((item) => {
+        const filterKey = `owner:${item.owner}`;
+        const isActive = activeDashboardFilter === filterKey;
+        return React.createElement("button", {
+          key: item.owner,
+          type: "button",
+          onClick: () => onSelectFilter(isActive ? null : filterKey),
+          style: {
+            display: "grid",
+            gap: 8,
+            textAlign: "left",
+            padding: 12,
+            borderRadius: 10,
+            border: isActive ? "1px solid rgba(96,165,250,0.65)" : "1px solid rgba(148,163,184,0.18)",
+            background: isActive ? "rgba(30,41,59,0.95)" : "rgba(2,6,23,0.72)",
+            color: "#e2e8f0",
+            cursor: "pointer",
+          }
+        },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" } },
+            React.createElement("div", { style: { display: "grid", gap: 2 } },
+              React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, item.owner),
+              currentOwnerLabel === item.owner ? React.createElement("div", { style: { fontSize: 11, color: "#60a5fa" } }, "You") : null
+            ),
+            React.createElement("span", { style: badgeStyle(item.stale ? "danger" : item.queue ? "warn" : "neutral") }, `${item.queue} queued`)
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+            React.createElement("span", { style: badgeStyle("neutral") }, `${item.total} assigned`),
+            item.blocked ? React.createElement("span", { style: badgeStyle("danger") }, `${item.blocked} blocked`) : null,
+            item.needsHuman ? React.createElement("span", { style: badgeStyle("warn") }, `${item.needsHuman} needs human`) : null,
+            item.escalated ? React.createElement("span", { style: badgeStyle("info") }, `${item.escalated} escalated`) : null,
+            item.stale ? React.createElement("span", { style: badgeStyle("danger") }, `${item.stale} stale`) : null
+          )
+        );
+      })
+    )
+  );
+}
+
 function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, activeDashboardFilter, onSelectFilter, currentOwnerLabel }) {
   const stats = buildDashboardStats({ scopedEntries, companyEntries, exportedRecords, currentOwnerLabel });
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: mutedHeadingStyle() }, "Operator dashboard"),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 } },
       ...stats.map((item) => React.createElement(SummaryCard, { key: item.label, label: item.label, value: item.value, tone: item.tone, active: activeDashboardFilter === item.filterKey, onClick: () => onSelectFilter(activeDashboardFilter === item.filterKey ? null : item.filterKey) }))
-    )
+    ),
+    React.createElement(TeamLoadPanel, { entries: companyEntries, currentOwnerLabel, onSelectFilter, activeDashboardFilter })
   );
 }
 
 function applyDashboardHistoryFilter(entries, activeDashboardFilter, scope, currentOwnerLabel = null) {
+  if (typeof activeDashboardFilter === "string" && activeDashboardFilter.startsWith("owner:")) {
+    const owner = activeDashboardFilter.slice("owner:".length);
+    return owner ? entries.filter((entry) => entry?.owner === owner) : entries;
+  }
   switch (activeDashboardFilter) {
     case "current":
       return scope === "scoped" ? entries : [];
