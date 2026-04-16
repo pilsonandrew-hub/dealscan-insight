@@ -1007,6 +1007,7 @@ export default function ExternalReviewLauncherPanel() {
   const [history, setHistory] = useState({ scoped: [], company: [] });
   const [currentOutcome, setCurrentOutcome] = useState(null);
   const [error, setError] = useState(null);
+  const [pendingUndo, setPendingUndo] = useState(null);
 
   const contextPreview = useMemo(() => ({
     companyId: host?.companyId ?? null,
@@ -1078,6 +1079,12 @@ export default function ExternalReviewLauncherPanel() {
       persistHistory([entry, ...history.scoped.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
     });
   }, [result]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingUndo?.timeoutId) window.clearTimeout(pendingUndo.timeoutId);
+    };
+  }, [pendingUndo]);
 
   function handleReuseAsFollowUp(normalized) {
     const followUpLines = [
@@ -1306,6 +1313,29 @@ export default function ExternalReviewLauncherPanel() {
     });
   }
 
+  function clearPendingUndo() {
+    setPendingUndo((current) => {
+      if (current?.timeoutId) window.clearTimeout(current.timeoutId);
+      return null;
+    });
+  }
+
+  function scheduleUndo(entry, previousOwner, nextOwner) {
+    setPendingUndo((current) => {
+      if (current?.timeoutId) window.clearTimeout(current.timeoutId);
+      const timeoutId = window.setTimeout(() => {
+        setPendingUndo(null);
+      }, 12000);
+      return {
+        entryId: entry.id,
+        taskSummary: entry.taskSummary || 'Untitled review',
+        previousOwner,
+        nextOwner,
+        timeoutId,
+      };
+    });
+  }
+
   function handleSetOwner(entryId, owner) {
     applyOwnerUpdate(entryId, owner).catch((err) => {
       toast({ tone: "error", title: "Owner update failed", body: err?.message || "Could not assign review owner." });
@@ -1314,8 +1344,22 @@ export default function ExternalReviewLauncherPanel() {
 
   function handleReassignSuggestion(entry, owner) {
     if (!entry?.id || !owner) return;
-    applyOwnerUpdate(entry.id, owner, `Reassigned \"${entry.taskSummary || 'Untitled review'}\" to ${owner}.`).catch((err) => {
-      toast({ tone: "error", title: "Reassignment failed", body: err?.message || "Could not reassign suggested review." });
+    const previousOwner = entry?.owner || 'unassigned';
+    applyOwnerUpdate(entry.id, owner, `Reassigned \"${entry.taskSummary || 'Untitled review'}\" to ${owner}. Undo available for 12s.`)
+      .then(() => {
+        scheduleUndo(entry, previousOwner, owner);
+      })
+      .catch((err) => {
+        toast({ tone: "error", title: "Reassignment failed", body: err?.message || "Could not reassign suggested review." });
+      });
+  }
+
+  function handleUndoReassignment() {
+    if (!pendingUndo?.entryId || !pendingUndo?.previousOwner) return;
+    const undo = pendingUndo;
+    clearPendingUndo();
+    applyOwnerUpdate(undo.entryId, undo.previousOwner, `Restored \"${undo.taskSummary}\" back to ${undo.previousOwner}.`).catch((err) => {
+      toast({ tone: "error", title: "Undo failed", body: err?.message || "Could not restore previous owner." });
     });
   }
 
@@ -1401,6 +1445,13 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
+    pendingUndo ? React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, borderRadius: 10, border: "1px solid rgba(251,191,36,0.28)", background: "rgba(120,53,15,0.18)" } },
+      React.createElement("div", { style: { display: "grid", gap: 2 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#fde68a" } }, "Recent reassignment"),
+        React.createElement("div", { style: { fontSize: 12, color: "#fcd34d" } }, `${pendingUndo.taskSummary} moved from ${pendingUndo.previousOwner} to ${pendingUndo.nextOwner}.`)
+      ),
+      React.createElement("button", { type: "button", onClick: handleUndoReassignment, style: buttonStyle("warn") }, "Undo reassignment")
+    ) : null,
     React.createElement(OperatorDashboard, {
       scopedEntries: history.scoped,
       companyEntries: history.company,
