@@ -1298,7 +1298,7 @@ export default function ExternalReviewLauncherPanel() {
     setArchivedFilter((current) => syncArchivedFilter(filterKey, current));
   }
 
-  function applyOwnerUpdate(entryId, owner, successBody = `Assigned to ${owner}.`) {
+  function applyOwnerUpdate(entryId, owner, successBody = `Assigned to ${owner}.`, options = {}) {
     setHistory((prev) => ({
       scoped: prev.scoped.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
       company: prev.company.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
@@ -1309,9 +1309,16 @@ export default function ExternalReviewLauncherPanel() {
       context: {
         companyId: host?.companyId ?? undefined,
         entityId: host?.entityId ?? undefined,
+        userName: currentOwnerLabel || undefined,
+        userDisplayName: currentOwnerLabel || undefined,
       },
       entryId,
       owner,
+      actor: options.actor || currentOwnerLabel || 'Operator',
+      reason: options.reason || 'owner_update',
+      previousOwner: options.previousOwner,
+      correlationId: options.correlationId,
+      sourceSurface: 'external_review_ui',
     }).then((next) => {
       if (next && typeof next === "object") {
         setHistory({
@@ -1348,7 +1355,7 @@ export default function ExternalReviewLauncherPanel() {
   }
 
   function handleSetOwner(entryId, owner) {
-    applyOwnerUpdate(entryId, owner).catch((err) => {
+    applyOwnerUpdate(entryId, owner, `Assigned to ${owner}.`, { reason: 'manual_assignment' }).catch((err) => {
       toast({ tone: "error", title: "Owner update failed", body: err?.message || "Could not assign review owner." });
     });
   }
@@ -1356,15 +1363,14 @@ export default function ExternalReviewLauncherPanel() {
   function handleReassignSuggestion(entry, owner) {
     if (!entry?.id || !owner) return;
     const previousOwner = entry?.owner || 'unassigned';
-    const auditStamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const auditActor = currentOwnerLabel || 'Operator';
-    setHistory((prev) => ({
-      scoped: prev.scoped.map((item) => item.id === entry.id ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
-      company: prev.company.map((item) => item.id === entry.id ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
-    }));
-    applyOwnerUpdate(entry.id, owner, `Reassigned \"${entry.taskSummary || 'Untitled review'}\" to ${owner}. Undo available for 12s.`)
+    const correlationId = `${entry.id}-reassign-${Date.now()}`;
+    applyOwnerUpdate(entry.id, owner, `Reassigned \"${entry.taskSummary || 'Untitled review'}\" to ${owner}. Undo available for 12s.`, {
+      reason: 'guided_reassignment',
+      previousOwner,
+      correlationId,
+    })
       .then(() => {
-        scheduleUndo({ ...entry, lastReassignedAt: auditStamp, lastReassignedBy: auditActor }, previousOwner, owner);
+        scheduleUndo(entry, previousOwner, owner);
       })
       .catch((err) => {
         toast({ tone: "error", title: "Reassignment failed", body: err?.message || "Could not reassign suggested review." });
@@ -1374,14 +1380,12 @@ export default function ExternalReviewLauncherPanel() {
   function handleUndoReassignment() {
     if (!pendingUndo?.entryId || !pendingUndo?.previousOwner) return;
     const undo = pendingUndo;
-    const auditStamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const auditActor = currentOwnerLabel || 'Operator';
     clearPendingUndo();
-    setHistory((prev) => ({
-      scoped: prev.scoped.map((item) => item.id === undo.entryId ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
-      company: prev.company.map((item) => item.id === undo.entryId ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
-    }));
-    applyOwnerUpdate(undo.entryId, undo.previousOwner, `Restored \"${undo.taskSummary}\" back to ${undo.previousOwner}.`).catch((err) => {
+    applyOwnerUpdate(undo.entryId, undo.previousOwner, `Restored \"${undo.taskSummary}\" back to ${undo.previousOwner}.`, {
+      reason: 'undo_reassignment',
+      previousOwner: undo.nextOwner,
+      correlationId: `${undo.entryId}-undo-${Date.now()}`,
+    }).catch((err) => {
       toast({ tone: "error", title: "Undo failed", body: err?.message || "Could not restore previous owner." });
     });
   }

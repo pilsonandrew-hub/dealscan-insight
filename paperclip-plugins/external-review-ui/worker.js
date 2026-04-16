@@ -2,8 +2,10 @@ import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 
 const REVIEW_HISTORY_KEY = "external-review-history-v1";
 const COMPANY_HISTORY_KEY = "external-review-history-company-v1";
+const REVIEW_AUDIT_KEY = "external-review-audit-v1";
 const REVIEW_ENTITY_TYPE = "external-review-record";
 const REVIEW_HISTORY_LIMIT = 20;
+const REVIEW_AUDIT_LIMIT = 100;
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -54,6 +56,25 @@ function normalizeHistoryEntry(input = {}) {
     scopeId: firstNonEmpty(input.scopeId),
     exportedEntityId: firstNonEmpty(input.exportedEntityId),
     exportedAt: firstNonEmpty(input.exportedAt),
+    lastReassignedAt: firstNonEmpty(input.lastReassignedAt),
+    lastReassignedBy: firstNonEmpty(input.lastReassignedBy),
+    previousOwner: firstNonEmpty(input.previousOwner),
+    auditEvents: Array.isArray(input.auditEvents) ? input.auditEvents : [],
+  };
+}
+
+function normalizeAuditEvent(input = {}) {
+  return {
+    id: firstNonEmpty(input.id, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+    eventType: firstNonEmpty(input.eventType, "review.updated"),
+    entryId: firstNonEmpty(input.entryId),
+    actor: firstNonEmpty(input.actor, "unknown"),
+    at: firstNonEmpty(input.at, new Date().toISOString()),
+    from: firstNonEmpty(input.from),
+    to: firstNonEmpty(input.to),
+    reason: firstNonEmpty(input.reason),
+    sourceSurface: firstNonEmpty(input.sourceSurface, "external_review_ui"),
+    correlationId: firstNonEmpty(input.correlationId),
   };
 }
 
@@ -84,6 +105,10 @@ function buildExportPayload(entry, companyId, scopeId) {
     createdAtMs: normalized.createdAtMs,
     exportedAt: new Date().toISOString(),
     archived: Boolean(normalized.archived),
+    lastReassignedAt: normalized.lastReassignedAt,
+    lastReassignedBy: normalized.lastReassignedBy,
+    previousOwner: normalized.previousOwner,
+    auditEvents: normalized.auditEvents,
   };
 }
 
@@ -139,6 +164,45 @@ async function writeCompanyHistory(ctx, companyId, entries) {
     namespace: "external-review-ui",
     stateKey: COMPANY_HISTORY_KEY,
   }, entries.slice(0, REVIEW_HISTORY_LIMIT));
+}
+
+async function readAuditTrail(ctx, companyId) {
+  const stored = await ctx.state.get({
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: "external-review-ui",
+    stateKey: REVIEW_AUDIT_KEY,
+  });
+  return Array.isArray(stored) ? stored.map((item) => normalizeAuditEvent(item)) : [];
+}
+
+async function writeAuditTrail(ctx, companyId, events) {
+  await ctx.state.set({
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: "external-review-ui",
+    stateKey: REVIEW_AUDIT_KEY,
+  }, events.slice(0, REVIEW_AUDIT_LIMIT));
+}
+
+async function appendAuditEvent(ctx, companyId, event) {
+  const normalized = normalizeAuditEvent(event);
+  const current = await readAuditTrail(ctx, companyId);
+  const next = [normalized, ...current].slice(0, REVIEW_AUDIT_LIMIT);
+  await writeAuditTrail(ctx, companyId, next);
+  return normalized;
+}
+
+function attachAuditEvent(entry, event) {
+  const normalizedEvent = normalizeAuditEvent(event);
+  const nextEvents = [normalizedEvent, ...(Array.isArray(entry?.auditEvents) ? entry.auditEvents : [])].slice(0, 20);
+  return normalizeHistoryEntry({
+    ...entry,
+    auditEvents: nextEvents,
+    lastReassignedAt: normalizedEvent.eventType === "review.reassigned" || normalizedEvent.eventType === "review.reassignment_undone" ? normalizedEvent.at : entry?.lastReassignedAt,
+    lastReassignedBy: normalizedEvent.eventType === "review.reassigned" || normalizedEvent.eventType === "review.reassignment_undone" ? normalizedEvent.actor : entry?.lastReassignedBy,
+    previousOwner: normalizedEvent.eventType === "review.reassigned" ? normalizedEvent.from : entry?.previousOwner,
+  });
 }
 
 async function syncHistoryWrite(ctx, companyId, scopeId, entry) {
@@ -258,19 +322,37 @@ const plugin = definePlugin({
       const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
       const entryId = firstNonEmpty(params?.entryId);
       const owner = firstNonEmpty(params?.owner, "unassigned");
+      const actor = firstNonEmpty(params?.actor, params?.context?.userName, params?.context?.userDisplayName, params?.context?.userLabel, "unknown");
+      const reason = firstNonEmpty(params?.reason, "owner_update");
+      const previousOwner = firstNonEmpty(params?.previousOwner);
+      const correlationId = firstNonEmpty(params?.correlationId);
       if (!companyId || !entryId) {
         throw new Error("companyId and entryId are required to update review owner");
       }
 
       const scopedHistory = await readHistory(ctx, companyId, scopeId);
-      const nextScoped = scopedHistory.map((item) => item.id === entryId ? { ...item, owner } : item);
+      const companyHistory = await readCompanyHistory(ctx, companyId);
+      const current = scopedHistory.find((item) => item.id === entryId) || companyHistory.find((item) => item.id === entryId);
+      const fromOwner = firstNonEmpty(previousOwner, current?.owner, "unassigned");
+      const eventType = reason === "undo_reassignment" ? "review.reassignment_undone" : "review.reassigned";
+      const auditEvent = await appendAuditEvent(ctx, companyId, {
+        eventType,
+        entryId,
+        actor,
+        from: fromOwner,
+        to: owner,
+        reason,
+        sourceSurface: firstNonEmpty(params?.sourceSurface, "external_review_ui"),
+        correlationId,
+      });
+
+      const nextScoped = scopedHistory.map((item) => item.id === entryId ? attachAuditEvent({ ...item, owner }, auditEvent) : item);
       await writeHistory(ctx, companyId, scopeId, nextScoped);
 
-      const companyHistory = await readCompanyHistory(ctx, companyId);
-      const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, owner } : item);
+      const nextCompany = companyHistory.map((item) => item.id === entryId ? attachAuditEvent({ ...item, owner }, auditEvent) : item);
       await writeCompanyHistory(ctx, companyId, nextCompany);
 
-      return { scoped: nextScoped, company: nextCompany };
+      return { scoped: nextScoped, company: nextCompany, auditEvent };
     });
 
     ctx.actions.register("export_review_record", async (params) => {
@@ -308,6 +390,16 @@ const plugin = definePlugin({
       });
       if (archivedFilter === "all") return records;
       return records.filter((record) => archivedFilter === "archived" ? Boolean(record?.data?.archived) : !record?.data?.archived);
+    });
+
+    ctx.data.register("review_audit_events", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      if (!companyId) {
+        throw new Error("companyId is required to load review audit events");
+      }
+      const entryId = firstNonEmpty(params?.entryId);
+      const events = await readAuditTrail(ctx, companyId);
+      return entryId ? events.filter((event) => event.entryId === entryId) : events;
     });
 
     ctx.actions.register("set_exported_review_archived", async (params) => {
