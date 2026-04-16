@@ -545,7 +545,7 @@ function SummaryCard({ label, value, tone = "neutral", active = false, onClick }
   );
 }
 
-function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords }) {
+function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords, currentOwnerLabel }) {
   const activeExported = exportedRecords.filter((record) => !record?.data?.archived);
   const archivedExported = exportedRecords.filter((record) => Boolean(record?.data?.archived));
   const pinnedHistory = companyEntries.filter((entry) => entry?.pinned);
@@ -553,8 +553,8 @@ function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords })
   const blocked = companyEntries.filter((entry) => entry?.outcome === "blocked");
   const escalated = companyEntries.filter((entry) => entry?.outcome === "escalated");
   const assigned = companyEntries.filter((entry) => entry?.owner && entry.owner !== "unassigned");
-  const assignedToAndrew = companyEntries.filter((entry) => entry?.owner === "Andrew");
-  const myQueue = companyEntries.filter((entry) => entry?.owner === "Andrew" && ["blocked", "needs_human", "escalated"].includes(entry?.outcome));
+  const assignedToCurrent = currentOwnerLabel ? companyEntries.filter((entry) => entry?.owner === currentOwnerLabel) : [];
+  const myQueue = currentOwnerLabel ? companyEntries.filter((entry) => entry?.owner === currentOwnerLabel && ["blocked", "needs_human", "escalated"].includes(entry?.outcome)) : [];
   const myStale = myQueue.filter((entry) => getAgingState(entry).stale);
   return [
     { label: "Current context", value: scopedEntries.length, tone: "info", filterKey: "current" },
@@ -563,17 +563,17 @@ function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords })
     { label: "Assigned", value: assigned.length, tone: assigned.length ? "info" : "neutral", filterKey: "assigned" },
     { label: "My queue", value: myQueue.length, tone: myQueue.length ? "success" : "neutral", filterKey: "my_queue" },
     { label: "My stale", value: myStale.length, tone: myStale.length ? "danger" : "neutral", filterKey: "my_stale" },
-    { label: "Andrew", value: assignedToAndrew.length, tone: assignedToAndrew.length ? "success" : "neutral", filterKey: "owner_Andrew" },
+    currentOwnerLabel ? { label: currentOwnerLabel, value: assignedToCurrent.length, tone: assignedToCurrent.length ? "success" : "neutral", filterKey: "owner_current" } : null,
     { label: "Needs human", value: needsHuman.length, tone: needsHuman.length ? "warn" : "neutral", filterKey: "needs_human" },
     { label: "Blocked", value: blocked.length, tone: blocked.length ? "danger" : "neutral", filterKey: "blocked" },
     { label: "Escalated", value: escalated.length, tone: escalated.length ? "info" : "neutral", filterKey: "escalated" },
     { label: "Exported", value: activeExported.length, tone: activeExported.length ? "success" : "neutral", filterKey: "exported_active" },
     { label: "Archived records", value: archivedExported.length, tone: "neutral", filterKey: "exported_archived" },
-  ];
+  ].filter(Boolean);
 }
 
-function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, activeDashboardFilter, onSelectFilter }) {
-  const stats = buildDashboardStats({ scopedEntries, companyEntries, exportedRecords });
+function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, activeDashboardFilter, onSelectFilter, currentOwnerLabel }) {
+  const stats = buildDashboardStats({ scopedEntries, companyEntries, exportedRecords, currentOwnerLabel });
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: mutedHeadingStyle() }, "Operator dashboard"),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 } },
@@ -582,7 +582,7 @@ function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, act
   );
 }
 
-function applyDashboardHistoryFilter(entries, activeDashboardFilter, scope) {
+function applyDashboardHistoryFilter(entries, activeDashboardFilter, scope, currentOwnerLabel = null) {
   switch (activeDashboardFilter) {
     case "current":
       return scope === "scoped" ? entries : [];
@@ -593,11 +593,11 @@ function applyDashboardHistoryFilter(entries, activeDashboardFilter, scope) {
     case "assigned":
       return entries.filter((entry) => entry?.owner && entry.owner !== "unassigned");
     case "my_queue":
-      return entries.filter((entry) => entry?.owner === "Andrew" && ["blocked", "needs_human", "escalated"].includes(entry?.outcome));
+      return currentOwnerLabel ? entries.filter((entry) => entry?.owner === currentOwnerLabel && ["blocked", "needs_human", "escalated"].includes(entry?.outcome)) : [];
     case "my_stale":
-      return entries.filter((entry) => entry?.owner === "Andrew" && ["blocked", "needs_human", "escalated"].includes(entry?.outcome) && getAgingState(entry).stale);
-    case "owner_Andrew":
-      return entries.filter((entry) => entry?.owner === "Andrew");
+      return currentOwnerLabel ? entries.filter((entry) => entry?.owner === currentOwnerLabel && ["blocked", "needs_human", "escalated"].includes(entry?.outcome) && getAgingState(entry).stale) : [];
+    case "owner_current":
+      return currentOwnerLabel ? entries.filter((entry) => entry?.owner === currentOwnerLabel) : [];
     case "needs_human":
       return entries.filter((entry) => entry?.outcome === "needs_human");
     case "blocked":
@@ -824,6 +824,14 @@ export default function ExternalReviewLauncherPanel() {
     parentEntityId: host?.parentEntityId ?? null,
     userId: host?.userId ?? null,
   }), [host]);
+
+  const currentOwnerLabel = useMemo(() => {
+    const preferred = [host?.userName, host?.userDisplayName, host?.userLabel, host?.renderEnvironment?.userName, host?.renderEnvironment?.userDisplayName, host?.renderEnvironment?.userLabel]
+      .find((value) => typeof value === "string" && value.trim());
+    if (preferred) return preferred.trim();
+    if (host?.userId === "7529788084") return "Andrew";
+    return null;
+  }, [host]);
 
   useEffect(() => {
     if (historyQuery.data && typeof historyQuery.data === "object") {
@@ -1194,10 +1202,11 @@ export default function ExternalReviewLauncherPanel() {
       companyEntries: history.company,
       exportedRecords: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [],
       activeDashboardFilter,
+      currentOwnerLabel,
       onSelectFilter: handleSelectDashboardFilter,
     }),
-    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_Andrew" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? "Andrew" : null).filter((entry) => activeDashboardFilter === "my_stale" ? getAgingState(entry).stale : true), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
-    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_Andrew" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? "Andrew" : "all" }),
+    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? currentOwnerLabel : null).filter((entry) => activeDashboardFilter === "my_stale" ? getAgingState(entry).stale : true), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
+    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped", currentOwnerLabel), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company", currentOwnerLabel), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? (currentOwnerLabel || "all") : "all" }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
