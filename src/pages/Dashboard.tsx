@@ -607,7 +607,7 @@ const DashboardTab = () => {
                   laneFilter === l
                     ? l === 'premium' ? 'bg-emerald-600 text-white border-emerald-600'
                       : l === 'standard' ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-900 border-gray-300'
+                      : 'bg-gray-200 text-gray-950 border-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600'
                     : 'bg-transparent text-gray-400 border-gray-600 hover:border-gray-400'
                 }`}
               >

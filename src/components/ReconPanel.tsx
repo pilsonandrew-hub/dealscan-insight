@@ -64,7 +64,7 @@ const VERDICT_STYLES: Record<ReconResult['verdict'], string> = {
 const VERDICT_BADGE: Record<ReconResult['verdict'], string> = {
   'HOT BUY': 'bg-orange-500 text-white',
   'BUY':     'bg-green-500 text-white',
-  'WATCH':   'bg-yellow-500 text-black',
+  'WATCH':   'bg-yellow-500 text-gray-950',
   'PASS':    'bg-gray-500 text-white',
 };
 
@@ -232,21 +232,21 @@ export const ReconPanel: React.FC = () => {
   return (
     <div className="w-full max-w-2xl mx-auto p-4">
       <div className="mb-4">
-        <h2 className="text-2xl font-bold text-foreground">Recon Evaluator</h2>
-        <p className="text-sm text-muted-foreground">Evaluate a vehicle deal before you bid</p>
+        <h2 className="text-2xl font-bold text-white">Recon Evaluator</h2>
+        <p className="text-sm text-gray-400">Evaluate a vehicle deal before you bid</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'evaluate' | 'history')}>
-        <TabsList className="w-full mb-4">
-          <TabsTrigger value="evaluate" className="flex-1">Evaluate</TabsTrigger>
-          <TabsTrigger value="history" className="flex-1">History</TabsTrigger>
+        <TabsList className="w-full mb-4 bg-gray-900 text-gray-400 border border-gray-800">
+          <TabsTrigger value="evaluate" className="flex-1 text-gray-400 data-[state=active]:bg-gray-800 data-[state=active]:text-white">Evaluate</TabsTrigger>
+          <TabsTrigger value="history" className="flex-1 text-gray-400 data-[state=active]:bg-gray-800 data-[state=active]:text-white">History</TabsTrigger>
         </TabsList>
 
         {/* ── EVALUATE TAB ── */}
         <TabsContent value="evaluate">
-          <Card>
+          <Card className="bg-gray-900 border-gray-800 text-white">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Vehicle Details</CardTitle>
+              <CardTitle className="text-base text-white">Vehicle Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
 
@@ -259,7 +259,7 @@ export const ReconPanel: React.FC = () => {
                     placeholder="1HGBH41JXMN109186"
                     value={form.vin}
                     onChange={e => setField('vin', e.target.value)}
-                    className="font-mono text-sm"
+                    className="font-mono text-sm bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                   />
                 </div>
                 <Button
@@ -267,7 +267,7 @@ export const ReconPanel: React.FC = () => {
                   size="sm"
                   onClick={decodeVIN}
                   disabled={vinLoading || !form.vin.trim()}
-                  className="shrink-0"
+                  className="shrink-0 border-gray-700 bg-gray-800 text-gray-100 hover:bg-gray-700 hover:text-white"
                 >
                   <Search className="h-4 w-4 mr-1" />
                   {vinLoading ? 'Decoding…' : 'Decode'}
@@ -279,6 +279,7 @@ export const ReconPanel: React.FC = () => {
                 <div>
                   <Label htmlFor="year" className="text-xs mb-1 block">Year</Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="year"
                     placeholder="2020"
                     value={form.year}
@@ -288,6 +289,7 @@ export const ReconPanel: React.FC = () => {
                 <div>
                   <Label htmlFor="make" className="text-xs mb-1 block">Make</Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="make"
                     placeholder="Toyota"
                     value={form.make}
@@ -297,6 +299,7 @@ export const ReconPanel: React.FC = () => {
                 <div>
                   <Label htmlFor="model" className="text-xs mb-1 block">Model</Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="model"
                     placeholder="Camry"
                     value={form.model}
@@ -310,6 +313,7 @@ export const ReconPanel: React.FC = () => {
                 <div>
                   <Label htmlFor="mileage" className="text-xs mb-1 block">Mileage</Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="mileage"
                     placeholder="45000"
                     value={form.mileage}
@@ -317,8 +321,9 @@ export const ReconPanel: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="asking_price" className="text-xs mb-1 block">Asking / Reserve Price <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Label htmlFor="asking_price" className="text-xs mb-1 block">Asking / Reserve Price <span className="text-gray-500 font-normal">(optional)</span></Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="asking_price"
                     placeholder="18500"
                     value={form.asking_price}
@@ -332,6 +337,7 @@ export const ReconPanel: React.FC = () => {
                 <div>
                   <Label htmlFor="source" className="text-xs mb-1 block">Source</Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="source"
                     placeholder="Manheim, ADESA…"
                     value={form.source}
@@ -341,6 +347,7 @@ export const ReconPanel: React.FC = () => {
                 <div>
                   <Label htmlFor="state" className="text-xs mb-1 block">State</Label>
                   <Input
+                    className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                     id="state"
                     placeholder="TX"
                     maxLength={2}
@@ -354,14 +361,14 @@ export const ReconPanel: React.FC = () => {
               <div>
                 <Label className="text-xs mb-1 block">Condition Grade</Label>
                 <Select value={form.condition_grade} onValueChange={v => setField('condition_grade', v)}>
-                  <SelectTrigger>
+                  <SelectTrigger className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Excellent">Excellent</SelectItem>
-                    <SelectItem value="Good">Good</SelectItem>
-                    <SelectItem value="Fair">Fair</SelectItem>
-                    <SelectItem value="Poor">Poor</SelectItem>
+                  <SelectContent className="bg-gray-900 border-gray-700 text-white">
+                    <SelectItem className="text-white focus:bg-gray-800 focus:text-white" value="Excellent">Excellent</SelectItem>
+                    <SelectItem className="text-white focus:bg-gray-800 focus:text-white" value="Good">Good</SelectItem>
+                    <SelectItem className="text-white focus:bg-gray-800 focus:text-white" value="Fair">Fair</SelectItem>
+                    <SelectItem className="text-white focus:bg-gray-800 focus:text-white" value="Poor">Poor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -397,10 +404,10 @@ export const ReconPanel: React.FC = () => {
                     {result.reliability_grade}
                   </span>
                 </div>
-                <span className="text-xs text-muted-foreground">{result.comp_count} comps</span>
+                <span className="text-xs text-gray-400">{result.comp_count} comps</span>
               </div>
 
-              <p className="text-sm text-muted-foreground mb-4">{result.verdict_reason || result.reason}</p>
+              <p className="text-sm text-gray-400 mb-4">{result.verdict_reason || result.reason}</p>
 
               {/* Risk flags — informational only, never blocks scoring */}
               {(() => {
