@@ -1,7 +1,7 @@
 export default {
   id: "local.external-review-ui-v2",
   apiVersion: 1,
-  version: "0.0.4",
+  version: "0.0.5",
   displayName: "External Review UI",
   description: "Minimal plugin that exposes a UI action for external specialist review.",
   author: "Ja'various",
