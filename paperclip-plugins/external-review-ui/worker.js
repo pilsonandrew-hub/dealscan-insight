@@ -193,6 +193,18 @@ async function appendAuditEvent(ctx, companyId, event) {
   return normalized;
 }
 
+function auditActorFromParams(params) {
+  return firstNonEmpty(params?.actor, params?.context?.userName, params?.context?.userDisplayName, params?.context?.userLabel, "unknown");
+}
+
+function auditSurfaceFromParams(params) {
+  return firstNonEmpty(params?.sourceSurface, "external_review_ui");
+}
+
+function auditCorrelationFromParams(params, fallback = "") {
+  return firstNonEmpty(params?.correlationId, fallback);
+}
+
 function attachAuditEvent(entry, event) {
   const normalizedEvent = normalizeAuditEvent(event);
   const nextEvents = [normalizedEvent, ...(Array.isArray(entry?.auditEvents) ? entry.auditEvents : [])].slice(0, 20);
@@ -294,7 +306,24 @@ const plugin = definePlugin({
       if (!companyId || !entryId) {
         throw new Error("companyId and entryId are required to update review outcome");
       }
-      return await syncOutcomeWrite(ctx, companyId, scopeId, entryId, outcome);
+      const scopedHistory = await readHistory(ctx, companyId, scopeId);
+      const companyHistory = await readCompanyHistory(ctx, companyId);
+      const current = scopedHistory.find((item) => item.id === entryId) || companyHistory.find((item) => item.id === entryId);
+      const auditEvent = await appendAuditEvent(ctx, companyId, {
+        eventType: "review.outcome_updated",
+        entryId,
+        actor: auditActorFromParams(params),
+        from: firstNonEmpty(current?.outcome),
+        to: outcome,
+        reason: firstNonEmpty(params?.reason, "outcome_update"),
+        sourceSurface: auditSurfaceFromParams(params),
+        correlationId: auditCorrelationFromParams(params, `${entryId}-outcome-${Date.now()}`),
+      });
+      const nextScoped = scopedHistory.map((item) => item.id === entryId ? attachAuditEvent({ ...item, outcome }, auditEvent) : item);
+      await writeHistory(ctx, companyId, scopeId, nextScoped);
+      const nextCompany = companyHistory.map((item) => item.id === entryId ? attachAuditEvent({ ...item, outcome }, auditEvent) : item);
+      await writeCompanyHistory(ctx, companyId, nextCompany);
+      return { scoped: nextScoped, company: nextCompany, auditEvent };
     });
 
     ctx.actions.register("set_review_pinned", async (params) => {
@@ -307,14 +336,26 @@ const plugin = definePlugin({
       }
 
       const scopedHistory = await readHistory(ctx, companyId, scopeId);
-      const nextScoped = scopedHistory.map((item) => item.id === entryId ? { ...item, pinned } : item);
+      const companyHistory = await readCompanyHistory(ctx, companyId);
+      const current = scopedHistory.find((item) => item.id === entryId) || companyHistory.find((item) => item.id === entryId);
+      const auditEvent = await appendAuditEvent(ctx, companyId, {
+        eventType: pinned ? "review.pinned" : "review.unpinned",
+        entryId,
+        actor: auditActorFromParams(params),
+        from: String(Boolean(current?.pinned)),
+        to: String(pinned),
+        reason: firstNonEmpty(params?.reason, pinned ? "pin_review" : "unpin_review"),
+        sourceSurface: auditSurfaceFromParams(params),
+        correlationId: auditCorrelationFromParams(params, `${entryId}-pin-${Date.now()}`),
+      });
+
+      const nextScoped = scopedHistory.map((item) => item.id === entryId ? attachAuditEvent({ ...item, pinned }, auditEvent) : item);
       await writeHistory(ctx, companyId, scopeId, nextScoped);
 
-      const companyHistory = await readCompanyHistory(ctx, companyId);
-      const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, pinned } : item);
+      const nextCompany = companyHistory.map((item) => item.id === entryId ? attachAuditEvent({ ...item, pinned }, auditEvent) : item);
       await writeCompanyHistory(ctx, companyId, nextCompany);
 
-      return { scoped: nextScoped, company: nextCompany };
+      return { scoped: nextScoped, company: nextCompany, auditEvent };
     });
 
     ctx.actions.register("set_review_owner", async (params) => {
@@ -371,8 +412,21 @@ const plugin = definePlugin({
         status: firstNonEmpty(entry.outcome, entry.decision, "recorded"),
         data: buildExportPayload(entry, companyId, scopeId),
       });
+      const auditEvent = await appendAuditEvent(ctx, companyId, {
+        eventType: "review.exported",
+        entryId: entry.id,
+        actor: auditActorFromParams(params),
+        to: exported.id,
+        reason: firstNonEmpty(params?.reason, "export_review_record"),
+        sourceSurface: auditSurfaceFromParams(params),
+        correlationId: auditCorrelationFromParams(params, `${entry.id}-export-${Date.now()}`),
+      });
       const next = await syncExportedEntityWrite(ctx, companyId, scopeId, entry.id, exported.id, new Date().toISOString());
-      return { entity: exported, history: next };
+      const scoped = Array.isArray(next?.scoped) ? next.scoped.map((item) => item.id === entry.id ? attachAuditEvent(item, auditEvent) : item) : [];
+      const company = Array.isArray(next?.company) ? next.company.map((item) => item.id === entry.id ? attachAuditEvent(item, auditEvent) : item) : [];
+      await writeHistory(ctx, companyId, scopeId, scoped);
+      await writeCompanyHistory(ctx, companyId, company);
+      return { entity: exported, history: { scoped, company }, auditEvent };
     });
 
     ctx.data.register("exported_review_records", async (params) => {
@@ -435,12 +489,22 @@ const plugin = definePlugin({
           archivedAt: archived ? new Date().toISOString() : null,
         },
       });
-      const history = await updateHistoryEntry(ctx, companyId, scopeId, entryId, (item) => ({
+      const auditEvent = await appendAuditEvent(ctx, companyId, {
+        eventType: archived ? "review.export_archived" : "review.export_restored",
+        entryId,
+        actor: auditActorFromParams(params),
+        from: existing?.data?.archived ? "archived" : "active",
+        to: archived ? "archived" : "active",
+        reason: firstNonEmpty(params?.reason, archived ? "archive_exported_review" : "restore_exported_review"),
+        sourceSurface: auditSurfaceFromParams(params),
+        correlationId: auditCorrelationFromParams(params, `${entryId}-archive-${Date.now()}`),
+      });
+      const history = await updateHistoryEntry(ctx, companyId, scopeId, entryId, (item) => attachAuditEvent({
         ...item,
         exportedEntityId: nextRecord.id,
         archived,
-      }));
-      return { entity: nextRecord, history };
+      }, auditEvent));
+      return { entity: nextRecord, history, auditEvent };
     });
 
     ctx.actions.register("clear_review_history", async (params) => {
