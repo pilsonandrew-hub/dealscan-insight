@@ -1,7 +1,7 @@
 export default {
   id: "local.external-review-ui-v2",
   apiVersion: 1,
-  version: "0.0.5",
+  version: "0.0.8",
   displayName: "External Review UI",
   description: "Minimal plugin that exposes a UI action for external specialist review.",
   author: "Ja'various",
@@ -9,7 +9,7 @@ export default {
   capabilities: ["agents.invoke", "ui.action.register", "plugin.state.read", "plugin.state.write"],
   entrypoints: {
     worker: "./worker.js",
-    ui: "./ui.js"
+    ui: "./ui"
   },
   launchers: [
     {
