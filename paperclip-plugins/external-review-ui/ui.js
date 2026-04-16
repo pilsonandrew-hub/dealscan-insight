@@ -25,6 +25,15 @@ const OUTCOME_OPTIONS = [
   { value: "escalated", label: "Escalated" },
 ];
 
+const OWNER_OPTIONS = [
+  { value: "unassigned", label: "Unassigned" },
+  { value: "Andrew", label: "Andrew" },
+  { value: "Ja'various", label: "Ja'various" },
+  { value: "Codex", label: "Codex" },
+  { value: "Claude Code", label: "Claude Code" },
+  { value: "Cursor", label: "Cursor" },
+];
+
 function cardStyle() {
   return {
     display: "grid",
@@ -387,7 +396,7 @@ function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sor
   });
 }
 
-function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onExport, emptyText }) {
+function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onSetOwner, onExport, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
       React.createElement("div", { style: mutedHeadingStyle() }, title),
@@ -403,7 +412,8 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
             React.createElement("div", { style: { display: "grid", gap: 4 } },
               React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
               React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`),
-              entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null
+              entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null,
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `owner: ${entry.owner || 'unassigned'}`)
             ),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
               entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
@@ -411,6 +421,9 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
               entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
               entry.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(entry.outcome)) }, formatOutcome(entry.outcome)) : null,
               React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "primary" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
+              React.createElement("select", { value: entry.owner || "unassigned", onChange: (e) => onSetOwner(entry.id, e.target.value), style: { ...inputStyle(false), minWidth: 160, width: 160 } },
+                ...OWNER_OPTIONS.map((option) => React.createElement("option", { key: option.value, value: option.value }, option.label))
+              ),
               React.createElement("button", { type: "button", onClick: () => onExport(entry), style: buttonStyle(entry.exportedEntityId ? "secondary" : "primary") }, entry.exportedEntityId ? "Update record" : "Export record"),
               React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
             )
@@ -612,7 +625,7 @@ function buildPriorityQueue(companyEntries) {
     .slice(0, 6);
 }
 
-function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned }) {
+function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onSetOwner }) {
   if (!entries.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 12, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.78)", border: "1px solid rgba(248,113,113,0.22)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -628,6 +641,7 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned }) {
         React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
           entry.outcome ? React.createElement("span", { style: badgeStyle(entry.outcome === "blocked" ? "danger" : entry.outcome === "needs_human" ? "warn" : "info") }, outcomeLabel(entry.outcome)) : null,
           React.createElement("span", { style: badgeStyle(getAgingState(entry).tone) }, getAgingState(entry).label),
+          React.createElement("span", { style: badgeStyle("neutral") }, `Owner: ${entry.owner || 'Unassigned'}`),
           entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
           entry.decision ? React.createElement("span", { style: badgeStyle("neutral") }, entry.decision) : null
         )
@@ -636,13 +650,16 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned }) {
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore"),
         React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "warn" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
+        React.createElement("select", { value: entry.owner || "unassigned", onChange: (e) => onSetOwner(entry.id, e.target.value), style: { ...inputStyle(false), minWidth: 160, width: 160 } },
+          ...OWNER_OPTIONS.map((option) => React.createElement("option", { key: option.value, value: option.value }, option.label))
+        ),
         ...OUTCOME_OPTIONS.filter((option) => option.value !== entry.outcome).map((option) => React.createElement("button", { key: option.value, type: "button", onClick: () => onSetOutcome(entry.id, option.value), style: buttonStyle(option.value === "blocked" ? "danger" : option.value === "needs_human" ? "warn" : "secondary") }, option.label))
       )
     ))
   );
 }
 
-function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onExport }) {
+function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onSetOwner, onExport }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [pinFilter, setPinFilter] = useState("all");
@@ -707,6 +724,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       onRestore,
       onSetOutcome,
       onSetPinned,
+      onSetOwner,
       onExport,
       emptyText: "No reviews saved for this entity yet."
     }),
@@ -717,6 +735,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       onRestore,
       onSetOutcome,
       onSetPinned,
+      onSetOwner,
       onExport,
       emptyText: "No shared company reviews yet."
     })
@@ -729,6 +748,7 @@ export default function ExternalReviewLauncherPanel() {
   const saveReviewHistory = usePluginAction("save_review_history");
   const setReviewOutcome = usePluginAction("set_review_outcome");
   const setReviewPinned = usePluginAction("set_review_pinned");
+  const setReviewOwner = usePluginAction("set_review_owner");
   const clearReviewHistory = usePluginAction("clear_review_history");
   const exportReviewRecord = usePluginAction("export_review_record");
   const setExportedReviewArchived = usePluginAction("set_exported_review_archived");
@@ -789,6 +809,7 @@ export default function ExternalReviewLauncherPanel() {
       taskSummary,
       reviewType,
       priority,
+      owner: "unassigned",
       content,
       contextNotes,
       decision: normalized.decision,
@@ -1022,6 +1043,33 @@ export default function ExternalReviewLauncherPanel() {
     setArchivedFilter((current) => syncArchivedFilter(filterKey, current));
   }
 
+  function handleSetOwner(entryId, owner) {
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
+      company: prev.company.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
+    }));
+    setReviewOwner({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: {
+        companyId: host?.companyId ?? undefined,
+        entityId: host?.entityId ?? undefined,
+      },
+      entryId,
+      owner,
+    }).then((next) => {
+      if (next && typeof next === "object") {
+        setHistory({
+          scoped: Array.isArray(next.scoped) ? next.scoped : [],
+          company: Array.isArray(next.company) ? next.company : [],
+        });
+      }
+      toast({ tone: "success", title: "Owner updated", body: `Assigned to ${owner}.` });
+    }).catch((err) => {
+      toast({ tone: "error", title: "Owner update failed", body: err?.message || "Could not assign review owner." });
+    });
+  }
+
   function handleClearHistory() {
     setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
@@ -1111,8 +1159,8 @@ export default function ExternalReviewLauncherPanel() {
       activeDashboardFilter,
       onSelectFilter: handleSelectDashboardFilter,
     }),
-    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned }),
-    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
+    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
+    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },

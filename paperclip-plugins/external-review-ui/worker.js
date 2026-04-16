@@ -42,6 +42,7 @@ function normalizeHistoryEntry(input = {}) {
     taskSummary: firstNonEmpty(input.taskSummary, "External review request"),
     reviewType: firstNonEmpty(input.reviewType, "architecture_review"),
     priority: firstNonEmpty(input.priority, "normal"),
+    owner: firstNonEmpty(input.owner),
     content: typeof input.content === "string" ? input.content : "",
     contextNotes: typeof input.contextNotes === "string" ? input.contextNotes : "",
     decision: firstNonEmpty(input.decision),
@@ -70,6 +71,7 @@ function buildExportPayload(entry, companyId, scopeId) {
     taskSummary: normalized.taskSummary,
     reviewType: normalized.reviewType,
     priority: normalized.priority,
+    owner: normalized.owner,
     decision: normalized.decision,
     recommendedNextStep: normalized.recommendedNextStep,
     lane: normalized.lane,
@@ -246,6 +248,26 @@ const plugin = definePlugin({
 
       const companyHistory = await readCompanyHistory(ctx, companyId);
       const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, pinned } : item);
+      await writeCompanyHistory(ctx, companyId, nextCompany);
+
+      return { scoped: nextScoped, company: nextCompany };
+    });
+
+    ctx.actions.register("set_review_owner", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      const entryId = firstNonEmpty(params?.entryId);
+      const owner = firstNonEmpty(params?.owner, "unassigned");
+      if (!companyId || !entryId) {
+        throw new Error("companyId and entryId are required to update review owner");
+      }
+
+      const scopedHistory = await readHistory(ctx, companyId, scopeId);
+      const nextScoped = scopedHistory.map((item) => item.id === entryId ? { ...item, owner } : item);
+      await writeHistory(ctx, companyId, scopeId, nextScoped);
+
+      const companyHistory = await readCompanyHistory(ctx, companyId);
+      const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, owner } : item);
       await writeCompanyHistory(ctx, companyId, nextCompany);
 
       return { scoped: nextScoped, company: nextCompany };
