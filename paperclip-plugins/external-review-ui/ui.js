@@ -432,23 +432,55 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
   );
 }
 
-function ExportedRecordsPanel({ records, loading, error }) {
+function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArchivedFilter, onToggleArchived }) {
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading exported records...");
   }
   if (error) {
     return React.createElement("div", { style: { fontSize: 13, color: "#fca5a5" } }, `Exported records unavailable: ${error.message || error}`);
   }
+  if (!records.length && archivedFilter !== "all") {
+    return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+        React.createElement("div", { style: mutedHeadingStyle() }, "Exported Paperclip records"),
+        React.createElement("select", {
+          value: archivedFilter,
+          onChange: (e) => setArchivedFilter(e.target.value),
+          style: inputStyle(false),
+        },
+          React.createElement("option", { value: "active" }, "Active records"),
+          React.createElement("option", { value: "archived" }, "Archived records"),
+          React.createElement("option", { value: "all" }, "All records")
+        )
+      ),
+      React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "No exported records in this view yet.")
+    );
+  }
   if (!records.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
-    React.createElement("div", { style: mutedHeadingStyle() }, "Exported Paperclip records"),
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Exported Paperclip records"),
+      React.createElement("select", {
+        value: archivedFilter,
+        onChange: (e) => setArchivedFilter(e.target.value),
+        style: inputStyle(false),
+      },
+        React.createElement("option", { value: "active" }, "Active records"),
+        React.createElement("option", { value: "archived" }, "Archived records"),
+        React.createElement("option", { value: "all" }, "All records")
+      )
+    ),
     ...records.map((record) => React.createElement("div", {
       key: record.id,
       style: { display: "grid", gap: 6, padding: 12, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(34,197,94,0.18)" }
     },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" } },
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, record.title || record.data?.taskSummary || "External review record"),
-        record.status ? React.createElement("span", { style: badgeStyle("success") }, record.status) : null
+        React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+          record.data?.archived ? React.createElement("span", { style: badgeStyle("neutral") }, "Archived") : null,
+          record.status ? React.createElement("span", { style: badgeStyle(record.data?.archived ? "neutral" : "success") }, record.status) : null,
+          React.createElement("button", { type: "button", onClick: () => onToggleArchived(record, !record.data?.archived), style: buttonStyle(record.data?.archived ? "secondary" : "primary") }, record.data?.archived ? "Restore" : "Archive")
+        )
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${record.entityType} • ${record.updatedAt || record.createdAt || 'unknown time'}`),
       record.data?.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, record.data.recommendedNextStep) : null
@@ -545,6 +577,7 @@ export default function ExternalReviewLauncherPanel() {
   const setReviewPinned = usePluginAction("set_review_pinned");
   const clearReviewHistory = usePluginAction("clear_review_history");
   const exportReviewRecord = usePluginAction("export_review_record");
+  const setExportedReviewArchived = usePluginAction("set_exported_review_archived");
   const toast = usePluginToast();
   const [reviewType, setReviewType] = useState("architecture_review");
   const [priority, setPriority] = useState("normal");
@@ -559,8 +592,10 @@ export default function ExternalReviewLauncherPanel() {
       entityId: host?.entityId ?? undefined,
     },
   });
+  const [archivedFilter, setArchivedFilter] = useState("active");
   const exportedRecordsQuery = usePluginData("exported_review_records", {
     companyId: host?.companyId ?? undefined,
+    archivedFilter,
     context: host,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -788,6 +823,33 @@ export default function ExternalReviewLauncherPanel() {
     });
   }
 
+  function handleToggleArchived(record, archived) {
+    const entryId = record.externalId || record.data?.externalId || record.data?.id;
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((entry) => entry.exportedEntityId === record.id ? { ...entry, archived } : entry),
+      company: prev.company.map((entry) => entry.exportedEntityId === record.id ? { ...entry, archived } : entry),
+    }));
+    setExportedReviewArchived({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: host,
+      recordId: record.id,
+      entryId,
+      externalId: entryId,
+      archived,
+    }).then((result) => {
+      if (result?.history && typeof result.history === "object") {
+        setHistory({
+          scoped: Array.isArray(result.history.scoped) ? result.history.scoped : [],
+          company: Array.isArray(result.history.company) ? result.history.company : [],
+        });
+      }
+      toast({ tone: "success", title: archived ? "Record archived" : "Record restored", body: archived ? "Exported review record has been archived from the active list." : "Exported review record is active again." });
+    }).catch((error) => {
+      toast({ tone: "error", title: archived ? "Archive failed" : "Restore failed", body: error?.message || "Could not update exported record state." });
+    });
+  }
+
   function handleClearHistory() {
     setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
@@ -871,7 +933,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
     React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
-    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error }),
+    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),

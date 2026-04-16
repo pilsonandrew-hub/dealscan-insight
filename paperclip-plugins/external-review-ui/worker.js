@@ -81,7 +81,20 @@ function buildExportPayload(entry, companyId, scopeId) {
     createdAtLabel: normalized.createdAtLabel,
     createdAtMs: normalized.createdAtMs,
     exportedAt: new Date().toISOString(),
+    archived: Boolean(normalized.archived),
   };
+}
+
+async function updateHistoryEntry(ctx, companyId, scopeId, entryId, updater) {
+  const scopedHistory = await readHistory(ctx, companyId, scopeId);
+  const nextScoped = scopedHistory.map((item) => item.id === entryId ? normalizeHistoryEntry(updater(item)) : item);
+  await writeHistory(ctx, companyId, scopeId, nextScoped);
+
+  const companyHistory = await readCompanyHistory(ctx, companyId);
+  const nextCompany = companyHistory.map((item) => item.id === entryId ? normalizeHistoryEntry(updater(item)) : item);
+  await writeCompanyHistory(ctx, companyId, nextCompany);
+
+  return { scoped: nextScoped, company: nextCompany };
 }
 
 function buildScopeKey(scopeId) {
@@ -263,13 +276,57 @@ const plugin = definePlugin({
       if (!companyId) {
         throw new Error("companyId is required to load exported review records");
       }
-      return await ctx.entities.list({
+      const archivedFilter = firstNonEmpty(params?.archivedFilter, "active");
+      const records = await ctx.entities.list({
         entityType: REVIEW_ENTITY_TYPE,
         scopeKind: "company",
         scopeId: companyId,
-        limit: 25,
+        limit: 50,
         offset: 0,
       });
+      if (archivedFilter === "all") return records;
+      return records.filter((record) => archivedFilter === "archived" ? Boolean(record?.data?.archived) : !record?.data?.archived);
+    });
+
+    ctx.actions.register("set_exported_review_archived", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      const recordId = firstNonEmpty(params?.recordId);
+      const entryId = firstNonEmpty(params?.entryId, params?.externalId);
+      const archived = Boolean(params?.archived);
+      if (!companyId || !recordId || !entryId) {
+        throw new Error("companyId, recordId, and entryId are required to update exported review archive state");
+      }
+      const records = await ctx.entities.list({
+        entityType: REVIEW_ENTITY_TYPE,
+        scopeKind: "company",
+        scopeId: companyId,
+        limit: 100,
+        offset: 0,
+      });
+      const existing = records.find((record) => record.id === recordId);
+      if (!existing) {
+        throw new Error("Exported review record not found");
+      }
+      const nextRecord = await ctx.entities.upsert({
+        entityType: REVIEW_ENTITY_TYPE,
+        scopeKind: "company",
+        scopeId: companyId,
+        externalId: existing.externalId || entryId,
+        title: existing.title || buildExportTitle(existing.data || {}),
+        status: archived ? "archived" : firstNonEmpty(existing.status, "recorded"),
+        data: {
+          ...(existing.data || {}),
+          archived,
+          archivedAt: archived ? new Date().toISOString() : null,
+        },
+      });
+      const history = await updateHistoryEntry(ctx, companyId, scopeId, entryId, (item) => ({
+        ...item,
+        exportedEntityId: nextRecord.id,
+        archived,
+      }));
+      return { entity: nextRecord, history };
     });
 
     ctx.actions.register("clear_review_history", async (params) => {
