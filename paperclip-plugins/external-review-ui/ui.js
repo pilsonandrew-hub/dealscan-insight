@@ -355,6 +355,27 @@ function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, 
   );
 }
 
+function filterHistoryEntries(entries, searchText, outcomeFilter) {
+  const query = String(searchText || "").trim().toLowerCase();
+  return entries.filter((entry) => {
+    const matchesOutcome = outcomeFilter === "all" ? true : String(entry.outcome || "") === outcomeFilter;
+    if (!matchesOutcome) return false;
+    if (!query) return true;
+    const haystack = [
+      entry.taskSummary,
+      entry.reviewType,
+      entry.priority,
+      entry.decision,
+      entry.outcome,
+      entry.recommendedNextStep,
+      entry.scopeId,
+      entry.model,
+      entry.lane,
+    ].filter(Boolean).join(" \n ").toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
 function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
@@ -396,6 +417,12 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, emptyT
 }
 
 function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome }) {
+  const [searchText, setSearchText] = useState("");
+  const [outcomeFilter, setOutcomeFilter] = useState("all");
+  const filteredCompanyEntries = useMemo(
+    () => filterHistoryEntries(companyEntries, searchText, outcomeFilter),
+    [companyEntries, searchText, outcomeFilter]
+  );
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading review history...");
   }
@@ -408,6 +435,22 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       React.createElement("div", { style: mutedHeadingStyle() }, "Review history"),
       React.createElement("button", { type: "button", onClick: onClear, style: buttonStyle("secondary") }, "Clear current scope")
     ),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 10 } },
+      React.createElement("input", {
+        value: searchText,
+        onChange: (e) => setSearchText(e.target.value),
+        placeholder: "Search shared history by summary, decision, lane, model, or scope",
+        style: inputStyle(false),
+      }),
+      React.createElement("select", {
+        value: outcomeFilter,
+        onChange: (e) => setOutcomeFilter(e.target.value),
+        style: inputStyle(false),
+      },
+        React.createElement("option", { value: "all" }, "All outcomes"),
+        ...OUTCOME_OPTIONS.map((option) => React.createElement("option", { key: option.value, value: option.value }, option.label))
+      )
+    ),
     React.createElement(HistoryList, {
       title: "Current context",
       subtitle: `${scopedEntries.length} reviews tied to this entity`,
@@ -418,8 +461,8 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
     }),
     React.createElement(HistoryList, {
       title: "Company-wide recent reviews",
-      subtitle: `${companyEntries.length} shared reviews across this Paperclip company`,
-      entries: companyEntries,
+      subtitle: `${filteredCompanyEntries.length} of ${companyEntries.length} shared reviews across this Paperclip company`,
+      entries: filteredCompanyEntries,
       onRestore,
       onSetOutcome,
       emptyText: "No shared company reviews yet."
