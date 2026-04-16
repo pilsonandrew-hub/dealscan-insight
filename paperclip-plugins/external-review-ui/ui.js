@@ -411,6 +411,22 @@ function formatAuditCopy(entry) {
   return parts.length ? parts.join(' • ') : null;
 }
 
+function AuditScopeChips({ entry, onFocusAudit }) {
+  if (!entry || !onFocusAudit || (!entry.lastAuditEventType && !entry.lastAuditEventActor)) return null;
+  return React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+    entry.lastAuditEventType ? React.createElement("button", {
+      type: "button",
+      onClick: () => onFocusAudit(entry, { eventType: entry.lastAuditEventType }),
+      style: { ...badgeStyle("info"), cursor: "pointer" },
+    }, entry.lastAuditEventType.replace(/^review\./, '').replaceAll('_', ' ')) : null,
+    entry.lastAuditEventActor ? React.createElement("button", {
+      type: "button",
+      onClick: () => onFocusAudit(entry, { actor: entry.lastAuditEventActor }),
+      style: { ...badgeStyle("neutral"), cursor: "pointer" },
+    }, entry.lastAuditEventActor) : null
+  );
+}
+
 function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onSetOwner, onExport, onFocusAudit, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
@@ -429,7 +445,8 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
               React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`),
               entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null,
               React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `owner: ${entry.owner || 'unassigned'}`),
-              formatAuditCopy(entry) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(entry), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null
+              formatAuditCopy(entry) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(entry), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null,
+              React.createElement(AuditScopeChips, { entry, onFocusAudit })
             ),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
               entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
@@ -577,6 +594,7 @@ function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArch
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${record.entityType} • ${record.updatedAt || record.createdAt || 'unknown time'}`),
       formatAuditCopy(record.data) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(record.data), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(record.data)) : null,
+      React.createElement(AuditScopeChips, { entry: record.data, onFocusAudit }),
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
         record.data?.reviewType ? React.createElement("span", { style: badgeStyle("info") }, record.data.reviewType) : null,
         record.data?.priority ? React.createElement("span", { style: badgeStyle("warn") }, record.data.priority) : null,
@@ -941,6 +959,7 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onS
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep || entry.contextNotes || entry.content || "No summary available."),
       formatAuditCopy(entry) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(entry), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null,
+      React.createElement(AuditScopeChips, { entry, onFocusAudit }),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore"),
         React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "warn" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
@@ -1402,10 +1421,10 @@ export default function ExternalReviewLauncherPanel() {
     setArchivedFilter((current) => syncArchivedFilter(filterKey, current));
   }
 
-  function handleFocusAudit(item) {
+  function handleFocusAudit(item, overrides = {}) {
     setSelectedAuditEntryId(item?.id || item?.externalId || null);
-    setScopedAuditEventType(item?.lastAuditEventType || null);
-    setScopedAuditActor(item?.lastAuditEventActor || item?.lastReassignedBy || null);
+    setScopedAuditEventType(overrides.eventType ?? item?.lastAuditEventType ?? null);
+    setScopedAuditActor(overrides.actor ?? item?.lastAuditEventActor ?? item?.lastReassignedBy ?? null);
   }
 
   function handleClearAuditScope() {
