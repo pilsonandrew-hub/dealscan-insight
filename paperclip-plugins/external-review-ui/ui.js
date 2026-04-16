@@ -1090,7 +1090,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
   );
 }
 
-export default function ExternalReviewLauncherPanel() {
+export function ExternalReviewLauncherPanel() {
   const host = useHostContext();
   const invoke = usePluginAction("invoke_external_review");
   const saveReviewHistory = usePluginAction("save_review_history");
@@ -1683,3 +1683,7 @@ export default function ExternalReviewLauncherPanel() {
     result ? React.createElement(ResultPanel, { result, currentOutcome, onSetOutcome: handleSetCurrentOutcome, onReuseAsFollowUp: handleReuseAsFollowUp, onEscalate: handleEscalate, onApplyPreset: handleApplyPreset, toast }) : null
   );
 }
+
+export default {
+  ExternalReviewLauncherPanel,
+};

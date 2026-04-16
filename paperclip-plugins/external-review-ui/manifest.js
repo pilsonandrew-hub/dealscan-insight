@@ -26,6 +26,20 @@ export default {
         environment: "hostOverlay",
         bounds: "wide"
       }
+    },
+    {
+      id: "invoke-external-review-global",
+      displayName: "External Review",
+      description: "Open the external review workspace from the Paperclip global toolbar.",
+      placementZone: "globalToolbarButton",
+      action: {
+        type: "openDrawer",
+        target: "ExternalReviewLauncherPanel"
+      },
+      render: {
+        environment: "hostOverlay",
+        bounds: "wide"
+      }
     }
   ]
 };
