@@ -2,6 +2,7 @@ import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 
 const REVIEW_HISTORY_KEY = "external-review-history-v1";
 const COMPANY_HISTORY_KEY = "external-review-history-company-v1";
+const REVIEW_ENTITY_TYPE = "external-review-record";
 const REVIEW_HISTORY_LIMIT = 20;
 
 function firstNonEmpty(...values) {
@@ -49,6 +50,37 @@ function normalizeHistoryEntry(input = {}) {
     model: firstNonEmpty(input.model),
     outcome: firstNonEmpty(input.outcome),
     pinned: Boolean(input.pinned),
+    scopeId: firstNonEmpty(input.scopeId),
+    exportedEntityId: firstNonEmpty(input.exportedEntityId),
+    exportedAt: firstNonEmpty(input.exportedAt),
+  };
+}
+
+function buildExportTitle(entry) {
+  const summary = firstNonEmpty(entry.taskSummary, "External review");
+  const decision = firstNonEmpty(entry.decision);
+  return decision ? `${summary} · ${decision}` : summary;
+}
+
+function buildExportPayload(entry, companyId, scopeId) {
+  const normalized = normalizeHistoryEntry({ ...entry, scopeId: firstNonEmpty(entry.scopeId, scopeId) });
+  return {
+    companyId,
+    scopeId: firstNonEmpty(normalized.scopeId),
+    taskSummary: normalized.taskSummary,
+    reviewType: normalized.reviewType,
+    priority: normalized.priority,
+    decision: normalized.decision,
+    recommendedNextStep: normalized.recommendedNextStep,
+    lane: normalized.lane,
+    model: normalized.model,
+    outcome: normalized.outcome,
+    pinned: normalized.pinned,
+    content: normalized.content,
+    contextNotes: normalized.contextNotes,
+    createdAtLabel: normalized.createdAtLabel,
+    createdAtMs: normalized.createdAtMs,
+    exportedAt: new Date().toISOString(),
   };
 }
 
@@ -116,6 +148,18 @@ async function syncOutcomeWrite(ctx, companyId, scopeId, entryId, outcome) {
 
   const companyHistory = await readCompanyHistory(ctx, companyId);
   const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, outcome } : item);
+  await writeCompanyHistory(ctx, companyId, nextCompany);
+
+  return { scoped: nextScoped, company: nextCompany };
+}
+
+async function syncExportedEntityWrite(ctx, companyId, scopeId, entryId, exportedEntityId, exportedAt) {
+  const scopedHistory = await readHistory(ctx, companyId, scopeId);
+  const nextScoped = scopedHistory.map((item) => item.id === entryId ? { ...item, exportedEntityId, exportedAt } : item);
+  await writeHistory(ctx, companyId, scopeId, nextScoped);
+
+  const companyHistory = await readCompanyHistory(ctx, companyId);
+  const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, exportedEntityId, exportedAt } : item);
   await writeCompanyHistory(ctx, companyId, nextCompany);
 
   return { scoped: nextScoped, company: nextCompany };
@@ -192,6 +236,40 @@ const plugin = definePlugin({
       await writeCompanyHistory(ctx, companyId, nextCompany);
 
       return { scoped: nextScoped, company: nextCompany };
+    });
+
+    ctx.actions.register("export_review_record", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      if (!companyId) {
+        throw new Error("companyId is required to export a review record");
+      }
+      const entry = normalizeHistoryEntry(params?.entry || {});
+      const exported = await ctx.entities.upsert({
+        entityType: REVIEW_ENTITY_TYPE,
+        scopeKind: "company",
+        scopeId: companyId,
+        externalId: entry.id,
+        title: buildExportTitle(entry),
+        status: firstNonEmpty(entry.outcome, entry.decision, "recorded"),
+        data: buildExportPayload(entry, companyId, scopeId),
+      });
+      const next = await syncExportedEntityWrite(ctx, companyId, scopeId, entry.id, exported.id, new Date().toISOString());
+      return { entity: exported, history: next };
+    });
+
+    ctx.data.register("exported_review_records", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      if (!companyId) {
+        throw new Error("companyId is required to load exported review records");
+      }
+      return await ctx.entities.list({
+        entityType: REVIEW_ENTITY_TYPE,
+        scopeKind: "company",
+        scopeId: companyId,
+        limit: 25,
+        offset: 0,
+      });
     });
 
     ctx.actions.register("clear_review_history", async (params) => {

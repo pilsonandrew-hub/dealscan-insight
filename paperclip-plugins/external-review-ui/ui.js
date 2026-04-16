@@ -387,7 +387,7 @@ function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sor
   });
 }
 
-function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, emptyText }) {
+function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onExport, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
       React.createElement("div", { style: mutedHeadingStyle() }, title),
@@ -407,9 +407,11 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
             ),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
               entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
+              entry.exportedEntityId ? React.createElement("span", { style: badgeStyle("success") }, "Exported") : null,
               entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
               entry.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(entry.outcome)) }, formatOutcome(entry.outcome)) : null,
               React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "primary" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
+              React.createElement("button", { type: "button", onClick: () => onExport(entry), style: buttonStyle(entry.exportedEntityId ? "secondary" : "primary") }, entry.exportedEntityId ? "Update record" : "Export record"),
               React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
             )
           ),
@@ -424,12 +426,37 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
               }
             }, option.label))
           ),
-          entry.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep) : null
+          entry.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep) : null,
+          entry.exportedAt ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `record synced ${entry.exportedAt}`) : null
         ))
   );
 }
 
-function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned }) {
+function ExportedRecordsPanel({ records, loading, error }) {
+  if (loading) {
+    return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading exported records...");
+  }
+  if (error) {
+    return React.createElement("div", { style: { fontSize: 13, color: "#fca5a5" } }, `Exported records unavailable: ${error.message || error}`);
+  }
+  if (!records.length) return null;
+  return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+    React.createElement("div", { style: mutedHeadingStyle() }, "Exported Paperclip records"),
+    ...records.map((record) => React.createElement("div", {
+      key: record.id,
+      style: { display: "grid", gap: 6, padding: 12, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(34,197,94,0.18)" }
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, record.title || record.data?.taskSummary || "External review record"),
+        record.status ? React.createElement("span", { style: badgeStyle("success") }, record.status) : null
+      ),
+      React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${record.entityType} • ${record.updatedAt || record.createdAt || 'unknown time'}`),
+      record.data?.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, record.data.recommendedNextStep) : null
+    ))
+  );
+}
+
+function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onExport }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [pinFilter, setPinFilter] = useState("all");
@@ -494,6 +521,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       onRestore,
       onSetOutcome,
       onSetPinned,
+      onExport,
       emptyText: "No reviews saved for this entity yet."
     }),
     React.createElement(HistoryList, {
@@ -503,6 +531,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       onRestore,
       onSetOutcome,
       onSetPinned,
+      onExport,
       emptyText: "No shared company reviews yet."
     })
   );
@@ -515,6 +544,7 @@ export default function ExternalReviewLauncherPanel() {
   const setReviewOutcome = usePluginAction("set_review_outcome");
   const setReviewPinned = usePluginAction("set_review_pinned");
   const clearReviewHistory = usePluginAction("clear_review_history");
+  const exportReviewRecord = usePluginAction("export_review_record");
   const toast = usePluginToast();
   const [reviewType, setReviewType] = useState("architecture_review");
   const [priority, setPriority] = useState("normal");
@@ -528,6 +558,10 @@ export default function ExternalReviewLauncherPanel() {
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
     },
+  });
+  const exportedRecordsQuery = usePluginData("exported_review_records", {
+    companyId: host?.companyId ?? undefined,
+    context: host,
   });
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -731,6 +765,29 @@ export default function ExternalReviewLauncherPanel() {
     toast({ tone: "success", title: pinned ? "Review pinned" : "Review unpinned", body: pinned ? "Pinned review will stay surfaced in history." : "Review returned to normal history ordering." });
   }
 
+  function handleExportRecord(entry) {
+    const normalizedEntry = {
+      ...entry,
+      scopeId: entry.scopeId || host?.entityId || null,
+    };
+    exportReviewRecord({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: host,
+      entry: normalizedEntry,
+    }).then((result) => {
+      if (result?.history && typeof result.history === "object") {
+        setHistory({
+          scoped: Array.isArray(result.history.scoped) ? result.history.scoped : [],
+          company: Array.isArray(result.history.company) ? result.history.company : [],
+        });
+      }
+      toast({ tone: "success", title: "Review exported", body: "Review is now stored as a Paperclip record." });
+    }).catch((error) => {
+      toast({ tone: "error", title: "Export failed", body: error?.message || "Could not export review record." });
+    });
+  }
+
   function handleClearHistory() {
     setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
@@ -813,7 +870,8 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
-    React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned }),
+    React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
+    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
