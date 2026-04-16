@@ -15,6 +15,9 @@ const PRIORITIES = [
   { value: "urgent", label: "Urgent" }
 ];
 
+const HISTORY_STORAGE_KEY = "paperclip.externalReview.history.v1";
+const HISTORY_LIMIT = 8;
+
 function cardStyle() {
   return {
     display: "grid",
@@ -202,6 +205,27 @@ function buildSummaryText(normalized) {
   return parts.join("\n");
 }
 
+function loadStoredHistory() {
+  if (typeof window === "undefined" || !window?.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistHistory(entries) {
+  if (typeof window === "undefined" || !window?.localStorage) return;
+  try {
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries.slice(0, HISTORY_LIMIT)));
+  } catch {
+    // best-effort only
+  }
+}
+
 async function copyToClipboard(text) {
   if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -294,12 +318,15 @@ function ResultPanel({ result, onReuseAsFollowUp, onEscalate, onApplyPreset, toa
   );
 }
 
-function HistoryPanel({ entries, onRestore }) {
+function HistoryPanel({ entries, onRestore, onClear }) {
   if (!entries.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
       React.createElement("div", { style: mutedHeadingStyle() }, "Recent review attempts"),
-      React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entries.length} stored locally in drawer state`)
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+        React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entries.length} stored locally across reloads`),
+        React.createElement("button", { type: "button", onClick: onClear, style: buttonStyle("secondary") }, "Clear history")
+      )
     ),
     ...entries.map((entry, index) => React.createElement("div", {
       key: entry.id || `${index}-${entry.taskSummary}`,
@@ -331,7 +358,7 @@ export default function ExternalReviewLauncherPanel() {
   const [contextNotes, setContextNotes] = useState(() => buildContextNotes(host));
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => loadStoredHistory());
   const [error, setError] = useState(null);
 
   const contextPreview = useMemo(() => ({
@@ -344,11 +371,16 @@ export default function ExternalReviewLauncherPanel() {
   }), [host]);
 
   useEffect(() => {
+    persistHistory(history);
+  }, [history]);
+
+  useEffect(() => {
     if (!result) return;
     const normalized = normalizeResultEnvelope(result);
     const entry = {
       id: normalized.correlationId || `${Date.now()}`,
       createdAtLabel: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      createdAtMs: Date.now(),
       taskSummary,
       reviewType,
       priority,
@@ -359,7 +391,7 @@ export default function ExternalReviewLauncherPanel() {
       lane: normalized.lane,
       model: normalized.model,
     };
-    setHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, 3));
+    setHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
   }, [result]);
 
   function handleReuseAsFollowUp(normalized) {
@@ -407,6 +439,11 @@ export default function ExternalReviewLauncherPanel() {
     ].filter(Boolean).join("\n\n"));
     setError(null);
     toast({ tone: "success", title: "Preset applied", body: "The form has been prefilled for a targeted rerun." });
+  }
+
+  function handleClearHistory() {
+    setHistory([]);
+    toast({ tone: "success", title: "History cleared", body: "Saved review history was cleared from this browser context." });
   }
 
   function handleRestoreHistory(entry) {
@@ -468,7 +505,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
-    React.createElement(HistoryPanel, { entries: history, onRestore: handleRestoreHistory }),
+    React.createElement(HistoryPanel, { entries: history, onRestore: handleRestoreHistory, onClear: handleClearHistory }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
