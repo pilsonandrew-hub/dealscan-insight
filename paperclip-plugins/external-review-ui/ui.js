@@ -457,6 +457,36 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
   );
 }
 
+function AuditTimelinePanel({ events, loading, error, entryId }) {
+  if (loading) {
+    return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading audit timeline...");
+  }
+  if (error) {
+    return React.createElement("div", { style: { fontSize: 13, color: "#fca5a5" } }, `Audit timeline unavailable: ${error.message || error}`);
+  }
+  if (!events.length) {
+    return React.createElement("div", { style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Audit timeline"),
+      React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, entryId ? "No audit events for this review yet." : "Select or create a review to see its audit trail.")
+    );
+  }
+  return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+    React.createElement("div", { style: mutedHeadingStyle() }, "Audit timeline"),
+    ...events.map((event) => React.createElement("div", {
+      key: event.id,
+      style: { display: "grid", gap: 4, padding: 10, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(59,130,246,0.12)" }
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#f8fafc" } }, event.eventType || "review.updated"),
+        React.createElement("div", { style: { fontSize: 11, color: "#94a3b8" } }, event.at || "unknown time")
+      ),
+      React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1" } }, `${event.actor || 'Unknown actor'}${event.to ? ` → ${event.to}` : ''}`),
+      event.from || event.reason ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, [event.from ? `from ${event.from}` : null, event.reason ? `reason: ${event.reason}` : null].filter(Boolean).join(' • ')) : null,
+      event.correlationId ? React.createElement("div", { style: { fontSize: 11, color: "#475569" } }, `correlation: ${event.correlationId}`) : null
+    ))
+  );
+}
+
 function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArchivedFilter, onToggleArchived, onRestoreRecord }) {
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading exported records...");
@@ -1008,9 +1038,15 @@ export default function ExternalReviewLauncherPanel() {
   });
   const [archivedFilter, setArchivedFilter] = useState("active");
   const [activeDashboardFilter, setActiveDashboardFilter] = useState(null);
+  const [selectedAuditEntryId, setSelectedAuditEntryId] = useState(null);
   const exportedRecordsQuery = usePluginData("exported_review_records", {
     companyId: host?.companyId ?? undefined,
     archivedFilter,
+    context: host,
+  });
+  const auditEventsQuery = usePluginData("review_audit_events", {
+    companyId: host?.companyId ?? undefined,
+    entryId: selectedAuditEntryId ?? undefined,
     context: host,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -1067,6 +1103,7 @@ export default function ExternalReviewLauncherPanel() {
       model: normalized.model,
     };
     setCurrentOutcome(entry.outcome || null);
+    setSelectedAuditEntryId(entry.id);
     setHistory((prev) => ({
       scoped: [entry, ...prev.scoped.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT),
       company: [{ ...entry, scopeId: host?.entityId ?? null }, ...prev.company.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT),
@@ -1419,6 +1456,7 @@ export default function ExternalReviewLauncherPanel() {
     setContent(entry.content || "");
     setContextNotes(entry.contextNotes || buildContextNotes(host));
     setCurrentOutcome(entry.outcome || null);
+    setSelectedAuditEntryId(entry.id || null);
     setError(null);
     toast({ tone: "success", title: "Review restored", body: "A recent review attempt has been restored into the form." });
   }
@@ -1491,6 +1529,7 @@ export default function ExternalReviewLauncherPanel() {
     React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? currentOwnerLabel : null).filter((entry) => activeDashboardFilter === "my_stale" ? getAgingState(entry).stale : true), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
     React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped", currentOwnerLabel), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company", currentOwnerLabel), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? (currentOwnerLabel || "all") : "all" }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
+    React.createElement(AuditTimelinePanel, { events: Array.isArray(auditEventsQuery.data) ? auditEventsQuery.data : [], loading: auditEventsQuery.loading, error: auditEventsQuery.error, entryId: selectedAuditEntryId }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
