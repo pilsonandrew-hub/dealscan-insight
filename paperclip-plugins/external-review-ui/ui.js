@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useHostContext, usePluginAction, usePluginToast } from "@paperclipai/plugin-sdk/ui";
+import { useHostContext, usePluginAction, usePluginData, usePluginToast } from "@paperclipai/plugin-sdk/ui";
 
 const REVIEW_TYPES = [
   { value: "architecture_review", label: "Architecture review" },
@@ -355,7 +355,13 @@ function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, 
   );
 }
 
-function HistoryPanel({ entries, onRestore, onClear, onSetOutcome }) {
+function HistoryPanel({ entries, loading, error, onRestore, onClear, onSetOutcome }) {
+  if (loading) {
+    return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading review history...");
+  }
+  if (error) {
+    return React.createElement("div", { style: { fontSize: 13, color: "#fca5a5" } }, `History unavailable: ${error.message || error}`);
+  }
   if (!entries.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -399,15 +405,26 @@ function HistoryPanel({ entries, onRestore, onClear, onSetOutcome }) {
 export default function ExternalReviewLauncherPanel() {
   const host = useHostContext();
   const invoke = usePluginAction("invoke_external_review");
+  const saveReviewHistory = usePluginAction("save_review_history");
+  const setReviewOutcome = usePluginAction("set_review_outcome");
+  const clearReviewHistory = usePluginAction("clear_review_history");
   const toast = usePluginToast();
   const [reviewType, setReviewType] = useState("architecture_review");
   const [priority, setPriority] = useState("normal");
   const [taskSummary, setTaskSummary] = useState(() => summaryFromContext(host));
   const [content, setContent] = useState("Please review the current agent context and provide a decision, risks, and recommended next step.");
   const [contextNotes, setContextNotes] = useState(() => buildContextNotes(host));
+  const historyQuery = usePluginData("review_history", {
+    companyId: host?.companyId ?? undefined,
+    entityId: host?.entityId ?? undefined,
+    context: {
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+    },
+  });
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState(() => loadStoredHistory());
+  const [history, setHistory] = useState([]);
   const [currentOutcome, setCurrentOutcome] = useState(null);
   const [error, setError] = useState(null);
 
@@ -421,8 +438,13 @@ export default function ExternalReviewLauncherPanel() {
   }), [host]);
 
   useEffect(() => {
-    persistHistory(history);
-  }, [history]);
+    if (Array.isArray(historyQuery.data)) {
+      setHistory(historyQuery.data);
+      persistHistory(historyQuery.data);
+    } else if (!historyQuery.loading && !historyQuery.data) {
+      setHistory(loadStoredHistory());
+    }
+  }, [historyQuery.data, historyQuery.loading]);
 
   useEffect(() => {
     if (!result) return;
@@ -443,6 +465,19 @@ export default function ExternalReviewLauncherPanel() {
     };
     setCurrentOutcome(entry.outcome || null);
     setHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
+    saveReviewHistory({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: {
+        companyId: host?.companyId ?? undefined,
+        entityId: host?.entityId ?? undefined,
+      },
+      entry,
+    }).then((next) => {
+      if (Array.isArray(next)) setHistory(next);
+    }).catch(() => {
+      persistHistory([entry, ...history.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
+    });
   }, [result]);
 
   function handleReuseAsFollowUp(normalized) {
@@ -497,6 +532,20 @@ export default function ExternalReviewLauncherPanel() {
     const targetId = normalized?.correlationId || null;
     if (!targetId) return;
     setHistory((prev) => prev.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry));
+    setReviewOutcome({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: {
+        companyId: host?.companyId ?? undefined,
+        entityId: host?.entityId ?? undefined,
+      },
+      entryId: targetId,
+      outcome,
+    }).then((next) => {
+      if (Array.isArray(next)) setHistory(next);
+    }).catch(() => {
+      persistHistory(history.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry));
+    });
     toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
   }
 
@@ -505,12 +554,36 @@ export default function ExternalReviewLauncherPanel() {
     if (history.find((entry) => entry.id === entryId)?.id === (normalizeResultEnvelope(result || {}).correlationId || null)) {
       setCurrentOutcome(outcome);
     }
+    setReviewOutcome({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: {
+        companyId: host?.companyId ?? undefined,
+        entityId: host?.entityId ?? undefined,
+      },
+      entryId,
+      outcome,
+    }).then((next) => {
+      if (Array.isArray(next)) setHistory(next);
+    }).catch(() => {
+      persistHistory(history.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry));
+    });
     toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
   }
 
   function handleClearHistory() {
     setHistory([]);
-    toast({ tone: "success", title: "History cleared", body: "Saved review history was cleared from this browser context." });
+    clearReviewHistory({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: {
+        companyId: host?.companyId ?? undefined,
+        entityId: host?.entityId ?? undefined,
+      },
+    }).catch(() => {
+      persistHistory([]);
+    });
+    toast({ tone: "success", title: "History cleared", body: "Saved review history was cleared." });
   }
 
   function handleRestoreHistory(entry) {
@@ -573,7 +646,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
-    React.createElement(HistoryPanel, { entries: history, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome }),
+    React.createElement(HistoryPanel, { entries: history, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),

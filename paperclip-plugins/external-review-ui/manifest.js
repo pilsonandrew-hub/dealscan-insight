@@ -6,7 +6,7 @@ export default {
   description: "Minimal plugin that exposes a UI action for external specialist review.",
   author: "Ja'various",
   categories: ["automation", "ui"],
-  capabilities: ["agents.invoke", "ui.action.register"],
+  capabilities: ["agents.invoke", "ui.action.register", "plugin.state.read", "plugin.state.write"],
   entrypoints: {
     worker: "./worker.js",
     ui: "./ui.js"

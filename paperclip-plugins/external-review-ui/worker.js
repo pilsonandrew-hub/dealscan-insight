@@ -1,5 +1,8 @@
 import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 
+const REVIEW_HISTORY_KEY = "external-review-history-v1";
+const REVIEW_HISTORY_LIMIT = 20;
+
 function firstNonEmpty(...values) {
   for (const value of values) {
     const normalized = typeof value === "string" ? value.trim() : "";
@@ -29,12 +32,95 @@ function deriveContent(params) {
   return "Please review the current agent context and provide a decision, risks, and recommended next step.";
 }
 
+function normalizeHistoryEntry(input = {}) {
+  return {
+    id: firstNonEmpty(input.id, `${Date.now()}`),
+    createdAtLabel: firstNonEmpty(input.createdAtLabel, new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
+    createdAtMs: Number.isFinite(Number(input.createdAtMs)) ? Number(input.createdAtMs) : Date.now(),
+    taskSummary: firstNonEmpty(input.taskSummary, "External review request"),
+    reviewType: firstNonEmpty(input.reviewType, "architecture_review"),
+    priority: firstNonEmpty(input.priority, "normal"),
+    content: typeof input.content === "string" ? input.content : "",
+    contextNotes: typeof input.contextNotes === "string" ? input.contextNotes : "",
+    decision: firstNonEmpty(input.decision),
+    recommendedNextStep: firstNonEmpty(input.recommendedNextStep),
+    lane: firstNonEmpty(input.lane),
+    model: firstNonEmpty(input.model),
+    outcome: firstNonEmpty(input.outcome),
+  };
+}
+
+async function readHistory(ctx, companyId, scopeId) {
+  const stored = await ctx.state.get({
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: "external-review-ui",
+    stateKey: scopeId ? `${REVIEW_HISTORY_KEY}:${scopeId}` : REVIEW_HISTORY_KEY,
+  });
+  return Array.isArray(stored) ? stored.map((item) => normalizeHistoryEntry(item)) : [];
+}
+
+async function writeHistory(ctx, companyId, scopeId, entries) {
+  await ctx.state.set({
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: "external-review-ui",
+    stateKey: scopeId ? `${REVIEW_HISTORY_KEY}:${scopeId}` : REVIEW_HISTORY_KEY,
+  }, entries.slice(0, REVIEW_HISTORY_LIMIT));
+}
+
 const plugin = definePlugin({
   id: "local.external-review-ui-v2",
   displayName: "External Review UI",
-  version: "0.0.3",
-  capabilities: ["agents.invoke"],
+  version: "0.0.4",
+  capabilities: ["agents.invoke", "plugin.state.read", "plugin.state.write"],
   async setup(ctx) {
+    ctx.data.register("review_history", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      if (!companyId) {
+        throw new Error("companyId is required to load review history");
+      }
+      return await readHistory(ctx, companyId, scopeId);
+    });
+
+    ctx.actions.register("save_review_history", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      if (!companyId) {
+        throw new Error("companyId is required to save review history");
+      }
+      const entry = normalizeHistoryEntry(params?.entry || {});
+      const history = await readHistory(ctx, companyId, scopeId);
+      const next = [entry, ...history.filter((item) => item.id !== entry.id)].slice(0, REVIEW_HISTORY_LIMIT);
+      await writeHistory(ctx, companyId, scopeId, next);
+      return next;
+    });
+
+    ctx.actions.register("set_review_outcome", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      const entryId = firstNonEmpty(params?.entryId);
+      const outcome = firstNonEmpty(params?.outcome);
+      if (!companyId || !entryId) {
+        throw new Error("companyId and entryId are required to update review outcome");
+      }
+      const history = await readHistory(ctx, companyId, scopeId);
+      const next = history.map((item) => item.id === entryId ? { ...item, outcome } : item);
+      await writeHistory(ctx, companyId, scopeId, next);
+      return next;
+    });
+
+    ctx.actions.register("clear_review_history", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      if (!companyId) {
+        throw new Error("companyId is required to clear review history");
+      }
+      await writeHistory(ctx, companyId, scopeId, []);
+      return [];
+    });
+
     ctx.actions.register("invoke_external_review", async (params) => {
       const agentId = firstNonEmpty(
         params?.agentId,
