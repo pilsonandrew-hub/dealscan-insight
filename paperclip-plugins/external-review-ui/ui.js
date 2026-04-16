@@ -500,7 +500,7 @@ function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArch
   );
 }
 
-function SummaryCard({ label, value, tone = "neutral" }) {
+function SummaryCard({ label, value, tone = "neutral", active = false, onClick }) {
   const toneColors = {
     neutral: { border: "rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.65)", value: "#f8fafc" },
     success: { border: "rgba(34,197,94,0.22)", background: "rgba(21,128,61,0.16)", value: "#bbf7d0" },
@@ -509,15 +509,19 @@ function SummaryCard({ label, value, tone = "neutral" }) {
     danger: { border: "rgba(239,68,68,0.22)", background: "rgba(127,29,29,0.18)", value: "#fecaca" },
   };
   const palette = toneColors[tone] || toneColors.neutral;
-  return React.createElement("div", {
+  return React.createElement("button", {
+    type: "button",
+    onClick,
     style: {
       display: "grid",
       gap: 6,
       padding: 12,
       borderRadius: 10,
-      border: `1px solid ${palette.border}`,
-      background: palette.background,
+      border: `1px solid ${active ? '#f8fafc' : palette.border}`,
+      background: active ? 'rgba(248,250,252,0.08)' : palette.background,
       minWidth: 0,
+      textAlign: 'left',
+      cursor: 'pointer',
     }
   },
     React.createElement("div", { style: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "#94a3b8", fontWeight: 700 } }, label),
@@ -533,25 +537,54 @@ function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords })
   const blocked = companyEntries.filter((entry) => entry?.outcome === "blocked");
   const escalated = companyEntries.filter((entry) => entry?.outcome === "escalated");
   return [
-    { label: "Current context", value: scopedEntries.length, tone: "info" },
-    { label: "Company history", value: companyEntries.length, tone: "neutral" },
-    { label: "Pinned", value: pinnedHistory.length, tone: "warn" },
-    { label: "Needs human", value: needsHuman.length, tone: needsHuman.length ? "warn" : "neutral" },
-    { label: "Blocked", value: blocked.length, tone: blocked.length ? "danger" : "neutral" },
-    { label: "Escalated", value: escalated.length, tone: escalated.length ? "info" : "neutral" },
-    { label: "Exported", value: activeExported.length, tone: activeExported.length ? "success" : "neutral" },
-    { label: "Archived records", value: archivedExported.length, tone: archivedExported.length ? "neutral" : "neutral" },
+    { label: "Current context", value: scopedEntries.length, tone: "info", filterKey: "current" },
+    { label: "Company history", value: companyEntries.length, tone: "neutral", filterKey: "company" },
+    { label: "Pinned", value: pinnedHistory.length, tone: "warn", filterKey: "pinned" },
+    { label: "Needs human", value: needsHuman.length, tone: needsHuman.length ? "warn" : "neutral", filterKey: "needs_human" },
+    { label: "Blocked", value: blocked.length, tone: blocked.length ? "danger" : "neutral", filterKey: "blocked" },
+    { label: "Escalated", value: escalated.length, tone: escalated.length ? "info" : "neutral", filterKey: "escalated" },
+    { label: "Exported", value: activeExported.length, tone: activeExported.length ? "success" : "neutral", filterKey: "exported_active" },
+    { label: "Archived records", value: archivedExported.length, tone: "neutral", filterKey: "exported_archived" },
   ];
 }
 
-function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords }) {
+function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, activeDashboardFilter, onSelectFilter }) {
   const stats = buildDashboardStats({ scopedEntries, companyEntries, exportedRecords });
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: mutedHeadingStyle() }, "Operator dashboard"),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 } },
-      ...stats.map((item) => React.createElement(SummaryCard, { key: item.label, label: item.label, value: item.value, tone: item.tone }))
+      ...stats.map((item) => React.createElement(SummaryCard, { key: item.label, label: item.label, value: item.value, tone: item.tone, active: activeDashboardFilter === item.filterKey, onClick: () => onSelectFilter(activeDashboardFilter === item.filterKey ? null : item.filterKey) }))
     )
   );
+}
+
+function applyDashboardHistoryFilter(entries, activeDashboardFilter, scope) {
+  switch (activeDashboardFilter) {
+    case "current":
+      return scope === "scoped" ? entries : [];
+    case "company":
+      return scope === "company" ? entries : [];
+    case "pinned":
+      return entries.filter((entry) => entry?.pinned);
+    case "needs_human":
+      return entries.filter((entry) => entry?.outcome === "needs_human");
+    case "blocked":
+      return entries.filter((entry) => entry?.outcome === "blocked");
+    case "escalated":
+      return entries.filter((entry) => entry?.outcome === "escalated");
+    case "exported_active":
+      return entries.filter((entry) => entry?.exportedEntityId && !entry?.archived);
+    case "exported_archived":
+      return entries.filter((entry) => entry?.exportedEntityId && entry?.archived);
+    default:
+      return entries;
+  }
+}
+
+function syncArchivedFilter(activeDashboardFilter, currentArchivedFilter) {
+  if (activeDashboardFilter === "exported_archived") return "archived";
+  if (activeDashboardFilter === "exported_active") return "active";
+  return currentArchivedFilter;
 }
 
 function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onExport }) {
@@ -659,6 +692,7 @@ export default function ExternalReviewLauncherPanel() {
     },
   });
   const [archivedFilter, setArchivedFilter] = useState("active");
+  const [activeDashboardFilter, setActiveDashboardFilter] = useState(null);
   const exportedRecordsQuery = usePluginData("exported_review_records", {
     companyId: host?.companyId ?? undefined,
     archivedFilter,
@@ -928,6 +962,11 @@ export default function ExternalReviewLauncherPanel() {
     toast({ tone: "success", title: "Exported review restored", body: "The exported review has been loaded back into the form." });
   }
 
+  function handleSelectDashboardFilter(filterKey) {
+    setActiveDashboardFilter(filterKey);
+    setArchivedFilter((current) => syncArchivedFilter(filterKey, current));
+  }
+
   function handleClearHistory() {
     setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
@@ -1014,8 +1053,10 @@ export default function ExternalReviewLauncherPanel() {
       scopedEntries: history.scoped,
       companyEntries: history.company,
       exportedRecords: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [],
+      activeDashboardFilter,
+      onSelectFilter: handleSelectDashboardFilter,
     }),
-    React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
+    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
