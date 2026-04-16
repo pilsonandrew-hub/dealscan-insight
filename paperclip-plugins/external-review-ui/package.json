@@ -1,0 +1,12 @@
+{
+  "name": "paperclip-external-review-ui-v2",
+  "version": "0.0.4",
+  "private": true,
+  "type": "module",
+  "paperclipPlugin": {
+    "manifest": "./manifest.js"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "file:/Users/andrewpilson/.npm/_npx/43414d9b790239bb/node_modules/@paperclipai/plugin-sdk"
+  }
+}

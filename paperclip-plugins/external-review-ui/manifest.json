@@ -1,0 +1,24 @@
+{
+  "id": "local.external-review-ui",
+  "displayName": "External Review UI",
+  "version": "0.0.1",
+  "description": "Minimal plugin that exposes a UI action for external specialist review.",
+  "capabilities": ["agents.invoke", "ui.action.register"],
+  "entrypoints": {
+    "worker": "./worker.js"
+  },
+  "ui": {
+    "launchers": [
+      {
+        "id": "invoke-external-review",
+        "displayName": "External Review",
+        "placementZone": "toolbarButton",
+        "entityTypes": ["agent"],
+        "action": {
+          "type": "performAction",
+          "key": "invoke_external_review"
+        }
+      }
+    ]
+  }
+}
