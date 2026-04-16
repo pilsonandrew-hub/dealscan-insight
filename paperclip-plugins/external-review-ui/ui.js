@@ -355,11 +355,12 @@ function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, 
   );
 }
 
-function filterHistoryEntries(entries, searchText, outcomeFilter) {
+function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sortMode) {
   const query = String(searchText || "").trim().toLowerCase();
-  return entries.filter((entry) => {
+  const filtered = entries.filter((entry) => {
     const matchesOutcome = outcomeFilter === "all" ? true : String(entry.outcome || "") === outcomeFilter;
-    if (!matchesOutcome) return false;
+    const matchesPin = pinFilter === "all" ? true : pinFilter === "pinned" ? Boolean(entry.pinned) : !entry.pinned;
+    if (!matchesOutcome || !matchesPin) return false;
     if (!query) return true;
     const haystack = [
       entry.taskSummary,
@@ -374,9 +375,19 @@ function filterHistoryEntries(entries, searchText, outcomeFilter) {
     ].filter(Boolean).join(" \n ").toLowerCase();
     return haystack.includes(query);
   });
+
+  return [...filtered].sort((a, b) => {
+    const aPinned = a.pinned ? 1 : 0;
+    const bPinned = b.pinned ? 1 : 0;
+    if (aPinned !== bPinned) return bPinned - aPinned;
+    const aMs = Number(a.createdAtMs || 0);
+    const bMs = Number(b.createdAtMs || 0);
+    if (sortMode === "oldest") return aMs - bMs;
+    return bMs - aMs;
+  });
 }
 
-function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, emptyText }) {
+function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
       React.createElement("div", { style: mutedHeadingStyle() }, title),
@@ -395,8 +406,10 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, emptyT
               entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null
             ),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+              entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
               entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
               entry.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(entry.outcome)) }, formatOutcome(entry.outcome)) : null,
+              React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "primary" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
               React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
             )
           ),
@@ -416,12 +429,18 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, emptyT
   );
 }
 
-function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome }) {
+function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
+  const [pinFilter, setPinFilter] = useState("all");
+  const [sortMode, setSortMode] = useState("newest");
+  const filteredScopedEntries = useMemo(
+    () => filterHistoryEntries(scopedEntries, "", "all", "all", sortMode),
+    [scopedEntries, sortMode]
+  );
   const filteredCompanyEntries = useMemo(
-    () => filterHistoryEntries(companyEntries, searchText, outcomeFilter),
-    [companyEntries, searchText, outcomeFilter]
+    () => filterHistoryEntries(companyEntries, searchText, outcomeFilter, pinFilter, sortMode),
+    [companyEntries, searchText, outcomeFilter, pinFilter, sortMode]
   );
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading review history...");
@@ -435,7 +454,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       React.createElement("div", { style: mutedHeadingStyle() }, "Review history"),
       React.createElement("button", { type: "button", onClick: onClear, style: buttonStyle("secondary") }, "Clear current scope")
     ),
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 10 } },
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px 160px 160px", gap: 10 } },
       React.createElement("input", {
         value: searchText,
         onChange: (e) => setSearchText(e.target.value),
@@ -449,14 +468,32 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       },
         React.createElement("option", { value: "all" }, "All outcomes"),
         ...OUTCOME_OPTIONS.map((option) => React.createElement("option", { key: option.value, value: option.value }, option.label))
+      ),
+      React.createElement("select", {
+        value: pinFilter,
+        onChange: (e) => setPinFilter(e.target.value),
+        style: inputStyle(false),
+      },
+        React.createElement("option", { value: "all" }, "All pins"),
+        React.createElement("option", { value: "pinned" }, "Pinned only"),
+        React.createElement("option", { value: "unpinned" }, "Unpinned only")
+      ),
+      React.createElement("select", {
+        value: sortMode,
+        onChange: (e) => setSortMode(e.target.value),
+        style: inputStyle(false),
+      },
+        React.createElement("option", { value: "newest" }, "Newest first"),
+        React.createElement("option", { value: "oldest" }, "Oldest first")
       )
     ),
     React.createElement(HistoryList, {
       title: "Current context",
-      subtitle: `${scopedEntries.length} reviews tied to this entity`,
-      entries: scopedEntries,
+      subtitle: `${filteredScopedEntries.length} reviews tied to this entity`,
+      entries: filteredScopedEntries,
       onRestore,
       onSetOutcome,
+      onSetPinned,
       emptyText: "No reviews saved for this entity yet."
     }),
     React.createElement(HistoryList, {
@@ -465,6 +502,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       entries: filteredCompanyEntries,
       onRestore,
       onSetOutcome,
+      onSetPinned,
       emptyText: "No shared company reviews yet."
     })
   );
@@ -475,6 +513,7 @@ export default function ExternalReviewLauncherPanel() {
   const invoke = usePluginAction("invoke_external_review");
   const saveReviewHistory = usePluginAction("save_review_history");
   const setReviewOutcome = usePluginAction("set_review_outcome");
+  const setReviewPinned = usePluginAction("set_review_pinned");
   const clearReviewHistory = usePluginAction("clear_review_history");
   const toast = usePluginToast();
   const [reviewType, setReviewType] = useState("architecture_review");
@@ -665,6 +704,33 @@ export default function ExternalReviewLauncherPanel() {
     toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
   }
 
+  function handleSetPinned(entryId, pinned) {
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((entry) => entry.id === entryId ? { ...entry, pinned } : entry),
+      company: prev.company.map((entry) => entry.id === entryId ? { ...entry, pinned } : entry),
+    }));
+    setReviewPinned({
+      companyId: host?.companyId ?? undefined,
+      entityId: host?.entityId ?? undefined,
+      context: {
+        companyId: host?.companyId ?? undefined,
+        entityId: host?.entityId ?? undefined,
+      },
+      entryId,
+      pinned,
+    }).then((next) => {
+      if (next && typeof next === "object") {
+        setHistory({
+          scoped: Array.isArray(next.scoped) ? next.scoped : [],
+          company: Array.isArray(next.company) ? next.company : [],
+        });
+      }
+    }).catch(() => {
+      persistHistory(history.scoped.map((entry) => entry.id === entryId ? { ...entry, pinned } : entry));
+    });
+    toast({ tone: "success", title: pinned ? "Review pinned" : "Review unpinned", body: pinned ? "Pinned review will stay surfaced in history." : "Review returned to normal history ordering." });
+  }
+
   function handleClearHistory() {
     setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
@@ -747,7 +813,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
-    React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome }),
+    React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),

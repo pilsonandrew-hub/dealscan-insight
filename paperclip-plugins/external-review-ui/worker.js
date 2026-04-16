@@ -48,6 +48,7 @@ function normalizeHistoryEntry(input = {}) {
     lane: firstNonEmpty(input.lane),
     model: firstNonEmpty(input.model),
     outcome: firstNonEmpty(input.outcome),
+    pinned: Boolean(input.pinned),
   };
 }
 
@@ -171,6 +172,26 @@ const plugin = definePlugin({
         throw new Error("companyId and entryId are required to update review outcome");
       }
       return await syncOutcomeWrite(ctx, companyId, scopeId, entryId, outcome);
+    });
+
+    ctx.actions.register("set_review_pinned", async (params) => {
+      const companyId = firstNonEmpty(params?.companyId, params?.context?.companyId);
+      const scopeId = firstNonEmpty(params?.entityId, params?.context?.entityId);
+      const entryId = firstNonEmpty(params?.entryId);
+      const pinned = Boolean(params?.pinned);
+      if (!companyId || !entryId) {
+        throw new Error("companyId and entryId are required to update review pin state");
+      }
+
+      const scopedHistory = await readHistory(ctx, companyId, scopeId);
+      const nextScoped = scopedHistory.map((item) => item.id === entryId ? { ...item, pinned } : item);
+      await writeHistory(ctx, companyId, scopeId, nextScoped);
+
+      const companyHistory = await readCompanyHistory(ctx, companyId);
+      const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, pinned } : item);
+      await writeCompanyHistory(ctx, companyId, nextCompany);
+
+      return { scoped: nextScoped, company: nextCompany };
     });
 
     ctx.actions.register("clear_review_history", async (params) => {
