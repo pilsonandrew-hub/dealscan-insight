@@ -4,13 +4,32 @@ Database configuration and session management
 import importlib
 import logging
 
-from sqlalchemy import create_engine, event
 try:
-    from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.x
-except ImportError:
-    from sqlalchemy.ext.declarative import declarative_base  # SQLAlchemy 1.x fallback
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import StaticPool
+    from sqlalchemy import create_engine, event
+    try:
+        from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.x
+    except ImportError:
+        from sqlalchemy.ext.declarative import declarative_base  # SQLAlchemy 1.x fallback
+    from sqlalchemy.orm import sessionmaker, Session
+    from sqlalchemy.pool import StaticPool
+except ModuleNotFoundError:
+    create_engine = None
+    event = None
+    StaticPool = None
+    Session = object
+
+    def declarative_base():
+        class _FallbackMetadata:
+            def create_all(self, bind=None):
+                return None
+
+        class _FallbackBase:
+            metadata = _FallbackMetadata()
+
+        return _FallbackBase
+
+    def sessionmaker(*_args, **_kwargs):
+        return None
 
 from config.settings import settings
 
