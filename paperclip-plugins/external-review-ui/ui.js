@@ -68,6 +68,48 @@ function buttonStyle(kind = "secondary") {
   };
 }
 
+function sectionCardStyle() {
+  return {
+    display: "grid",
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    background: "rgba(2,6,23,0.8)",
+    border: "1px solid rgba(59,130,246,0.18)",
+  };
+}
+
+function badgeStyle(tone = "neutral") {
+  const tones = {
+    success: { background: "rgba(34,197,94,0.18)", color: "#86efac", border: "1px solid rgba(34,197,94,0.28)" },
+    warn: { background: "rgba(245,158,11,0.18)", color: "#fcd34d", border: "1px solid rgba(245,158,11,0.28)" },
+    danger: { background: "rgba(239,68,68,0.18)", color: "#fca5a5", border: "1px solid rgba(239,68,68,0.28)" },
+    info: { background: "rgba(59,130,246,0.18)", color: "#93c5fd", border: "1px solid rgba(59,130,246,0.28)" },
+    neutral: { background: "rgba(148,163,184,0.16)", color: "#cbd5e1", border: "1px solid rgba(148,163,184,0.24)" },
+  };
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    padding: "4px 10px",
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: "0.02em",
+    ...tones[tone],
+  };
+}
+
+function mutedHeadingStyle() {
+  return {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#cbd5e1",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  };
+}
+
 function summaryFromContext(host) {
   if (host?.entityType === "agent" && host?.entityId) {
     return `External review for agent ${host.entityId}`;
@@ -88,6 +130,117 @@ function buildContextNotes(host) {
     host?.userId ? `userId: ${host.userId}` : null,
   ].filter(Boolean);
   return lines.join("\n");
+}
+
+function formatDecision(decision) {
+  if (!decision) return "No decision";
+  return String(decision)
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function decisionTone(decision) {
+  const normalized = String(decision || "").toUpperCase();
+  if (normalized.includes("APPROVE") && normalized.includes("CONDITION")) return "warn";
+  if (normalized.includes("APPROVE")) return "success";
+  if (normalized.includes("REJECT") || normalized.includes("BLOCK")) return "danger";
+  return "info";
+}
+
+function percent(confidence) {
+  if (typeof confidence !== "number" || Number.isNaN(confidence)) return "N/A";
+  return `${Math.round(confidence * 100)}%`;
+}
+
+function normalizeResultEnvelope(response) {
+  const payload = response?.data ?? response ?? {};
+  const result = payload?.result ?? {};
+  const routing = payload?.routing ?? {};
+  const routingMeta = result?.routing_metadata ?? {};
+  const usage = payload?.usage ?? {};
+  return {
+    decision: result?.decision ?? null,
+    confidence: result?.confidence,
+    topRisks: Array.isArray(result?.top_risks) ? result.top_risks : [],
+    recommendedNextStep: result?.recommended_next_step ?? null,
+    escalationSuggested: Boolean(result?.escalation_suggested),
+    lane: payload?.lane ?? routing?.selected_lane ?? routingMeta?.selected_lane ?? null,
+    model: payload?.model ?? routingMeta?.selected_model ?? null,
+    provider: payload?.provider ?? routingMeta?.provider ?? null,
+    summary: payload?.summary ?? null,
+    repaired: payload?.repaired ?? routingMeta?.repaired ?? null,
+    correlationId: routing?.correlation_id ?? routingMeta?.correlation_id ?? null,
+    reviewType: routingMeta?.review_type ?? null,
+    sourceContext: routingMeta?.source_context ?? null,
+    subject: routingMeta?.subject ?? null,
+    priority: routingMeta?.priority ?? null,
+    promptTokens: usage?.prompt_tokens ?? null,
+    completionTokens: usage?.completion_tokens ?? null,
+    totalTokens: usage?.total_tokens ?? null,
+    cost: usage?.cost ?? null,
+    raw: response,
+  };
+}
+
+function ResultMetric({ label, value }) {
+  return React.createElement("div", { style: { display: "grid", gap: 4 } },
+    React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, label),
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#f8fafc" } }, value || "N/A")
+  );
+}
+
+function ResultPanel({ result }) {
+  const normalized = normalizeResultEnvelope(result);
+  return React.createElement("div", { style: sectionCardStyle() },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" } },
+      React.createElement("div", { style: { display: "grid", gap: 6 } },
+        React.createElement("div", { style: mutedHeadingStyle() }, "Latest result"),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 700, color: "#f8fafc" } }, formatDecision(normalized.decision))
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        React.createElement("span", { style: badgeStyle(decisionTone(normalized.decision)) }, formatDecision(normalized.decision)),
+        normalized.escalationSuggested ? React.createElement("span", { style: badgeStyle("warn") }, "Escalation suggested") : null,
+        normalized.repaired === true ? React.createElement("span", { style: badgeStyle("info") }, "JSON repaired") : null
+      )
+    ),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 } },
+      React.createElement(ResultMetric, { label: "Confidence", value: percent(normalized.confidence) }),
+      React.createElement(ResultMetric, { label: "Lane", value: normalized.lane }),
+      React.createElement(ResultMetric, { label: "Model", value: normalized.model })
+    ),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 } },
+      React.createElement(ResultMetric, { label: "Provider", value: normalized.provider }),
+      React.createElement(ResultMetric, { label: "Priority", value: normalized.priority }),
+      React.createElement(ResultMetric, { label: "Review type", value: normalized.reviewType })
+    ),
+    normalized.recommendedNextStep ? React.createElement("div", { style: { display: "grid", gap: 6 } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Recommended next step"),
+      React.createElement("div", { style: { fontSize: 14, lineHeight: 1.5, color: "#e2e8f0" } }, normalized.recommendedNextStep)
+    ) : null,
+    normalized.topRisks.length > 0 ? React.createElement("div", { style: { display: "grid", gap: 8 } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Top risks"),
+      React.createElement("ul", { style: { margin: 0, paddingLeft: 18, display: "grid", gap: 6, color: "#cbd5e1" } },
+        ...normalized.topRisks.map((risk, index) => React.createElement("li", { key: `${index}-${risk}` }, risk))
+      )
+    ) : null,
+    React.createElement("details", { style: { display: "grid", gap: 8 } },
+      React.createElement("summary", { style: { cursor: "pointer", color: "#93c5fd", fontWeight: 600 } }, "Show routing and raw details"),
+      React.createElement("div", { style: { display: "grid", gap: 10 } },
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 } },
+          React.createElement(ResultMetric, { label: "Correlation ID", value: normalized.correlationId }),
+          React.createElement(ResultMetric, { label: "Subject", value: normalized.subject })
+        ),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 } },
+          React.createElement(ResultMetric, { label: "Prompt tokens", value: normalized.promptTokens != null ? String(normalized.promptTokens) : "N/A" }),
+          React.createElement(ResultMetric, { label: "Completion tokens", value: normalized.completionTokens != null ? String(normalized.completionTokens) : "N/A" }),
+          React.createElement(ResultMetric, { label: "Total tokens", value: normalized.totalTokens != null ? String(normalized.totalTokens) : "N/A" }),
+          React.createElement(ResultMetric, { label: "Cost", value: normalized.cost != null ? `$${Number(normalized.cost).toFixed(6)}` : "N/A" })
+        ),
+        React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#bfdbfe" } }, JSON.stringify(normalized.raw, null, 2))
+      )
+    )
+  );
 }
 
 export default function ExternalReviewLauncherPanel() {
@@ -158,7 +311,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Submit a structured review request with explicit scope before invoking the specialist lane.")
     ),
     React.createElement("div", { style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
-      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#cbd5e1", textTransform: "uppercase", letterSpacing: "0.04em" } }, "Detected context"),
+      React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
@@ -191,9 +344,6 @@ export default function ExternalReviewLauncherPanel() {
     React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 10 } },
       React.createElement("button", { type: "submit", disabled: submitting, style: buttonStyle("primary") }, submitting ? "Submitting..." : "Submit external review")
     ),
-    result ? React.createElement("div", { style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "rgba(2,6,23,0.8)", border: "1px solid rgba(59,130,246,0.25)" } },
-      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#cbd5e1", textTransform: "uppercase", letterSpacing: "0.04em" } }, "Latest result"),
-      React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#bfdbfe" } }, JSON.stringify(result, null, 2))
-    ) : null
+    result ? React.createElement(ResultPanel, { result }) : null
   );
 }
