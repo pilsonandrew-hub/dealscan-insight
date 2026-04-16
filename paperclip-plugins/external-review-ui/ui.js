@@ -411,7 +411,7 @@ function formatAuditCopy(entry) {
   return parts.length ? parts.join(' • ') : null;
 }
 
-function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onSetOwner, onExport, emptyText }) {
+function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onSetOwner, onExport, onFocusAudit, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
       React.createElement("div", { style: mutedHeadingStyle() }, title),
@@ -429,7 +429,7 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
               React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`),
               entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null,
               React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `owner: ${entry.owner || 'unassigned'}`),
-              formatAuditCopy(entry) ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null
+              formatAuditCopy(entry) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(entry), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null
             ),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
               entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
@@ -461,9 +461,15 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
   );
 }
 
-function AuditTimelinePanel({ events, loading, error, entryId }) {
+function AuditTimelinePanel({ events, loading, error, entryId, scopedEventType = null, scopedActor = null, onClearScope = null }) {
   const [eventTypeFilter, setEventTypeFilter] = useState('all');
   const [actorFilter, setActorFilter] = useState('all');
+  useEffect(() => {
+    if (scopedEventType) setEventTypeFilter(scopedEventType);
+  }, [scopedEventType]);
+  useEffect(() => {
+    if (scopedActor) setActorFilter(scopedActor);
+  }, [scopedActor]);
   const eventTypes = useMemo(() => Array.from(new Set((events || []).map((event) => event?.eventType).filter(Boolean))).sort(), [events]);
   const actors = useMemo(() => Array.from(new Set((events || []).map((event) => event?.actor).filter(Boolean))).sort(), [events]);
   const filteredEvents = useMemo(() => (events || []).filter((event) => {
@@ -485,7 +491,10 @@ function AuditTimelinePanel({ events, loading, error, entryId }) {
   }
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" } },
-      React.createElement("div", { style: mutedHeadingStyle() }, "Audit timeline"),
+      React.createElement("div", { style: { display: "grid", gap: 4 } },
+        React.createElement("div", { style: mutedHeadingStyle() }, "Audit timeline"),
+        scopedEventType || scopedActor ? React.createElement("div", { style: { fontSize: 11, color: "#94a3b8" } }, `Scoped${scopedEventType ? ` • ${scopedEventType}` : ''}${scopedActor ? ` • ${scopedActor}` : ''}`) : null
+      ),
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
         React.createElement("select", { value: eventTypeFilter, onChange: (e) => setEventTypeFilter(e.target.value), style: inputStyle(false) },
           React.createElement("option", { value: "all" }, "All event types"),
@@ -494,7 +503,8 @@ function AuditTimelinePanel({ events, loading, error, entryId }) {
         React.createElement("select", { value: actorFilter, onChange: (e) => setActorFilter(e.target.value), style: inputStyle(false) },
           React.createElement("option", { value: "all" }, "All actors"),
           ...actors.map((value) => React.createElement("option", { key: value, value }, value))
-        )
+        ),
+        scopedEventType || scopedActor ? React.createElement("button", { type: "button", onClick: () => onClearScope && onClearScope(), style: buttonStyle("secondary") }, "Clear scope") : null
       )
     ),
     !filteredEvents.length
@@ -514,7 +524,7 @@ function AuditTimelinePanel({ events, loading, error, entryId }) {
   );
 }
 
-function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArchivedFilter, onToggleArchived, onRestoreRecord }) {
+function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArchivedFilter, onToggleArchived, onRestoreRecord, onFocusAudit }) {
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading exported records...");
   }
@@ -566,7 +576,7 @@ function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArch
         )
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${record.entityType} • ${record.updatedAt || record.createdAt || 'unknown time'}`),
-      formatAuditCopy(record.data) ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, formatAuditCopy(record.data)) : null,
+      formatAuditCopy(record.data) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(record.data), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(record.data)) : null,
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
         record.data?.reviewType ? React.createElement("span", { style: badgeStyle("info") }, record.data.reviewType) : null,
         record.data?.priority ? React.createElement("span", { style: badgeStyle("warn") }, record.data.priority) : null,
@@ -908,7 +918,7 @@ function buildPriorityQueue(companyEntries, ownerFilter = null) {
     .slice(0, 6);
 }
 
-function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onSetOwner }) {
+function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onSetOwner, onFocusAudit }) {
   if (!entries.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 12, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.78)", border: "1px solid rgba(248,113,113,0.22)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -930,7 +940,7 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onS
         )
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep || entry.contextNotes || entry.content || "No summary available."),
-      formatAuditCopy(entry) ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null,
+      formatAuditCopy(entry) ? React.createElement("button", { type: "button", onClick: () => onFocusAudit && onFocusAudit(entry), style: { background: "transparent", border: "none", padding: 0, margin: 0, textAlign: "left", cursor: "pointer", fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null,
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore"),
         React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "warn" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
@@ -943,7 +953,7 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onS
   );
 }
 
-function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onSetOwner, onExport, initialOwnerFilter = "all" }) {
+function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onSetOwner, onExport, onFocusAudit, initialOwnerFilter = "all" }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [pinFilter, setPinFilter] = useState("all");
@@ -1023,6 +1033,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       onSetPinned,
       onSetOwner,
       onExport,
+      onFocusAudit,
       emptyText: "No reviews saved for this entity yet."
     }),
     React.createElement(HistoryList, {
@@ -1034,6 +1045,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
       onSetPinned,
       onSetOwner,
       onExport,
+      onFocusAudit,
       emptyText: "No shared company reviews yet."
     })
   );
@@ -1066,6 +1078,8 @@ export default function ExternalReviewLauncherPanel() {
   const [archivedFilter, setArchivedFilter] = useState("active");
   const [activeDashboardFilter, setActiveDashboardFilter] = useState(null);
   const [selectedAuditEntryId, setSelectedAuditEntryId] = useState(null);
+  const [scopedAuditEventType, setScopedAuditEventType] = useState(null);
+  const [scopedAuditActor, setScopedAuditActor] = useState(null);
   const exportedRecordsQuery = usePluginData("exported_review_records", {
     companyId: host?.companyId ?? undefined,
     archivedFilter,
@@ -1388,6 +1402,17 @@ export default function ExternalReviewLauncherPanel() {
     setArchivedFilter((current) => syncArchivedFilter(filterKey, current));
   }
 
+  function handleFocusAudit(item) {
+    setSelectedAuditEntryId(item?.id || item?.externalId || null);
+    setScopedAuditEventType(item?.lastAuditEventType || null);
+    setScopedAuditActor(item?.lastAuditEventActor || item?.lastReassignedBy || null);
+  }
+
+  function handleClearAuditScope() {
+    setScopedAuditEventType(null);
+    setScopedAuditActor(null);
+  }
+
   function applyOwnerUpdate(entryId, owner, successBody = `Assigned to ${owner}.`, options = {}) {
     setHistory((prev) => ({
       scoped: prev.scoped.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
@@ -1510,6 +1535,8 @@ export default function ExternalReviewLauncherPanel() {
     setContextNotes(entry.contextNotes || buildContextNotes(host));
     setCurrentOutcome(entry.outcome || null);
     setSelectedAuditEntryId(entry.id || null);
+    setScopedAuditEventType(null);
+    setScopedAuditActor(null);
     setError(null);
     toast({ tone: "success", title: "Review restored", body: "A recent review attempt has been restored into the form." });
   }
@@ -1579,10 +1606,10 @@ export default function ExternalReviewLauncherPanel() {
       onSelectFilter: handleSelectDashboardFilter,
       onReassignSuggestion: handleReassignSuggestion,
     }),
-    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? currentOwnerLabel : null).filter((entry) => activeDashboardFilter === "my_stale" ? getAgingState(entry).stale : true), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
-    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped", currentOwnerLabel), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company", currentOwnerLabel), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? (currentOwnerLabel || "all") : "all" }),
-    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
-    React.createElement(AuditTimelinePanel, { events: Array.isArray(auditEventsQuery.data) ? auditEventsQuery.data : [], loading: auditEventsQuery.loading, error: auditEventsQuery.error, entryId: selectedAuditEntryId }),
+    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? currentOwnerLabel : null).filter((entry) => activeDashboardFilter === "my_stale" ? getAgingState(entry).stale : true), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onFocusAudit: handleFocusAudit }),
+    React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped", currentOwnerLabel), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company", currentOwnerLabel), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, onFocusAudit: handleFocusAudit, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? (currentOwnerLabel || "all") : "all" }),
+    React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord, onFocusAudit: handleFocusAudit }),
+    React.createElement(AuditTimelinePanel, { events: Array.isArray(auditEventsQuery.data) ? auditEventsQuery.data : [], loading: auditEventsQuery.loading, error: auditEventsQuery.error, entryId: selectedAuditEntryId, scopedEventType: scopedAuditEventType, scopedActor: scopedAuditActor, onClearScope: handleClearAuditScope }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
