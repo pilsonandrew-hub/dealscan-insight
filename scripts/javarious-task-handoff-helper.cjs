@@ -10,7 +10,7 @@ function normalizeString(value) {
 function shouldUseExternalReviewTask(userRequest) {
   const text = normalizeString(userRequest).toLowerCase();
   if (!text) return false;
-  const triggers = [
+  const directTriggers = [
     'review this',
     'critique this',
     'audit this',
@@ -18,8 +18,16 @@ function shouldUseExternalReviewTask(userRequest) {
     'challenge this architecture',
     'second opinion',
     'review the architecture',
+    'please review',
+    'review the typed',
+    'identify the top risks',
+    'external review',
   ];
-  return triggers.some((phrase) => text.includes(phrase));
+  if (directTriggers.some((phrase) => text.includes(phrase))) return true;
+
+  const hasReviewIntent = /(review|audit|critique|challenge|assess|evaluate|inspect)/.test(text);
+  const hasTarget = /(architecture|design|contract|transport|integration|approach|plan|implementation|system)/.test(text);
+  return hasReviewIntent && hasTarget;
 }
 
 function buildExternalReviewTaskPacket(userRequest, supportingContext = {}) {
