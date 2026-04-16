@@ -190,8 +190,41 @@ function ResultMetric({ label, value }) {
   );
 }
 
-function ResultPanel({ result }) {
+function buildSummaryText(normalized) {
+  const parts = [
+    `Decision: ${formatDecision(normalized.decision)}`,
+    `Confidence: ${percent(normalized.confidence)}`,
+    normalized.recommendedNextStep ? `Recommended next step: ${normalized.recommendedNextStep}` : null,
+    normalized.topRisks.length ? `Top risks: ${normalized.topRisks.join('; ')}` : null,
+    normalized.lane ? `Lane: ${normalized.lane}` : null,
+    normalized.model ? `Model: ${normalized.model}` : null,
+  ].filter(Boolean);
+  return parts.join("\n");
+}
+
+async function copyToClipboard(text) {
+  if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  return false;
+}
+
+function ResultPanel({ result, onReuseAsFollowUp, toast }) {
   const normalized = normalizeResultEnvelope(result);
+  const summaryText = buildSummaryText(normalized);
+  async function handleCopySummary() {
+    try {
+      const ok = await copyToClipboard(summaryText);
+      if (ok) {
+        toast({ tone: "success", title: "Review summary copied", body: "Structured result copied to clipboard." });
+      } else {
+        toast({ tone: "info", title: "Clipboard unavailable", body: "Copy is not available in this host environment." });
+      }
+    } catch (err) {
+      toast({ tone: "error", title: "Copy failed", body: err?.message || "Could not copy review summary." });
+    }
+  }
   return React.createElement("div", { style: sectionCardStyle() },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" } },
       React.createElement("div", { style: { display: "grid", gap: 6 } },
@@ -224,6 +257,10 @@ function ResultPanel({ result }) {
         ...normalized.topRisks.map((risk, index) => React.createElement("li", { key: `${index}-${risk}` }, risk))
       )
     ) : null,
+    React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+      React.createElement("button", { type: "button", onClick: handleCopySummary, style: buttonStyle("secondary") }, "Copy review summary"),
+      React.createElement("button", { type: "button", onClick: () => onReuseAsFollowUp(normalized), style: buttonStyle("secondary") }, "Use as follow-up draft")
+    ),
     React.createElement("details", { style: { display: "grid", gap: 8 } },
       React.createElement("summary", { style: { cursor: "pointer", color: "#93c5fd", fontWeight: 600 } }, "Show routing and raw details"),
       React.createElement("div", { style: { display: "grid", gap: 10 } },
@@ -264,6 +301,18 @@ export default function ExternalReviewLauncherPanel() {
     parentEntityId: host?.parentEntityId ?? null,
     userId: host?.userId ?? null,
   }), [host]);
+
+  function handleReuseAsFollowUp(normalized) {
+    const followUpLines = [
+      normalized.recommendedNextStep ? `Execute this next step: ${normalized.recommendedNextStep}` : "Follow up on the external review outcome.",
+      normalized.topRisks.length ? `Address these risks: ${normalized.topRisks.join('; ')}` : null,
+      normalized.decision ? `Current decision context: ${formatDecision(normalized.decision)}` : null,
+    ].filter(Boolean);
+    setTaskSummary(`Follow-up for ${taskSummary}`);
+    setContent(followUpLines.join("\n\n"));
+    setError(null);
+    toast({ tone: "success", title: "Follow-up draft ready", body: "The review output has been converted into a follow-up draft." });
+  }
 
   async function handleSubmit(event) {
     event?.preventDefault?.();
@@ -344,6 +393,6 @@ export default function ExternalReviewLauncherPanel() {
     React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 10 } },
       React.createElement("button", { type: "submit", disabled: submitting, style: buttonStyle("primary") }, submitting ? "Submitting..." : "Submit external review")
     ),
-    result ? React.createElement(ResultPanel, { result }) : null
+    result ? React.createElement(ResultPanel, { result, onReuseAsFollowUp: handleReuseAsFollowUp, toast }) : null
   );
 }
