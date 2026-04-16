@@ -355,50 +355,75 @@ function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, 
   );
 }
 
-function HistoryPanel({ entries, loading, error, onRestore, onClear, onSetOutcome }) {
+function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, emptyText }) {
+  return React.createElement("div", { style: { display: "grid", gap: 10 } },
+    React.createElement("div", { style: { display: "grid", gap: 4 } },
+      React.createElement("div", { style: mutedHeadingStyle() }, title),
+      subtitle ? React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, subtitle) : null
+    ),
+    !entries.length
+      ? React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, emptyText)
+      : entries.map((entry, index) => React.createElement("div", {
+          key: entry.id || `${index}-${entry.taskSummary}`,
+          style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(59,130,246,0.12)" }
+        },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+            React.createElement("div", { style: { display: "grid", gap: 4 } },
+              React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
+              React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`),
+              entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+              entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
+              entry.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(entry.outcome)) }, formatOutcome(entry.outcome)) : null,
+              React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
+            )
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+            ...OUTCOME_OPTIONS.map((option) => React.createElement("button", {
+              key: `${entry.id}-${option.value}`,
+              type: "button",
+              onClick: () => onSetOutcome(entry.id, option.value),
+              style: {
+                ...buttonStyle(entry.outcome === option.value ? "primary" : "secondary"),
+                padding: "8px 10px",
+              }
+            }, option.label))
+          ),
+          entry.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep) : null
+        ))
+  );
+}
+
+function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome }) {
   if (loading) {
     return React.createElement("div", { style: { fontSize: 13, color: "#94a3b8" } }, "Loading review history...");
   }
   if (error) {
     return React.createElement("div", { style: { fontSize: 13, color: "#fca5a5" } }, `History unavailable: ${error.message || error}`);
   }
-  if (!entries.length) return null;
-  return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
+  if (!scopedEntries.length && !companyEntries.length) return null;
+  return React.createElement("div", { style: { display: "grid", gap: 12, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
-      React.createElement("div", { style: mutedHeadingStyle() }, "Recent review attempts"),
-      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
-        React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entries.length} stored locally across reloads`),
-        React.createElement("button", { type: "button", onClick: onClear, style: buttonStyle("secondary") }, "Clear history")
-      )
+      React.createElement("div", { style: mutedHeadingStyle() }, "Review history"),
+      React.createElement("button", { type: "button", onClick: onClear, style: buttonStyle("secondary") }, "Clear current scope")
     ),
-    ...entries.map((entry, index) => React.createElement("div", {
-      key: entry.id || `${index}-${entry.taskSummary}`,
-      style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, background: "rgba(2,6,23,0.75)", border: "1px solid rgba(59,130,246,0.12)" }
-    },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" } },
-        React.createElement("div", { style: { display: "grid", gap: 4 } },
-          React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
-          React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`)
-        ),
-        React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
-          entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
-          entry.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(entry.outcome)) }, formatOutcome(entry.outcome)) : null,
-          React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
-        )
-      ),
-      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
-        ...OUTCOME_OPTIONS.map((option) => React.createElement("button", {
-          key: `${entry.id}-${option.value}`,
-          type: "button",
-          onClick: () => onSetOutcome(entry.id, option.value),
-          style: {
-            ...buttonStyle(entry.outcome === option.value ? "primary" : "secondary"),
-            padding: "8px 10px",
-          }
-        }, option.label))
-      ),
-      entry.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep) : null
-    ))
+    React.createElement(HistoryList, {
+      title: "Current context",
+      subtitle: `${scopedEntries.length} reviews tied to this entity`,
+      entries: scopedEntries,
+      onRestore,
+      onSetOutcome,
+      emptyText: "No reviews saved for this entity yet."
+    }),
+    React.createElement(HistoryList, {
+      title: "Company-wide recent reviews",
+      subtitle: `${companyEntries.length} shared reviews across this Paperclip company`,
+      entries: companyEntries,
+      onRestore,
+      onSetOutcome,
+      emptyText: "No shared company reviews yet."
+    })
   );
 }
 
@@ -424,7 +449,7 @@ export default function ExternalReviewLauncherPanel() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState({ scoped: [], company: [] });
   const [currentOutcome, setCurrentOutcome] = useState(null);
   const [error, setError] = useState(null);
 
@@ -438,11 +463,13 @@ export default function ExternalReviewLauncherPanel() {
   }), [host]);
 
   useEffect(() => {
-    if (Array.isArray(historyQuery.data)) {
-      setHistory(historyQuery.data);
-      persistHistory(historyQuery.data);
+    if (historyQuery.data && typeof historyQuery.data === "object") {
+      const scoped = Array.isArray(historyQuery.data.scoped) ? historyQuery.data.scoped : [];
+      const company = Array.isArray(historyQuery.data.company) ? historyQuery.data.company : [];
+      setHistory({ scoped, company });
+      persistHistory(scoped);
     } else if (!historyQuery.loading && !historyQuery.data) {
-      setHistory(loadStoredHistory());
+      setHistory({ scoped: loadStoredHistory(), company: [] });
     }
   }, [historyQuery.data, historyQuery.loading]);
 
@@ -464,7 +491,10 @@ export default function ExternalReviewLauncherPanel() {
       model: normalized.model,
     };
     setCurrentOutcome(entry.outcome || null);
-    setHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
+    setHistory((prev) => ({
+      scoped: [entry, ...prev.scoped.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT),
+      company: [{ ...entry, scopeId: host?.entityId ?? null }, ...prev.company.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT),
+    }));
     saveReviewHistory({
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
@@ -474,9 +504,14 @@ export default function ExternalReviewLauncherPanel() {
       },
       entry,
     }).then((next) => {
-      if (Array.isArray(next)) setHistory(next);
+      if (next && typeof next === "object") {
+        setHistory({
+          scoped: Array.isArray(next.scoped) ? next.scoped : [],
+          company: Array.isArray(next.company) ? next.company : [],
+        });
+      }
     }).catch(() => {
-      persistHistory([entry, ...history.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
+      persistHistory([entry, ...history.scoped.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
     });
   }, [result]);
 
@@ -531,7 +566,10 @@ export default function ExternalReviewLauncherPanel() {
     setCurrentOutcome(outcome);
     const targetId = normalized?.correlationId || null;
     if (!targetId) return;
-    setHistory((prev) => prev.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry));
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry),
+      company: prev.company.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry),
+    }));
     setReviewOutcome({
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
@@ -542,16 +580,24 @@ export default function ExternalReviewLauncherPanel() {
       entryId: targetId,
       outcome,
     }).then((next) => {
-      if (Array.isArray(next)) setHistory(next);
+      if (next && typeof next === "object") {
+        setHistory({
+          scoped: Array.isArray(next.scoped) ? next.scoped : [],
+          company: Array.isArray(next.company) ? next.company : [],
+        });
+      }
     }).catch(() => {
-      persistHistory(history.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry));
+      persistHistory(history.scoped.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry));
     });
     toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
   }
 
   function handleHistoryOutcome(entryId, outcome) {
-    setHistory((prev) => prev.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry));
-    if (history.find((entry) => entry.id === entryId)?.id === (normalizeResultEnvelope(result || {}).correlationId || null)) {
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry),
+      company: prev.company.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry),
+    }));
+    if (history.scoped.find((entry) => entry.id === entryId)?.id === (normalizeResultEnvelope(result || {}).correlationId || null)) {
       setCurrentOutcome(outcome);
     }
     setReviewOutcome({
@@ -564,15 +610,20 @@ export default function ExternalReviewLauncherPanel() {
       entryId,
       outcome,
     }).then((next) => {
-      if (Array.isArray(next)) setHistory(next);
+      if (next && typeof next === "object") {
+        setHistory({
+          scoped: Array.isArray(next.scoped) ? next.scoped : [],
+          company: Array.isArray(next.company) ? next.company : [],
+        });
+      }
     }).catch(() => {
-      persistHistory(history.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry));
+      persistHistory(history.scoped.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry));
     });
     toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
   }
 
   function handleClearHistory() {
-    setHistory([]);
+    setHistory({ scoped: [], company: history.company });
     clearReviewHistory({
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
@@ -580,6 +631,13 @@ export default function ExternalReviewLauncherPanel() {
         companyId: host?.companyId ?? undefined,
         entityId: host?.entityId ?? undefined,
       },
+    }).then((next) => {
+      if (next && typeof next === "object") {
+        setHistory({
+          scoped: Array.isArray(next.scoped) ? next.scoped : [],
+          company: Array.isArray(next.company) ? next.company : [],
+        });
+      }
     }).catch(() => {
       persistHistory([]);
     });
@@ -646,7 +704,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
-    React.createElement(HistoryPanel, { entries: history, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome }),
+    React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),

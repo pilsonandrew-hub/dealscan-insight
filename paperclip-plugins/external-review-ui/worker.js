@@ -1,6 +1,7 @@
 import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 
 const REVIEW_HISTORY_KEY = "external-review-history-v1";
+const COMPANY_HISTORY_KEY = "external-review-history-company-v1";
 const REVIEW_HISTORY_LIMIT = 20;
 
 function firstNonEmpty(...values) {
@@ -50,12 +51,16 @@ function normalizeHistoryEntry(input = {}) {
   };
 }
 
+function buildScopeKey(scopeId) {
+  return scopeId ? `${REVIEW_HISTORY_KEY}:${scopeId}` : REVIEW_HISTORY_KEY;
+}
+
 async function readHistory(ctx, companyId, scopeId) {
   const stored = await ctx.state.get({
     scopeKind: "company",
     scopeId: companyId,
     namespace: "external-review-ui",
-    stateKey: scopeId ? `${REVIEW_HISTORY_KEY}:${scopeId}` : REVIEW_HISTORY_KEY,
+    stateKey: buildScopeKey(scopeId),
   });
   return Array.isArray(stored) ? stored.map((item) => normalizeHistoryEntry(item)) : [];
 }
@@ -65,8 +70,69 @@ async function writeHistory(ctx, companyId, scopeId, entries) {
     scopeKind: "company",
     scopeId: companyId,
     namespace: "external-review-ui",
-    stateKey: scopeId ? `${REVIEW_HISTORY_KEY}:${scopeId}` : REVIEW_HISTORY_KEY,
+    stateKey: buildScopeKey(scopeId),
   }, entries.slice(0, REVIEW_HISTORY_LIMIT));
+}
+
+async function readCompanyHistory(ctx, companyId) {
+  const stored = await ctx.state.get({
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: "external-review-ui",
+    stateKey: COMPANY_HISTORY_KEY,
+  });
+  return Array.isArray(stored) ? stored.map((item) => normalizeHistoryEntry(item)) : [];
+}
+
+async function writeCompanyHistory(ctx, companyId, entries) {
+  await ctx.state.set({
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: "external-review-ui",
+    stateKey: COMPANY_HISTORY_KEY,
+  }, entries.slice(0, REVIEW_HISTORY_LIMIT));
+}
+
+async function syncHistoryWrite(ctx, companyId, scopeId, entry) {
+  const scopedHistory = await readHistory(ctx, companyId, scopeId);
+  const nextScoped = [entry, ...scopedHistory.filter((item) => item.id !== entry.id)].slice(0, REVIEW_HISTORY_LIMIT);
+  await writeHistory(ctx, companyId, scopeId, nextScoped);
+
+  const companyHistory = await readCompanyHistory(ctx, companyId);
+  const nextCompany = [
+    { ...entry, scopeId: firstNonEmpty(scopeId) || null },
+    ...companyHistory.filter((item) => item.id !== entry.id)
+  ].slice(0, REVIEW_HISTORY_LIMIT);
+  await writeCompanyHistory(ctx, companyId, nextCompany);
+
+  return { scoped: nextScoped, company: nextCompany };
+}
+
+async function syncOutcomeWrite(ctx, companyId, scopeId, entryId, outcome) {
+  const scopedHistory = await readHistory(ctx, companyId, scopeId);
+  const nextScoped = scopedHistory.map((item) => item.id === entryId ? { ...item, outcome } : item);
+  await writeHistory(ctx, companyId, scopeId, nextScoped);
+
+  const companyHistory = await readCompanyHistory(ctx, companyId);
+  const nextCompany = companyHistory.map((item) => item.id === entryId ? { ...item, outcome } : item);
+  await writeCompanyHistory(ctx, companyId, nextCompany);
+
+  return { scoped: nextScoped, company: nextCompany };
+}
+
+async function clearScopedHistory(ctx, companyId, scopeId) {
+  const scopedHistory = await readHistory(ctx, companyId, scopeId);
+  const scopedIds = new Set(scopedHistory.map((item) => item.id));
+  await writeHistory(ctx, companyId, scopeId, []);
+
+  if (scopedIds.size > 0) {
+    const companyHistory = await readCompanyHistory(ctx, companyId);
+    const nextCompany = companyHistory.filter((item) => !scopedIds.has(item.id));
+    await writeCompanyHistory(ctx, companyId, nextCompany);
+    return { scoped: [], company: nextCompany };
+  }
+
+  return { scoped: [], company: await readCompanyHistory(ctx, companyId) };
 }
 
 const plugin = definePlugin({
@@ -81,7 +147,9 @@ const plugin = definePlugin({
       if (!companyId) {
         throw new Error("companyId is required to load review history");
       }
-      return await readHistory(ctx, companyId, scopeId);
+      const scoped = await readHistory(ctx, companyId, scopeId);
+      const company = await readCompanyHistory(ctx, companyId);
+      return { scoped, company };
     });
 
     ctx.actions.register("save_review_history", async (params) => {
@@ -91,10 +159,7 @@ const plugin = definePlugin({
         throw new Error("companyId is required to save review history");
       }
       const entry = normalizeHistoryEntry(params?.entry || {});
-      const history = await readHistory(ctx, companyId, scopeId);
-      const next = [entry, ...history.filter((item) => item.id !== entry.id)].slice(0, REVIEW_HISTORY_LIMIT);
-      await writeHistory(ctx, companyId, scopeId, next);
-      return next;
+      return await syncHistoryWrite(ctx, companyId, scopeId, entry);
     });
 
     ctx.actions.register("set_review_outcome", async (params) => {
@@ -105,10 +170,7 @@ const plugin = definePlugin({
       if (!companyId || !entryId) {
         throw new Error("companyId and entryId are required to update review outcome");
       }
-      const history = await readHistory(ctx, companyId, scopeId);
-      const next = history.map((item) => item.id === entryId ? { ...item, outcome } : item);
-      await writeHistory(ctx, companyId, scopeId, next);
-      return next;
+      return await syncOutcomeWrite(ctx, companyId, scopeId, entryId, outcome);
     });
 
     ctx.actions.register("clear_review_history", async (params) => {
@@ -117,8 +179,7 @@ const plugin = definePlugin({
       if (!companyId) {
         throw new Error("companyId is required to clear review history");
       }
-      await writeHistory(ctx, companyId, scopeId, []);
-      return [];
+      return await clearScopedHistory(ctx, companyId, scopeId);
     });
 
     ctx.actions.register("invoke_external_review", async (params) => {
