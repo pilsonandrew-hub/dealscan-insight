@@ -18,6 +18,13 @@ const PRIORITIES = [
 const HISTORY_STORAGE_KEY = "paperclip.externalReview.history.v1";
 const HISTORY_LIMIT = 8;
 
+const OUTCOME_OPTIONS = [
+  { value: "needs_human", label: "Needs human" },
+  { value: "approved", label: "Approved" },
+  { value: "blocked", label: "Blocked" },
+  { value: "escalated", label: "Escalated" },
+];
+
 function cardStyle() {
   return {
     display: "grid",
@@ -151,6 +158,21 @@ function decisionTone(decision) {
   return "info";
 }
 
+function outcomeTone(outcome) {
+  switch (String(outcome || "")) {
+    case "approved": return "success";
+    case "blocked": return "danger";
+    case "escalated": return "warn";
+    case "needs_human": return "info";
+    default: return "neutral";
+  }
+}
+
+function formatOutcome(outcome) {
+  if (!outcome) return "Unlabeled";
+  return String(outcome).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function percent(confidence) {
   if (typeof confidence !== "number" || Number.isNaN(confidence)) return "N/A";
   return `${Math.round(confidence * 100)}%`;
@@ -238,7 +260,7 @@ function rerunPresetButton(label, onClick) {
   return React.createElement("button", { type: "button", onClick, style: buttonStyle("secondary") }, label);
 }
 
-function ResultPanel({ result, onReuseAsFollowUp, onEscalate, onApplyPreset, toast }) {
+function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, onEscalate, onApplyPreset, toast }) {
   const normalized = normalizeResultEnvelope(result);
   const summaryText = buildSummaryText(normalized);
   async function handleCopySummary() {
@@ -285,6 +307,21 @@ function ResultPanel({ result, onReuseAsFollowUp, onEscalate, onApplyPreset, toa
         ...normalized.topRisks.map((risk, index) => React.createElement("li", { key: `${index}-${risk}` }, risk))
       )
     ) : null,
+    React.createElement("div", { style: { display: "grid", gap: 8 } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Operator outcome"),
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+        ...OUTCOME_OPTIONS.map((option) => React.createElement("button", {
+          key: option.value,
+          type: "button",
+          onClick: () => onSetOutcome(option.value, normalized),
+          style: {
+            ...buttonStyle(currentOutcome === option.value ? "primary" : "secondary"),
+            border: currentOutcome === option.value ? "1px solid #2563eb" : buttonStyle("secondary").border,
+          }
+        }, option.label)),
+        currentOutcome ? React.createElement("span", { style: badgeStyle(outcomeTone(currentOutcome)) }, formatOutcome(currentOutcome)) : null
+      )
+    ),
     React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
       React.createElement("button", { type: "button", onClick: handleCopySummary, style: buttonStyle("secondary") }, "Copy review summary"),
       React.createElement("button", { type: "button", onClick: () => onReuseAsFollowUp(normalized), style: buttonStyle("secondary") }, "Use as follow-up draft"),
@@ -318,7 +355,7 @@ function ResultPanel({ result, onReuseAsFollowUp, onEscalate, onApplyPreset, toa
   );
 }
 
-function HistoryPanel({ entries, onRestore, onClear }) {
+function HistoryPanel({ entries, onRestore, onClear, onSetOutcome }) {
   if (!entries.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -337,10 +374,22 @@ function HistoryPanel({ entries, onRestore, onClear }) {
           React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
           React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`)
         ),
-        React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
           entry.decision ? React.createElement("span", { style: badgeStyle(decisionTone(entry.decision)) }, formatDecision(entry.decision)) : null,
+          entry.outcome ? React.createElement("span", { style: badgeStyle(outcomeTone(entry.outcome)) }, formatOutcome(entry.outcome)) : null,
           React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore")
         )
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        ...OUTCOME_OPTIONS.map((option) => React.createElement("button", {
+          key: `${entry.id}-${option.value}`,
+          type: "button",
+          onClick: () => onSetOutcome(entry.id, option.value),
+          style: {
+            ...buttonStyle(entry.outcome === option.value ? "primary" : "secondary"),
+            padding: "8px 10px",
+          }
+        }, option.label))
       ),
       entry.recommendedNextStep ? React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep) : null
     ))
@@ -359,6 +408,7 @@ export default function ExternalReviewLauncherPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState(() => loadStoredHistory());
+  const [currentOutcome, setCurrentOutcome] = useState(null);
   const [error, setError] = useState(null);
 
   const contextPreview = useMemo(() => ({
@@ -391,6 +441,7 @@ export default function ExternalReviewLauncherPanel() {
       lane: normalized.lane,
       model: normalized.model,
     };
+    setCurrentOutcome(entry.outcome || null);
     setHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, HISTORY_LIMIT));
   }, [result]);
 
@@ -441,6 +492,22 @@ export default function ExternalReviewLauncherPanel() {
     toast({ tone: "success", title: "Preset applied", body: "The form has been prefilled for a targeted rerun." });
   }
 
+  function handleSetCurrentOutcome(outcome, normalized) {
+    setCurrentOutcome(outcome);
+    const targetId = normalized?.correlationId || null;
+    if (!targetId) return;
+    setHistory((prev) => prev.map((entry) => entry.id === targetId ? { ...entry, outcome } : entry));
+    toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
+  }
+
+  function handleHistoryOutcome(entryId, outcome) {
+    setHistory((prev) => prev.map((entry) => entry.id === entryId ? { ...entry, outcome } : entry));
+    if (history.find((entry) => entry.id === entryId)?.id === (normalizeResultEnvelope(result || {}).correlationId || null)) {
+      setCurrentOutcome(outcome);
+    }
+    toast({ tone: "success", title: "Outcome updated", body: `Marked review as ${formatOutcome(outcome)}.` });
+  }
+
   function handleClearHistory() {
     setHistory([]);
     toast({ tone: "success", title: "History cleared", body: "Saved review history was cleared from this browser context." });
@@ -452,6 +519,7 @@ export default function ExternalReviewLauncherPanel() {
     setTaskSummary(entry.taskSummary || summaryFromContext(host));
     setContent(entry.content || "");
     setContextNotes(entry.contextNotes || buildContextNotes(host));
+    setCurrentOutcome(entry.outcome || null);
     setError(null);
     toast({ tone: "success", title: "Review restored", body: "A recent review attempt has been restored into the form." });
   }
@@ -505,7 +573,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
-    React.createElement(HistoryPanel, { entries: history, onRestore: handleRestoreHistory, onClear: handleClearHistory }),
+    React.createElement(HistoryPanel, { entries: history, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("label", { style: labelStyle() },
         React.createElement("span", null, "Review type"),
@@ -536,6 +604,6 @@ export default function ExternalReviewLauncherPanel() {
     React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 10 } },
       React.createElement("button", { type: "submit", disabled: submitting, style: buttonStyle("primary") }, submitting ? "Submitting..." : "Submit external review")
     ),
-    result ? React.createElement(ResultPanel, { result, onReuseAsFollowUp: handleReuseAsFollowUp, onEscalate: handleEscalate, onApplyPreset: handleApplyPreset, toast }) : null
+    result ? React.createElement(ResultPanel, { result, currentOutcome, onSetOutcome: handleSetCurrentOutcome, onReuseAsFollowUp: handleReuseAsFollowUp, onEscalate: handleEscalate, onApplyPreset: handleApplyPreset, toast }) : null
   );
 }
