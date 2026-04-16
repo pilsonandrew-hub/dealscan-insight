@@ -587,6 +587,16 @@ function syncArchivedFilter(activeDashboardFilter, currentArchivedFilter) {
   return currentArchivedFilter;
 }
 
+function getAgingState(entry) {
+  const createdAtMs = entry?.createdAtMs || 0;
+  if (!createdAtMs) return { label: "Unknown age", tone: "neutral", stale: false };
+  const ageHours = (Date.now() - createdAtMs) / (1000 * 60 * 60);
+  if (ageHours >= 24) return { label: `${Math.round(ageHours)}h old`, tone: "danger", stale: true };
+  if (ageHours >= 8) return { label: `${Math.round(ageHours)}h old`, tone: "warn", stale: true };
+  if (ageHours >= 2) return { label: `${Math.round(ageHours)}h old`, tone: "info", stale: false };
+  return { label: "Fresh", tone: "success", stale: false };
+}
+
 function buildPriorityQueue(companyEntries) {
   const priorityOrder = { blocked: 0, needs_human: 1, escalated: 2 };
   return companyEntries
@@ -595,6 +605,8 @@ function buildPriorityQueue(companyEntries) {
       const left = priorityOrder[a?.outcome] ?? 99;
       const right = priorityOrder[b?.outcome] ?? 99;
       if (left !== right) return left - right;
+      const staleDelta = Number(getAgingState(b).stale) - Number(getAgingState(a).stale);
+      if (staleDelta !== 0) return staleDelta;
       return (b?.createdAtMs || 0) - (a?.createdAtMs || 0);
     })
     .slice(0, 6);
@@ -615,6 +627,7 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned }) {
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
         React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
           entry.outcome ? React.createElement("span", { style: badgeStyle(entry.outcome === "blocked" ? "danger" : entry.outcome === "needs_human" ? "warn" : "info") }, outcomeLabel(entry.outcome)) : null,
+          React.createElement("span", { style: badgeStyle(getAgingState(entry).tone) }, getAgingState(entry).label),
           entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
           entry.decision ? React.createElement("span", { style: badgeStyle("neutral") }, entry.decision) : null
         )
