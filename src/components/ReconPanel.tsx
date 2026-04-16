@@ -568,7 +568,7 @@ export const ReconPanel: React.FC = () => {
         <TabsContent value="history">
           <div className="space-y-3">
             {loading && (
-              <div className="flex items-center justify-center py-10 text-muted-foreground">
+              <div className="flex items-center justify-center py-10 text-gray-400">
                 <Clock className="h-4 w-4 mr-2 animate-spin" />
                 Loading history…
               </div>
@@ -580,12 +580,12 @@ export const ReconPanel: React.FC = () => {
               </div>
             )}
             {!loading && history.length === 0 && !error && (
-              <div className="text-center py-10 text-muted-foreground text-sm">
+              <div className="text-center py-10 text-gray-400 text-sm">
                 No evaluations yet.
               </div>
             )}
             {history.map(item => (
-              <Card key={item.id} className="hover:shadow-md transition-all duration-200">
+              <Card key={item.id} className="bg-gray-900 border-gray-800 text-white hover:shadow-md transition-all duration-200">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -597,25 +597,25 @@ export const ReconPanel: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex items-center gap-3 text-sm">
-                      <span className="text-muted-foreground">Ask: ${item.asking_price.toLocaleString()}</span>
+                      <span className="text-gray-400">Ask: ${item.asking_price.toLocaleString()}</span>
                       <span className={`font-semibold ${item.profit_expected || item.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         ${((item.profit_expected ?? item.profit) ?? 0).toLocaleString()}
                       </span>
                     </div>
                   </div>
 
-                  <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{item.verdict_reason || item.reason}</p>
+                  <p className="text-xs text-gray-400 mb-3 line-clamp-2">{item.verdict_reason || item.reason}</p>
 
                   <div className="flex items-center justify-between">
-                    <div className="flex gap-3 text-xs text-muted-foreground">
-                      <span>Max Bid: <span className="text-foreground font-medium">${(item.max_bid ?? 0).toLocaleString()}</span></span>
+                    <div className="flex gap-3 text-xs text-gray-400">
+                      <span>Max Bid: <span className="text-white font-medium">${(item.max_bid ?? 0).toLocaleString()}</span></span>
                       <span>{item.comp_count} comps</span>
                     </div>
                     {!isPromoted(item) ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-xs h-7"
+                        className="text-xs h-7 border-gray-700 bg-gray-800 text-gray-100 hover:bg-gray-700 hover:text-white"
                         onClick={() => promote(item.id)}
                       >
                         Promote
