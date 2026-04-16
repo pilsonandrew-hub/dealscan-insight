@@ -210,7 +210,7 @@ async function copyToClipboard(text) {
   return false;
 }
 
-function ResultPanel({ result, onReuseAsFollowUp, toast }) {
+function ResultPanel({ result, onReuseAsFollowUp, onEscalate, toast }) {
   const normalized = normalizeResultEnvelope(result);
   const summaryText = buildSummaryText(normalized);
   async function handleCopySummary() {
@@ -259,7 +259,8 @@ function ResultPanel({ result, onReuseAsFollowUp, toast }) {
     ) : null,
     React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
       React.createElement("button", { type: "button", onClick: handleCopySummary, style: buttonStyle("secondary") }, "Copy review summary"),
-      React.createElement("button", { type: "button", onClick: () => onReuseAsFollowUp(normalized), style: buttonStyle("secondary") }, "Use as follow-up draft")
+      React.createElement("button", { type: "button", onClick: () => onReuseAsFollowUp(normalized), style: buttonStyle("secondary") }, "Use as follow-up draft"),
+      React.createElement("button", { type: "button", onClick: () => onEscalate(normalized), style: buttonStyle("primary") }, "Escalate")
     ),
     React.createElement("details", { style: { display: "grid", gap: 8 } },
       React.createElement("summary", { style: { cursor: "pointer", color: "#93c5fd", fontWeight: 600 } }, "Show routing and raw details"),
@@ -312,6 +313,27 @@ export default function ExternalReviewLauncherPanel() {
     setContent(followUpLines.join("\n\n"));
     setError(null);
     toast({ tone: "success", title: "Follow-up draft ready", body: "The review output has been converted into a follow-up draft." });
+  }
+
+  function handleEscalate(normalized) {
+    const escalationLines = [
+      "Escalation requested. Re-review this item with higher urgency and sharper decision pressure.",
+      normalized.decision ? `Prior review decision: ${formatDecision(normalized.decision)}` : null,
+      normalized.recommendedNextStep ? `Previous recommended next step: ${normalized.recommendedNextStep}` : null,
+      normalized.topRisks.length ? `Unresolved risks: ${normalized.topRisks.join('; ')}` : null,
+      normalized.summary ? `Previous review summary: ${normalized.summary}` : null,
+      "Return a firmer decision, the highest-risk blocker, and the exact next operator move.",
+    ].filter(Boolean);
+    setReviewType("operational_review");
+    setPriority("urgent");
+    setTaskSummary(`Escalation: ${taskSummary}`);
+    setContent(escalationLines.join("\n\n"));
+    setContextNotes((prev) => {
+      const prefix = prev?.trim() ? `${prev.trim()}\n\n` : "";
+      return `${prefix}escalation_requested: true\nescalation_source: external_review_ui\nprevious_lane: ${normalized.lane || 'unknown'}\nprevious_model: ${normalized.model || 'unknown'}`;
+    });
+    setError(null);
+    toast({ tone: "success", title: "Escalation draft ready", body: "The drawer has been prefilled for a higher-priority follow-up review." });
   }
 
   async function handleSubmit(event) {
@@ -393,6 +415,6 @@ export default function ExternalReviewLauncherPanel() {
     React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 10 } },
       React.createElement("button", { type: "submit", disabled: submitting, style: buttonStyle("primary") }, submitting ? "Submitting..." : "Submit external review")
     ),
-    result ? React.createElement(ResultPanel, { result, onReuseAsFollowUp: handleReuseAsFollowUp, toast }) : null
+    result ? React.createElement(ResultPanel, { result, onReuseAsFollowUp: handleReuseAsFollowUp, onEscalate: handleEscalate, toast }) : null
   );
 }

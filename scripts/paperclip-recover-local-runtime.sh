@@ -14,6 +14,7 @@ PLUGIN_ID="${PAPERCLIP_PLUGIN_ID:-$DEFAULT_PLUGIN_ID}"
 PLUGIN_PATH="${PAPERCLIP_PLUGIN_PATH:-$DEFAULT_PLUGIN_PATH}"
 SKIP_PATCH="${PAPERCLIP_SKIP_PATCH:-0}"
 SKIP_VERIFY="${PAPERCLIP_SKIP_VERIFY:-0}"
+SKIP_SMOKE="${PAPERCLIP_SKIP_SMOKE:-0}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -118,6 +119,79 @@ with urllib.request.urlopen(req, timeout=120) as r:
 PY
 else
   log "Skipping plugin verify because PAPERCLIP_SKIP_VERIFY=1"
+fi
+
+if [[ "$SKIP_SMOKE" != "1" ]]; then
+  log "Running lightweight plugin smoke checks"
+  PLUGIN_ID="$PLUGIN_ID" python3 - <<'PY'
+import os, json, urllib.request, urllib.error, sys
+plugin = os.environ['PLUGIN_ID']
+base = 'http://127.0.0.1:3100/api'
+
+# Smoke 1: launcher contribution should be present and still point at the drawer target.
+with urllib.request.urlopen(f'{base}/plugins/ui-contributions', timeout=30) as r:
+    ui = json.loads(r.read().decode())
+if isinstance(ui, list):
+    contributions = ui
+elif isinstance(ui, dict):
+    contributions = [ui]
+else:
+    raise SystemExit(f'Smoke failed: unexpected ui-contributions shape: {type(ui).__name__}')
+launcher = None
+for contribution in contributions:
+    if contribution.get('pluginId') != plugin:
+        continue
+    for item in contribution.get('launchers') or []:
+        if item.get('id') == 'invoke-external-review':
+            launcher = item
+            break
+    if launcher:
+        break
+if not launcher:
+    raise SystemExit('Smoke failed: launcher contribution missing for external review plugin')
+action = launcher.get('action') or {}
+if action.get('type') != 'openDrawer' or action.get('target') != 'ExternalReviewLauncherPanel':
+    raise SystemExit(f'Smoke failed: launcher action drifted: {action}')
+print('SMOKE_UI_OK', json.dumps({'id': launcher.get('id'), 'action': action}))
+
+# Smoke 2: action dispatch route should still reach the worker.
+# A validation-style error is acceptable here, because it proves routing/dispatch is alive
+# without requiring a real specialist task to complete in the recovery script.
+payload = {
+    'key': 'invoke_external_review',
+    'params': {
+        'companyId': '00000000-0000-0000-0000-000000000000',
+        'entityType': 'agent',
+        'entityId': '00000000-0000-0000-0000-000000000000',
+        'taskSummary': 'Recovery smoke test',
+        'content': 'Verify the plugin bridge action path remains dispatchable after recovery.'
+    },
+    'renderEnvironment': 'hostOverlay'
+}
+req = urllib.request.Request(
+    f'{base}/plugins/{plugin}/bridge/action',
+    data=json.dumps(payload).encode(),
+    headers={'content-type': 'application/json'},
+    method='POST'
+)
+try:
+    with urllib.request.urlopen(req, timeout=60) as r:
+        body = r.read().decode()
+        print('SMOKE_ACTION_OK', r.status, body)
+except urllib.error.HTTPError as err:
+    body = err.read().decode()
+    acceptable = err.code in (400, 422, 500, 502) and any(token in body for token in [
+        'invalid input syntax for type uuid',
+        'agentId, companyId, taskSummary, and content are required',
+        'UNKNOWN',
+        'invalid_model_output'
+    ])
+    if not acceptable:
+        raise SystemExit(f'Smoke failed: unexpected action-dispatch error {err.code}: {body}')
+    print('SMOKE_ACTION_OK', err.code, body)
+PY
+else
+  log "Skipping smoke checks because PAPERCLIP_SKIP_SMOKE=1"
 fi
 
 log "Paperclip local runtime recovery flow completed"

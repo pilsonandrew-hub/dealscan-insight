@@ -61,12 +61,18 @@ What it does:
 - reapplies the local plugin loader cache-busting patch
 - restarts Paperclip again
 - verifies the local `external-review-ui` plugin with a real upgrade call
+- runs lightweight smoke checks for drawer exposure and action dispatch
+
+Expected smoke-check success markers:
+- `SMOKE_UI_OK` with launcher `invoke-external-review` and drawer target `ExternalReviewLauncherPanel`
+- `SMOKE_ACTION_OK` with a validation/downstream error like `Agent not found` or UUID/input validation, which proves the dispatch chain is alive without requiring a real operator task
 
 Optional environment overrides:
 
 ```bash
 PAPERCLIP_SKIP_PATCH=1 /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
 PAPERCLIP_SKIP_VERIFY=1 /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
+PAPERCLIP_SKIP_SMOKE=1 /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
 PAPERCLIP_PLUGIN_ID=<plugin-id> PAPERCLIP_PLUGIN_PATH=<local-plugin-path> /Users/andrewpilson/.openclaw/workspace/scripts/paperclip-recover-local-runtime.sh
 ```
 
