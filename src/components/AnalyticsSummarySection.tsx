@@ -160,8 +160,11 @@ export default function AnalyticsSummarySection({
         </div>
       )}
 
-      <div className={`${freshnessNeedsAttention ? 'border-sky-500/25 bg-sky-500/10' : 'border-gray-800 bg-gray-900'} rounded-xl border p-3`}>
+      <div className={`${freshnessNeedsAttention ? 'border-sky-500/35 bg-sky-500/10 ring-1 ring-sky-500/10' : 'border-gray-800 bg-gray-900'} rounded-xl border p-3`}>
         <p className="text-xs font-medium text-sky-200 uppercase tracking-wide">Freshness snapshot</p>
+        <p className="mt-1 text-[11px] text-sky-100/70">
+          Empty means there are no underlying records. Unknown means freshness could not be computed.
+        </p>
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {freshnessItems.map((item) => (
             <div key={item.key} className="rounded-lg border border-white/10 bg-black/20 p-3">

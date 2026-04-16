@@ -9,6 +9,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from webapp.routers import analytics
 
+# This module uses fakes for Supabase, auth, and source-health so the unit
+# suite stays hermetic. Live backend integration coverage still depends on a
+# real deployment environment, which is intentionally out of scope here.
+
 
 class _QueryResult:
     def __init__(self, data=None, count=None):
@@ -54,12 +58,36 @@ class _TableQuery:
         return _QueryResult(data=payload.get("data"), count=payload.get("count"))
 
 
+class _RaisingTableQuery(_TableQuery):
+    def __init__(self, table_name: str, payloads: dict[str, dict[str, object]], raise_on_execute: bool = False):
+        super().__init__(table_name, payloads)
+        self.raise_on_execute = raise_on_execute
+
+    def execute(self):
+        if self.raise_on_execute:
+            raise RuntimeError(f"{self.table_name} query failed")
+        return super().execute()
+
+
 class _FakeSupabase:
     def __init__(self, payloads: dict[str, dict[str, object]]):
         self.payloads = payloads
 
     def table(self, table_name: str):
         return _TableQuery(table_name, self.payloads)
+
+
+class _FakeSupabaseWithFailures(_FakeSupabase):
+    def __init__(self, payloads: dict[str, dict[str, object]], failing_tables: set[str]):
+        super().__init__(payloads)
+        self.failing_tables = failing_tables
+
+    def table(self, table_name: str):
+        return _RaisingTableQuery(
+            table_name,
+            self.payloads,
+            raise_on_execute=table_name in self.failing_tables,
+        )
 
 
 class BaseAnalyticsTrustModelTests(unittest.TestCase):
@@ -122,7 +150,7 @@ class AnalyticsTrustModelTests(BaseAnalyticsTrustModelTests):
         self.assertIn("summary_refreshed_at", summary["trust"])
         self.assertIn("degraded_sections", summary["trust"])
         self.assertEqual(summary["trust"]["status"], "degraded")
-        self.assertEqual(summary["trust"]["rule_ids"], ["healthy_source_health_with_stale_summary"])
+        self.assertEqual(summary["trust"]["rule_ids"], ["fresh_source_health_with_stale_execution_or_outcomes"])
         self.assertIn("System and source signals are current while execution/outcomes freshness is stale or empty", summary["trust"]["notes"])
 
     def test_source_health_freshness_uses_generated_at_when_source_timestamps_are_missing(self):
@@ -164,7 +192,7 @@ class AnalyticsTrustModelTests(BaseAnalyticsTrustModelTests):
                         "context": {
                             "event": "analytics_summary_rule_violation",
                             "trustSeverity": "medium",
-                            "trustRuleIds": ["healthy_source_health_with_stale_summary"],
+                            "trustRuleIds": ["fresh_source_health_with_stale_execution_or_outcomes"],
                             "trustNotes": ["Analytics trust is mixed"],
                             "degradedSections": ["trust", "execution", "outcomes"],
                             "completenessScore": 0.5,
@@ -192,6 +220,47 @@ class AnalyticsTrustModelTests(BaseAnalyticsTrustModelTests):
         self.assertEqual(payload["events"][0]["freshness"]["execution"]["status"], "empty")
         self.assertEqual(payload["events"][0]["freshness"]["pipeline"]["status"], "fresh")
         self.assertEqual(payload["events"][0]["severity"], "medium")
+
+    def test_no_database_path_keeps_execution_and_outcomes_freshness_empty(self):
+        analytics.supa = None
+
+        summary = _run(analytics.analytics_summary("Bearer token"))
+
+        self.assertEqual(summary["freshness"]["execution"]["status"], "empty")
+        self.assertEqual(summary["freshness"]["outcomes"]["status"], "empty")
+        self.assertEqual(summary["trust"]["status"], "degraded")
+
+    def test_query_failures_do_not_override_empty_execution_and_outcomes_freshness(self):
+        now = datetime(2026, 4, 15, 18, 0, 0, tzinfo=timezone.utc)
+        analytics.datetime = _FixedDatetime
+
+        async def _fake_source_health(authorization=None):
+            return {
+                "sources": [{"source_site": "govdeals", "last_webhook_at": now.isoformat()}],
+                "generated_at": now.isoformat(),
+            }
+
+        analytics.source_health = _fake_source_health
+        analytics.supa = _FakeSupabaseWithFailures(
+            {
+                "opportunities": {
+                    "data": [
+                        {"created_at": now.isoformat(), "dos_score": 88, "source_site": "govdeals", "state": "CA"}
+                    ],
+                    "count": 1,
+                },
+                "dealer_sales": {"data": [], "count": 0},
+                "alert_log": {"data": [], "count": 0},
+            },
+            failing_tables={"dealer_sales"},
+        )
+
+        summary = _run(analytics.analytics_summary("Bearer token"))
+
+        self.assertEqual(summary["execution"]["status"], "empty")
+        self.assertEqual(summary["freshness"]["execution"]["status"], "empty")
+        self.assertEqual(summary["outcomes"]["status"], "empty")
+        self.assertEqual(summary["freshness"]["outcomes"]["status"], "empty")
 
 
 if __name__ == "__main__":

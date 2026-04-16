@@ -89,17 +89,17 @@ def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
 def _build_freshness_entry(*, updated_at: Optional[datetime], has_records: bool, query_failed: bool = False) -> dict:
     # Empty means there are no underlying records to judge.
     # Unknown means we expected data, but the timestamp is missing or the query failed.
-    if query_failed:
-        return {
-            "updated_at": None,
-            "age_seconds": None,
-            "status": "unknown",
-        }
     if not has_records:
         return {
             "updated_at": None,
             "age_seconds": None,
             "status": "empty",
+        }
+    if query_failed:
+        return {
+            "updated_at": None,
+            "age_seconds": None,
+            "status": "unknown",
         }
     if updated_at is None:
         return {
