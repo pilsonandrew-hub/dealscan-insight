@@ -269,6 +269,26 @@ function rerunPresetButton(label, onClick) {
   return React.createElement("button", { type: "button", onClick, style: buttonStyle("secondary") }, label);
 }
 
+function WhatsNewPanel() {
+  const items = [
+    'Structured review results with decision, confidence, risks, and next step',
+    'Current-context and company-wide review history',
+    'Priority queue with aging signals, team load, and rebalance guidance',
+    'Owner tagging, guided reassignment, and undo window',
+    'Exported Paperclip review records with archive and restore flow',
+    'Worker-backed audit timeline with clickable audit chips and scoped filters',
+  ];
+  return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, border: "1px solid rgba(96,165,250,0.32)", background: "rgba(30,64,175,0.16)" } },
+    React.createElement("div", { style: { display: "grid", gap: 4 } },
+      React.createElement("div", { style: { ...mutedHeadingStyle(), color: "#bfdbfe" } }, "What's new in this drawer"),
+      React.createElement("div", { style: { fontSize: 13, color: "#dbeafe", lineHeight: 1.5 } }, "This is now a full operator console, not just a one-shot review form.")
+    ),
+    React.createElement("div", { style: { display: "grid", gap: 6 } },
+      ...items.map((item) => React.createElement("div", { key: item, style: { fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 } }, `• ${item}`))
+    )
+  );
+}
+
 function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, onEscalate, onApplyPreset, toast }) {
   const normalized = normalizeResultEnvelope(result);
   const summaryText = buildSummaryText(normalized);
@@ -1609,6 +1629,7 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
+    React.createElement(WhatsNewPanel),
     pendingUndo ? React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, borderRadius: 10, border: "1px solid rgba(251,191,36,0.28)", background: "rgba(120,53,15,0.18)" } },
       React.createElement("div", { style: { display: "grid", gap: 2 } },
         React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#fde68a" } }, "Recent reassignment"),
