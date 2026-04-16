@@ -593,8 +593,47 @@ function buildOwnerLoad(entries) {
   });
 }
 
+function buildRebalanceSuggestions(ownerLoad, currentOwnerLabel) {
+  if (!Array.isArray(ownerLoad) || ownerLoad.length < 2) return [];
+  const busiest = ownerLoad[0];
+  const leastBusy = [...ownerLoad].sort((a, b) => {
+    if (a.queue !== b.queue) return a.queue - b.queue;
+    if (a.stale !== b.stale) return a.stale - b.stale;
+    return a.owner.localeCompare(b.owner);
+  })[0];
+  const suggestions = [];
+  if (busiest && leastBusy && busiest.owner !== leastBusy.owner && (busiest.queue - leastBusy.queue >= 2 || busiest.stale > 0)) {
+    suggestions.push({
+      title: `Shift one queued review from ${busiest.owner} to ${leastBusy.owner}`,
+      detail: `${busiest.owner} has ${busiest.queue} queued with ${busiest.stale} stale, while ${leastBusy.owner} has ${leastBusy.queue} queued.`,
+      tone: busiest.stale ? "danger" : "warn",
+      filterKey: `owner:${busiest.owner}`,
+    });
+  }
+  if (currentOwnerLabel) {
+    const mine = ownerLoad.find((item) => item.owner === currentOwnerLabel);
+    if (mine?.stale) {
+      suggestions.push({
+        title: `Clear stale items in ${currentOwnerLabel}'s queue`,
+        detail: `${currentOwnerLabel} has ${mine.stale} stale queued review${mine.stale === 1 ? "" : "s"} ready for triage.`,
+        tone: "danger",
+        filterKey: "my_stale",
+      });
+    } else if (mine?.queue >= 3) {
+      suggestions.push({
+        title: `Review ${currentOwnerLabel}'s queue depth`,
+        detail: `${currentOwnerLabel} currently owns ${mine.queue} queued reviews.`,
+        tone: "warn",
+        filterKey: "my_queue",
+      });
+    }
+  }
+  return suggestions.slice(0, 2);
+}
+
 function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashboardFilter }) {
   const ownerLoad = useMemo(() => buildOwnerLoad(entries), [entries]);
+  const suggestions = useMemo(() => buildRebalanceSuggestions(ownerLoad, currentOwnerLabel), [ownerLoad, currentOwnerLabel]);
   if (!ownerLoad.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -637,7 +676,32 @@ function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashb
           )
         );
       })
-    )
+    ),
+    suggestions.length ? React.createElement("div", { style: { display: "grid", gap: 8 } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Rebalance suggestions"),
+      ...suggestions.map((suggestion) => React.createElement("button", {
+        key: suggestion.title,
+        type: "button",
+        onClick: () => onSelectFilter(suggestion.filterKey),
+        style: {
+          display: "grid",
+          gap: 4,
+          textAlign: "left",
+          padding: 10,
+          borderRadius: 10,
+          border: "1px solid rgba(148,163,184,0.18)",
+          background: "rgba(2,6,23,0.72)",
+          color: "#e2e8f0",
+          cursor: "pointer",
+        }
+      },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#f8fafc" } }, suggestion.title),
+          React.createElement("span", { style: badgeStyle(suggestion.tone) }, suggestion.tone === "danger" ? "High leverage" : "Suggested")
+        ),
+        React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, suggestion.detail)
+      ))
+    ) : null
   );
 }
 
