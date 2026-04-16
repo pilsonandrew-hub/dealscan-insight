@@ -17,6 +17,7 @@ export default {
       displayName: "External Review",
       description: "Invoke an external specialist review for the current agent context.",
       placementZone: "toolbarButton",
+      exportName: "ExternalReviewLauncherPanel",
       entityTypes: ["agent"],
       action: {
         type: "openDrawer",
@@ -32,6 +33,7 @@ export default {
       displayName: "External Review",
       description: "Open the external review workspace from the Paperclip global toolbar.",
       placementZone: "globalToolbarButton",
+      exportName: "ExternalReviewLauncherPanel",
       action: {
         type: "openDrawer",
         target: "ExternalReviewLauncherPanel"
