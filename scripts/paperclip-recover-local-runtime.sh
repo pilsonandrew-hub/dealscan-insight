@@ -194,4 +194,33 @@ else
   log "Skipping smoke checks because PAPERCLIP_SKIP_SMOKE=1"
 fi
 
+log "Running bridge compatibility smoke check"
+python3 - <<'PY'
+import json, urllib.request, sys
+payload = {
+    'system_prompt': 'Health check',
+    'context': {
+        'prompt': 'Reply with exactly: BRIDGE_OK',
+        'task_class': 'general_default'
+    }
+}
+req = urllib.request.Request(
+    'http://127.0.0.1:8787/run',
+    data=json.dumps(payload).encode(),
+    headers={'content-type': 'application/json'},
+    method='POST'
+)
+with urllib.request.urlopen(req, timeout=90) as r:
+    body = json.loads(r.read().decode())
+if r.status != 200 or body.get('content') != 'BRIDGE_OK':
+    raise SystemExit(f"Bridge compatibility smoke failed: status={r.status} body={body}")
+if body.get('task_class') != 'general_chat':
+    raise SystemExit(f"Bridge compatibility smoke failed: expected normalized task_class general_chat, got {body.get('task_class')}")
+print('SMOKE_BRIDGE_OK', json.dumps({
+    'lane': body.get('lane'),
+    'model': body.get('model'),
+    'task_class': body.get('task_class')
+}))
+PY
+
 log "Paperclip local runtime recovery flow completed"
