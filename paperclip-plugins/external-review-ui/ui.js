@@ -399,6 +399,14 @@ function filterHistoryEntries(entries, searchText, outcomeFilter, pinFilter, sor
   });
 }
 
+function formatAuditCopy(entry) {
+  if (!entry?.lastReassignedAt && !entry?.lastReassignedBy) return null;
+  const parts = [];
+  if (entry?.lastReassignedBy) parts.push(`reassigned by ${entry.lastReassignedBy}`);
+  if (entry?.lastReassignedAt) parts.push(entry.lastReassignedAt);
+  return parts.length ? parts.join(' • ') : null;
+}
+
 function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetPinned, onSetOwner, onExport, emptyText }) {
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: { display: "grid", gap: 4 } },
@@ -416,7 +424,8 @@ function HistoryList({ title, subtitle, entries, onRestore, onSetOutcome, onSetP
               React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
               React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${entry.reviewType || 'unknown'} • ${entry.priority || 'unknown'} • ${entry.createdAtLabel || 'now'}`),
               entry.scopeId ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `scope: ${entry.scopeId}`) : null,
-              React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `owner: ${entry.owner || 'unassigned'}`)
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, `owner: ${entry.owner || 'unassigned'}`),
+              formatAuditCopy(entry) ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null
             ),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
               entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
@@ -500,6 +509,7 @@ function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArch
         )
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `${record.entityType} • ${record.updatedAt || record.createdAt || 'unknown time'}`),
+      formatAuditCopy(record.data) ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, formatAuditCopy(record.data)) : null,
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
         record.data?.reviewType ? React.createElement("span", { style: badgeStyle("info") }, record.data.reviewType) : null,
         record.data?.priority ? React.createElement("span", { style: badgeStyle("warn") }, record.data.priority) : null,
@@ -863,6 +873,7 @@ function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned, onS
         )
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep || entry.contextNotes || entry.content || "No summary available."),
+      formatAuditCopy(entry) ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, formatAuditCopy(entry)) : null,
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore"),
         React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "warn" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
@@ -1345,9 +1356,15 @@ export default function ExternalReviewLauncherPanel() {
   function handleReassignSuggestion(entry, owner) {
     if (!entry?.id || !owner) return;
     const previousOwner = entry?.owner || 'unassigned';
+    const auditStamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const auditActor = currentOwnerLabel || 'Operator';
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((item) => item.id === entry.id ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
+      company: prev.company.map((item) => item.id === entry.id ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
+    }));
     applyOwnerUpdate(entry.id, owner, `Reassigned \"${entry.taskSummary || 'Untitled review'}\" to ${owner}. Undo available for 12s.`)
       .then(() => {
-        scheduleUndo(entry, previousOwner, owner);
+        scheduleUndo({ ...entry, lastReassignedAt: auditStamp, lastReassignedBy: auditActor }, previousOwner, owner);
       })
       .catch((err) => {
         toast({ tone: "error", title: "Reassignment failed", body: err?.message || "Could not reassign suggested review." });
@@ -1357,7 +1374,13 @@ export default function ExternalReviewLauncherPanel() {
   function handleUndoReassignment() {
     if (!pendingUndo?.entryId || !pendingUndo?.previousOwner) return;
     const undo = pendingUndo;
+    const auditStamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const auditActor = currentOwnerLabel || 'Operator';
     clearPendingUndo();
+    setHistory((prev) => ({
+      scoped: prev.scoped.map((item) => item.id === undo.entryId ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
+      company: prev.company.map((item) => item.id === undo.entryId ? { ...item, lastReassignedAt: auditStamp, lastReassignedBy: auditActor } : item),
+    }));
     applyOwnerUpdate(undo.entryId, undo.previousOwner, `Restored \"${undo.taskSummary}\" back to ${undo.previousOwner}.`).catch((err) => {
       toast({ tone: "error", title: "Undo failed", body: err?.message || "Could not restore previous owner." });
     });
