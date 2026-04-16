@@ -587,6 +587,48 @@ function syncArchivedFilter(activeDashboardFilter, currentArchivedFilter) {
   return currentArchivedFilter;
 }
 
+function buildPriorityQueue(companyEntries) {
+  const priorityOrder = { blocked: 0, needs_human: 1, escalated: 2 };
+  return companyEntries
+    .filter((entry) => ["blocked", "needs_human", "escalated"].includes(entry?.outcome))
+    .sort((a, b) => {
+      const left = priorityOrder[a?.outcome] ?? 99;
+      const right = priorityOrder[b?.outcome] ?? 99;
+      if (left !== right) return left - right;
+      return (b?.createdAtMs || 0) - (a?.createdAtMs || 0);
+    })
+    .slice(0, 6);
+}
+
+function PriorityQueuePanel({ entries, onRestore, onSetOutcome, onSetPinned }) {
+  if (!entries.length) return null;
+  return React.createElement("div", { style: { display: "grid", gap: 12, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.78)", border: "1px solid rgba(248,113,113,0.22)" } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+      React.createElement("div", { style: mutedHeadingStyle() }, "Priority queue"),
+      React.createElement("div", { style: { fontSize: 12, color: "#fca5a5" } }, "Blocked, needs human, and escalated reviews float to the top here.")
+    ),
+    ...entries.map((entry) => React.createElement("div", {
+      key: `priority-${entry.id}`,
+      style: { display: "grid", gap: 8, padding: 12, borderRadius: 10, border: "1px solid rgba(248,113,113,0.18)", background: "rgba(2,6,23,0.72)" }
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#f8fafc" } }, entry.taskSummary || "Untitled review"),
+        React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+          entry.outcome ? React.createElement("span", { style: badgeStyle(entry.outcome === "blocked" ? "danger" : entry.outcome === "needs_human" ? "warn" : "info") }, outcomeLabel(entry.outcome)) : null,
+          entry.pinned ? React.createElement("span", { style: badgeStyle("warn") }, "Pinned") : null,
+          entry.decision ? React.createElement("span", { style: badgeStyle("neutral") }, entry.decision) : null
+        )
+      ),
+      React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, entry.recommendedNextStep || entry.contextNotes || entry.content || "No summary available."),
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+        React.createElement("button", { type: "button", onClick: () => onRestore(entry), style: buttonStyle("secondary") }, "Restore"),
+        React.createElement("button", { type: "button", onClick: () => onSetPinned(entry.id, !entry.pinned), style: buttonStyle(entry.pinned ? "warn" : "secondary") }, entry.pinned ? "Unpin" : "Pin"),
+        ...OUTCOME_OPTIONS.filter((option) => option.value !== entry.outcome).map((option) => React.createElement("button", { key: option.value, type: "button", onClick: () => onSetOutcome(entry.id, option.value), style: buttonStyle(option.value === "blocked" ? "danger" : option.value === "needs_human" ? "warn" : "secondary") }, option.label))
+      )
+    ))
+  );
+}
+
 function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onExport }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
@@ -1056,6 +1098,7 @@ export default function ExternalReviewLauncherPanel() {
       activeDashboardFilter,
       onSelectFilter: handleSelectDashboardFilter,
     }),
+    React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned }),
     React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped"), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company"), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
