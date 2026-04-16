@@ -500,6 +500,60 @@ function ExportedRecordsPanel({ records, loading, error, archivedFilter, setArch
   );
 }
 
+function SummaryCard({ label, value, tone = "neutral" }) {
+  const toneColors = {
+    neutral: { border: "rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.65)", value: "#f8fafc" },
+    success: { border: "rgba(34,197,94,0.22)", background: "rgba(21,128,61,0.16)", value: "#bbf7d0" },
+    warn: { border: "rgba(251,191,36,0.22)", background: "rgba(161,98,7,0.18)", value: "#fde68a" },
+    info: { border: "rgba(59,130,246,0.22)", background: "rgba(30,64,175,0.18)", value: "#bfdbfe" },
+    danger: { border: "rgba(239,68,68,0.22)", background: "rgba(127,29,29,0.18)", value: "#fecaca" },
+  };
+  const palette = toneColors[tone] || toneColors.neutral;
+  return React.createElement("div", {
+    style: {
+      display: "grid",
+      gap: 6,
+      padding: 12,
+      borderRadius: 10,
+      border: `1px solid ${palette.border}`,
+      background: palette.background,
+      minWidth: 0,
+    }
+  },
+    React.createElement("div", { style: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "#94a3b8", fontWeight: 700 } }, label),
+    React.createElement("div", { style: { fontSize: 24, fontWeight: 800, color: palette.value, lineHeight: 1 } }, String(value))
+  );
+}
+
+function buildDashboardStats({ scopedEntries, companyEntries, exportedRecords }) {
+  const activeExported = exportedRecords.filter((record) => !record?.data?.archived);
+  const archivedExported = exportedRecords.filter((record) => Boolean(record?.data?.archived));
+  const pinnedHistory = companyEntries.filter((entry) => entry?.pinned);
+  const needsHuman = companyEntries.filter((entry) => entry?.outcome === "needs_human");
+  const blocked = companyEntries.filter((entry) => entry?.outcome === "blocked");
+  const escalated = companyEntries.filter((entry) => entry?.outcome === "escalated");
+  return [
+    { label: "Current context", value: scopedEntries.length, tone: "info" },
+    { label: "Company history", value: companyEntries.length, tone: "neutral" },
+    { label: "Pinned", value: pinnedHistory.length, tone: "warn" },
+    { label: "Needs human", value: needsHuman.length, tone: needsHuman.length ? "warn" : "neutral" },
+    { label: "Blocked", value: blocked.length, tone: blocked.length ? "danger" : "neutral" },
+    { label: "Escalated", value: escalated.length, tone: escalated.length ? "info" : "neutral" },
+    { label: "Exported", value: activeExported.length, tone: activeExported.length ? "success" : "neutral" },
+    { label: "Archived records", value: archivedExported.length, tone: archivedExported.length ? "neutral" : "neutral" },
+  ];
+}
+
+function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords }) {
+  const stats = buildDashboardStats({ scopedEntries, companyEntries, exportedRecords });
+  return React.createElement("div", { style: { display: "grid", gap: 10 } },
+    React.createElement("div", { style: mutedHeadingStyle() }, "Operator dashboard"),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 } },
+      ...stats.map((item) => React.createElement(SummaryCard, { key: item.label, label: item.label, value: item.value, tone: item.tone }))
+    )
+  );
+}
+
 function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore, onClear, onSetOutcome, onSetPinned, onExport }) {
   const [searchText, setSearchText] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
@@ -956,6 +1010,11 @@ export default function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
+    React.createElement(OperatorDashboard, {
+      scopedEntries: history.scoped,
+      companyEntries: history.company,
+      exportedRecords: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [],
+    }),
     React.createElement(HistoryPanel, { scopedEntries: history.scoped, companyEntries: history.company, loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onExport: handleExportRecord }),
     React.createElement(ExportedRecordsPanel, { records: Array.isArray(exportedRecordsQuery.data) ? exportedRecordsQuery.data : [], loading: exportedRecordsQuery.loading, error: exportedRecordsQuery.error, archivedFilter, setArchivedFilter, onToggleArchived: handleToggleArchived, onRestoreRecord: handleRestoreExportedRecord }),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
