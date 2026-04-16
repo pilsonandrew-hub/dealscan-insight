@@ -4,8 +4,47 @@ Application settings — Railway-safe, robust defaults
 import logging
 import os
 from typing import Optional, Any
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    from pydantic import field_validator
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ModuleNotFoundError:
+    def field_validator(*_args, **_kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    class SettingsConfigDict(dict):
+        pass
+
+    class BaseSettings:
+        def __init__(self, **overrides):
+            for name, value in self.__class__.__dict__.items():
+                if name.startswith("_") or callable(value) or isinstance(value, property):
+                    continue
+                setattr(self, name, value)
+
+            for key, value in os.environ.items():
+                attr = key.lower()
+                if hasattr(self, attr):
+                    current = getattr(self, attr)
+                    setattr(self, attr, self._coerce_env_value(value, current))
+
+            for key, value in overrides.items():
+                setattr(self, key, value)
+
+        @staticmethod
+        def _coerce_env_value(raw_value: str, current_value: Any) -> Any:
+            if isinstance(current_value, bool):
+                return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+            if isinstance(current_value, int):
+                try:
+                    return int(raw_value)
+                except ValueError:
+                    return current_value
+            if current_value is None:
+                return raw_value
+            return raw_value
 
 logger = logging.getLogger(__name__)
 SECRET_KEY = os.getenv("SECRET_KEY")

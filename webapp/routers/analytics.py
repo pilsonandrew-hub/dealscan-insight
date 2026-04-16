@@ -5,7 +5,30 @@ GET /api/analytics/summary — aggregates KPIs from Supabase.
 Uses the opportunities table which now carries outcome_* columns,
 and the alert_log table for alert delivery stats.
 """
-from fastapi import APIRouter, HTTPException, Header
+try:
+    from fastapi import APIRouter, HTTPException, Header
+except ModuleNotFoundError:
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+
+    class APIRouter:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        @staticmethod
+        def _decorator(*_args, **_kwargs):
+            def wrapper(func):
+                return func
+            return wrapper
+
+        get = post = patch = delete = put = _decorator
+
+    def Header(default=None):
+        return default
 from typing import Optional
 
 from webapp.routers.outcomes import _verify_auth

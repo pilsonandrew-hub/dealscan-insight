@@ -3,8 +3,36 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+try:
+    from fastapi import APIRouter, Header, HTTPException
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+
+    class APIRouter:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        @staticmethod
+        def _decorator(*_args, **_kwargs):
+            def wrapper(func):
+                return func
+            return wrapper
+
+        get = post = patch = delete = put = _decorator
+
+    def Header(default=None):
+        return default
+
+    class BaseModel:
+        def __init__(self, **data):
+            for key, value in data.items():
+                setattr(self, key, value)
 
 from webapp.database import supabase_client
 
