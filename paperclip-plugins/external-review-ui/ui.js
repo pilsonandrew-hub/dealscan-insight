@@ -633,6 +633,24 @@ function buildRebalanceSuggestions(ownerLoad, currentOwnerLabel) {
   return suggestions.slice(0, 2);
 }
 
+function explainRebalanceCandidate(entry, suggestion) {
+  if (!entry) return null;
+  const reasons = [];
+  if (["blocked", "needs_human", "escalated"].includes(entry?.outcome)) {
+    reasons.push(`${outcomeLabel(entry.outcome)} item`);
+  }
+  const aging = getAgingState(entry);
+  if (aging?.label && aging.label !== "Fresh" && aging.label !== "Unknown age") {
+    reasons.push(aging.label.toLowerCase());
+  }
+  if (entry?.pinned) reasons.push("currently pinned");
+  if (suggestion?.fromOwner && suggestion?.toOwner) {
+    reasons.push(`moves load from ${suggestion.fromOwner} to ${suggestion.toOwner}`);
+  }
+  if (!reasons.length) reasons.push("highest-priority queued item in the overloaded lane");
+  return `Why this item: ${reasons.join(", ")}.`;
+}
+
 function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashboardFilter, onReassignSuggestion }) {
   const ownerLoad = useMemo(() => buildOwnerLoad(entries), [entries]);
   const suggestions = useMemo(() => buildRebalanceSuggestions(ownerLoad, currentOwnerLabel), [ownerLoad, currentOwnerLabel]);
@@ -728,9 +746,12 @@ function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashb
             ),
             React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, suggestion.detail)
           ),
-          candidate ? React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" } },
-            React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `Suggested item: ${candidate.entry.taskSummary || 'Untitled review'}`),
-            React.createElement("button", { type: "button", onClick: () => onReassignSuggestion(candidate.entry, suggestion.toOwner), style: buttonStyle("secondary") }, `Reassign to ${suggestion.toOwner}`)
+          candidate ? React.createElement("div", { style: { display: "grid", gap: 6 } },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+              React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `Suggested item: ${candidate.entry.taskSummary || 'Untitled review'}`),
+              React.createElement("button", { type: "button", onClick: () => onReassignSuggestion(candidate.entry, suggestion.toOwner), style: buttonStyle("secondary") }, `Reassign to ${suggestion.toOwner}`)
+            ),
+            React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", lineHeight: 1.5 } }, explainRebalanceCandidate(candidate.entry, suggestion))
           ) : null
         );
       })
