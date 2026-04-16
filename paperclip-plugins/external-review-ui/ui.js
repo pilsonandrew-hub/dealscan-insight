@@ -608,6 +608,8 @@ function buildRebalanceSuggestions(ownerLoad, currentOwnerLabel) {
       detail: `${busiest.owner} has ${busiest.queue} queued with ${busiest.stale} stale, while ${leastBusy.owner} has ${leastBusy.queue} queued.`,
       tone: busiest.stale ? "danger" : "warn",
       filterKey: `owner:${busiest.owner}`,
+      fromOwner: busiest.owner,
+      toOwner: leastBusy.owner,
     });
   }
   if (currentOwnerLabel) {
@@ -631,9 +633,23 @@ function buildRebalanceSuggestions(ownerLoad, currentOwnerLabel) {
   return suggestions.slice(0, 2);
 }
 
-function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashboardFilter }) {
+function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashboardFilter, onReassignSuggestion }) {
   const ownerLoad = useMemo(() => buildOwnerLoad(entries), [entries]);
   const suggestions = useMemo(() => buildRebalanceSuggestions(ownerLoad, currentOwnerLabel), [ownerLoad, currentOwnerLabel]);
+  const rebalanceCandidates = useMemo(() => {
+    return suggestions.map((suggestion) => {
+      if (!suggestion.fromOwner || !suggestion.toOwner) return null;
+      const candidate = (entries || [])
+        .filter((entry) => entry?.owner === suggestion.fromOwner)
+        .filter((entry) => ["blocked", "needs_human", "escalated"].includes(entry?.outcome))
+        .sort((a, b) => {
+          const staleDelta = Number(getAgingState(b).stale) - Number(getAgingState(a).stale);
+          if (staleDelta !== 0) return staleDelta;
+          return (b?.createdAtMs || 0) - (a?.createdAtMs || 0);
+        })[0];
+      return candidate ? { suggestion, entry: candidate } : null;
+    }).filter(Boolean);
+  }, [entries, suggestions]);
   if (!ownerLoad.length) return null;
   return React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(15,23,42,0.65)", border: "1px solid rgba(148,163,184,0.18)" } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -679,40 +695,57 @@ function TeamLoadPanel({ entries, currentOwnerLabel, onSelectFilter, activeDashb
     ),
     suggestions.length ? React.createElement("div", { style: { display: "grid", gap: 8 } },
       React.createElement("div", { style: mutedHeadingStyle() }, "Rebalance suggestions"),
-      ...suggestions.map((suggestion) => React.createElement("button", {
-        key: suggestion.title,
-        type: "button",
-        onClick: () => onSelectFilter(suggestion.filterKey),
-        style: {
-          display: "grid",
-          gap: 4,
-          textAlign: "left",
-          padding: 10,
-          borderRadius: 10,
-          border: "1px solid rgba(148,163,184,0.18)",
-          background: "rgba(2,6,23,0.72)",
-          color: "#e2e8f0",
-          cursor: "pointer",
-        }
-      },
-        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" } },
-          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#f8fafc" } }, suggestion.title),
-          React.createElement("span", { style: badgeStyle(suggestion.tone) }, suggestion.tone === "danger" ? "High leverage" : "Suggested")
-        ),
-        React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, suggestion.detail)
-      ))
+      ...suggestions.map((suggestion) => {
+        const candidate = rebalanceCandidates.find((item) => item.suggestion.title === suggestion.title);
+        return React.createElement("div", {
+          key: suggestion.title,
+          style: {
+            display: "grid",
+            gap: 8,
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid rgba(148,163,184,0.18)",
+            background: "rgba(2,6,23,0.72)",
+          }
+        },
+          React.createElement("button", {
+            type: "button",
+            onClick: () => onSelectFilter(suggestion.filterKey),
+            style: {
+              display: "grid",
+              gap: 4,
+              textAlign: "left",
+              padding: 0,
+              border: "none",
+              background: "transparent",
+              color: "#e2e8f0",
+              cursor: "pointer",
+            }
+          },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#f8fafc" } }, suggestion.title),
+              React.createElement("span", { style: badgeStyle(suggestion.tone) }, suggestion.tone === "danger" ? "High leverage" : "Suggested")
+            ),
+            React.createElement("div", { style: { fontSize: 12, color: "#cbd5e1", lineHeight: 1.5 } }, suggestion.detail)
+          ),
+          candidate ? React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+            React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, `Suggested item: ${candidate.entry.taskSummary || 'Untitled review'}`),
+            React.createElement("button", { type: "button", onClick: () => onReassignSuggestion(candidate.entry, suggestion.toOwner), style: buttonStyle("secondary") }, `Reassign to ${suggestion.toOwner}`)
+          ) : null
+        );
+      })
     ) : null
   );
 }
 
-function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, activeDashboardFilter, onSelectFilter, currentOwnerLabel }) {
+function OperatorDashboard({ scopedEntries, companyEntries, exportedRecords, activeDashboardFilter, onSelectFilter, currentOwnerLabel, onReassignSuggestion }) {
   const stats = buildDashboardStats({ scopedEntries, companyEntries, exportedRecords, currentOwnerLabel });
   return React.createElement("div", { style: { display: "grid", gap: 10 } },
     React.createElement("div", { style: mutedHeadingStyle() }, "Operator dashboard"),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 } },
       ...stats.map((item) => React.createElement(SummaryCard, { key: item.label, label: item.label, value: item.value, tone: item.tone, active: activeDashboardFilter === item.filterKey, onClick: () => onSelectFilter(activeDashboardFilter === item.filterKey ? null : item.filterKey) }))
     ),
-    React.createElement(TeamLoadPanel, { entries: companyEntries, currentOwnerLabel, onSelectFilter, activeDashboardFilter })
+    React.createElement(TeamLoadPanel, { entries: companyEntries, currentOwnerLabel, onSelectFilter, activeDashboardFilter, onReassignSuggestion })
   );
 }
 
@@ -1226,12 +1259,12 @@ export default function ExternalReviewLauncherPanel() {
     setArchivedFilter((current) => syncArchivedFilter(filterKey, current));
   }
 
-  function handleSetOwner(entryId, owner) {
+  function applyOwnerUpdate(entryId, owner, successBody = `Assigned to ${owner}.`) {
     setHistory((prev) => ({
       scoped: prev.scoped.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
       company: prev.company.map((entry) => entry.id === entryId ? { ...entry, owner } : entry),
     }));
-    setReviewOwner({
+    return setReviewOwner({
       companyId: host?.companyId ?? undefined,
       entityId: host?.entityId ?? undefined,
       context: {
@@ -1247,9 +1280,21 @@ export default function ExternalReviewLauncherPanel() {
           company: Array.isArray(next.company) ? next.company : [],
         });
       }
-      toast({ tone: "success", title: "Owner updated", body: `Assigned to ${owner}.` });
-    }).catch((err) => {
+      toast({ tone: "success", title: "Owner updated", body: successBody });
+      return next;
+    });
+  }
+
+  function handleSetOwner(entryId, owner) {
+    applyOwnerUpdate(entryId, owner).catch((err) => {
       toast({ tone: "error", title: "Owner update failed", body: err?.message || "Could not assign review owner." });
+    });
+  }
+
+  function handleReassignSuggestion(entry, owner) {
+    if (!entry?.id || !owner) return;
+    applyOwnerUpdate(entry.id, owner, `Reassigned \"${entry.taskSummary || 'Untitled review'}\" to ${owner}.`).catch((err) => {
+      toast({ tone: "error", title: "Reassignment failed", body: err?.message || "Could not reassign suggested review." });
     });
   }
 
@@ -1342,6 +1387,7 @@ export default function ExternalReviewLauncherPanel() {
       activeDashboardFilter,
       currentOwnerLabel,
       onSelectFilter: handleSelectDashboardFilter,
+      onReassignSuggestion: handleReassignSuggestion,
     }),
     React.createElement(PriorityQueuePanel, { entries: buildPriorityQueue(history.company, activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? currentOwnerLabel : null).filter((entry) => activeDashboardFilter === "my_stale" ? getAgingState(entry).stale : true), onRestore: handleRestoreHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner }),
     React.createElement(HistoryPanel, { scopedEntries: applyDashboardHistoryFilter(history.scoped, activeDashboardFilter, "scoped", currentOwnerLabel), companyEntries: applyDashboardHistoryFilter(history.company, activeDashboardFilter, "company", currentOwnerLabel), loading: historyQuery.loading, error: historyQuery.error, onRestore: handleRestoreHistory, onClear: handleClearHistory, onSetOutcome: handleHistoryOutcome, onSetPinned: handleSetPinned, onSetOwner: handleSetOwner, onExport: handleExportRecord, initialOwnerFilter: activeDashboardFilter === "assigned" ? "assigned" : activeDashboardFilter === "owner_current" || activeDashboardFilter === "my_queue" || activeDashboardFilter === "my_stale" ? (currentOwnerLabel || "all") : "all" }),
