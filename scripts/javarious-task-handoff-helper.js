@@ -143,7 +143,8 @@ async function main() {
   const packet = buildExternalReviewTaskPacket(request, {
     context_notes: [
       'Typed /task transport is live',
-      'External Review Agent routes to claude-sonnet-4.5',
+      'External Review Agent is governor-routed with Gemini 2.5 Flash as the default review lane',
+      'Premium Claude use is restricted to certified compact-contract escalation paths',
     ],
   });
   const response = await callTypedTaskTransport(packet);
