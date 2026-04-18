@@ -6,7 +6,7 @@ const { buildBridgeRequest } = require('./paperclip-routing-governor.cjs');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_LEGACY_DEFAULTS_ENABLED = normalizeFlag(process.env.OPENROUTER_LEGACY_DEFAULTS_ENABLED);
+const OPENROUTER_LEGACY_DEFAULTS_ENABLED = false;
 const OPENROUTER_LEGACY_DEFAULT_LANE = normalizeString(process.env.OPENROUTER_LEGACY_DEFAULT_LANE);
 const OPENROUTER_LEGACY_DEFAULT_MODEL = normalizeString(process.env.OPENROUTER_LEGACY_DEFAULT_MODEL);
 const ROUTING_GOVERNOR_CONFIG_PATH = normalizeString(process.env.PAPERCLIP_ROUTING_GOVERNOR_CONFIG_PATH) || path.join(__dirname, '..', 'reports', 'paperclip-routing-governor-config-v2-2026-04-16.json');
@@ -269,7 +269,7 @@ function resolveLaneAndModel(body) {
     if (!legacyEnabled) {
       throw validationError('Missing lane for OpenRouter bridge request', 'missing_lane');
     }
-    lane = OPENROUTER_LEGACY_DEFAULT_LANE || 'openrouter_deepseek_workhorse';
+    lane = OPENROUTER_LEGACY_DEFAULT_LANE || 'openrouter_gemini_proven';
     compatibilityDefaultsUsed.lane = true;
   }
 
@@ -656,6 +656,34 @@ function buildExternalReviewRepairPrompt(rawOutput, validationErrors) {
   ].join('\n\n');
 }
 
+function stringifyTopRisk(risk) {
+  if (typeof risk === 'string') return normalizeString(risk);
+  if (risk && typeof risk === 'object') {
+    const description = normalizeString(risk.description);
+    const category = normalizeString(risk.category);
+    const severity = normalizeString(risk.severity);
+    return [description, category ? `category: ${category}` : '', severity ? `severity: ${severity}` : '']
+      .filter(Boolean)
+      .join(' | ');
+  }
+  return normalizeString(String(risk || ''));
+}
+
+function buildExternalReviewCommentSummary(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+  const decision = normalizeString(result.decision);
+  const nextStep = normalizeString(result.recommended_next_step);
+  const risks = Array.isArray(result.top_risks)
+    ? result.top_risks.map(stringifyTopRisk).filter(Boolean).slice(0, 3)
+    : [];
+
+  const lines = [];
+  if (decision) lines.push(`Decision: ${decision}`);
+  if (risks.length) lines.push(`Top risks: ${risks.join('; ')}`);
+  if (nextStep) lines.push(`Next step: ${nextStep}`);
+  return lines.join('\n');
+}
+
 async function requestOpenRouterChat({ model, systemPrompt, userPrompt, maxTokens, responseFormat }) {
   const payload = {
     model,
@@ -858,7 +886,7 @@ const server = http.createServer(async (req, res) => {
             task_class: packet.taskClass,
             lane,
             model,
-            summary: `OpenRouter ${model}`,
+            summary: buildExternalReviewCommentSummary(enforced.normalized) || `OpenRouter ${model}`,
             result: enforced.normalized,
             usage: firstAttempt.data?.usage || null,
             provider: firstAttempt.data?.provider || laneConfig.provider,
@@ -899,7 +927,7 @@ const server = http.createServer(async (req, res) => {
             task_class: packet.taskClass,
             lane,
             model,
-            summary: `OpenRouter ${model}`,
+            summary: buildExternalReviewCommentSummary(repaired.normalized) || `OpenRouter ${model}`,
             result: repaired.normalized,
             usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
             provider: repairAttempt.data?.provider || laneConfig.provider,
@@ -919,7 +947,7 @@ const server = http.createServer(async (req, res) => {
             task_class: packet.taskClass,
             lane,
             model,
-            summary: `OpenRouter ${model}`,
+            summary: buildExternalReviewCommentSummary(heuristic) || `OpenRouter ${model}`,
             result: heuristic,
             usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
             provider: repairAttempt.data?.provider || laneConfig.provider,
@@ -952,7 +980,7 @@ const server = http.createServer(async (req, res) => {
             task_class: packet.taskClass,
             lane,
             model,
-            summary: `OpenRouter ${model}`,
+            summary: buildExternalReviewCommentSummary(heuristic) || `OpenRouter ${model}`,
             result: heuristic,
             usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
             provider: repairAttempt.data?.provider || laneConfig.provider,

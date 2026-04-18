@@ -26,6 +26,7 @@ dist-ssr
 __pycache__/
 *.pyc
 *.pyo
+.venv/
 runtime-artifacts/
 
 # Local data files
