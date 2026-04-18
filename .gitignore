@@ -36,3 +36,15 @@ tmp_*.js
 backend/
 config/
 skills/
+
+# Nested repos are managed independently
+brains/
+projects/
+tools/
+workspace-gateway-*/
+webapp/
+
+# Personal operating memory stays local to workspace umbrella
+MEMORY.md
+SOUL.md
+memory/*.md
