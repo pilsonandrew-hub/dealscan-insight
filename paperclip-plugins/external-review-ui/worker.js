@@ -543,7 +543,7 @@ const plugin = definePlugin({
         throw new Error("Plugin launcher context must provide a valid agent entity and companyId");
       }
 
-      return await ctx.agents.invokeSpecialist(agentId, companyId, {
+      const promptPayload = {
         specialist: "external_review",
         taskClass: "external_review",
         taskSummary,
@@ -561,6 +561,10 @@ const plugin = definePlugin({
           "escalation_suggested",
           "routing_metadata"
         ],
+      };
+
+      return await ctx.agents.invoke(agentId, companyId, {
+        prompt: JSON.stringify(promptPayload),
         reason: "plugin_action_invoke_external_review"
       });
     });

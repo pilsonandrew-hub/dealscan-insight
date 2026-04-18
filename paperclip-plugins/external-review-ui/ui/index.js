@@ -151,6 +151,10 @@ function buildContextNotes(host) {
   return lines.join("\n");
 }
 
+function hasValidAgentContext(host) {
+  return Boolean(host?.companyId && host?.entityType === "agent" && host?.entityId);
+}
+
 function formatDecision(decision) {
   if (!decision) return "No decision";
   return String(decision)
@@ -193,6 +197,8 @@ function normalizeResultEnvelope(response) {
   const routing = payload?.routing ?? {};
   const routingMeta = result?.routing_metadata ?? {};
   const usage = payload?.usage ?? {};
+  const runId = payload?.runId ?? payload?.run_id ?? null;
+  const queued = Boolean(runId) && !result?.decision;
   return {
     decision: result?.decision ?? null,
     confidence: result?.confidence,
@@ -204,7 +210,7 @@ function normalizeResultEnvelope(response) {
     provider: payload?.provider ?? routingMeta?.provider ?? null,
     summary: payload?.summary ?? null,
     repaired: payload?.repaired ?? routingMeta?.repaired ?? null,
-    correlationId: routing?.correlation_id ?? routingMeta?.correlation_id ?? null,
+    correlationId: routing?.correlation_id ?? routingMeta?.correlation_id ?? runId ?? null,
     reviewType: routingMeta?.review_type ?? null,
     sourceContext: routingMeta?.source_context ?? null,
     subject: routingMeta?.subject ?? null,
@@ -213,6 +219,8 @@ function normalizeResultEnvelope(response) {
     completionTokens: usage?.completion_tokens ?? null,
     totalTokens: usage?.total_tokens ?? null,
     cost: usage?.cost ?? null,
+    runId,
+    queued,
     raw: response,
   };
 }
@@ -222,6 +230,18 @@ function ResultMetric({ label, value }) {
     React.createElement("div", { style: { fontSize: 12, color: "#94a3b8" } }, label),
     React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#f8fafc" } }, value || "N/A")
   );
+}
+
+async function fetchCompanyAgents(companyId) {
+  if (!companyId) return [];
+  const response = await fetch(`/api/companies/${encodeURIComponent(companyId)}/agents`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load agents (${response.status})`);
+  }
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 }
 
 function buildSummaryText(normalized) {
@@ -291,6 +311,16 @@ function WhatsNewPanel() {
 
 function ResultPanel({ result, currentOutcome, onSetOutcome, onReuseAsFollowUp, onEscalate, onApplyPreset, toast }) {
   const normalized = normalizeResultEnvelope(result);
+  if (normalized.queued) {
+    return React.createElement("div", { style: sectionCardStyle() },
+      React.createElement("div", { style: { display: "grid", gap: 6 } },
+        React.createElement("div", { style: mutedHeadingStyle() }, "Latest result"),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 700, color: "#f8fafc" } }, "Review queued"),
+        React.createElement("div", { style: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 } }, "Paperclip accepted the request and started an agent run, but this runtime only returned a run ID, not the finished review payload yet."),
+        React.createElement("div", { style: { fontSize: 12, color: "#93c5fd" } }, `Run ID: ${normalized.runId || 'unknown'}`)
+      )
+    );
+  }
   const summaryText = buildSummaryText(normalized);
   async function handleCopySummary() {
     try {
@@ -1092,6 +1122,7 @@ function HistoryPanel({ scopedEntries, companyEntries, loading, error, onRestore
 
 export function ExternalReviewLauncherPanel() {
   const host = useHostContext();
+  const canInvokeAgentReview = hasValidAgentContext(host);
   const invoke = usePluginAction("invoke_external_review");
   const saveReviewHistory = usePluginAction("save_review_history");
   const setReviewOutcome = usePluginAction("set_review_outcome");
@@ -1106,6 +1137,10 @@ export function ExternalReviewLauncherPanel() {
   const [taskSummary, setTaskSummary] = useState(() => summaryFromContext(host));
   const [content, setContent] = useState("Please review the current agent context and provide a decision, risks, and recommended next step.");
   const [contextNotes, setContextNotes] = useState(() => buildContextNotes(host));
+  const [availableAgents, setAvailableAgents] = useState([]);
+  const [selectedAgentId, setSelectedAgentId] = useState(() => host?.entityType === "agent" ? host?.entityId ?? "" : "");
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [agentsError, setAgentsError] = useState(null);
   const historyQuery = usePluginData("review_history", {
     companyId: host?.companyId ?? undefined,
     entityId: host?.entityId ?? undefined,
@@ -1136,14 +1171,44 @@ export function ExternalReviewLauncherPanel() {
   const [error, setError] = useState(null);
   const [pendingUndo, setPendingUndo] = useState(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!host?.companyId || host?.entityType === "agent") return undefined;
+    setAgentsLoading(true);
+    setAgentsError(null);
+    fetchCompanyAgents(host.companyId)
+      .then((agents) => {
+        if (cancelled) return;
+        setAvailableAgents(agents);
+        if (!selectedAgentId && agents.length > 0) {
+          const preferred = agents.find((agent) => agent?.status === "idle") || agents[0];
+          setSelectedAgentId(preferred?.id || "");
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setAgentsError(err?.message || "Failed to load agents");
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [host?.companyId, host?.entityType]);
+
+  const effectiveEntityType = host?.entityType === "agent" ? "agent" : (selectedAgentId ? "agent" : host?.entityType ?? null);
+  const effectiveEntityId = host?.entityType === "agent" ? (host?.entityId ?? null) : (selectedAgentId || null);
+  const canSubmitFromPage = Boolean(host?.companyId && effectiveEntityType === "agent" && effectiveEntityId);
+
   const contextPreview = useMemo(() => ({
     companyId: host?.companyId ?? null,
-    entityType: host?.entityType ?? null,
-    entityId: host?.entityId ?? null,
+    entityType: effectiveEntityType,
+    entityId: effectiveEntityId,
     projectId: host?.projectId ?? null,
     parentEntityId: host?.parentEntityId ?? null,
     userId: host?.userId ?? null,
-  }), [host]);
+  }), [host, effectiveEntityType, effectiveEntityId]);
 
   const currentOwnerLabel = useMemo(() => {
     const preferred = [host?.userName, host?.userDisplayName, host?.userLabel, host?.renderEnvironment?.userName, host?.renderEnvironment?.userDisplayName, host?.renderEnvironment?.userLabel]
@@ -1177,6 +1242,9 @@ export function ExternalReviewLauncherPanel() {
   useEffect(() => {
     if (!result) return;
     const normalized = normalizeResultEnvelope(result);
+    if (normalized.queued || !normalized.decision) {
+      return;
+    }
     const entry = {
       id: normalized.correlationId || `${Date.now()}`,
       createdAtLabel: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
@@ -1582,19 +1650,25 @@ export function ExternalReviewLauncherPanel() {
 
   async function handleSubmit(event) {
     event?.preventDefault?.();
+    if (!canSubmitFromPage) {
+      const message = "Select an agent before submitting an external review from the page view.";
+      setError(message);
+      toast({ tone: "warn", title: "Agent context required", body: message });
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       const response = await invoke({
         companyId: host?.companyId ?? undefined,
-        entityType: host?.entityType ?? undefined,
-        entityId: host?.entityId ?? undefined,
+        entityType: effectiveEntityType ?? undefined,
+        entityId: effectiveEntityId ?? undefined,
         context: {
           companyId: host?.companyId ?? undefined,
           companyPrefix: host?.companyPrefix ?? undefined,
           projectId: host?.projectId ?? undefined,
-          entityType: host?.entityType ?? undefined,
-          entityId: host?.entityId ?? undefined,
+          entityType: effectiveEntityType ?? undefined,
+          entityId: effectiveEntityId ?? undefined,
           parentEntityId: host?.parentEntityId ?? undefined,
           userId: host?.userId ?? undefined,
           renderEnvironment: host?.renderEnvironment ?? undefined,
@@ -1607,8 +1681,9 @@ export function ExternalReviewLauncherPanel() {
         content,
         contextNotes,
       });
+      const normalized = normalizeResultEnvelope(response);
       setResult(response);
-      toast({ tone: "success", title: "External review submitted", body: "Specialist invocation completed successfully." });
+      toast({ tone: "success", title: normalized.queued ? "External review queued" : "External review submitted", body: normalized.queued ? `Agent run started${normalized.runId ? ` (${normalized.runId})` : ''}.` : "Specialist invocation completed successfully." });
     } catch (err) {
       const message = err?.message || "External review failed";
       setError(message);
@@ -1629,6 +1704,24 @@ export function ExternalReviewLauncherPanel() {
       React.createElement("div", { style: mutedHeadingStyle() }, "Detected context"),
       React.createElement("pre", { style: { margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, color: "#93c5fd" } }, JSON.stringify(contextPreview, null, 2))
     ),
+    host?.entityType !== "agent" ? React.createElement("div", { style: { display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.28)", color: "#dbeafe" } },
+      React.createElement("div", { style: { fontWeight: 700, fontSize: 13 } }, "Page mode: choose an agent for submission"),
+      React.createElement("div", { style: { fontSize: 13, color: "#bfdbfe", lineHeight: 1.5 } }, "This page opened at company scope, so I loaded the available agents for you. Pick one below, then submit the external review normally."),
+      React.createElement("label", { style: labelStyle() },
+        React.createElement("span", null, "Target agent"),
+        React.createElement("select", {
+          value: selectedAgentId,
+          onChange: (event) => setSelectedAgentId(event.target.value),
+          style: inputStyle(false),
+          disabled: agentsLoading || availableAgents.length === 0,
+        },
+          React.createElement("option", { value: "" }, agentsLoading ? "Loading agents..." : "Select an agent"),
+          availableAgents.map((agent) => React.createElement("option", { key: agent.id, value: agent.id }, `${agent.name || agent.title || agent.id}${agent.status ? ` (${agent.status})` : ""}`))
+        )
+      ),
+      agentsError ? React.createElement("div", { style: { fontSize: 12, color: "#fca5a5" } }, agentsError) : null,
+      !canSubmitFromPage ? React.createElement("div", { style: { fontSize: 12, color: "#fde68a" } }, "Choose an agent to enable submission.") : null
+    ) : null,
     React.createElement(WhatsNewPanel),
     pendingUndo ? React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, borderRadius: 10, border: "1px solid rgba(251,191,36,0.28)", background: "rgba(120,53,15,0.18)" } },
       React.createElement("div", { style: { display: "grid", gap: 2 } },
