@@ -48,3 +48,18 @@ webapp/
 MEMORY.md
 SOUL.md
 memory/*.md
+
+# Root local archive / staging corpora (intentional local-only workspace records)
+AUDIT_*.md
+CC_RED_*.md
+CODEX_RED_*.md
+GEMINI_RED_*.md
+GROK_RED_*.md
+FRESH_EYES_*.md
+MASTER_ROADMAP.md
+SCRAPER_AGENT_REPORT_*.md
+SWEEP_REPORT_*.md
+reports/
+scripts/codex-warmstart.sh
+scripts/promote-routing-governor-v2.py
+scripts/promote-specialist-routing-artifacts.py
