@@ -94,8 +94,12 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 ANDREW_UUID = "ff8425cd-0596-470b-b2b8-3a7a30ef4e37"
 OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
-# DeepSeek direct API (fallback if OpenRouter unavailable)
+# DeepSeek direct API (legacy fallback only if explicitly enabled)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+OPENROUTER_LANE_MODEL_PAIRS = {
+    "premium": "deepseek/deepseek-v3.2",
+    "standard": "deepseek/deepseek-v3.2",
+}
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
@@ -146,6 +150,41 @@ except Exception as _supa_err:
 
 def _apify_api_token() -> str:
     return (os.getenv("APIFY_TOKEN") or os.getenv("APIFY_API_TOKEN") or "").strip()
+
+
+def _normalize_openrouter_route_value(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _openrouter_legacy_defaulting_enabled() -> bool:
+    return _normalize_openrouter_route_value(os.getenv("OPENROUTER_LEGACY_DEFAULTING_ENABLED")) == "true"
+
+
+def _openrouter_legacy_deepseek_fallback_enabled() -> bool:
+    return _normalize_openrouter_route_value(
+        os.getenv("OPENROUTER_LEGACY_DEEPSEEK_FALLBACK_ENABLED")
+    ) == "true"
+
+
+def _resolve_openrouter_lane_model(deal: dict[str, Any], deal_id: str) -> tuple[str, str]:
+    lane = _normalize_openrouter_route_value(deal.get("designated_lane"))
+    if not lane:
+        if not _openrouter_legacy_defaulting_enabled():
+            raise ValueError("Missing designated_lane for OpenRouter validation")
+        lane = _normalize_openrouter_route_value(os.getenv("OPENROUTER_LEGACY_DEFAULT_LANE", "premium"))
+        logger.warning(
+            "[AI_VALIDATE] deal_id=%s missing designated_lane; using legacy default lane=%s",
+            deal_id,
+            lane or "unknown",
+        )
+
+    model = _normalize_openrouter_route_value(deal.get("openrouter_model"))
+    expected_model = OPENROUTER_LANE_MODEL_PAIRS.get(lane)
+    if not expected_model:
+        raise ValueError(f"Unsupported OpenRouter lane: {lane}")
+    if model and model != expected_model:
+        raise ValueError(f"Unsupported OpenRouter lane/model pair: {lane}/{model}")
+    return lane, expected_model
 
 
 def _derive_supabase_direct_db_url() -> Optional[str]:
@@ -2753,8 +2792,6 @@ async def ai_validate_hot_deals(deals: list) -> list:
     import httpx
 
     validated_deals: list = []
-    # Use DeepSeek direct API (cheaper, faster than OpenRouter)
-    # Use OpenRouter with deepseek-v3.2 (6x cheaper than deepseek-reasoner, sufficient for VALID/INVALID)
     url = "https://openrouter.ai/api/v1/chat/completions"
     api_key = OPENROUTER_API_KEY or DEEPSEEK_API_KEY
     headers = {
@@ -2764,8 +2801,29 @@ async def ai_validate_hot_deals(deals: list) -> list:
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
+        api_key = OPENROUTER_API_KEY
+        if not api_key and _openrouter_legacy_deepseek_fallback_enabled():
+            api_key = DEEPSEEK_API_KEY
+        if not api_key:
+            logger.warning(
+                "[AI_VALIDATE] result=SKIP reason=missing_openrouter_api_key"
+            )
+            return []
+
+        headers["Authorization"] = f"Bearer {api_key}"
+
         for deal in deals:
             deal_id = deal.get("id") or deal.get("opportunity_id") or deal.get("listing_id") or "unknown"
+            try:
+                lane, model = _resolve_openrouter_lane_model(deal, str(deal_id))
+            except Exception as exc:
+                logger.warning(
+                    "[AI_VALIDATE] deal_id=%s result=SKIP reason=invalid_route error=%s",
+                    deal_id,
+                    exc,
+                )
+                continue
+
             mmr_estimated = deal.get("mmr_estimated")
             if mmr_estimated is None:
                 mmr_estimated = (deal.get("score_breakdown") or {}).get("mmr_estimated")
@@ -2779,7 +2837,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
             )
 
             payload = {
-                "model": "deepseek/deepseek-v3.2",
+                "model": model,
                 "messages": [
                     {"role": "user", "content": prompt},
                 ],
@@ -2808,31 +2866,37 @@ async def ai_validate_hot_deals(deals: list) -> list:
 
                 if verdict == "VALID":
                     logger.info(
-                        "[AI_VALIDATE] deal_id=%s result=VALID reason=%s",
+                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=VALID reason=%s",
                         deal_id,
+                        lane,
+                        model,
                         reason or "validated by model",
                     )
                     validated_deals.append(deal)
                 elif verdict == "INVALID":
                     logger.warning(
-                        "[AI_VALIDATE] deal_id=%s result=INVALID reason=%s",
+                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=INVALID reason=%s",
                         deal_id,
+                        lane,
+                        model,
                         reason or "rejected by model",
                     )
                 else:
                     logger.warning(
-                        "[AI_VALIDATE] deal_id=%s result=VALID reason=unparseable_response_kept_open content=%s",
+                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=SKIP reason=unparseable_response content=%s",
                         deal_id,
+                        lane,
+                        model,
                         content,
                     )
-                    validated_deals.append(deal)
             except Exception as exc:
                 logger.warning(
-                    "[AI_VALIDATE] deal_id=%s result=VALID reason=api_error_fail_open error=%s",
+                    "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=SKIP reason=api_error error=%s",
                     deal_id,
+                    lane,
+                    model,
                     exc,
                 )
-                validated_deals.append(deal)
 
     return validated_deals
 
