@@ -1,12 +1,12 @@
 # MEMORY.md — Ja'various Long-Term Memory
 
-Last updated: 2026-03-10
+Last updated: 2026-04-03
 
 ---
 
 ## Who I Am
 
-- **Name:** Ja'various — named by Andrew. "Cousin of Jarvis from Iron Man, backside of the family." 😄
+- **Name:** Ja'various — named by Andrew. "Cousin of Jarvis from Iron Man, Black side of the family." 😄
 - **Role:** Personal AI assistant + lead engineer on DealerScope
 - **Running on:** OpenClaw, Mac Computer (HQ), channel: Telegram
 
@@ -27,6 +27,35 @@ Last updated: 2026-03-10
 ---
 
 ## The Main Project: DealerScope
+
+### 📌 Pinned For Later — Enterprise Upgrade Direction (2026-04-03)
+- Andrew wants DealerScope taken to the next level with enterprise-grade systems, especially around memory, operational continuity, and agent infrastructure.
+- Current pinned recommendation direction:
+  - build a **first-party memory system** on Supabase/Postgres
+  - use **daily logs + nightly long-term consolidation**
+  - add **hybrid retrieval with citations**
+  - adopt **Ollama** as the local/private inference layer
+  - benchmark **Gemma / Qwen / Nemotron** on real DealerScope tasks before standardizing
+  - prefer **Relay.app** over GumLoop for controlled human-in-loop workflows
+- Not priority/core right now: NotebookLM-style workflow as core infrastructure, MiniMax, TurboQuant.
+- Long-form draft report saved at:
+  `/Users/andrewpilson/.openclaw/workspace/reports/dealerscope-enterprise-ai-stack-recommendations-2026-04-03.md`
+
+### 📌 ACTIVE — Full Migration: Claude + OpenAI → Open Source LLMs (2026-04-03)
+- Anthropic ended subscription-included usage for third-party harnesses on April 4, 2026 at 12pm PT.
+- Andrew has directed: move away from BOTH Claude AND OpenAI entirely. Destination is open source LLMs.
+- Target stack: Ollama local inference, OpenRouter for provider-neutral routing, Qwen/Gemma/DeepSeek as primary models.
+- Master agent handoff file (complete context for any new agent):
+  - `/Users/andrewpilson/.openclaw/workspace/reports/MASTER-AGENT-HANDOFF-2026-04-03.md`
+- Migration inventory: `reports/claude-exhaustive-inventory-2026-04-03.md` (135 files matched)
+- Migration checklist: `reports/claude-to-chatgpt-oauth-prioritized-migration-checklist-2026-04-03.md`
+- Status as of 2026-04-03: documentation complete. Runtime config not yet changed. Hard migration pending.
+- Desired end state:
+  - Open source LLM as primary runtime
+  - Claude/Anthropic fully removed or emergency-fallback only
+  - OpenAI fully removed or emergency-fallback only
+  - All memory/docs/workflows updated to reflect new direction
+
 
 ### What It Is
 AI-powered wholesale vehicle arbitrage platform. Scrapes government/public auctions (GovDeals, PublicSurplus) every 3hrs, scores deals using institutional dealer logic, surfaces profitable vehicles to buy below MMR and resell to dealers at Manheim.
@@ -126,7 +155,7 @@ All 4 phases of roadmap completed. Key additions:
 - ✅ Texas state surplus added to PublicSurplus actor
 - ✅ NHTSA VIN decode + NLP condition scoring
 - ✅ Scraper alerts + daily digest → Dealerscope Alerts channel (fixed 2026-03-18)
-- ✅ Gemini API key fixed: AIzaSyCFl6jhR9T2L2sAJOgKslGmSwz1qwivCvM
+- ✅ Gemini API key fixed: [REDACTED_SECRET]
 - ✅ 4-model failover: Claude Max → ChatGPT OAuth → OpenAI API gpt-4.1-mini → Gemini
 - ✅ OpenAI Tier 2 unlocked (2M TPM on gpt-4.1-mini)
 - ✅ Codex switched to gpt-4.1-mini
@@ -196,17 +225,45 @@ All 4 phases of roadmap completed. Key additions:
 - Connection string: `postgresql://postgres.lbnxzvqppccajllsqaaw:ja'varioustheclawbot@aws-0-us-west-1.pooler.supabase.com:6543/postgres`
 
 ### Railway
-- Token: `c5bc110a-c58a-4e49-b181-bbfd6dd26992`
+- Token (old, expired): `c5bc110a-c58a-4e49-b181-bbfd6dd26992`
+- Token (new 2026-03-24): `440362cc-6363-4625-aec3-e835a07df266`
+- Token (read-only attempt): `f205ac4d-897d-4a80-a12b-1eb1da122fcd`
+- ⚠️ Railway personal tokens DO NOT work with GraphQL API or CLI — all return "Not Authorized"
+- Railway API access requires Team plan or service tokens (not personal tokens)
+- Env var changes must be done manually via dashboard: railway.app → project → service → Variables
 - Project: `exemplary-mercy` (ID: `54a9370c-89ae-41fe-ac64-c01d8c2fbaad`)
 - App service: `dealscan-insight` (ID: `fbc5a039-4de7-468c-abb1-71dcdaf47f38`)
 - Live URL: `https://dealscan-insight-production.up.railway.app`
 - Postgres service ID: `8fa81c37-8823-4fa1-b32f-44fbafa2af4b`
 - Redis service ID: `c2e53ea0-3bc4-409f-8030-e4a9e2e6ed5a`
 
+### Vercel
+- Account API Token: `[REDACTED_SECRET]`
+- Project: dealscan-insight — `prj_Ya5LZmAqfQfUKpMDtyAmJQI4DjOY`
+- Can manage env vars + trigger redeploys via API (no console needed) ✅
+
+### Supabase Management API
+- Token: `[REDACTED_SECRET]`
+- Can run SQL migrations directly via API (no SQL editor needed) ✅
+
+### GitHub
+- PAT: `[REDACTED_SECRET]` (repo + workflow scope, no expiry)
+- Repo: `pilsonandrew-hub/dealscan-insight`
+- Can set secrets, trigger workflows, manage repo via API ✅
+
+### Firecrawl
+- API Key: `[REDACTED_SECRET]`
+- Status: ✅ Live
+
+### Slack (Dealerscope workspace)
+- Bot Token: `[REDACTED_SECRET]`
+- Channel ID: `C0ALM52FV25`
+- Bot: javariousthebot @ Dealerscope workspace ✅
+
 ### Apify
 - Account: `Javariousthebot` (FREE plan — do NOT upgrade until pipeline validated)
-- Token: `apify_api_Vaz9Ij2D5E42LA7cHF39jnMVzpVHID3nuspZ`
-- Webhook secret: `sbEC0dNgb7Ohg3rDV`
+- Token: `[REDACTED_SECRET]`
+- Webhook secret: `[REDACTED_SECRET]`
 - ds-govdeals actor ID: `CuKaIAcWyFS0EPrAz`
 - ds-publicsurplus actor ID: `9xxQLlRsROnSgA42i`
 - Placeholder webhook URL: `https://dealerscope-api.com/api/ingest/apify`
@@ -215,36 +272,53 @@ All 4 phases of roadmap completed. Key additions:
 - **OLD project** `lgpugcflvrqhslfnsjfh` — PAUSED/DEAD (9 months), do not use
 - **NEW project ID:** `lbnxzvqppccajllsqaaw`
 - **NEW URL:** `https://lbnxzvqppccajllsqaaw.supabase.co`
-- **Anon key:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI`
-- **Service role key:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzIwMTQ3MSwiZXhwIjoyMDg4Nzc3NDcxfQ.gLFMWuEVDbwMMHYL1CPRwNv1oGukhBTFYZGYTuXftSg`
+- **Anon key:** `[REDACTED_SECRET]`
+- **Service role key:** `[REDACTED_SECRET]`
 
 ### OpenAI
-- Key: `sk-proj-WCHpaZar...` (full key in openclaw.json)
+- Key: `[REDACTED_SECRET]`
 - Status: Free tier, quota=0, needs billing
 
 ### Gemini
-- Key: `AIzaSyCFl6jhR9T2L2sAJOgKslGmSwz1qwivCvM` ("Gemini ChatClaw Api")
-- Status: ✅ Live — 45 models available, free tier
+- Key (old, free tier exhausted): `[REDACTED_SECRET]`
+- Key (new, paid plan): `[REDACTED_SECRET]` ✅ Active
+- Model confirmed working: `gemini-3.1-pro-preview`
+- Status: ✅ Live — paid plan
 
 ### OpenRouter
-- Key: `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`
-- Status: ✅ Live — 350 models (GPT-5, Claude, Gemini, Grok, Llama, Mistral, etc.)
-- Added as 5th fallback in openclaw.json
+- Key (old, dead): `[REDACTED_SECRET]`
+- Key (new, active): `[REDACTED_SECRET]` ✅ Active
+- Balance: $8.11 (as of 2026-03-26)
+- Status: ✅ Live — 350+ models available
 - Base URL: https://openrouter.ai/api/v1
 
 ### Telegram Bot
-- Token: `8770839167:AAEPvbNtS5Fr3LPmoEUM-9CJ14r7OXhIgzI`
+- Token: `[REDACTED_SECRET]`
 - **Dealerscope Alerts channel ID: `-1003672399222`**
 - Bot (@JarviscousinJavariousbot) is admin in the channel
 - All hot deal alerts + SniperScope alerts route here
 
 ### Notion
-- Integration Token: `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` ("DealerScope Bot")
+- Integration Token: `[REDACTED_SECRET]` ("DealerScope Bot")
 - Database ID: `32034c00de4c80fdae18eb02848a9f39` ("Dealerscope Deals")
 - Status: ✅ Live — wired to Railway, deals will auto-sync on ingest
 
+### Cursor
+- API Key: `crsr_5711f6fab646e32c33cb1daf607187ba48ab7dc8d8d23880eec893b5ca815491`
+- Status: ✅ Saved — cursor-review.yml is business rule validation only (no API calls needed)
+
+### DeepSeek
+- API Key: `[REDACTED_SECRET]`
+- Base URL: `https://api.deepseek.com/v1`
+- Status: ✅ Direct account — use instead of OpenRouter for DeepSeek calls
+- Models: `deepseek-reasoner` (R1), `deepseek-chat` (V3)
+
 ### Perplexity
 - Key: `01e7a2ff-1076-4ca1-8721-c43f19770950`
+
+### Moonshot / Kimi
+- Key: `[REDACTED_SECRET]`
+- Status: ✅ Saved for MetaClaw setup
 
 ---
 
@@ -263,9 +337,27 @@ Sonnet/subagents handle planning, analysis, config, and deployment only. Never w
 
 **Cross-review rule (ALWAYS):** When Claude Code builds something, Codex reviews it. When Codex builds something, Claude Code reviews it. Both must sign off before shipping.
 
+## Paperclip (Mission Control Dashboard) — DO NOT FORGET
+
+- **What it is:** paperclipai.com — open source AI company orchestrator. Sits above OpenClaw. Manages the full agent org chart.
+- **Installed via:** `npx paperclipai` — binary at `/Users/andrewpilson/.npm/_npx/43414d9b790239bb/node_modules/paperclipai/dist/index.js`
+- **Config dir:** `/Users/andrewpilson/.paperclip/instances/default/`
+- **Dashboard URL:** http://127.0.0.1:3100/DEA/dashboard
+- **Company name:** DEA (DealerScope Enterprise Agent)
+- **Org chart:** 7 agents — Ja'various, Codex, Cursor, Claude Auditor, DeepSeek, Gemini, Grok
+- **DB:** Embedded Postgres on port 54329
+- **To START (required after reboot):**
+  ```
+  nohup node /Users/andrewpilson/.npm/_npx/43414d9b790239bb/node_modules/paperclipai/dist/index.js run > /tmp/paperclip.log 2>&1 &
+  ```
+- **To CHECK if running:** `curl -s http://127.0.0.1:3100/` — should return HTML
+- **Logs:** `/tmp/paperclip.log` and `/Users/andrewpilson/.paperclip/instances/default/logs/server.log`
+- **Does NOT auto-start** — must be launched manually or I need to add a LaunchAgent for it
+- Built/set up on 2026-03-26
+
 ## Tools & Setup
 
-- **Codex CLI:** `~/.local/bin/codex` (v0.113.0) — installed but OpenAI has no billing credits
+- **Codex CLI:** `/usr/local/bin/codex` (v0.116.0) — ChatGPT Plus OAuth, model=gpt-5.4-mini (o3 retired)
 - **Failover script:** `workspace/scripts/code-agent.sh`
 - **Chromium:** `/Users/andrewpillar/Library/Caches/ms-playwright/chromium_headless_shell-1208`
 - **Claude Code rate limit:** resets daily at 1pm PT
