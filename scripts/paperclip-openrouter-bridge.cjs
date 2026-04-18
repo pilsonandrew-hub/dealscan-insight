@@ -2,7 +2,7 @@
 const http = require('http');
 const path = require('node:path');
 
-const { buildBridgeRequest } = require('./paperclip-routing-governor');
+const { buildBridgeRequest } = require('./paperclip-routing-governor.cjs');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -12,33 +12,63 @@ const OPENROUTER_LEGACY_DEFAULT_MODEL = normalizeString(process.env.OPENROUTER_L
 const ROUTING_GOVERNOR_CONFIG_PATH = normalizeString(process.env.PAPERCLIP_ROUTING_GOVERNOR_CONFIG_PATH) || path.join(__dirname, '..', 'reports', 'paperclip-routing-governor-config-v2-2026-04-16.json');
 
 const OPENROUTER_LANES = Object.freeze({
-  openrouter_claude_review: Object.freeze({
+  openrouter_claude_premium: Object.freeze({
     provider: 'openrouter',
-    defaultModel: 'anthropic/claude-sonnet-4.5',
+    defaultModel: 'anthropic/claude-opus-4.7',
     allowedModels: Object.freeze([
+      'anthropic/claude-opus-4.7',
       'anthropic/claude-sonnet-4.5',
       'anthropic/claude-3.7-sonnet',
     ]),
   }),
-  openrouter_claude_fallback: Object.freeze({
+  openrouter_claude_review: Object.freeze({
     provider: 'openrouter',
-    defaultModel: 'anthropic/claude-3.7-sonnet',
+    defaultModel: 'anthropic/claude-opus-4.7',
     allowedModels: Object.freeze([
+      'anthropic/claude-opus-4.7',
+      'anthropic/claude-sonnet-4.5',
       'anthropic/claude-3.7-sonnet',
     ]),
   }),
-  openrouter_deepseek_reasoner: Object.freeze({
+  openrouter_gemini_review: Object.freeze({
+    provider: 'openrouter',
+    defaultModel: 'google/gemini-2.5-flash',
+    allowedModels: Object.freeze([
+      'google/gemini-2.5-flash',
+      'google/gemini-2.0-flash-001',
+      'google/gemini-2.5-flash-lite',
+    ]),
+  }),
+  openrouter_gemini_proven: Object.freeze({
+    provider: 'openrouter',
+    defaultModel: 'google/gemini-2.0-flash-001',
+    allowedModels: Object.freeze([
+      'google/gemini-2.0-flash-001',
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-flash-lite',
+    ]),
+  }),
+  openrouter_deepseek_workhorse: Object.freeze({
     provider: 'openrouter',
     defaultModel: 'deepseek/deepseek-v3.2',
     allowedModels: Object.freeze([
       'deepseek/deepseek-v3.2',
     ]),
   }),
-  openrouter_general: Object.freeze({
+  openrouter_gemini_triage: Object.freeze({
     provider: 'openrouter',
-    defaultModel: 'deepseek/deepseek-v3.2',
+    defaultModel: 'google/gemini-2.5-flash-lite',
     allowedModels: Object.freeze([
-      'deepseek/deepseek-v3.2',
+      'google/gemini-2.5-flash-lite',
+      'google/gemini-2.0-flash-001',
+      'google/gemini-2.5-flash',
+    ]),
+  }),
+  openrouter_kimi_specialist: Object.freeze({
+    provider: 'openrouter',
+    defaultModel: 'moonshotai/kimi-k2',
+    allowedModels: Object.freeze([
+      'moonshotai/kimi-k2',
     ]),
   }),
 });
@@ -91,8 +121,14 @@ function validateLaneCatalog() {
   }
 }
 
+function normalizeTaskClassAlias(value) {
+  const normalized = normalizeString(value);
+  if (normalized === 'general_default') return 'general_chat';
+  return normalized;
+}
+
 function inferTaskClass(body) {
-  const explicitTaskClass = normalizeString(body?.task_class || body?.taskClass || body?.routing?.task_class);
+  const explicitTaskClass = normalizeTaskClassAlias(body?.task_class || body?.taskClass || body?.routing?.task_class);
   if (explicitTaskClass) return explicitTaskClass;
 
   const ctx = body?.context || {};
@@ -143,11 +179,20 @@ function resolveLaneAndModel(body) {
   const requestedLane = normalizeLaneName(body?.lane);
   const requestedModel = normalizeString(body?.model);
   const legacyEnabled = OPENROUTER_LEGACY_DEFAULTS_ENABLED;
-  const taskClass = inferTaskClass(body);
+  const taskClass = normalizeTaskClassAlias(inferTaskClass(body));
+  const agentHint = normalizeString(
+    body?.agent_hint ||
+    body?.agentHint ||
+    body?.context?.agent_hint ||
+    body?.context?.agentHint ||
+    body?.context?.agent?.name ||
+    body?.context?.agentName ||
+    body?.context?.agent?.title
+  );
 
   if (!requestedLane && !requestedModel) {
     const bridgeRequest = buildBridgeRequest(
-      { task_class: taskClass },
+      { task_class: taskClass, agent_hint: agentHint, context: body?.context || {} },
       { configPath: ROUTING_GOVERNOR_CONFIG_PATH }
     );
     if (bridgeRequest.blocked) {
@@ -170,7 +215,9 @@ function resolveLaneAndModel(body) {
       compatibilityDefaultsUsed: { lane: false, model: false },
       taskClass,
       routing: bridgeRequest.routing,
+      contract: bridgeRequest.contract || null,
       routingSource: 'governor',
+      agentHint,
     };
   }
 
@@ -182,10 +229,47 @@ function resolveLaneAndModel(body) {
   };
 
   if (!lane) {
+    if (!legacyEnabled && taskClass) {
+      const bridgeRequest = buildBridgeRequest(
+        { task_class: taskClass, agent_hint: agentHint, context: body?.context || {} },
+        { configPath: ROUTING_GOVERNOR_CONFIG_PATH }
+      );
+      if (bridgeRequest.blocked) {
+        throw validationError(`Task class ${taskClass} is blocked from external bridge routing`, 'blocked_task_class');
+      }
+      lane = normalizeLaneName(bridgeRequest.lane);
+      model = model || normalizeString(bridgeRequest.model);
+      compatibilityDefaultsUsed.lane = true;
+      if (!body?.model && bridgeRequest.model) {
+        compatibilityDefaultsUsed.model = true;
+      }
+      const laneConfig = OPENROUTER_LANES[lane];
+      if (!laneConfig) {
+        throw validationError(`Unsupported lane from routing governor: ${lane}`, 'unsupported_lane');
+      }
+      if (!model) {
+        throw validationError(`Missing model for governor-selected lane ${lane}`, 'missing_model');
+      }
+      if (!laneConfig.allowedModels.includes(model)) {
+        throw validationError(`Model ${model} is not allowed for lane ${lane}`, 'lane_model_not_allowed');
+      }
+      return {
+        lane,
+        model,
+        laneConfig,
+        legacyDefaultsUsed: true,
+        compatibilityDefaultsUsed,
+        taskClass,
+        routing: bridgeRequest.routing,
+        contract: bridgeRequest.contract || null,
+        routingSource: 'governor_compat',
+        agentHint,
+      };
+    }
     if (!legacyEnabled) {
       throw validationError('Missing lane for OpenRouter bridge request', 'missing_lane');
     }
-    lane = OPENROUTER_LEGACY_DEFAULT_LANE || 'openrouter_general';
+    lane = OPENROUTER_LEGACY_DEFAULT_LANE || 'openrouter_deepseek_workhorse';
     compatibilityDefaultsUsed.lane = true;
   }
 
@@ -214,7 +298,34 @@ function resolveLaneAndModel(body) {
     compatibilityDefaultsUsed,
     taskClass,
     routing: body?.routing || null,
+    contract: body?.contract && typeof body.contract === 'object' ? body.contract : null,
     routingSource: 'direct',
+    agentHint,
+  };
+}
+
+function buildRunPrompt(body, contract) {
+  if (!contract || typeof contract !== 'object') {
+    return {
+      systemPrompt:
+        typeof body?.system_prompt === 'string' && body.system_prompt.trim()
+          ? body.system_prompt.trim()
+          : 'You are a Paperclip agent backend. Respond concisely and use plain text.',
+      userPrompt: buildPrompt(body),
+      maxTokens: Number.isInteger(body?.max_tokens) && body.max_tokens > 0 ? body.max_tokens : 700,
+      responseFormat: undefined,
+    };
+  }
+
+  const contractPrompt = normalizeString(contract.system_prompt);
+  const responseFormat = contract.response_format === 'json_compact' ? { type: 'json_object' } : undefined;
+  const defaultMaxTokens = contract.response_format === 'json_compact' ? 240 : 700;
+
+  return {
+    systemPrompt: contractPrompt || 'Return only the required structured output.',
+    userPrompt: buildPrompt(body),
+    maxTokens: Number.isInteger(body?.max_tokens) && body.max_tokens > 0 ? body.max_tokens : defaultMaxTokens,
+    responseFormat,
   };
 }
 
@@ -237,11 +348,37 @@ function buildPrompt(body) {
   if (ctx.issueDescription) parts.push(`Description:\n${ctx.issueDescription}`);
   if (ctx.prompt) parts.push(`Prompt:\n${ctx.prompt}`);
   if (ctx.task && typeof ctx.task === 'object') parts.push(`Task JSON:\n${JSON.stringify(ctx.task, null, 2)}`);
+  const wake = ctx.paperclipWake && typeof ctx.paperclipWake === 'object' ? ctx.paperclipWake : null;
+  if (wake) {
+    const wakeLines = [];
+    if (wake.reason) wakeLines.push(`Wake reason: ${wake.reason}`);
+    if (wake.issue?.identifier || wake.issue?.title) {
+      wakeLines.push(`Issue ref: ${[wake.issue?.identifier, wake.issue?.title].filter(Boolean).join(' - ')}`);
+    }
+    const wakeComments = Array.isArray(wake.comments) ? wake.comments : [];
+    if (wakeComments.length) {
+      const renderedComments = wakeComments.map((comment, index) => {
+        const authorType = comment?.author?.type || 'unknown';
+        const authorId = comment?.author?.id || 'unknown';
+        const header = `Comment ${index + 1} (${comment?.id || 'no-id'}, ${authorType}:${authorId}, ${comment?.createdAt || 'unknown-time'})`;
+        const truncationNote = comment?.bodyTruncated ? '\n[truncated]' : '';
+        return `${header}\n${comment?.body || ''}${truncationNote}`;
+      });
+      wakeLines.push(`Wake thread context:\n${renderedComments.join('\n\n')}`);
+    }
+    if (wake.commentWindow) {
+      wakeLines.push(`Wake comment window: ${JSON.stringify(wake.commentWindow)}`);
+    }
+    if (wake.fallbackFetchNeeded) {
+      wakeLines.push('Wake payload indicates additional earlier thread context may exist beyond the inline window.');
+    }
+    if (wakeLines.length) parts.push(wakeLines.join('\n\n'));
+  }
   if (parts.length === 0) parts.push(`Paperclip context:\n${JSON.stringify(ctx, null, 2)}`);
   return parts.join('\n\n');
 }
 
-function buildTaskPrompt(body) {
+function buildTaskPrompt(body, contract) {
   const inputs = body?.inputs && typeof body.inputs === 'object' ? body.inputs : {};
   const contextNotes = Array.isArray(inputs.context_notes) ? inputs.context_notes : [];
   const requiredOutput = Array.isArray(body?.required_output) ? body.required_output : [];
@@ -259,6 +396,9 @@ function buildTaskPrompt(body) {
   }
   if (requiredOutput.length) {
     lines.push(`Required output fields:\n- ${requiredOutput.join('\n- ')}`);
+  }
+  if (contract?.output_contract && typeof contract.output_contract === 'object') {
+    lines.push(`Contract:\n${JSON.stringify(contract.output_contract, null, 2)}`);
   }
   return lines.join('\n\n');
 }
@@ -524,6 +664,9 @@ async function requestOpenRouterChat({ model, systemPrompt, userPrompt, maxToken
       { role: 'user', content: userPrompt },
     ],
     max_tokens: maxTokens,
+    ...(model.startsWith('google/gemini')
+      ? { reasoning: { exclude: true } }
+      : {}),
   };
   if (responseFormat) payload.response_format = responseFormat;
 
@@ -556,7 +699,7 @@ function enforceExternalReviewOutput(rawContent, routingMetadata) {
 
 function validateTypedTaskPacket(body) {
   const agent = normalizeString(body?.agent);
-  const taskClass = normalizeString(body?.task_class);
+  const taskClass = normalizeTaskClassAlias(body?.task_class);
   if (agent !== 'external_review') {
     throw validationError('Unsupported specialist agent for /task transport', 'unsupported_specialist_agent');
   }
@@ -591,6 +734,48 @@ function validateTypedTaskPacket(body) {
   };
 }
 
+function extractTextContent(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          return normalizeString(item.text || item.content || item.output_text || item.reasoning);
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  if (value && typeof value === 'object') {
+    return normalizeString(value.text || value.content || value.output_text);
+  }
+  return '';
+}
+
+function extractOpenRouterContent(data) {
+  const direct = extractTextContent(data?.choices?.[0]?.message?.content);
+  if (direct) return direct;
+
+  const altMessage = extractTextContent(data?.choices?.[0]?.message);
+  if (altMessage) return altMessage;
+
+  const outputText = extractTextContent(data?.output_text);
+  if (outputText) return outputText;
+
+  const content = extractTextContent(data?.content);
+  if (content) return content;
+
+  const responsesOutput = Array.isArray(data?.output)
+    ? data.output.map((item) => extractTextContent(item?.content || item)).filter(Boolean).join('\n').trim()
+    : '';
+  if (responsesOutput) return responsesOutput;
+
+  return '';
+}
+
 function buildHealthResponse() {
   return {
     ok: true,
@@ -620,29 +805,26 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const packet = validateTypedTaskPacket(body);
-      const bridgeRequest = buildBridgeRequest(
-        { task_class: packet.taskClass },
-        { configPath: ROUTING_GOVERNOR_CONFIG_PATH }
-      );
-      if (bridgeRequest.blocked) {
-        throw validationError(`Task class ${packet.taskClass} is blocked from typed task transport`, 'blocked_task_class');
-      }
-      const lane = normalizeLaneName(bridgeRequest.lane);
-      const model = normalizeString(bridgeRequest.model);
-      const laneConfig = OPENROUTER_LANES[lane];
-      if (!laneConfig) {
-        throw validationError(`Unsupported lane from routing governor: ${lane}`, 'unsupported_lane');
-      }
+      const resolved = resolveLaneAndModel({
+        ...body,
+        context: {
+          ...(body?.context && typeof body.context === 'object' ? body.context : {}),
+          task_class: packet.taskClass,
+        },
+      });
+      const { lane, model, laneConfig, routing, contract } = resolved;
 
       const schema = getExternalReviewResultSchema();
-      const systemPrompt = 'You are the External Review Agent. Return ONLY valid minified JSON with exactly these top-level keys: decision, confidence, top_risks, recommended_next_step, escalation_suggested, routing_metadata. No markdown fences. No prose.';
-      const userPrompt = buildTaskPrompt(body);
-      const maxTokens = Number.isInteger(body?.max_tokens) && body.max_tokens > 0 ? body.max_tokens : 260;
+      const fallbackSystemPrompt = 'You are the External Review Agent. Return ONLY valid minified JSON with exactly these top-level keys: decision, confidence, top_risks, recommended_next_step, escalation_suggested, routing_metadata. No markdown fences. No prose.';
+      const systemPrompt = normalizeString(contract?.system_prompt) || fallbackSystemPrompt;
+      const userPrompt = buildTaskPrompt(body, contract);
+      const maxTokens = Number.isInteger(body?.max_tokens) && body.max_tokens > 0 ? body.max_tokens : (contract?.response_format === 'json_compact' ? 240 : 260);
       const routingMetadata = {
-        ...(bridgeRequest.routing || {}),
+        ...(routing || {}),
         selected_lane: lane,
         selected_model: model,
         provider: laneConfig.provider,
+        contract_applied: Boolean(contract),
       };
 
       let firstAttempt = await requestOpenRouterChat({
@@ -680,7 +862,9 @@ const server = http.createServer(async (req, res) => {
             result: enforced.normalized,
             usage: firstAttempt.data?.usage || null,
             provider: firstAttempt.data?.provider || laneConfig.provider,
-            routing: bridgeRequest.routing,
+            routing,
+            contract_applied: Boolean(contract),
+            contract,
             raw_result: rawContent,
           });
         }
@@ -719,7 +903,9 @@ const server = http.createServer(async (req, res) => {
             result: repaired.normalized,
             usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
             provider: repairAttempt.data?.provider || laneConfig.provider,
-            routing: bridgeRequest.routing,
+            routing,
+            contract_applied: Boolean(contract),
+            contract,
             raw_result: repairedRaw,
             repaired: true,
           });
@@ -737,7 +923,9 @@ const server = http.createServer(async (req, res) => {
             result: heuristic,
             usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
             provider: repairAttempt.data?.provider || laneConfig.provider,
-            routing: bridgeRequest.routing,
+            routing,
+            contract_applied: Boolean(contract),
+            contract,
             raw_result: repairedRaw,
             repaired: true,
             fallback_normalized: true,
@@ -751,7 +939,9 @@ const server = http.createServer(async (req, res) => {
           model,
           validation_errors: repaired.validationErrors,
           raw_result: repairedRaw,
-          routing: bridgeRequest.routing,
+          routing,
+          contract_applied: Boolean(contract),
+          contract,
         });
       } catch (error) {
         const heuristic = buildHeuristicExternalReviewResult(repairedRaw, routingMetadata);
@@ -766,7 +956,9 @@ const server = http.createServer(async (req, res) => {
             result: heuristic,
             usage: repairAttempt.data?.usage || firstAttempt.data?.usage || null,
             provider: repairAttempt.data?.provider || laneConfig.provider,
-            routing: bridgeRequest.routing,
+            routing,
+            contract_applied: Boolean(contract),
+            contract,
             raw_result: repairedRaw,
             repaired: true,
             fallback_normalized: true,
@@ -780,7 +972,9 @@ const server = http.createServer(async (req, res) => {
           model,
           validation_errors: [error instanceof Error ? error.message : 'invalid_json_output'],
           raw_result: repairedRaw,
-          routing: bridgeRequest.routing,
+          routing,
+          contract_applied: Boolean(contract),
+          contract,
         });
       }
     } catch (err) {
@@ -805,13 +999,8 @@ const server = http.createServer(async (req, res) => {
         console.error('[paperclip-openrouter-bridge] request body:', JSON.stringify(body));
       } catch {}
     }
-    const { lane, model, laneConfig, legacyDefaultsUsed, compatibilityDefaultsUsed, taskClass, routing, routingSource } = resolveLaneAndModel(body);
-    const prompt = buildPrompt(body);
-    const systemPrompt =
-      typeof body?.system_prompt === 'string' && body.system_prompt.trim()
-        ? body.system_prompt.trim()
-        : 'You are a Paperclip agent backend. Respond concisely and use plain text.';
-    const maxTokens = Number.isInteger(body?.max_tokens) && body.max_tokens > 0 ? body.max_tokens : 700;
+    const { lane, model, laneConfig, legacyDefaultsUsed, compatibilityDefaultsUsed, taskClass, routing, contract, routingSource, agentHint } = resolveLaneAndModel(body);
+    const runPrompt = buildRunPrompt(body, contract);
 
     const upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -824,10 +1013,14 @@ const server = http.createServer(async (req, res) => {
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
+          { role: 'system', content: runPrompt.systemPrompt },
+          { role: 'user', content: runPrompt.userPrompt },
         ],
-        max_tokens: maxTokens,
+        max_tokens: runPrompt.maxTokens,
+        ...(runPrompt.responseFormat ? { response_format: runPrompt.responseFormat } : {}),
+        ...(model.startsWith('google/gemini')
+          ? { reasoning: { exclude: true } }
+          : {}),
       }),
     });
 
@@ -842,7 +1035,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    const content = data?.choices?.[0]?.message?.content || 'No response content.';
+    const content = extractOpenRouterContent(data) || 'No response content.';
     return sendJson(res, 200, {
       ok: true,
       lane,
@@ -855,7 +1048,10 @@ const server = http.createServer(async (req, res) => {
       compatibility_defaults_used: compatibilityDefaultsUsed,
       task_class: taskClass,
       routing_source: routingSource,
+      agent_hint: agentHint || null,
       routing,
+      contract_applied: Boolean(contract),
+      contract,
     });
   } catch (err) {
     const statusCode = err && typeof err.statusCode === 'number' ? err.statusCode : 500;
