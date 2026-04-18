@@ -163,6 +163,8 @@ function routeRoutingRequest(input, options = {}) {
   }
 
   const taskPolicy = config.task_policy?.[taskClass];
+  const financialSensitiveTaskClasses = new Set(['recon_scoring', 'deal_adjudication', 'market_intel_financial', 'premium_judgment']);
+  const approvedFinancialLaneNames = new Set(['openrouter_gemini_review', 'openrouter_gemini_proven', 'openrouter_claude_premium', 'local_private_lane']);
   if (!taskPolicy || !taskPolicy.primary) {
     throw routingError(`No permitted route exists for task_class ${taskClass}`, 'no_permitted_route');
   }
@@ -174,7 +176,17 @@ function routeRoutingRequest(input, options = {}) {
   const hintedLaneName = agentHint && hintLaneMap[agentHint] ? hintLaneMap[agentHint] : null;
   const selectedLaneName = hintedLaneName || taskPolicy.primary;
   const selectedLane = validateLaneForTaskClass(config, taskClass, selectedLaneName, 'primary');
+  if (financialSensitiveTaskClasses.has(taskClass) && !approvedFinancialLaneNames.has(selectedLaneName)) {
+    throw routingError(`Financial-sensitive task_class ${taskClass} cannot route to lane ${selectedLaneName}`, 'financial_policy_violation');
+  }
   const fallbackChain = buildFallbackChain(config, taskClass, Array.isArray(taskPolicy.fallback) ? taskPolicy.fallback : []);
+  if (financialSensitiveTaskClasses.has(taskClass)) {
+    for (const fallback of fallbackChain) {
+      if (!approvedFinancialLaneNames.has(fallback.lane)) {
+        throw routingError(`Financial-sensitive task_class ${taskClass} has non-approved fallback lane ${fallback.lane}`, 'financial_policy_violation');
+      }
+    }
+  }
   const maxEstimatedCost = Number(selectedLane.max_estimated_cost_usd);
   const budgetLimit = Number(config.budget_policy?.default_max_estimated_cost_usd);
   const provider = normalizeString(selectedLane.provider);
@@ -193,6 +205,10 @@ function routeRoutingRequest(input, options = {}) {
 
   if (premium && !premiumAllowed && config.budget_policy?.premium_without_explicit_approval === false) {
     throw routingError(`Premium lane ${selectedLaneName} is not permitted for task_class ${taskClass}`, 'budget_blocked');
+  }
+
+  if (certificationRequired && options.certifiedLanes instanceof Set && !options.certifiedLanes.has(selectedLaneName)) {
+    throw routingError(`Lane ${selectedLaneName} requires certification before production routing`, 'certification_required');
   }
 
   const budgetApproved = blocked
