@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+
+# OpenClaw local state / caches
+.openclaw/
+.clawhub/
+.tmp/
+.wiki-backup/
+
+# Generated screenshots / captures
+*.png
+current-screen.png
+cmd-palette.png
+issues.png
+now.png
+agent-review.png
+cursor-screen.png
+review-cmd.png
+review-complete.png
+review-done.png
+review-final.png
+review2.png
+review3.png
+
+# Local chat / scratch artifacts
+chat-history.txt
+
+# Generated recall residue and ephemeral logs
+memory/.dreams/
+memory/phase-execution.log
+
+# Local scratch / temporary probes
+tmp_*.js
+
+# Nested local caches and support dirs
+backend/
+config/
+skills/
