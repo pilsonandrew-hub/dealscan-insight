@@ -10,7 +10,7 @@ function normalizeString(value) {
 function shouldUseExternalReviewTask(userRequest) {
   const text = normalizeString(userRequest).toLowerCase();
   if (!text) return false;
-  const directTriggers = [
+  const triggers = [
     'review this',
     'critique this',
     'audit this',
@@ -18,16 +18,8 @@ function shouldUseExternalReviewTask(userRequest) {
     'challenge this architecture',
     'second opinion',
     'review the architecture',
-    'please review',
-    'review the typed',
-    'identify the top risks',
-    'external review',
   ];
-  if (directTriggers.some((phrase) => text.includes(phrase))) return true;
-
-  const hasReviewIntent = /(review|audit|critique|challenge|assess|evaluate|inspect)/.test(text);
-  const hasTarget = /(architecture|design|contract|transport|integration|approach|plan|implementation|system)/.test(text);
-  return hasReviewIntent && hasTarget;
+  return triggers.some((phrase) => text.includes(phrase));
 }
 
 function buildExternalReviewTaskPacket(userRequest, supportingContext = {}) {
@@ -141,7 +133,7 @@ function renderExternalReviewResult(response) {
 async function main() {
   const request = process.argv.slice(2).join(' ').trim();
   if (!request) {
-    console.error('Usage: node scripts/javarious-task-handoff-helper.js "review this architecture..."');
+    console.error('Usage: node scripts/javarious-task-handoff-helper.cjs "review this architecture..."');
     process.exit(1);
   }
   if (!shouldUseExternalReviewTask(request)) {
@@ -151,7 +143,8 @@ async function main() {
   const packet = buildExternalReviewTaskPacket(request, {
     context_notes: [
       'Typed /task transport is live',
-      'External Review Agent routes to claude-sonnet-4.5',
+      'External Review Agent is governor-routed with Gemini 2.5 Flash as the default review lane',
+      'Premium Claude use is restricted to certified compact-contract escalation paths',
     ],
   });
   const response = await callTypedTaskTransport(packet);

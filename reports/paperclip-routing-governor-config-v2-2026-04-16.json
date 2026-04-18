@@ -1,0 +1,263 @@
+{
+  "version": 2,
+  "policy_version": "2026-04-17.v5",
+  "default_lane": "openrouter_deepseek_workhorse",
+  "lanes": {
+    "openrouter_claude_premium": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.7",
+      "max_estimated_cost_usd": 0.05,
+      "premium": true,
+      "certification_required": true,
+      "use_cases": ["premium_judgment", "recon_scoring", "deal_adjudication", "market_intel_financial"]
+    },
+    "openrouter_gemini_review": {
+      "provider": "openrouter",
+      "model": "google/gemini-2.5-flash",
+      "max_estimated_cost_usd": 0.03,
+      "premium": false,
+      "use_cases": ["external_review", "recon_scoring", "market_intel", "market_intel_financial", "deal_adjudication"]
+    },
+    "openrouter_gemini_proven": {
+      "provider": "openrouter",
+      "model": "google/gemini-2.0-flash-001",
+      "max_estimated_cost_usd": 0.02,
+      "premium": false,
+      "use_cases": ["external_review", "recon_scoring", "market_intel", "market_intel_financial", "deal_adjudication", "deal_alert_format", "general_chat", "summarization", "orchestration", "psr_extraction", "health_check", "light_extraction"]
+    },
+    "openrouter_deepseek_workhorse": {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v3.2",
+      "max_estimated_cost_usd": 0.01,
+      "premium": false,
+      "use_cases": ["code_reasoning", "scrape_normalize", "summarization", "orchestration", "general_chat"]
+    },
+    "openrouter_gemini_triage": {
+      "provider": "openrouter",
+      "model": "google/gemini-2.5-flash-lite",
+      "max_estimated_cost_usd": 0.005,
+      "premium": false,
+      "use_cases": ["deal_alert_format", "health_check", "light_extraction", "summarization"]
+    },
+    "openrouter_kimi_specialist": {
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2",
+      "max_estimated_cost_usd": 0.02,
+      "premium": false,
+      "use_cases": ["psr_extraction"]
+    },
+    "local_private_lane": {
+      "provider": "local",
+      "model": null,
+      "max_estimated_cost_usd": 0,
+      "premium": false,
+      "use_cases": ["local_only_private", "admin_sensitive"]
+    },
+    "blocked_no_llm": {
+      "provider": "blocked",
+      "model": null,
+      "max_estimated_cost_usd": 0,
+      "premium": false,
+      "use_cases": ["crosshair_filter"]
+    },
+    "blocked_not_yet_supported": {
+      "provider": "blocked",
+      "model": null,
+      "max_estimated_cost_usd": 0,
+      "premium": false,
+      "use_cases": ["image_analysis"]
+    }
+  },
+  "agent_hint_policy": {
+    "gemini": "openrouter_gemini_review",
+    "gemini reviewer": "openrouter_gemini_review",
+    "gemini fast": "openrouter_gemini_review",
+    "gemini proven": "openrouter_gemini_proven",
+    "contradiction and gap detector": "openrouter_gemini_review",
+    "claude": "openrouter_claude_premium",
+    "claude auditor": "openrouter_claude_premium",
+    "deepseek": "openrouter_deepseek_workhorse",
+    "deepseek r1": "openrouter_deepseek_workhorse",
+    "kimi": "openrouter_kimi_specialist",
+    "kimi k2": "openrouter_kimi_specialist",
+    "moonshot": "openrouter_kimi_specialist"
+  },
+  "task_policy": {
+    "general_chat": {
+      "primary": "openrouter_deepseek_workhorse",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "low",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "summarization": {
+      "primary": "openrouter_gemini_triage",
+      "fallback": ["openrouter_deepseek_workhorse", "openrouter_gemini_proven"],
+      "priority": "low",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "external_review": {
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "premium_judgment": {
+      "primary": "openrouter_claude_premium",
+      "fallback": ["openrouter_gemini_review", "openrouter_gemini_proven"],
+      "priority": "high",
+      "premium_allowed": true,
+      "requires_manual_approval": true
+    },
+    "code_reasoning": {
+      "primary": "openrouter_deepseek_workhorse",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "medium",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "crosshair_filter": {
+      "primary": "blocked_no_llm",
+      "fallback": [],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "scrape_normalize": {
+      "primary": "openrouter_deepseek_workhorse",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "medium",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "recon_scoring": {
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "high",
+      "premium_allowed": true,
+      "requires_manual_approval": true
+    },
+    "deal_adjudication": {
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": true
+    },
+    "deal_alert_format": {
+      "primary": "openrouter_gemini_triage",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "medium",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "market_intel": {
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "market_intel_financial": {
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": true
+    },
+    "psr_extraction": {
+      "primary": "openrouter_kimi_specialist",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "medium",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "health_check": {
+      "primary": "openrouter_gemini_triage",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "low",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "light_extraction": {
+      "primary": "openrouter_gemini_triage",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "low",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "image_analysis": {
+      "primary": "blocked_not_yet_supported",
+      "fallback": [],
+      "priority": "medium",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "local_only_private": {
+      "primary": "local_private_lane",
+      "fallback": [],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "admin_sensitive": {
+      "primary": "local_private_lane",
+      "fallback": [],
+      "priority": "high",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    },
+    "orchestration": {
+      "primary": "openrouter_deepseek_workhorse",
+      "fallback": ["openrouter_gemini_proven"],
+      "priority": "medium",
+      "premium_allowed": false,
+      "requires_manual_approval": false
+    }
+  },
+  "budget_policy": {
+    "default_max_estimated_cost_usd": 0.05,
+    "premium_without_explicit_approval": false,
+    "block_on_budget_exceeded": true
+  },
+  "excluded_models": [
+    {
+      "model": "google/gemini-3.1-pro-preview",
+      "reason": "unintended model substitution incident in production path, pending root cause investigation"
+    },
+    {
+      "model": "moonshotai/kimi-k2.5",
+      "reason": "returned no response content in live probe"
+    },
+    {
+      "model": "minimax/minimax-m2.7",
+      "reason": "returned no response content in live probe"
+    },
+    {
+      "model": "minimax/minimax-m1",
+      "reason": "weak output in live probe"
+    },
+    {
+      "model": "moonshotai/kimi-latest",
+      "reason": "invalid model id in bridge path"
+    },
+    {
+      "model": "minimax/minimax-text-01",
+      "reason": "invalid model id in bridge path"
+    },
+    {
+      "model": "qwen/qwen-3.6",
+      "reason": "runtime identity / API id not cleanly validated in current path"
+    },
+    {
+      "model": "qwen/qwen-3.6-plus",
+      "reason": "runtime identity / API id not cleanly validated in current path"
+    },
+    {
+      "model": "qwen/qwen3-235b-a22b",
+      "reason": "reasoning-heavy behavior makes it unsuitable for current governor-routed structured workloads"
+    }
+  ]
+}
