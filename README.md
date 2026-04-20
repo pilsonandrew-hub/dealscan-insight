@@ -37,6 +37,8 @@ Current mounted route families in `backend/main.py`:
 - `recon`
 - `sonar`
 - `lifecycle`
+- `telegram` (callback router still mounted via separate import/include path)
+- `pipeline` (legacy endpoints still present in `backend/main.py`)
 
 Explicit live alias retained in `backend/main.py`:
 - `POST /api/opportunities/{opportunity_id}/pass`
@@ -47,12 +49,16 @@ Health endpoints:
 
 ## Route families intentionally not treated as current production authority
 
-The older SQLAlchemy/auth router family was removed from the main backend entrypoint because it was absent from live production surface checks and had become false authority:
+The older SQLAlchemy/auth router family removed from the main backend entrypoint because it was absent from live production surface checks and had become false authority:
 - `auth`
 - `vehicles`
 - `upload`
 - `ml`
 - `opportunities`
+
+Important distinction:
+- `telegram` is still mounted in the current main backend entrypoint
+- `pipeline` legacy endpoints are still present in `backend/main.py`
 
 Legacy code may still exist in the repo, but those route families are not mounted from the current main backend entrypoint.
 

@@ -66,6 +66,8 @@ The canonical ingest/scoring path is centered on:
 - `recon`
 - `sonar`
 - `lifecycle`
+- `telegram` (callback router still mounted via separate import/include path)
+- `pipeline` (legacy endpoints still present in `backend/main.py`)
 
 ### Explicit retained alias
 - `POST /api/opportunities/{opportunity_id}/pass`
@@ -81,6 +83,10 @@ The older mounted SQLAlchemy/auth router family was removed from the main backen
 - `upload`
 - `ml`
 - `opportunities`
+
+Important distinction:
+- `telegram` is still mounted in the current main backend entrypoint
+- `pipeline` legacy endpoints are still present in `backend/main.py`
 
 Legacy code for some of those areas may still exist in the repo, but they are not mounted from the current main backend entrypoint.
 

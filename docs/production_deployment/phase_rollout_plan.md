@@ -25,6 +25,8 @@ It does **not** treat historical route families, synthetic validation harnesses,
 - `recon`
 - `sonar`
 - `lifecycle`
+- `telegram` (callback router still mounted via separate import/include path)
+- `pipeline` (legacy endpoints still present in `backend/main.py`)
 
 ### Explicit retained alias
 - `POST /api/opportunities/{opportunity_id}/pass`
@@ -40,6 +42,10 @@ These older families were unmounted because they were absent from verified produ
 - `upload`
 - `ml`
 - `opportunities`
+
+Important distinction:
+- `telegram` is still mounted in the current main backend entrypoint
+- `pipeline` legacy endpoints are still present in `backend/main.py`
 
 Legacy code for some of those surfaces may still exist in the repo, but they are not part of the current main backend rollout surface.
 

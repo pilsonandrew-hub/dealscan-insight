@@ -38,6 +38,8 @@ Current verified authority order:
 - `recon`
 - `sonar`
 - `lifecycle`
+- `telegram` (callback router still mounted via separate import/include path)
+- `pipeline` (legacy endpoints still present in `backend/main.py`)
 
 ### Explicit retained alias
 - `POST /api/opportunities/{opportunity_id}/pass`
@@ -53,6 +55,10 @@ These route families are no longer mounted from the main backend entrypoint beca
 - `upload`
 - `ml`
 - `opportunities`
+
+Important distinction:
+- `telegram` is still mounted in the current main backend entrypoint
+- `pipeline` legacy endpoints are still present in `backend/main.py`
 
 Legacy code for those areas may still exist in the repo, but it is not current mounted production authority.
 
