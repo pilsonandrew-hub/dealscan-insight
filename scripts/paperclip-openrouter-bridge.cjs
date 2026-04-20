@@ -304,13 +304,20 @@ function resolveLaneAndModel(body) {
   };
 }
 
+function buildIssueCommentSystemPrompt(body) {
+  const explicit = typeof body?.system_prompt === 'string' && body.system_prompt.trim() ? body.system_prompt.trim() : '';
+  const base = explicit || 'You are a Paperclip agent backend handling an issue-linked execution.';
+  return `${base}\n\nFor issue-linked work, your response will be posted as an issue comment and must be evidence-bearing. Return plain text only. Do not return JSON. Do not use filler acknowledgements. Do not say Roger that, Acknowledged, or similar placeholder phrases.\n\nRequired format, in this exact order:\n## Outcome\nOne sentence stating the actual result.\n\n## Evidence\n2 to 6 bullet points with concrete facts, observations, checks, files, commands, routes, ids, or outputs you used.\n\n## Blockers\nEither 'None.' or a precise blocker with what is missing.\n\n## Next Step\nOne sentence naming the next concrete action.\n\nIf you do not have enough information to do the task, say so under Blockers, but still provide concrete Evidence describing exactly what was inspected and why it was insufficient.`;
+}
+
 function buildRunPrompt(body, contract) {
   if (!contract || typeof contract !== 'object') {
     return {
-      systemPrompt:
-        typeof body?.system_prompt === 'string' && body.system_prompt.trim()
+      systemPrompt: isIssueLinkedWake(body)
+        ? buildIssueCommentSystemPrompt(body)
+        : (typeof body?.system_prompt === 'string' && body.system_prompt.trim()
           ? body.system_prompt.trim()
-          : 'You are a Paperclip agent backend. Respond concisely and use plain text.',
+          : 'You are a Paperclip agent backend. Respond concisely and use plain text.'),
       userPrompt: buildPrompt(body),
       maxTokens: Number.isInteger(body?.max_tokens) && body.max_tokens > 0 ? body.max_tokens : 700,
       responseFormat: undefined,
@@ -339,6 +346,20 @@ async function readBody(req) {
   } catch {
     throw validationError('Invalid JSON body', 'invalid_json');
   }
+}
+
+function isIssueLinkedWake(body) {
+  const ctx = body?.context || {};
+  const wake = ctx.paperclipWake && typeof ctx.paperclipWake === 'object' ? ctx.paperclipWake : null;
+  return Boolean(
+    ctx.issueTitle ||
+    ctx.issueDescription ||
+    wake?.issue?.identifier ||
+    wake?.issue?.title ||
+    wake?.reason === 'issue_assigned' ||
+    wake?.reason === 'issue_status_changed' ||
+    wake?.reason === 'retry_failed_run'
+  );
 }
 
 function buildPrompt(body) {
