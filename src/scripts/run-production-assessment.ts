@@ -1,7 +1,10 @@
 #!/usr/bin/env tsx
 
 /**
- * Production Readiness Assessment Runner
+ * Production readiness assessment runner.
+ * Local/current-gate heuristic only. Do not treat its output as authoritative
+ * production deployment approval without independent verification against live
+ * routes, current mounted surfaces, current migrations, and current workflows.
  * Run: npm run assessment
  */
 
@@ -10,7 +13,7 @@ import { logger } from '../core/UnifiedLogger';
 import { configService } from '../core/UnifiedConfigService';
 
 async function runAssessment() {
-  logger.info('🚀 Starting Production Readiness Assessment', {
+  logger.info('🚀 Starting production readiness assessment heuristic', {
     environment: configService.environment,
     timestamp: new Date().toISOString()
   });
@@ -18,7 +21,7 @@ async function runAssessment() {
   try {
     const report = await productionGate.runFullAssessment();
     
-    console.log('\n📊 PRODUCTION READINESS REPORT');
+    console.log('\n📊 PRODUCTION READINESS HEURISTIC REPORT');
     console.log('==================================');
     console.log(`Overall Score: ${report.overallScore}/100`);
     console.log(`Status: ${report.passed ? '✅ READY' : '❌ NOT READY'}`);
@@ -69,12 +72,12 @@ async function runAssessment() {
     console.log('\n==================================');
     
     if (!report.passed) {
-      console.log('❌ PRODUCTION DEPLOYMENT BLOCKED');
-      console.log('Fix critical issues before deploying to production.');
+      console.log('❌ HEURISTIC DEPLOYMENT BLOCKED');
+      console.log('Fix critical issues and re-verify against live production authority before deploying.');
       process.exit(1);
     } else {
-      console.log('✅ READY FOR PRODUCTION DEPLOYMENT');
-      console.log('All quality gates have passed successfully.');
+      console.log('✅ HEURISTIC GATES PASSED');
+      console.log('Local quality gates passed, but this is not standalone production deployment proof.');
     }
 
   } catch (error) {
