@@ -294,12 +294,8 @@ except Exception as _e:
 @app.post("/api/opportunities/{opportunity_id}/pass")
 async def pass_opportunity_alias(opportunity_id: str, request: Request, background_tasks: BackgroundTasks):
     """Alias so frontend /api/opportunities/{id}/pass hits the ingest handler."""
-    try:
-        from webapp.routers.ingest import pass_opportunity
-        return await pass_opportunity(opportunity_id, request, background_tasks)
-    except Exception as e:
-        logger.warning(f"[PASS] handler error: {e}")
-        return {"status": "passed", "opportunity_id": opportunity_id}
+    from webapp.routers.ingest import pass_opportunity
+    return await pass_opportunity(opportunity_id, request, background_tasks)
 
 # ---------------------------------------------------------------------------
 # Pipeline endpoints
