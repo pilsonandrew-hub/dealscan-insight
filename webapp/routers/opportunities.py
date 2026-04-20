@@ -307,42 +307,6 @@ async def save_opportunity(
 
     return {"message": "Opportunity saved"}
 
-@router.post("/{opportunity_id}/pass")
-async def pass_opportunity(
-    opportunity_id: str,
-    authorization: Optional[str] = Header(None)
-):
-    """Mark opportunity as passed — Supabase-only"""
-    import os
-    from supabase import create_client as _sc
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    token = authorization.split(" ", 1)[1]
-    supa = _sc(os.getenv("SUPABASE_URL",""), os.getenv("SUPABASE_SERVICE_ROLE_KEY",""))
-    user = supa.auth.get_user(token)
-    if not user or not user.user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    try:
-        supa.table("user_opportunity_actions").upsert(
-            {
-                "user_id": user.user.id,
-                "opportunity_id": str(opportunity_id),
-                "action": "passed",
-            },
-            on_conflict="user_id,opportunity_id",
-        ).execute()
-    except Exception:
-        logger.warning("[OPPORTUNITIES] user_opportunity_actions pass failed, falling back", exc_info=True)
-        try:
-            supa.table("user_passes").upsert(
-                {"user_id": user.user.id, "opportunity_id": opportunity_id},
-                on_conflict="user_id,opportunity_id"
-            ).execute()
-        except Exception:
-            raise HTTPException(status_code=500, detail="Failed to record pass")
-    return {"success": True}
-
-
 @router.post("/{opportunity_id}/ignore")
 async def ignore_opportunity(
     opportunity_id: int,
