@@ -84,8 +84,8 @@
   },
   "task_policy": {
     "general_chat": {
-      "primary": "openrouter_gemini_proven",
-      "fallback": ["openrouter_gemini_review"],
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
       "priority": "low",
       "premium_allowed": false,
       "requires_manual_approval": false
@@ -210,8 +210,8 @@
       "requires_manual_approval": false
     },
     "orchestration": {
-      "primary": "openrouter_gemini_proven",
-      "fallback": ["openrouter_gemini_review"],
+      "primary": "openrouter_gemini_review",
+      "fallback": ["openrouter_gemini_proven"],
       "priority": "medium",
       "premium_allowed": false,
       "requires_manual_approval": false
