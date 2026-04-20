@@ -1,5 +1,10 @@
 """
 Vehicles API endpoints
+
+Transitional router, not primary production authority.
+Current product surfaces are centered on ingest/analytics/rover style flows and
+Supabase-first reads, so do not use this file as a first truth source without
+live route evidence.
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException

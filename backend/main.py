@@ -251,6 +251,12 @@ app.add_middleware(
 
 # ---------------------------------------------------------------------------
 # Register webapp routers — only those that loaded successfully
+#
+# NOTE: auth / vehicles / opportunities / upload / ml belong to an older
+# SQLAlchemy-auth router family. Current production authority is centered on
+# ingest/rover/analytics/outcomes/saved-searches/sonar style surfaces, and live
+# product reads are often Supabase-first. Do not treat those older mounted
+# prefixes as primary production truth without live route evidence.
 # ---------------------------------------------------------------------------
 _prefix_map = {
     "auth": "/api/auth",
