@@ -1338,14 +1338,14 @@ EOF
 
 # Enhanced README
 write "$ROOT/README.md" <<'EOF'
-# DealerScope v4.7 Enhanced (Production-Ready)
+# DealerScope v4.7 Enhanced (Legacy Local Harness)
 
 ## Overview
 Production-grade vehicle arbitrage platform with comprehensive monitoring, security, and resilience features.
 
 ## Features
 - ✅ **Zero-config local demo** with SQLite
-- ✅ **Production-ready** with Docker + PostgreSQL support
+- ✅ **Legacy local harness** with Docker + PostgreSQL support
 - ✅ **Circuit breakers** for API resilience
 - ✅ **Advanced rate limiting** with progressive penalties
 - ✅ **Comprehensive security** (CSRF, CSP, file validation)
@@ -1701,5 +1701,5 @@ msg "✅ Health checks for all system components"
 msg "✅ Structured logging with correlation IDs"
 msg "✅ Background job processing (non-blocking UI)"
 msg "✅ Enhanced error handling and retry logic"
-msg "✅ Production-ready Docker deployment"
+msg "✅ Legacy local Docker deployment helper"
 msg "✅ Connection pooling and performance optimizations"
