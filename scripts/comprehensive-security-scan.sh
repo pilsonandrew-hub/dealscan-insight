@@ -304,7 +304,7 @@ generate_security_report() {
     "docker_security": "$([ -f Dockerfile ] && echo "completed" || echo "skipped")"
   },
   "risk_score": $(( (CRITICAL_ISSUES * 10) + (HIGH_ISSUES * 5) + (MEDIUM_ISSUES * 2) + LOW_ISSUES )),
-  "deployment_recommendation": "$(if [ "$CRITICAL_ISSUES" -eq 0 ] && [ "$HIGH_ISSUES" -lt 3 ]; then echo "APPROVED"; else echo "BLOCKED"; fi)",
+  "security_gate_result": "$(if [ "$CRITICAL_ISSUES" -eq 0 ] && [ "$HIGH_ISSUES" -lt 3 ]; then echo "PASS"; else echo "FAIL"; fi)",
   "next_steps": [
     $([ "$CRITICAL_ISSUES" -gt 0 ] && echo '"Fix critical vulnerabilities immediately",' || echo "")
     $([ "$HIGH_ISSUES" -gt 0 ] && echo '"Address high-risk issues before deployment",' || echo "")
@@ -331,13 +331,13 @@ VULNERABILITY BREAKDOWN:
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 📊 Total:    $TOTAL_VULNERABILITIES
 
-DEPLOYMENT RECOMMENDATION:
+SECURITY GATE RESULT:
 $(if [ "$CRITICAL_ISSUES" -eq 0 ] && [ "$HIGH_ISSUES" -lt 3 ]; then 
-    echo "✅ APPROVED FOR DEPLOYMENT"
-    echo "   Low security risk detected"
+    echo "✅ SECURITY SCAN PASSED"
+    echo "   No blocking issues found in this security scan"
 else 
     echo "❌ SECURITY GATE FAILED"
-    echo "   Critical security issues must be resolved"
+    echo "   Critical security issues must be resolved and re-verified"
 fi)
 
 DETAILED FINDINGS:
