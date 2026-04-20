@@ -380,13 +380,13 @@ main() {
     
     # Exit with status based on findings
     if [ "$CRITICAL_ISSUES" -gt 0 ]; then
-        log "🚨 CRITICAL ISSUES DETECTED - Deployment blocked"
+        log "🚨 CRITICAL ISSUES DETECTED - Security gate failed"
         exit 2
     elif [ "$HIGH_ISSUES" -gt 3 ]; then
         log "⚠️ HIGH RISK DETECTED - Review required"
         exit 1
     else
-        log "✅ Security scan passed - Deployment approved"
+        log "✅ Security scan passed - No blocking issues found in this security scan"
         exit 0
     fi
 }
