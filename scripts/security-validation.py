@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-DealerScope Security Validation Suite
-Comprehensive security testing and validation
+Obsolete security validation harness.
+
+This script mixes Supabase checks with stale localhost frontend assumptions and
+should not be treated as current DealerScope security authority without a full
+endpoint and environment remap.
 """
 
 import json
+import os
 import subprocess
 import requests
 import time
@@ -84,7 +88,7 @@ class SecurityValidator:
     def test_rate_limiting(self):
         """Test rate limiting implementation"""
         # Simulate rapid requests
-        url = "http://localhost:4173"  # Frontend URL
+        url = os.getenv("BASE_URL", "http://localhost:8000")
         rapid_requests = []
         
         start_time = time.time()
@@ -107,7 +111,7 @@ class SecurityValidator:
     def test_cors_headers(self):
         """Test CORS configuration"""
         try:
-            response = requests.options("http://localhost:4173", timeout=5)
+            response = requests.options(os.getenv("BASE_URL", "http://localhost:8000"), timeout=5)
             headers = response.headers
             
             cors_headers = [

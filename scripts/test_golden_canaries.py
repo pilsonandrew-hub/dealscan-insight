@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 import requests
 
-API_BASE = os.getenv('API_BASE', 'http://localhost:4173')
+API_BASE = os.getenv('API_BASE', 'http://localhost:8000')
 PASS_RATE_THRESHOLD = float(os.getenv('PASS_RATE_THRESHOLD', '0.95'))
 
 # Golden canary test data - representative samples from top auction sites

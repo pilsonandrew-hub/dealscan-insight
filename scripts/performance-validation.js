@@ -73,7 +73,7 @@ export let options = {
     },
 };
 
-const BASE_URL = 'http://localhost:4173';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:8000';
 
 export default function() {
     const endpoints = [

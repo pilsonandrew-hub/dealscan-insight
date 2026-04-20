@@ -177,7 +177,7 @@ class SecurityTester:
 
 def main():
     import os
-    base_url = os.getenv("BASE_URL", "http://localhost:4173")
+    base_url = os.getenv("BASE_URL", "http://localhost:8000")
     
     tester = SecurityTester(base_url)
     

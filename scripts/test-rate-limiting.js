@@ -27,7 +27,7 @@ async function makeRequest(url) {
 async function testRateLimiting() {
   console.log('🚦 Testing Rate Limiting...');
   
-  const endpoint = 'http://localhost:4173';
+  const endpoint = process.env.BASE_URL || 'http://localhost:8000';
   const requests = [];
   
   // Make rapid successive requests
