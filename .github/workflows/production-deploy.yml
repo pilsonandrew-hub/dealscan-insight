@@ -121,6 +121,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL || 'https://dealscan-insight-production.up.railway.app' }}
     steps:
       - uses: actions/checkout@v4
       
@@ -138,7 +140,7 @@ jobs:
       - name: Run backend smoke check
         run: |
           echo "🧪 Running smoke tests on Railway backend..."
-          curl -f https://dealscan-insight-production.up.railway.app/healthz || echo "⚠️ Health check failed — non-blocking for staging"
+          curl -f ${BACKEND_BASE_URL}/healthz || echo "⚠️ Health check failed — non-blocking for staging"
           echo "✅ Smoke tests complete"
           
       - name: Comment on PR (legacy placeholder)
@@ -158,6 +160,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    env:
+      BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL || 'https://dealscan-insight-production.up.railway.app' }}
     steps:
       - uses: actions/checkout@v4
       
@@ -188,7 +192,7 @@ jobs:
           
           # Check Railway backend health
           for i in {1..5}; do
-            if curl -sf https://dealscan-insight-production.up.railway.app/healthz; then
+            if curl -sf ${BACKEND_BASE_URL}/healthz; then
               echo "✅ Health check passed"
               break
             fi
