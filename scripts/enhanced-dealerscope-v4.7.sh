@@ -1614,7 +1614,7 @@ case "${1:-demo}" in
         setup_env
         init_db
         run_tests
-        msg "Production ready - configure reverse proxy and SSL"
+        msg "Legacy local deployment note - configure reverse proxy and SSL if using this harness"
         ;;
     *)
         echo "Usage: $0 [demo|run|pipeline|test|docker|prod]"

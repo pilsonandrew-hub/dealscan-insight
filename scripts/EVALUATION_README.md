@@ -180,7 +180,7 @@ node scripts/ai-evaluation-suite.js --model gpt-5-2025-08-07
 
 🎉 Evaluation Complete!
 Overall Score: 85%
-Legacy completeness label: Near Complete
+Legacy completeness label: Legacy Medium Score
 ```
 
 ## 🔍 Troubleshooting
