@@ -1,9 +1,6 @@
-name: Legacy Build and Deploy Placeholder
+name: Legacy Build and Deploy Placeholder (manual only)
 on:
-  push:
-    branches: [main]
-  release:
-    types: [published]
+  workflow_dispatch:
 
 env:
   NODE_VERSION: '20'

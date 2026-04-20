@@ -27,7 +27,6 @@ Current verified authority order:
 - `backend/main.py`
 
 ### Current mounted route families
-- `admin`
 - `ingest`
 - `rover`
 - `outcomes`

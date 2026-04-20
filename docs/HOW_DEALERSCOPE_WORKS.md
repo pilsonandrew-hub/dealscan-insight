@@ -55,7 +55,6 @@ The canonical ingest/scoring path is centered on:
 - `backend/main.py`
 
 ### Current mounted route families
-- `admin`
 - `ingest`
 - `rover`
 - `outcomes`

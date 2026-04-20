@@ -69,21 +69,17 @@ class EnvironmentManager {
    * Detect current environment
    */
   private detectEnvironment(): Environment {
-    // Check environment variables
     const viteMode = import.meta.env.MODE;
-    const isProd = import.meta.env.PROD;
-    
-    // Check hostname patterns
-    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-    
-    if (isProd || hostname.includes('dealerscope.com')) {
+    const appEnv = (import.meta.env.VITE_APP_ENV || '').toLowerCase();
+
+    if (appEnv === 'production' || viteMode === 'production') {
       return Environment.PRODUCTION;
     }
-    
-    if (viteMode === 'staging' || hostname.includes('staging') || hostname.includes('preview')) {
+
+    if (appEnv === 'staging' || viteMode === 'staging') {
       return Environment.STAGING;
     }
-    
+
     return Environment.DEVELOPMENT;
   }
 
@@ -114,7 +110,7 @@ class EnvironmentManager {
         ssl: true
       },
       api: {
-        baseUrl: 'https://api.dealerscope.com',
+        baseUrl: import.meta.env.VITE_API_URL || '/api',
         timeout: 30000,
         retries: 3
       },
@@ -155,7 +151,7 @@ class EnvironmentManager {
         ssl: true
       },
       api: {
-        baseUrl: 'https://staging-api.dealerscope.com',
+        baseUrl: import.meta.env.VITE_API_URL || '/api',
         timeout: 30000,
         retries: 2
       },
@@ -196,7 +192,7 @@ class EnvironmentManager {
         ssl: false
       },
       api: {
-        baseUrl: 'http://localhost:8080',
+        baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
         timeout: 10000,
         retries: 1
       },

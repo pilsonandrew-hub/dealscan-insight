@@ -1,6 +1,9 @@
 /**
- * Production Readiness Gate
- * Enforces quality gates before deployment
+ * Legacy production-readiness heuristic
+ *
+ * This module is not authoritative deployment governance.
+ * It runs browser-side heuristics and local signals only.
+ * Do not use it as deployment approval or production-truth evidence.
  */
 
 import { logger } from './UnifiedLogger';
@@ -313,26 +316,15 @@ class ProductionReadinessGate {
   }
 
   private async checkTestCoverage(): Promise<GateResult> {
-    // Simulate test coverage check
-    const coverage = Math.random() * 100; // In real implementation, read from coverage reports
-    
-    let score = coverage;
-    const target = 80;
-    
-    if (coverage < target) {
-      score = (coverage / target) * 100;
-    }
-
     return {
-      passed: coverage >= target,
-      score: Math.round(score),
-      message: `Test coverage: ${Math.round(coverage)}% (target: ${target}%)`,
-      details: { coverage, target },
-      recommendations: coverage < target ? [
-        'Add unit tests for critical components',
-        'Implement integration tests',
-        'Add end-to-end tests'
-      ] : [],
+      passed: false,
+      score: 0,
+      message: 'Test coverage gate is non-authoritative in this module. Read real coverage artifacts in CI instead.',
+      details: { authoritative: false },
+      recommendations: [
+        'Read real CI coverage artifacts instead of browser-side heuristics',
+        'Do not use this module as deployment approval evidence'
+      ],
     };
   }
 
@@ -516,7 +508,7 @@ class ProductionReadinessGate {
   }
 
   async runFullAssessment(): Promise<ProductionReadinessReport> {
-    logger.info('Starting production readiness assessment');
+    logger.warn('Starting legacy production-readiness heuristic. This is not deployment authority.');
     
     const results: Array<GateResult & { name: string; weight: number }> = [];
     const criticalIssues: string[] = [];

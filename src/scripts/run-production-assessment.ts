@@ -1,10 +1,9 @@
 #!/usr/bin/env tsx
 
 /**
- * Production readiness assessment runner.
- * Local/current-gate heuristic only. Do not treat its output as authoritative
- * production deployment approval without independent verification against live
- * routes, current mounted surfaces, current migrations, and current workflows.
+ * Legacy production-readiness heuristic runner.
+ * This script is non-authoritative and must not be used as deployment approval.
+ * It exists only to surface local/browser heuristic signals for debugging.
  * Run: npm run assessment
  */
 
@@ -21,7 +20,7 @@ async function runAssessment() {
   try {
     const report = await productionGate.runFullAssessment();
     
-    console.log('\n📊 PRODUCTION READINESS HEURISTIC REPORT');
+    console.log('\n📊 LEGACY PRODUCTION READINESS HEURISTIC REPORT');
     console.log('==================================');
     console.log(`Overall Score: ${report.overallScore}/100`);
     console.log(`Status: ${report.passed ? '✅ READY' : '❌ NOT READY'}`);
@@ -72,12 +71,12 @@ async function runAssessment() {
     console.log('\n==================================');
     
     if (!report.passed) {
-      console.log('❌ HEURISTIC DEPLOYMENT BLOCKED');
-      console.log('Fix critical issues and re-verify against live production authority before deploying.');
+      console.log('❌ LEGACY HEURISTIC REPORTED FAILURES');
+      console.log('Do not treat this output as deployment authority. Re-verify against live code, workflows, routes, and CI artifacts.');
       process.exit(1);
     } else {
-      console.log('✅ HEURISTIC GATES PASSED');
-      console.log('Local quality gates passed, but this is not standalone production deployment proof.');
+      console.log('✅ LEGACY HEURISTIC COMPLETED WITHOUT FAILURES');
+      console.log('This is still not deployment authority or standalone production proof.');
     }
 
   } catch (error) {

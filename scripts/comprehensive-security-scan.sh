@@ -1,9 +1,11 @@
 #!/bin/bash
-# DealerScope Comprehensive Security Scanner
-# Production-grade security validation for deployment readiness
+# DealerScope Legacy Comprehensive Security Scanner
+# Non-authoritative heuristic scanner. Do not use as deployment approval.
 set -euo pipefail
 
-echo "🔒 DealerScope Comprehensive Security Scanner Starting..."
+START_TS=$(date +%s)
+
+echo "🔒 DealerScope Legacy Comprehensive Security Scanner Starting..."
 echo "📅 $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -162,29 +164,7 @@ secret_detection_scan() {
     fi
 }
 
-# 5. Dependency License Check
-dependency_license_check() {
-    log "📄 Checking dependency licenses..."
-    
-    if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
-        # Extract dependencies and check for known problematic licenses
-        local risky_licenses=0
-        
-        # Check for GPL dependencies (may require open-sourcing)
-        if npm list --json 2>/dev/null | jq -r '.. | .license? // empty' | grep -i gpl > "$REPORTS_DIR/gpl-licenses.txt" 2>/dev/null; then
-            local gpl_count=$(wc -l < "$REPORTS_DIR/gpl-licenses.txt")
-            if [ "$gpl_count" -gt 0 ]; then
-                log "  ⚠️ Found $gpl_count GPL-licensed dependencies"
-                risky_licenses=$((risky_licenses + gpl_count))
-                add_vulnerability "MEDIUM"
-            fi
-        fi
-        
-        log "  📊 License check found $risky_licenses potentially problematic licenses"
-    fi
-}
-
-# 6. Web Security Headers Check (if server is running)
+# 5. Web Security Headers Check (local heuristic only, if server is running)
 web_security_headers_check() {
     log "🌐 Checking web security headers..."
     
@@ -232,7 +212,7 @@ web_security_headers_check() {
     fi
 }
 
-# 7. Docker Security Check
+# 6. Docker Security Check
 docker_security_check() {
     log "🐳 Checking Docker security configuration..."
     
@@ -285,7 +265,7 @@ generate_security_report() {
     cat > "$REPORTS_DIR/security-summary.json" << EOF
 {
   "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "scan_duration_seconds": $(($(date +%s) - $(date -d "1 minute ago" +%s))),
+  "scan_duration_seconds": $(($(date +%s) - START_TS)),
   "overall_status": "$overall_status",
   "vulnerability_summary": {
     "total": $TOTAL_VULNERABILITIES,
@@ -299,7 +279,6 @@ generate_security_report() {
     "nodejs_dependencies": "$([ -f "$REPORTS_DIR/npm-audit.json" ] && echo "completed" || echo "skipped")",
     "file_permissions": "completed",
     "secret_detection": "completed",
-    "license_check": "$([ -f package.json ] && echo "completed" || echo "skipped")",
     "web_headers": "completed",
     "docker_security": "$([ -f Dockerfile ] && echo "completed" || echo "skipped")"
   },

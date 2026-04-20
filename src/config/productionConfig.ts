@@ -1,7 +1,9 @@
 /**
- * Production-oriented configuration template
- * Centralized environment/config model, not standalone proof of current
- * production deployment truth.
+ * Production-oriented runtime configuration.
+ *
+ * This module is live in the frontend runtime path, but it is not allowed to
+ * hardcode current deployment identity. Environment-specific values must come
+ * from explicit env configuration.
  */
 
 import { createLogger } from '@/utils/productionLogger';
@@ -82,12 +84,12 @@ class ProductionConfigManager {
           ...this.config.app,
           environment: this.getEnvironment(),
           buildHash: import.meta.env.VITE_BUILD_HASH || 'unknown',
-          deployedAt: import.meta.env.VITE_DEPLOYED_AT || new Date().toISOString(),
+          deployedAt: import.meta.env.VITE_DEPLOYED_AT || undefined,
         },
         supabase: {
           ...this.config.supabase,
-          url: import.meta.env.VITE_SUPABASE_URL || 'https://lbnxzvqppccajllsqaaw.supabase.co',
-          anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMDE0NzEsImV4cCI6MjA4ODc3NzQ3MX0.NkgR_s5Zru3Y24HlGXrE4BzOkCoyQfHQRg317QuFNQI',
+          url: import.meta.env.VITE_SUPABASE_URL || '',
+          anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
         },
         monitoring: {
           ...this.config.monitoring,
@@ -181,14 +183,13 @@ class ProductionConfigManager {
     const viteMode = import.meta.env.MODE;
     const nodeEnv = import.meta.env.NODE_ENV;
     
-    // Check URL for staging/production indicators
-    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-    
-    if (viteMode === 'production') {
+    const appEnv = (import.meta.env.VITE_APP_ENV || '').toLowerCase();
+
+    if (appEnv === 'production' || viteMode === 'production') {
       return 'production';
     }
-    
-    if (hostname.includes('staging') || viteMode === 'staging') {
+
+    if (appEnv === 'staging' || viteMode === 'staging') {
       return 'staging';
     }
     

@@ -29,6 +29,7 @@ interface AnalyticsOpenTrustCasesPanelProps {
   recentNeedsActionCount: number;
 }
 
+const PAPERCLIP_BASE_URL = import.meta.env.VITE_PAPERCLIP_BASE_URL || 'http://localhost:3100';
 const severityRank = (severity: 'low' | 'medium' | 'high' | null) => severity === 'high' ? 3 : severity === 'medium' ? 2 : 1;
 
 export default function AnalyticsOpenTrustCasesPanel({
@@ -49,7 +50,7 @@ export default function AnalyticsOpenTrustCasesPanel({
           )}
           {recentOpenTrustEvents.length > 0 && (
             <a
-              href="http://localhost:3100/DEA/issues?status=backlog"
+              href={`${PAPERCLIP_BASE_URL}/DEA/issues?status=backlog`}
               target="_blank"
               rel="noreferrer"
               className="text-[11px] text-violet-300 underline underline-offset-2"
@@ -112,7 +113,7 @@ export default function AnalyticsOpenTrustCasesPanel({
                     </span>
                     {event.paperclip.identifier && event.paperclip.issue_id ? (
                       <a
-                        href={`http://localhost:3100/DEA/issues/${event.paperclip.issue_id}`}
+                        href={`${PAPERCLIP_BASE_URL}/DEA/issues/${event.paperclip.issue_id}`}
                         target="_blank"
                         rel="noreferrer"
                         className="text-violet-300 underline underline-offset-2"

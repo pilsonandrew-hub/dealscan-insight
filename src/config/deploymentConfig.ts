@@ -1,7 +1,9 @@
 /**
- * Deployment-oriented configuration template
- * Handles environment-specific settings and deployment assumptions without
- * serving as standalone proof of current production deployment truth.
+ * Legacy deployment configuration template.
+ *
+ * This file is not deployment authority and must not hardcode current public
+ * deployment identity. It is only a template/helper surface for explicit env-
+ * driven configuration.
  */
 
 import { Environment } from '@/config/environmentManager';
@@ -10,6 +12,7 @@ export interface DeploymentConfig {
   environment: Environment;
   domain: string;
   ssl: boolean;
+  authoritative: false;
   cdn: {
     enabled: boolean;
     domain?: string;
@@ -42,11 +45,12 @@ export interface DeploymentConfig {
 export class DeploymentManager {
   private static readonly PRODUCTION_CONFIG: DeploymentConfig = {
     environment: Environment.PRODUCTION,
-    domain: 'dealerscope.com',
+    domain: process.env.VITE_PUBLIC_DOMAIN || '',
     ssl: true,
+    authoritative: false,
     cdn: {
-      enabled: true,
-      domain: 'cdn.dealerscope.com',
+      enabled: Boolean(process.env.VITE_CDN_DOMAIN),
+      domain: process.env.VITE_CDN_DOMAIN || undefined,
       assets: ['*.js', '*.css', '*.png', '*.jpg', '*.svg', '*.woff2']
     },
     database: {
@@ -76,7 +80,7 @@ export class DeploymentManager {
   private static readonly STAGING_CONFIG: DeploymentConfig = {
     ...DeploymentManager.PRODUCTION_CONFIG,
     environment: Environment.STAGING,
-    domain: 'staging.dealerscope.com',
+    domain: process.env.VITE_STAGING_PUBLIC_DOMAIN || '',
     cdn: {
       enabled: false,
       assets: []
@@ -95,7 +99,7 @@ export class DeploymentManager {
   private static readonly DEVELOPMENT_CONFIG: DeploymentConfig = {
     ...DeploymentManager.PRODUCTION_CONFIG,
     environment: Environment.DEVELOPMENT,
-    domain: 'localhost:8080',
+    domain: process.env.VITE_DEV_PUBLIC_DOMAIN || 'localhost:8000',
     ssl: false,
     cdn: {
       enabled: false,

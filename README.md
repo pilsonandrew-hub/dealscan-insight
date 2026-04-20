@@ -26,7 +26,6 @@ Primary backend entrypoint:
 - `backend/main.py`
 
 Current mounted route families in `backend/main.py`:
-- `admin`
 - `ingest`
 - `rover`
 - `outcomes`
