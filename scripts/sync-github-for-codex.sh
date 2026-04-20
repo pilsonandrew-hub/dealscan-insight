@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # DealerScope GitHub Sync Verification Script
-# Ensures the correct production-ready version is available for Codex analysis
+# Legacy repository-shape checker for Codex packaging context.
+# Do not treat its checks or generated summary as authoritative evidence of
+# current DealerScope production readiness.
 
 set -e
 
@@ -82,7 +84,7 @@ else
 fi
 
 # Verify key production features
-echo -e "${BLUE}🔍 Verifying production readiness features...${NC}"
+echo -e "${BLUE}🔍 Verifying legacy packaging/features checklist...${NC}"
 
 PRODUCTION_INDICATORS=(
     "src/monitoring/"
@@ -105,7 +107,7 @@ for indicator in "${PRODUCTION_INDICATORS[@]}"; do
     fi
 done
 
-echo -e "${BLUE}Production readiness score: $FOUND_INDICATORS/${#PRODUCTION_INDICATORS[@]}${NC}"
+echo -e "${BLUE}Legacy packaging score: $FOUND_INDICATORS/${#PRODUCTION_INDICATORS[@]}${NC}"
 
 # Check Git status
 echo -e "${BLUE}📋 Checking Git repository status...${NC}"
@@ -145,9 +147,7 @@ if git ls-remote origin > /dev/null 2>&1; then
     
     if [ "$AHEAD" -gt 0 ]; then
         echo -e "${YELLOW}⚠️  Local is $AHEAD commits ahead of remote${NC}"
-        echo -e "${BLUE}💡 Pushing changes to sync with GitHub...${NC}"
-        git push origin "$CURRENT_BRANCH"
-        echo -e "${GREEN}✅ Changes pushed to GitHub${NC}"
+        echo -e "${YELLOW}⚠️  This script no longer auto-pushes. Push manually if you intend to update GitHub.${NC}"
     elif [ "$BEHIND" -gt 0 ]; then
         echo -e "${YELLOW}⚠️  Local is $BEHIND commits behind remote${NC}"
         echo -e "${BLUE}💡 Consider pulling latest changes${NC}"
@@ -163,12 +163,12 @@ fi
 echo -e "${BLUE}📊 Generating project summary...${NC}"
 
 cat > PROJECT_SUMMARY.md << EOF
-# DealerScope Production-Ready Application
+# DealerScope Legacy Codex Packaging Summary
 
 ## Project Overview
 - **Type**: React/TypeScript Web Application
 - **Total Files**: $TOTAL_FILES
-- **Production Readiness**: $FOUND_INDICATORS/${#PRODUCTION_INDICATORS[@]} features implemented
+- **Legacy Packaging Score**: $FOUND_INDICATORS/${#PRODUCTION_INDICATORS[@]} checklist items present
 
 ## Key Features Implemented
 - ✅ Production monitoring and metrics collection
@@ -195,7 +195,7 @@ src/
 scripts/               # Build and deployment scripts
 \`\`\`
 
-## Deployment Ready
+## Legacy Packaging Signals
 - Production Dockerfile (Dockerfile.prod)
 - Docker Compose for production (docker-compose.prod.yml)
 - Nginx configuration (nginx.prod.conf)
@@ -213,9 +213,9 @@ echo -e "\n${BLUE}🎯 Sync Status Summary${NC}"
 echo -e "======================="
 
 if [ ${#MISSING_FILES[@]} -eq 0 ] && [ "$FOUND_INDICATORS" -eq ${#PRODUCTION_INDICATORS[@]} ]; then
-    echo -e "${GREEN}✅ READY: Complete production-ready codebase detected${NC}"
-    echo -e "${GREEN}✅ READY: All expected files and features present${NC}"
-    echo -e "${BLUE}💡 This repository should show as a full production application in Codex${NC}"
+    echo -e "${GREEN}✅ READY: Legacy checklist is fully satisfied${NC}"
+    echo -e "${GREEN}✅ READY: Expected files and packaging signals are present${NC}"
+    echo -e "${BLUE}💡 This repository should present a fuller code shape to Codex, but this is not production proof${NC}"
 else
     echo -e "${YELLOW}⚠️  WARNING: Incomplete project structure detected${NC}"
     echo -e "${YELLOW}⚠️  WARNING: Codex may analyze an outdated or incomplete version${NC}"
