@@ -52,7 +52,7 @@ except Exception as e:
 # Routers — import each independently so one failure doesn't kill everything
 import importlib
 _routers = {}
-for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin", "recon", "sonar", "lifecycle"]:
+for _rname in ["opportunities", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin", "recon", "sonar", "lifecycle"]:
     try:
         _routers[_rname] = importlib.import_module(f"webapp.routers.{_rname}")
         logging.info(f"Router loaded: {_rname}")
@@ -259,11 +259,7 @@ app.add_middleware(
 # prefixes as primary production truth without live route evidence.
 # ---------------------------------------------------------------------------
 _prefix_map = {
-    "auth": "/api/auth",
-    "vehicles": "/api/vehicles",
     "opportunities": "/api/opportunities",
-    "upload": "/api/upload",
-    "ml": "/api/ml",
     "admin": "/api/admin",
     "ingest": "",
     "telegram": "/api/telegram",  # Telegram callback webhooks
