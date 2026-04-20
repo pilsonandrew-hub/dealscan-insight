@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Investment-Grade SLO Enforcement Script
-# Enforces Service Level Objectives for production deployment
+# Legacy SLO heuristic script
+# Evaluates summary/dashboard artifacts from the legacy validation stack.
+# Do not treat its output as authoritative current production deployment approval.
 set -euo pipefail
 
-echo "🎯 Enforcing Service Level Objectives..."
+echo "🎯 Evaluating legacy SLO heuristic..."
 
 # Configuration
 SUMMARY_FILE="${1:-validation-reports/final/summary.json}"
@@ -107,8 +108,8 @@ echo ""
 
 # Final Decision
 if [[ "$gate_status" == "PASS" ]]; then
-    echo "🎉 All SLO gates satisfied - DEPLOYMENT APPROVED"
-    echo "Investment-grade quality standards met."
+    echo "🎉 All SLO heuristic gates satisfied"
+    echo "Legacy validation artifacts met configured thresholds. This is not standalone deployment approval."
     
     # Update summary with SLO status
     if command -v jq >/dev/null 2>&1; then
@@ -126,7 +127,7 @@ else
         echo "  - $gate gate failed"
     done
     echo ""
-    echo "🚫 DEPLOYMENT BLOCKED - Fix issues before retry"
+    echo "🚫 LEGACY SLO HEURISTIC FAILED - Fix issues and re-verify against current production authority before treating this as deploy-relevant"
     
     # Update summary with failure details
     if command -v jq >/dev/null 2>&1; then
