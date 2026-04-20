@@ -1,8 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
-
 interface VehicleListing {
   id: string;
   source_site: string;
@@ -131,45 +129,6 @@ class DealScoringEngine {
         const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
         const lowPrice = Math.min(...prices);
         const highPrice = Math.max(...prices);
-
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-
-        if (token) {
-          try {
-            const resp = await fetch(`${API_BASE}/api/ml/predict-price`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                make,
-                model,
-                year,
-                state: state || undefined,
-                condition: 'fair',
-              }),
-            });
-
-            if (resp.ok) {
-              const prediction = await resp.json();
-              const predictedPrice = typeof prediction?.predicted_price === 'number' ? prediction.predicted_price : avgPrice;
-              const priceRange = prediction?.price_range || {};
-              return {
-                avg_price: predictedPrice,
-                low_price: typeof priceRange.low === 'number' ? priceRange.low : lowPrice,
-                high_price: typeof priceRange.high === 'number' ? priceRange.high : highPrice,
-                sample_size: prices.length,
-                confidence: typeof prediction?.confidence === 'number'
-                  ? prediction.confidence
-                  : Math.min(0.9, prices.length / 20)
-              };
-            }
-          } catch {
-            // Fall back to the calculated market data below.
-          }
-        }
 
         return {
           avg_price: avgPrice,
