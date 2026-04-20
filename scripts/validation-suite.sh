@@ -759,7 +759,7 @@ generate_summary_report() {
 <body>
     <h1>🚀 DealerScope Validation Report</h1>
     <p><strong>Generated:</strong> 'TIMESTAMP'</p>
-    <p><strong>Overall Status:</strong> <span class="pass">✅ PRODUCTION READY</span></p>
+    <p><strong>Overall Status:</strong> <span class="pass">✅ SYNTHETIC LEGACY VALIDATION OUTPUT</span></p>
     
     <div class="section">
         <h2>🛡️ Security Validation</h2>
@@ -833,7 +833,7 @@ generate_summary_report() {
     <p><strong>Warnings:</strong> <span class="warn">0 ⚠️</span></p>
     
     <h2>🎯 Production Readiness Score: 10/10</h2>
-    <p>DealerScope is fully validated and production-ready for immediate deployment.</p>
+    <p>This report is generated from a mixed live/simulated legacy harness and is not authoritative production-readiness evidence.</p>
 </body>
 </html>
 EOF
