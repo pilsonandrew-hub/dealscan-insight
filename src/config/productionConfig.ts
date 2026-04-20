@@ -1,6 +1,7 @@
 /**
- * Production Configuration Management
- * Centralized configuration for production deployment
+ * Production-oriented configuration template
+ * Centralized environment/config model, not standalone proof of current
+ * production deployment truth.
  */
 
 import { createLogger } from '@/utils/productionLogger';
@@ -106,7 +107,7 @@ class ProductionConfigManager {
         },
       };
 
-      // Apply production-specific optimizations
+      // Apply production-oriented optimizations
       if (this.isProduction()) {
         this.applyProductionOptimizations();
       }
@@ -224,7 +225,7 @@ class ProductionConfigManager {
       features: {
         realTimeUpdates: true,
         advancedScoring: true,
-        mlPredictions: true,
+        mlPredictions: false,
         auditLogging: false,
         maintenanceMode: false,
       },
@@ -253,7 +254,7 @@ class ProductionConfigManager {
    * Apply production-specific optimizations
    */
   private applyProductionOptimizations(): void {
-    // Enable all production features
+    // Enable production-oriented feature defaults
     this.config.features.auditLogging = true;
     this.config.performance.cacheEnabled = true;
     this.config.api.rateLimit.enabled = true;
