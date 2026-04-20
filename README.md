@@ -1,76 +1,148 @@
 # DealerScope
 
-**Unified vehicle arbitrage platform** — scrapes government/surplus auctions, scores deals against dealer MMR comps, and surfaces high-margin opportunities through a real-time React dashboard.
+DealerScope is a vehicle arbitrage intelligence system centered on government and public-surplus auction inventory. It ingests listings, applies DealerScope business rules, scores opportunities, and exposes the current product surface through a hybrid FastAPI + Supabase + React stack.
 
----
+## Current system truth
 
-## Architecture
+This repository is **not** a neat single-stack app.
+It is a hybrid live system with:
+- FastAPI backend entrypoint in `backend/main.py`
+- current operational routers under `webapp/routers/`
+- React frontend under `src/`
+- Supabase-backed data access and migrations
+- Railway-hosted backend APIs
+- supporting scripts, workflows, and local harnesses
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        docker-compose                        │
-│                                                             │
-│  ┌──────────────┐   REST/WS    ┌──────────────────────────┐ │
-│  │   frontend   │◄────────────►│        backend           │ │
-│  │  React+Vite  │              │  FastAPI  (port 8000)    │ │
-│  │  port 5173   │              │                          │ │
-│  └──────────────┘              │  /api/auth               │ │
-│                                │  /api/vehicles           │ │
-│  ┌──────────────┐              │  /api/opportunities      │ │
-│  │    worker    │              │  /api/ml                 │ │
-│  │  Celery      │◄────────────►│  /api/pipeline/run  ◄──┐ │ │
-│  │  (scraping)  │   task queue │  /api/pipeline/status   │ │ │
-│  └──────┬───────┘              └──────────────────────────┘ │ │
-│         │                                     │             │ │
-│         ▼                                     ▼             │ │
-│  ┌──────────────────────────────────────────────────────┐   │ │
-│  │                   backend/ingest/                    │   │ │
-│  │                                                      │   │ │
-│  │  scrapers/govdeals.py  ──► scrape_all.py             │   │ │
-│  │  scrapers/publicsurplus.py   │                       │   │ │
-│  │  scrapers/govdeals_live.py   ▼                       │   │ │
-│  │                         normalize.py                 │   │ │
-│  │                         transport.py                 │   │ │
-│  │                         score.py                     │   │ │
-│  └──────────────────────────────────────────────────────┘   │ │
-│         │                                                    │ │
-│  ┌──────▼───────┐    ┌──────────────┐                       │ │
-│  │  PostgreSQL  │    │    Redis     │                       │ │
-│  │  (listings,  │    │  (Celery     │                       │ │
-│  │   sales,     │    │   broker +   │                       │ │
-│  │   audit log) │    │   cache)     │                       │ │
-│  └──────────────┘    └──────────────┘                       │ │
-└─────────────────────────────────────────────────────────────┘
-```
+For current truth, prefer:
+1. live code
+2. live schema/migrations
+3. frontend/backend integration points
+4. workflows/control-plane files
+5. docs and historical artifacts
 
----
+## Current backend authority
 
-## Quick Start
+Primary backend entrypoint:
+- `backend/main.py`
 
-```bash
-# 1. Clone
-git clone https://github.com/pilsonandrew-hub/dealerscope.git
-cd dealerscope
+Current mounted route families in `backend/main.py`:
+- `admin`
+- `ingest`
+- `rover`
+- `outcomes`
+- `analytics`
+- `sniper`
+- `saved_searches`
+- `vin`
+- `recon`
+- `sonar`
+- `lifecycle`
 
-# 2. Copy env file and set secrets
-cp .env.example .env
-# edit SECRET_KEY in .env
+Explicit live alias retained in `backend/main.py`:
+- `POST /api/opportunities/{opportunity_id}/pass`
 
-# 3. Start everything
-docker-compose up
+Health endpoints:
+- `GET /health`
+- `GET /healthz`
 
-# Frontend → http://localhost:5173
-# API docs → http://localhost:8000/docs  (DEBUG=true only)
-# API      → http://localhost:8000
-```
+## Route families intentionally not treated as current production authority
 
-## Python Backend Tests
+The older SQLAlchemy/auth router family was removed from the main backend entrypoint because it was absent from live production surface checks and had become false authority:
+- `auth`
+- `vehicles`
+- `upload`
+- `ml`
+- `opportunities`
 
-This repo targets Python 3.11 for backend work. The backend test dependencies are
-kept in `requirements-dev.txt` as a narrow test/dev set for analytics and router
-coverage, so local backend test setup does not need the full production runtime
-stack.
+Legacy code may still exist in the repo, but those route families are not mounted from the current main backend entrypoint.
 
+## Frontend/API authority
+
+Frontend code should use the centralized settings surface:
+- `src/config/settings.ts`
+- `settings.api.baseUrl`
+
+Current API-base fallback pattern:
+- `VITE_API_URL`
+- fallback local backend: `http://localhost:8000`
+
+The active frontend service/component tier was cleaned to stop hardcoding the Railway production origin directly.
+
+## Current core operational surfaces
+
+### Ingest
+Primary current ingest surface:
+- `webapp/routers/ingest.py`
+
+It owns core behaviors such as:
+- Apify webhook ingest
+- listing normalization
+- gating
+- scoring
+- persistence
+- delivery logging
+- opportunity pass handling
+
+### Scoring
+Primary scoring surface:
+- `backend/ingest/score.py`
+
+Current scoring model includes a **two-lane vehicle system**:
+- Premium lane:
+  - max age 4 years
+  - max mileage 50,000
+  - ceiling 0.88
+- Standard lane:
+  - max age 10 years
+  - max mileage 100,000
+  - reject mileage-per-year over 18,000
+  - ceiling 0.80
+
+### Condition
+Condition engine:
+- `backend/ingest/condition.py`
+
+### Analytics
+Current analytics/trust surface:
+- `webapp/routers/analytics.py`
+
+### Rover
+Current Rover surface:
+- `webapp/routers/rover.py`
+
+### Sonar / Recon / Sniper
+Current specialized route families:
+- `webapp/routers/sonar.py`
+- `webapp/routers/recon.py`
+- `webapp/routers/sniper.py`
+
+## Production reality that was verified
+
+Live production checks established:
+
+Exists in production:
+- `/health`
+- `/healthz`
+- `/api/ingest/opportunities/{opportunity_id}/pass`
+- `/api/opportunities/{opportunity_id}/pass`
+
+Absent in production:
+- `/api/opportunities` list/detail/save/ignore/rescore routes
+- `/api/vehicles/*`
+- `/api/auth/*`
+- `/api/upload/*`
+- `/api/ml/*`
+- `/api/health`
+- `/api/metrics`
+- `/api/ready`
+- `/api/live`
+- `/api/ingest/ingest-vehicle`
+
+Do not use older docs, scripts, or stale route assumptions to infer live production surface.
+
+## Local backend tests
+
+Backend test runner:
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
@@ -78,142 +150,52 @@ python -m pip install -r requirements-dev.txt
 bash scripts/run_backend_tests.sh
 ```
 
-`bash scripts/run_backend_tests.sh` uses `pytest` and defaults to the
-analytics trust-model backend test path (`tests/test_analytics_trust_model.py`).
-Pass one or more test files/modules explicitly once the test dependency set is
-installed. If `pytest` is missing, the script fails clearly instead of
-switching frameworks under the hood.
+Targeted backend suites used during cleanup included:
+- `tests/test_ingest_scoring.py`
+- `tests/test_ingest_save_fallback.py`
+- `tests/test_condition_grade.py`
+- `tests/test_analytics_trust_model.py`
+- `tests/test_reconcile_apify_ingest_runs.py`
 
-### Run the pipeline manually
+## Local development
 
-```bash
-# Trigger a scrape+score run via the API
-curl -X POST http://localhost:8000/api/pipeline/run
+Frontend and backend local assumptions now standardize on:
+- frontend dev origins such as `localhost:5173` / `localhost:4173` where appropriate for dev allowlists
+- backend API default `http://localhost:8000`
 
-# Check status
-curl http://localhost:8000/api/pipeline/status
-```
+Do not assume older local route patterns such as `/api/health` or stale anonymous `/api/opportunities` list endpoints are current.
 
----
+## Schema truth
 
-## Services
+Database truth lives in:
+- `supabase/migrations/`
 
-| Service    | Port  | Description                                      |
-|------------|-------|--------------------------------------------------|
-| `frontend` | 5173  | React + Vite dev server                          |
-| `backend`  | 8000  | FastAPI unified entrypoint (webapp + pipeline)   |
-| `worker`   | —     | Celery worker for background scraping/scoring    |
-| `db`       | 5432  | PostgreSQL 15 — listings, sales, audit logs      |
-| `redis`    | 6379  | Celery broker, result backend, rate-limit cache  |
+Important current-system rule:
+- when code, scripts, or docs disagree, migrations and live route surfaces outrank historical documentation.
 
----
+## Scripts and evaluation artifacts
 
-## Environment Variables
+Many legacy scripts, validation harnesses, exports, and evaluation helpers remain in the repo for local packaging, synthetic testing, or historical context.
 
-| Variable                | Default                                    | Description                          |
-|-------------------------|--------------------------------------------|--------------------------------------|
-| `SECRET_KEY`            | *(required in prod)*                       | JWT signing key                      |
-| `DATABASE_URL`          | `postgresql://dealerscope:...@db:5432/...` | Postgres connection string           |
-| `REDIS_URL`             | `redis://redis:6379/0`                     | Redis connection (webapp)            |
-| `CELERY_BROKER_URL`     | `redis://redis:6379/1`                     | Celery broker                        |
-| `CELERY_RESULT_BACKEND` | `redis://redis:6379/2`                     | Celery result backend                |
-| `OFFLINE_MODE`          | `1`                                        | `1` = use demo fixtures; `0` = live  |
-| `USE_LIVE_GOVDEALS`     | `0`                                        | `1` = scrape GovDeals live           |
-| `DATA_DIR`              | `/app/data`                                | Where pipeline writes CSV/DB files   |
-| `CORS_ORIGINS`          | `http://localhost:5173`                    | Allowed frontend origins             |
-| `DEBUG`                 | `false`                                    | Enables `/docs` and verbose logs     |
+They are **not** authoritative production truth by default.
 
----
+Examples now explicitly demoted as non-authoritative or legacy-local:
+- synthetic validation/report generators
+- obsolete security harnesses
+- local legacy export/deployment helpers
+- legacy AI/Codex evaluation harnesses
 
-## Pipeline — End to End
+Use them only after verifying their target endpoints and assumptions against current live surfaces.
 
-```
-POST /api/pipeline/run
-        │
-        ▼
-  scrape_all.py          ← async-gathers all scrapers concurrently
-        │
-        ├─ GovDealsScraper / GovDealsLive
-        └─ PublicSurplusScraper
-        │
-        ▼
-  Rust/state filter      ← backend/config/states.yml whitelist
-        │
-        ▼
-  normalize.py           ← canonical make/model aliases
-        │
-        ▼
-  transport.py           ← mileage-band cost from state → CA
-        │
-        ▼
-  score.py               ← margin = MMR_CA - bid - premium - doc_fee - transport
-                            score  = margin / max(1000, bid)
-        │
-        ▼
-  opportunities.csv      ← ranked deals written to DATA_DIR
-        │
-        ▼
-  /api/opportunities     ← served to React dashboard
-```
+## What this README is trying to prevent
 
-### Auction sources & fees
+This README intentionally does **not** describe the old Docker/Celery/Postgres-auth/router surface as if it were the current deployed truth.
 
-| Source        | Buyer's Premium | Doc Fee |
-|---------------|-----------------|---------|
-| GovDeals      | 12.5%           | $75     |
-| PublicSurplus | 10.0%           | $50     |
-
-Configured in `backend/config/fees.yml` and `backend/config/sources.yml`.
-
----
-
-## Project Layout
-
-```
-dealerscope/
-├── backend/                  # Scraper/pipeline engine (NEW)
-│   ├── __init__.py
-│   ├── main.py               # Unified FastAPI entrypoint
-│   ├── config/
-│   │   ├── sources.yml       # Auction source URLs + cadence
-│   │   ├── states.yml        # Rust-safe state whitelist
-│   │   ├── fees.yml          # Buyer premiums + doc fees per site
-│   │   ├── transit_rates.yml # Mileage-band transport rates
-│   │   └── state_miles_to_ca.yml
-│   └── ingest/
-│       ├── normalize.py      # Make/model alias resolution
-│       ├── transport.py      # Transport cost calculation
-│       ├── score.py          # Deal margin + score
-│       ├── scrape_all.py     # Scraper orchestrator
-│       └── scrapers/
-│           ├── structures.py     # PublicListing dataclass
-│           ├── govdeals.py       # GovDeals scraper (offline + live)
-│           ├── govdeals_live.py  # Live HTML scraper (lxml)
-│           ├── publicsurplus.py  # PublicSurplus scraper
-│           └── registry.py       # Scraper factory
-├── webapp/                   # Original FastAPI app (routers, ML, auth)
-│   ├── main.py
-│   ├── routers/
-│   ├── ml/
-│   ├── middleware/
-│   └── ...
-├── src/                      # React + TypeScript frontend
-├── docker-compose.yml
-├── Dockerfile
-└── requirements.txt
-```
-
----
-
-## Tech Stack
-
-| Layer      | Technology                                      |
-|------------|-------------------------------------------------|
-| Frontend   | React 18, TypeScript, Vite, Tailwind, shadcn/ui |
-| Backend    | FastAPI, Uvicorn, SQLAlchemy 2                  |
-| Pipeline   | asyncio, aiohttp/requests, lxml, PyYAML         |
-| Queue      | Celery 5 + Redis 7                              |
-| Database   | PostgreSQL 15                                   |
-| ML         | scikit-learn, SHAP, joblib                      |
-| Auth       | JWT, bcrypt, TOTP (2FA)                         |
-| Containers | Docker + docker-compose                         |
+If you are remediating DealerScope, do not start from stale route families or historical scripts.
+Start from:
+- `backend/main.py`
+- current mounted routers
+- `src/config/settings.ts`
+- current frontend service usage
+- `supabase/migrations/`
+- live route checks
