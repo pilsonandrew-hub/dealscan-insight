@@ -13,9 +13,12 @@ import threading
 from pathlib import Path
 from typing import List, Dict, Any
 
-API_BASE = os.getenv('API_BASE', 'http://localhost:4173')
+API_BASE = os.getenv('API_BASE', 'http://localhost:8000')
 MEMORY_THRESHOLD = int(os.getenv('MEMORY_THRESHOLD', '120'))  # MB
 TEST_DURATION = int(os.getenv('TEST_DURATION', '300'))  # seconds
+MEMORY_TEST_ENDPOINTS = [
+    endpoint.strip() for endpoint in os.getenv('MEMORY_TEST_ENDPOINTS', '/health').split(',') if endpoint.strip()
+]
 
 def monitor_memory_usage() -> Dict[str, Any]:
     """Monitor memory usage during API load test"""
@@ -27,11 +30,7 @@ def monitor_memory_usage() -> Dict[str, Any]:
     def generate_load():
         """Generate sustained API load"""
         session = requests.Session()
-        endpoints = [
-            '/api/opportunities?page=1&limit=50',
-            '/api/opportunities?page=2&limit=50',
-            '/api/health'
-        ]
+        endpoints = MEMORY_TEST_ENDPOINTS
         
         while load_running:
             for endpoint in endpoints:
@@ -113,6 +112,7 @@ def monitor_memory_usage() -> Dict[str, Any]:
         'timestamp': time.time(),
         'configuration': {
             'api_base': API_BASE,
+            'memory_test_endpoints': MEMORY_TEST_ENDPOINTS,
             'memory_threshold_mb': MEMORY_THRESHOLD,
             'test_duration_seconds': TEST_DURATION
         },

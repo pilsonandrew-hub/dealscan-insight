@@ -351,7 +351,7 @@ run_observability_validation() {
     "message": "HTTP request started",
     "request_id": "req_abc123def456",
     "method": "GET",
-    "path": "/api/opportunities",
+    "path": "/api/opportunities/1/pass",
     "user_id": "user_789xyz",
     "ip": "192.168.1.100",
     "user_agent": "Mozilla/5.0"
@@ -404,7 +404,7 @@ EOF
   "trace_id": "trace_xyz789abc123",
   "root_span": {
     "span_id": "span_001",
-    "operation_name": "GET /api/opportunities",
+    "operation_name": "POST /api/opportunities/{id}/pass",
     "start_time": "2024-01-15T10:30:15.123Z",
     "end_time": "2024-01-15T10:30:15.298Z",
     "duration_ms": 175.4,
