@@ -1,6 +1,6 @@
 /**
- * Production-ready API service layer
- * Supabase for opportunity data, Railway for ML/rover endpoints
+ * Current API service layer
+ * Supabase for opportunity data, backend API for operational/specialized endpoints
  */
 
 import { Opportunity, PipelineStatus, UploadResult, SourceHealthResponse } from '@/types/dealerscope';

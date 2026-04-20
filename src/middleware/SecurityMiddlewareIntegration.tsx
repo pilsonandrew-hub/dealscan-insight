@@ -1,6 +1,7 @@
 /**
- * Security Middleware Integration - Complete Phase 3 & 4 Implementation
- * Unifies all security components into a cohesive production-ready system
+ * Security Middleware Integration
+ * Coordinates current frontend-side security-related utilities without implying
+ * full production security completeness.
  */
 
 import React, { useEffect, useState } from 'react';

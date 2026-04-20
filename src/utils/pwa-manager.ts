@@ -1,6 +1,7 @@
 /**
  * PWA Manager for offline support and installation
- * Implements production-ready PWA features from v4.7 plan
+ * Legacy-enhanced/local feature manager derived from the v4.7 plan. Do not treat
+ * this file as proof of current production-grade PWA completeness.
  */
 
 import { auditLogger } from './audit-logger';
