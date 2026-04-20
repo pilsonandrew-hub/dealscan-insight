@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# DealerScope Comprehensive Validation Suite
-# Generates all security, performance, resilience, and operational validation artifacts
+# Obsolete synthetic validation/report generator.
+# Generates canned security, performance, resilience, and operational artifacts.
+# Do not treat its outputs as authoritative evidence of current DealerScope production state.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
