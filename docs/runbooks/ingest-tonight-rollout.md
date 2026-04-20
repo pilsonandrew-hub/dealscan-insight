@@ -1,5 +1,8 @@
 # Tonight Ingest Rollout
 
+> Historical rollout snapshot only.
+> This document reflects an earlier ingest rollout plan and must not be treated as current operational authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 Use this when you need to make today’s ingest hardening and reconciliation changes operational tonight without touching the live path casually.
 
 ## Best Next Move

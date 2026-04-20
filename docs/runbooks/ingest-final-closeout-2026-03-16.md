@@ -1,5 +1,8 @@
 # DealerScope Ingest Final Closeout — 2026-03-16
 
+> Historical closeout snapshot only.
+> This document records a March 16, 2026 ingest closeout state and must not be treated as current ingest deployment or operational authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 ## Scope
 Final closeout for the March 15–16 ingest recovery and hardening run.
 

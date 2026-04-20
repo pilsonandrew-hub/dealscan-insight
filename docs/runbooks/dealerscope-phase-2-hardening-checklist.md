@@ -1,5 +1,8 @@
 # DealerScope Phase 2 Hardening Checklist
 
+> Historical checklist snapshot only.
+> This document reflects an earlier hardening checklist and must not be treated as current operational authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 Use this with [docs/runbooks/dealerscope-phase-2-hardening-roadmap.md](/Users/andrewpilson/.openclaw/workspace/projects/dealerscope/docs/runbooks/dealerscope-phase-2-hardening-roadmap.md).
 
 This is the execution copy. If a box cannot be checked with evidence, it is not done.

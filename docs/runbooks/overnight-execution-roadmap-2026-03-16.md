@@ -1,5 +1,8 @@
 # Overnight Execution Roadmap — 2026-03-16
 
+> Historical roadmap snapshot only.
+> This document reflects an earlier overnight execution plan and must not be treated as current operational authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 This roadmap starts from the exact unresolved state at the end of tonight.
 
 ## Operating Rules
