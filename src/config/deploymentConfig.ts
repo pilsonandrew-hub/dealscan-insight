@@ -1,6 +1,7 @@
 /**
- * Production Deployment Configuration
- * Handles environment-specific settings and deployment requirements
+ * Deployment-oriented configuration template
+ * Handles environment-specific settings and deployment assumptions without
+ * serving as standalone proof of current production deployment truth.
  */
 
 import { Environment } from '@/config/environmentManager';
@@ -197,7 +198,7 @@ export class DeploymentManager {
    * Validate deployment readiness
    */
   static validateDeployment(environment: Environment): {
-    ready: boolean;
+    configReady: boolean;
     issues: string[];
     warnings: string[];
   } {
@@ -232,7 +233,7 @@ export class DeploymentManager {
     }
 
     return {
-      ready: issues.length === 0,
+      configReady: issues.length === 0,
       issues,
       warnings
     };
