@@ -27,7 +27,6 @@ export interface DeploymentConfig {
   };
   monitoring: {
     healthCheckPath: string;
-    metricsPath: string;
     logLevel: string;
   };
   performance: {
@@ -61,8 +60,7 @@ export class DeploymentManager {
       frameOptions: 'DENY'
     },
     monitoring: {
-      healthCheckPath: '/api/health',
-      metricsPath: '/api/metrics',
+      healthCheckPath: '/health',
       logLevel: 'warn'
     },
     performance: {
@@ -265,7 +263,7 @@ export class DeploymentManager {
 
 // Health check endpoint configuration
 export const HEALTH_CHECK_CONFIG = {
-  path: '/api/health',
+  path: '/health',
   timeout: 5000,
   services: ['database', 'storage', 'memory', 'network'],
   thresholds: {
@@ -277,10 +275,7 @@ export const HEALTH_CHECK_CONFIG = {
 
 // Monitoring endpoints
 export const MONITORING_CONFIG = {
-  healthCheck: '/api/health',
-  metrics: '/api/metrics',
-  readiness: '/api/ready',
-  liveness: '/api/live'
+  healthCheck: '/health'
 };
 
 export default DeploymentManager;

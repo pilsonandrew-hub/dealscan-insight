@@ -414,7 +414,7 @@ class ProductionReadinessGate {
     try {
       // Measure API performance with a simple health check
       const start = performance.now();
-      await fetch('/api/health', { method: 'HEAD' });
+      await fetch('/health', { method: 'HEAD' });
       const end = performance.now();
       
       p95Latency = end - start;

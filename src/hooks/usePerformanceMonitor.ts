@@ -57,20 +57,20 @@ export function usePerformanceMonitor(componentName: string) {
   }, [componentName]);
 
   const reportMetrics = (component: string, metrics: PerformanceMetrics) => {
-    // Send to analytics service
-    fetch('/api/metrics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    try {
+      const existingMetrics = JSON.parse(localStorage.getItem('dealerscope_metrics') || '[]');
+      const nextEntry = {
         component,
         metrics,
         timestamp: Date.now(),
         userAgent: navigator.userAgent,
         url: window.location.pathname
-      })
-    }).catch(() => {
-      // Silently fail in production
-    });
+      };
+      const combinedMetrics = [...existingMetrics, nextEntry].slice(-1000);
+      localStorage.setItem('dealerscope_metrics', JSON.stringify(combinedMetrics));
+    } catch {
+      // Silently fail in production.
+    }
   };
 
   const measureAsync = async <T>(

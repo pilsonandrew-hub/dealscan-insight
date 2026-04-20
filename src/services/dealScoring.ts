@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
 
 interface VehicleListing {
   id: string;
@@ -323,67 +322,6 @@ class DealScoringEngine {
     }
   }
 
-  async createOpportunityIfProfitable(listing: VehicleListing, metrics: DealMetrics): Promise<boolean> {
-    // Profitability thresholds
-    const MIN_ROI = 15; // 15% minimum ROI
-    const MIN_PROFIT = 3000; // $3k minimum profit
-    const MAX_RISK = 70; // Maximum risk score of 70
-    const MIN_CONFIDENCE = 40; // Minimum confidence of 40%
-
-    if (
-      metrics.roi_percentage >= MIN_ROI &&
-      metrics.potential_profit >= MIN_PROFIT &&
-      metrics.risk_score <= MAX_RISK &&
-      metrics.confidence_score >= MIN_CONFIDENCE
-    ) {
-      try {
-        // Determine status based on metrics
-        let status = 'moderate';
-        if (metrics.roi_percentage >= 25 && metrics.risk_score <= 40) {
-          status = 'hot';
-        } else if (metrics.roi_percentage >= 20 && metrics.risk_score <= 50) {
-          status = 'good';
-        }
-
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        const resp = await fetch(`${API_BASE}/api/ingest/ingest-vehicle`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': token ? `Bearer ${token}` : '',
-          },
-          body: JSON.stringify({
-            ...listing,
-            profit_margin: (metrics.potential_profit / metrics.estimated_sale_price) * 100,
-            status,
-            is_active: true,
-            metrics,
-          }),
-        });
-
-        if (!resp.ok) {
-          console.error('Error creating opportunity:', await resp.text().catch(() => `HTTP ${resp.status}`));
-          return false;
-        }
-
-        // Show toast notification for hot deals
-        if (status === 'hot') {
-          toast.success('🔥 Hot Deal Alert!', {
-            description: `${listing.year} ${listing.make} ${listing.model} - ${metrics.roi_percentage.toFixed(1)}% ROI, $${metrics.potential_profit.toLocaleString()} profit`,
-            duration: 10000
-          });
-        }
-
-        return true;
-      } catch (error) {
-        console.error('Error creating opportunity:', error);
-        return false;
-      }
-    }
-
-    return false;
-  }
 }
 
 export const dealScoringEngine = new DealScoringEngine();

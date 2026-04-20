@@ -184,14 +184,6 @@ export class MetricsCollector {
         const combinedMetrics = [...existingMetrics, ...metricsToFlush].slice(-1000); // Keep last 1000 metrics
         localStorage.setItem('dealerscope_metrics', JSON.stringify(combinedMetrics));
         
-        // Send to cloud logging for production monitoring
-        if (import.meta.env.PROD) {
-          await fetch('/api/metrics', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ metrics: metricsToFlush })
-          }).catch(err => logger.error('Failed to send metrics to cloud:', err));
-        }
       } catch (storageError) {
         logger.error('Failed to store metrics locally:', storageError);
       }
