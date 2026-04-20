@@ -336,7 +336,7 @@ $(if [ "$CRITICAL_ISSUES" -eq 0 ] && [ "$HIGH_ISSUES" -lt 3 ]; then
     echo "✅ APPROVED FOR DEPLOYMENT"
     echo "   Low security risk detected"
 else 
-    echo "❌ DEPLOYMENT BLOCKED"
+    echo "❌ SECURITY GATE FAILED"
     echo "   Critical security issues must be resolved"
 fi)
 
