@@ -1,6 +1,8 @@
 /**
- * Centralized configuration management
- * Inspired by the config.py in the bootstrap script
+ * Centralized runtime settings.
+ *
+ * This module is live and high-impact. It must not infer deployment identity
+ * from stale defaults beyond explicit local-development fallbacks.
  */
 
 import { createLogger } from '@/utils/productionLogger';
@@ -81,12 +83,14 @@ export interface AppSettings {
 }
 
 // Default configuration
+const resolvedEnvironment = ((import.meta.env.VITE_APP_ENV || import.meta.env.MODE || 'development') as 'development' | 'staging' | 'production');
+
 const defaultSettings: AppSettings = {
-  environment: import.meta.env.MODE as 'development' | 'staging' | 'production' || 'development',
-  debug: import.meta.env.MODE === 'development',
+  environment: resolvedEnvironment,
+  debug: resolvedEnvironment === 'development',
   
   api: {
-    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    baseUrl: import.meta.env.VITE_API_URL || (resolvedEnvironment === 'development' ? 'http://localhost:8000' : '/api'),
     timeout: 30000,
     retries: 3,
     circuitBreakerThreshold: 5,
@@ -124,13 +128,13 @@ const defaultSettings: AppSettings = {
   
   features: {
     realTimeUpdates: true,
-    advancedMetrics: import.meta.env.MODE !== 'development',
+    advancedMetrics: resolvedEnvironment !== 'development',
     backgroundSync: true,
-    experimentalFeatures: import.meta.env.MODE === 'development'
+    experimentalFeatures: resolvedEnvironment === 'development'
   },
   
   websocket: {
-    url: import.meta.env.VITE_WS_URL || 'ws://localhost:8000',
+    url: import.meta.env.VITE_WS_URL || (resolvedEnvironment === 'development' ? 'ws://localhost:8000' : ''),
     autoReconnect: true,
     maxReconnectAttempts: 5,
     reconnectInterval: 3000
