@@ -1,4 +1,4 @@
-name: Production Deploy
+name: Legacy Build and Deploy Placeholder
 on:
   push:
     branches: [main]
@@ -129,19 +129,19 @@ jobs:
         with:
           name: build-${{ needs.build.outputs.version }}
           
-      - name: Deploy to staging
+      - name: Legacy staging deploy placeholder
         run: |
-          echo "🚀 Deploying to staging environment..."
+          echo "🚀 Running legacy staging deploy placeholder..."
           # Add your staging deployment commands here
           # Example: rsync, scp, or cloud provider CLI
           
-      - name: Run smoke tests
+      - name: Run backend smoke check
         run: |
           echo "🧪 Running smoke tests on Railway backend..."
           curl -f https://dealscan-insight-production.up.railway.app/healthz || echo "⚠️ Health check failed — non-blocking for staging"
           echo "✅ Smoke tests complete"
           
-      - name: Comment on PR
+      - name: Comment on PR (legacy placeholder)
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
@@ -166,22 +166,22 @@ jobs:
         with:
           name: build-${{ needs.build.outputs.version }}
           
-      - name: Validate production readiness
+      - name: Validate legacy production placeholder assumptions
         run: |
-          echo "🔍 Validating production readiness..."
-          echo "✅ Production validation passed — env vars managed by Railway"
+          echo "🔍 Validating legacy production placeholder assumptions..."
+          echo "⚠️ This workflow does not prove production readiness or perform a real backend deployment."
           
-      - name: Database migration check
+      - name: Database migration placeholder
         run: |
           echo "🗄️ Checking database migrations..."
           # Add Supabase migration commands here
           
-      - name: Deploy to production
+      - name: Legacy production deploy placeholder
         run: |
-          echo "🚀 Deploying to production..."
+          echo "🚀 Running legacy production deploy placeholder..."
           # Add your production deployment commands here
           
-      - name: Health check
+      - name: Health check against current Railway backend
         run: |
           echo "🏥 Running production health check..."
           sleep 30 # Wait for deployment
@@ -198,14 +198,14 @@ jobs:
             sleep 10
           done
           
-      - name: Performance check
+      - name: Performance placeholder
         run: |
           echo "⚡ Running performance check..."
           # Add Lighthouse CI or similar performance testing
           
-      - name: Notify deployment
+      - name: Notify legacy deploy placeholder
         run: |
-          echo "📢 Production deployment completed!"
+          echo "📢 Legacy deploy placeholder run completed!"
           echo "Version: ${{ needs.build.outputs.version }}"
           echo "URL: https://dealerscope.com"
 
@@ -215,7 +215,7 @@ jobs:
     if: failure() && (github.ref == 'refs/heads/main' || github.event_name == 'release')
     needs: [deploy-production]
     steps:
-      - name: Rollback deployment
+      - name: Rollback placeholder
         run: |
           echo "🔄 Rolling back deployment..."
           # Add rollback commands here
