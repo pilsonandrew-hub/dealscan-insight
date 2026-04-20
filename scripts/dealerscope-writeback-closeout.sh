@@ -4,6 +4,7 @@ set -euo pipefail
 CANON_ROOT="/Users/andrewpilson/.openclaw/workspace/brains/dealerscope-brain"
 SYNC_SCRIPT="/Users/andrewpilson/.openclaw/workspace/scripts/dealerscope-brain-sync.py"
 VERIFY_SCRIPT="/Users/andrewpilson/.openclaw/workspace/scripts/check-dealerscope-writeback-closeout.py"
+VERIFY_FULL_SCRIPT="/Users/andrewpilson/.openclaw/workspace/scripts/verify-dealerscope-obsidian-mirror.py"
 
 usage() {
   cat <<'EOF'
@@ -15,7 +16,8 @@ Usage:
 Purpose:
   1. Require named governed brain artifacts for closeout
   2. Run the Obsidian mirror sync
-  3. Verify exact parity between canonical brain and mirror
+  3. Verify exact parity between canonical brain and mirror for named artifacts
+  4. Verify exact parity across the full governed included scope
 
 Examples:
   dealerscope-writeback-closeout.sh \
@@ -42,16 +44,19 @@ for raw in "$@"; do
   fi
 done
 
-echo "[1/3] Canonical governed artifacts present"
+echo "[1/4] Canonical governed artifacts present"
 for raw in "$@"; do
   rel="${raw#brains/dealerscope-brain/}"
   echo "  - $rel"
 done
 
-echo "[2/3] Syncing canonical brain to Obsidian mirror"
+echo "[2/4] Syncing canonical brain to Obsidian mirror"
 python3 "$SYNC_SCRIPT"
 
-echo "[3/3] Verifying closeout parity"
+echo "[3/4] Verifying named closeout artifacts"
 python3 "$VERIFY_SCRIPT" "$@"
 
-echo "CLOSEOUT_COMPLETE governed writeback verified"
+echo "[4/4] Verifying full governed mirror scope"
+python3 "$VERIFY_FULL_SCRIPT"
+
+echo "CLOSEOUT_COMPLETE governed writeback and full mirror parity verified"
