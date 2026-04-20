@@ -62,17 +62,7 @@ _POSITIVE_SIGNALS: dict[str, int] = {
     "runs & drives": 10,
     "runs and moves": 8,
     "runs & moves": 8,
-    "fleet maintained": 6,
-    "fleet vehicle": 5,
     "maintenance records": 5,
-    "jump to start": -8,
-    "jump start": -8,
-    "body damage": -10,
-    "paint damage": -6,
-    "body/paint damage": -10,
-    "frame damage": -20,
-    "structural damage": -20,
-
 }
 
 # Numeric grade-code patterns in descriptions ("Grade 5", "Condition 3", etc.)
@@ -190,7 +180,8 @@ def score_condition(
     # Add type coercion for mileage
     if isinstance(mileage, str):
         try:
-            mileage = float(re.sub(r'[^-9.]', '', mileage)) if mileage else None
+            cleaned_mileage = re.sub(r'[^0-9.]', '', mileage)
+            mileage = float(cleaned_mileage) if cleaned_mileage else None
         except (ValueError, TypeError):
             mileage = None
     """Full condition scoring.
