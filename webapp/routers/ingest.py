@@ -112,6 +112,7 @@ _supabase_url = (
 _supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 _supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
 _environment = os.getenv("ENVIRONMENT", "production")
+_APP_PUBLIC_URL = (os.getenv("APP_PUBLIC_URL") or "https://dealscan-insight-production.up.railway.app").strip()
 
 if _supabase_service_role_key:
     _supabase_key = _supabase_service_role_key
@@ -2852,7 +2853,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://dealscan-insight-production.up.railway.app",
+        "HTTP-Referer": _APP_PUBLIC_URL,
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
