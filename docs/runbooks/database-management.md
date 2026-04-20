@@ -1,8 +1,11 @@
 # DealerScope Database Management & Recovery Runbook
 
-**Owner:** Database Administration Team  
-**Last Updated:** 2025-09-07  
-**Classification:** Internal - Operations Manual
+> Historical/legacy runbook only.
+> This document contains a generic operational model with unverified ownership, infrastructure, migration, maintenance-mode, and incident-response assumptions. It must not be treated as current DealerScope database operations authority without re-validation against current Supabase setup, current code, current workflows, and current runbook truth.
+
+**Owner:** Historical placeholder owner  
+**Last Updated:** Historical snapshot placeholder  
+**Classification:** Internal - Historical Operations Manual
 
 ## Overview
 
@@ -12,9 +15,9 @@ This document covers standard operating procedures for managing the DealerScope 
 
 ### Primary Database
 - **Provider:** Supabase (Managed PostgreSQL)
-- **Environment:** Production
-- **Location:** US-East-1 (Primary)
-- **Instance Type:** [To be documented based on actual deployment]
+- **Environment:** Production-oriented historical assumption
+- **Location:** Historical placeholder; verify against current project reality
+- **Instance Type:** Historical placeholder; verify against current provider reality
 
 ### Backup Strategy
 - **Method:** Supabase Point-in-Time Recovery (PITR)
@@ -24,7 +27,7 @@ This document covers standard operating procedures for managing the DealerScope 
 
 ## 2. Schema Migration Procedures
 
-> **CRITICAL:** Schema changes must NEVER be applied directly to production without following this process.
+> **CRITICAL:** This is a historical process model, not a verified current production procedure. Revalidate every step against current Supabase workflow and current operational ownership before use.
 
 ### Development Phase
 1. **Migration Script Creation:**
