@@ -1,269 +1,193 @@
-# DealerScope Production Readiness Assessment
+# DealerScope Production Readiness
 
-## 🚀 **CURRENT STATUS: 10/10 PRODUCTION READY**
+## Purpose
 
-**Last Updated:** January 2025
-**Deployment Status:** ✅ READY FOR IMMEDIATE PRODUCTION DEPLOYMENT
+This document describes current DealerScope production-readiness truth using verified live code, verified route surface, current config authority, and current migrations.
 
----
-
-## Executive Summary
-
-DealerScope has achieved **full production readiness** with enterprise-grade architecture, comprehensive security, and battle-tested reliability features.
-
-### Readiness Scores by Component
-
-| Component | Score | Status | Notes |
-|-----------|-------|--------|-------|
-| **Backend (FastAPI)** | 10/10 | ✅ Production Ready | Complete API with auth, rate limiting, monitoring |
-| **Database (Supabase)** | 10/10 | ✅ Production Ready | 22 tables, RLS policies, audit logs, functions |
-| **Frontend (React)** | 10/10 | ✅ Production Ready | Modern React with performance monitoring |
-| **Security** | 10/10 | ✅ Enterprise Grade | JWT + 2FA, RLS, rate limiting, audit logs |
-| **DevOps** | 10/10 | ✅ Production Ready | Docker, CI/CD, health checks, monitoring |
-| **Monitoring** | 10/10 | ✅ Comprehensive | Error tracking, performance metrics, alerting |
+It does **not** treat historical route families, synthetic validation harnesses, legacy export helpers, or old architecture assumptions as readiness authority.
 
 ---
 
-## 🏗 Architecture Overview
+## Current readiness truth
 
-### Backend Stack
-- **FastAPI** - Production-grade Python API framework
-- **SQLAlchemy** - Database ORM with migrations
-- **PostgreSQL** - Primary database (via Supabase)
-- **Redis** - Caching and rate limiting
-- **JWT + TOTP** - Multi-factor authentication
-- **Pydantic** - Data validation and settings management
+DealerScope is production-shaped as a **hybrid live system**, not as a neat single Docker/Celery/Postgres stack.
 
-### Frontend Stack
-- **React 18** - Modern React with hooks
-- **TypeScript** - Type-safe development
-- **Vite** - Fast build tooling
-- **Tailwind CSS** - Utility-first styling
-- **Radix UI** - Accessible component primitives
-- **React Query** - Server state management
-
-### Infrastructure
-- **Docker** - Containerized deployment
-- **GitHub Actions** - CI/CD pipeline
-- **Supabase** - Backend-as-a-Service
-- **Nginx** - Production web server
-- **Monitoring** - Error tracking and performance
+Current verified authority order:
+1. live code
+2. live schema/migrations
+3. frontend/backend integration points
+4. workflows/control-plane files
+5. historical docs and legacy tooling
 
 ---
 
-## 🔐 Security Features
+## Current backend readiness surface
 
-### Authentication & Authorization
-- ✅ **JWT Authentication** with secure token handling
-- ✅ **TOTP 2FA** with QR code generation
-- ✅ **Row Level Security (RLS)** on all user data
-- ✅ **Session management** with secure cookies
-- ✅ **Password hashing** with bcrypt (12 rounds)
+### Backend entrypoint
+- `backend/main.py`
 
-### Data Protection
-- ✅ **Input validation** on all endpoints
-- ✅ **SQL injection prevention** via ORM
-- ✅ **XSS protection** with CSP headers
-- ✅ **Rate limiting** with exponential backoff
-- ✅ **File upload security** with type validation
-- ✅ **Environment variables** for secrets
+### Current mounted route families
+- `admin`
+- `ingest`
+- `rover`
+- `outcomes`
+- `analytics`
+- `sniper`
+- `saved_searches`
+- `vin`
+- `recon`
+- `sonar`
+- `lifecycle`
 
-### Audit & Compliance
-- ✅ **Audit logging** for all user actions
-- ✅ **Error reporting** with correlation IDs
-- ✅ **Security event tracking**
-- ✅ **Data retention policies**
-- ✅ **GDPR compliance** features
+### Explicit retained alias
+- `POST /api/opportunities/{opportunity_id}/pass`
 
----
+### Live health routes
+- `GET /health`
+- `GET /healthz`
 
-## ⚡ Performance Features
+### Route families removed from current main backend surface
+These route families are no longer mounted from the main backend entrypoint because they were absent from verified production route surface and had become false authority:
+- `auth`
+- `vehicles`
+- `upload`
+- `ml`
+- `opportunities`
 
-### Frontend Optimizations
-- ✅ **Code splitting** with dynamic imports
-- ✅ **Bundle optimization** with Vite
-- ✅ **Image optimization** and lazy loading
-- ✅ **Performance monitoring** with Web Vitals
-- ✅ **Error boundaries** for graceful failures
-- ✅ **Memory leak prevention**
-
-### Backend Optimizations
-- ✅ **Database indexing** on query columns
-- ✅ **Redis caching** for frequent queries
-- ✅ **Connection pooling** for database
-- ✅ **Query optimization** with SQLAlchemy
-- ✅ **Background tasks** with Celery
-- ✅ **Rate limiting** to prevent abuse
-
-### Infrastructure
-- ✅ **CDN integration** ready
-- ✅ **Gzip compression** enabled
-- ✅ **Health checks** for load balancers
-- ✅ **Horizontal scaling** support
-- ✅ **Database replication** ready
+Legacy code for those areas may still exist in the repo, but it is not current mounted production authority.
 
 ---
 
-## 📊 Monitoring & Observability
+## Current frontend/runtime readiness surface
 
-### Error Tracking
-- ✅ **Error boundaries** catch React errors
-- ✅ **Global error handlers** for unhandled errors
-- ✅ **Error reporting** to Supabase
-- ✅ **Stack trace collection**
-- ✅ **User context** in error reports
+Frontend API access should route through:
+- `src/config/settings.ts`
+- `settings.api.baseUrl`
 
-### Performance Monitoring
-- ✅ **Web Vitals** tracking (LCP, FID, CLS)
-- ✅ **API response time** monitoring
-- ✅ **Database query** performance
-- ✅ **Memory usage** tracking
-- ✅ **Bundle size** monitoring
+The current frontend service/component tier has been cleaned so it no longer hardcodes the Railway production origin in the major live surfaces.
 
-### Business Metrics
-- ✅ **User activity** tracking
-- ✅ **Feature usage** analytics
-- ✅ **Conversion funnels**
-- ✅ **Error rate** monitoring
-- ✅ **Custom dashboards**
+Readiness claims should therefore be based on:
+- centralized API base resolution
+- current mounted backend route families
+- current live route checks
+
+Not on stale per-file hardcoded origins.
 
 ---
 
-## 🚀 Deployment
+## Verified production route truth
 
-### Containerization
-```bash
-# Production deployment
-docker-compose -f docker-compose.prod.yml up -d
+### Present
+- `/health`
+- `/healthz`
+- `/api/ingest/opportunities/{opportunity_id}/pass`
+- `/api/opportunities/{opportunity_id}/pass`
 
-# Health check
-curl -f http://localhost:8080/healthz
-```
+### Absent
+- `/api/opportunities` list/detail/save/ignore/rescore routes
+- `/api/vehicles/*`
+- `/api/auth/*`
+- `/api/upload/*`
+- `/api/ml/*`
+- `/api/health`
+- `/api/metrics`
+- `/api/ready`
+- `/api/live`
+- `/api/ingest/ingest-vehicle`
 
-### Environment Configuration
-- ✅ **Environment separation** (dev/staging/prod)
-- ✅ **Secret management** via environment variables
-- ✅ **Configuration validation** on startup
-- ✅ **Feature flags** for controlled rollouts
-
-### CI/CD Pipeline
-- ✅ **Automated testing** (unit, integration, e2e)
-- ✅ **Security scanning** with Trivy
-- ✅ **Code quality** checks (ESLint, TypeScript)
-- ✅ **Performance validation**
-- ✅ **Automated deployment** to staging/production
-- ✅ **Rollback capabilities**
+Any readiness surface still assuming those absent routes are live is stale and should be treated as a defect in documentation/tooling, not as current production truth.
 
 ---
 
-## 🧪 Testing Coverage
+## Current scoring/readiness reality
 
-### Frontend Testing
-- ✅ **Unit tests** with Vitest
-- ✅ **Component testing** with React Testing Library
-- ✅ **E2E testing** with Playwright
-- ✅ **Visual regression** testing
-- ✅ **Accessibility** testing
+Current scoring truth lives in:
+- `backend/ingest/score.py`
+- `backend/ingest/condition.py`
 
-### Backend Testing
-- ✅ **Unit tests** with pytest
-- ✅ **Integration tests** for API endpoints
-- ✅ **Database tests** with test fixtures
-- ✅ **Security tests** for auth flows
-- ✅ **Performance tests** for scalability
+Current vehicle rule model is a two-lane system:
 
-### Infrastructure Testing
-- ✅ **Container tests** with hadolint
-- ✅ **Security scanning** in CI/CD
-- ✅ **Load testing** capabilities
-- ✅ **Chaos engineering** ready
+### Premium lane
+- max age 4 years
+- max mileage 50,000
+- bid ceiling 0.88
 
----
+### Standard lane
+- max age 10 years
+- max mileage 100,000
+- reject mileage-per-year over 18,000
+- bid ceiling 0.80
 
-## 📈 Scalability
-
-### Horizontal Scaling
-- ✅ **Stateless application** design
-- ✅ **Load balancer** ready
-- ✅ **Database connection pooling**
-- ✅ **Redis clustering** support
-- ✅ **Microservices** architecture ready
-
-### Performance Limits
-- **API Throughput:** 10,000 req/sec per instance
-- **Database:** Handles 1M+ records efficiently
-- **File Uploads:** 50MB max with chunked upload
-- **WebSocket Connections:** 10,000 concurrent users
-- **Memory Usage:** <512MB per container
+Any readiness or review process that still assumes a single 4-year / 50k universal model is stale.
 
 ---
 
-## 🔧 Maintenance & Operations
+## Current operationally relevant backend surfaces
 
-### Monitoring Dashboards
-- ✅ **System health** dashboard
-- ✅ **Application metrics** dashboard
-- ✅ **Business KPIs** dashboard
-- ✅ **Error tracking** dashboard
-- ✅ **Performance metrics** dashboard
+### Ingest
+- `webapp/routers/ingest.py`
 
-### Operational Procedures
-- ✅ **Incident response** playbook
-- ✅ **Deployment** procedures
-- ✅ **Backup & restore** procedures
-- ✅ **Disaster recovery** plan
-- ✅ **Security incident** response
+### Analytics
+- `webapp/routers/analytics.py`
 
----
+### Rover
+- `webapp/routers/rover.py`
 
-## 🎯 Production Checklist
+### Sniper
+- `webapp/routers/sniper.py`
 
-### Pre-Deployment ✅
-- [x] All tests passing
-- [x] Security scan passed
-- [x] Performance validation passed
-- [x] Database migrations applied
-- [x] Environment variables configured
-- [x] SSL certificates configured
-- [x] Monitoring configured
-- [x] Backup strategy implemented
+### Sonar
+- `webapp/routers/sonar.py`
 
-### Post-Deployment ✅
-- [x] Health checks passing
-- [x] Monitoring alerts configured
-- [x] Performance baselines established
-- [x] Error tracking active
-- [x] User feedback channels active
-- [x] Support documentation updated
+### Recon
+- `webapp/routers/recon.py`
+
+These surfaces should outrank historical generic CRUD assumptions when evaluating production readiness.
 
 ---
 
-## 🚦 Go/No-Go Criteria
+## What is no longer valid as readiness evidence
 
-### GO ✅ - Ready for Production
-- ✅ **Security:** All security requirements met
-- ✅ **Performance:** Meets all SLAs
-- ✅ **Reliability:** 99.9% uptime target achievable
-- ✅ **Scalability:** Can handle expected load
-- ✅ **Monitoring:** Full observability in place
-- ✅ **Support:** Incident response procedures ready
+The following are not authoritative production-readiness evidence on their own:
+- synthetic validation/report generators
+- obsolete security harnesses
+- legacy local AI evaluation harnesses
+- legacy export/deployment helpers
+- legacy Codex packaging/sync scores
+- local v4.7 harness behavior
+- dead route assumptions in old scripts or docs
 
-### Risk Assessment: **LOW** ✅
-- **Technical Risk:** Minimal - proven technology stack
-- **Security Risk:** Minimal - comprehensive security measures
-- **Performance Risk:** Minimal - thoroughly tested
-- **Operational Risk:** Minimal - automated deployments
+They may still exist for historical or local-use reasons, but they do not define current production readiness.
 
 ---
 
-## 🎉 Conclusion
+## What should count as production-readiness evidence
 
-**DealerScope is 100% production-ready** and exceeds enterprise standards for:
-- Security and compliance
-- Performance and scalability  
-- Reliability and monitoring
-- Operational excellence
+Use:
+- current mounted route surface from `backend/main.py`
+- current frontend config authority from `src/config/settings.ts`
+- current migrations under `supabase/migrations/`
+- current workflows/control-plane files
+- direct live route checks
+- current targeted tests tied to active surfaces
 
-**Deployment Recommendation:** ✅ **APPROVED FOR IMMEDIATE PRODUCTION DEPLOYMENT**
+Examples of current evidence that matter more than legacy docs:
+- targeted backend suites around ingest/scoring/reconciliation
+- live route checks proving health/pass routes present and old route families absent
+- workflow wording aligned to live two-lane scoring truth
 
-The application can handle enterprise-scale workloads with confidence.
+---
+
+## Current readiness rule
+
+A surface is only production-authoritative if it satisfies both:
+1. it is present in current live code/config authority
+2. it survives current live route or current integration proof
+
+If a script, route family, or doc fails that standard, treat it as:
+- legacy
+- transitional
+- synthetic
+- or stale
+
+Do not let it define production readiness.
