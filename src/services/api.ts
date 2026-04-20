@@ -5,8 +5,9 @@
 
 import { Opportunity, PipelineStatus, UploadResult, SourceHealthResponse } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
+import { settings } from '@/config/settings';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
+const API_BASE = settings.api.baseUrl;
 
 export interface CrosshairSearchFilters {
   make?: string;

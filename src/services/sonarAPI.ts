@@ -1,6 +1,8 @@
 // Sonar API — real Apify backend via /api/sonar/*
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
+import { settings } from '@/config/settings';
+
+const API_BASE = settings.api.baseUrl;
 
 export interface SonarResult {
   id: string;

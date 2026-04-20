@@ -3,8 +3,9 @@ import { Camera, X, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { settings } from '@/config/settings';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
+const API_BASE_URL = settings.api.baseUrl;
 
 const VINScanner = () => {
   const [isOpen, setIsOpen] = useState(false);

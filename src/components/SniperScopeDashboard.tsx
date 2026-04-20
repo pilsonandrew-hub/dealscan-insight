@@ -3,6 +3,7 @@ import { Target, Lock, Trash2, Calculator, Upload, Search, RefreshCw, Crosshair,
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { settings } from '@/config/settings';
 import api, { type OpportunityDetail } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -94,7 +95,7 @@ const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: 
 ];
 
 const STORAGE_KEY = 'dealerscope_sniper_targets';
-const API_BASE = (typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_API_URL : '') || 'https://dealscan-insight-production.up.railway.app';
+const API_BASE = settings.api.baseUrl;
 
 // ─── Active DB Sniper Targets ─────────────────────────────────────────────────
 interface LiveTarget {
@@ -485,7 +486,7 @@ export default function SniperScopeDashboard() {
         throw new Error('You must be signed in to log a sale outcome.');
       }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/outcomes`, {
+      const response = await fetch(`${API_BASE}/api/outcomes`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -1,7 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { logger } from "@/lib/logger";
+import { settings } from "@/config/settings";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
+const API_BASE = settings.api.baseUrl;
 
 export interface RoverEvent {
   userId: string;
@@ -80,7 +81,6 @@ class RoverAPIService {
 
   async trackEvent(event: RoverEvent): Promise<void> {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       const headers: Record<string, string> = {
@@ -89,7 +89,7 @@ class RoverAPIService {
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
-      await fetch(`${apiUrl}/api/rover/events`, {
+      await fetch(`${API_BASE}/api/rover/events`, {
         method: "POST",
         headers,
         body: JSON.stringify({

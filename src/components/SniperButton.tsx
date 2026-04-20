@@ -12,10 +12,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Target, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { settings } from '@/config/settings';
 
-const API_BASE =
-  import.meta.env.VITE_API_URL ||
-  'https://dealscan-insight-production.up.railway.app';
+const API_BASE = settings.api.baseUrl;
 
 // Minimal shape we need from an opportunity — keeps this component decoupled.
 interface SniperOpportunity {

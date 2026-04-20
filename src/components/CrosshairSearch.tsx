@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { roverAPI } from "@/services/roverAPI";
 import { api } from "@/services/api";
 import { supabase } from "@/integrations/supabase/client";
+import { settings } from '@/config/settings';
 import { Search, Target, Plus, X, Settings, Bell } from "lucide-react";
 import { SniperButton } from "@/components/SniperButton";
 
@@ -171,10 +172,9 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
     }
     setSaving(true);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const resp = await fetch(`${apiUrl}/api/saved-searches`, {
+      const resp = await fetch(`${settings.api.baseUrl}/api/saved-searches`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
