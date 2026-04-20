@@ -1,5 +1,10 @@
 """
 Opportunities API endpoints
+
+Transitional router, not primary product authority.
+Current product reads are Supabase-first, and opportunity pass is canonically handled in
+webapp.routers.ingest with the backend/main.py alias surface.
+Do not use this file as the first truth source for remediation without live route evidence.
 """
 import logging
 import os
