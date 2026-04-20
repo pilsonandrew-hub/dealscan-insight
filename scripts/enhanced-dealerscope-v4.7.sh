@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Legacy local harness / generator.
+# This script builds and runs a self-contained v4.7-style DealerScope environment
+# with its own local /metrics and /dashboard surfaces. It is not authoritative
+# evidence of the current production API surface.
+
 # DealerScope v4.7 Enhanced "handoff" installer
 # Production-grade optimizations: error boundaries, circuit breakers, retry logic,
 # health monitoring, enhanced security, performance optimizations, observability
