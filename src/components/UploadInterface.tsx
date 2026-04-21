@@ -181,6 +181,10 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     timer.end(success);
   }, []);
 
+  const showUploadToast = useCallback((title: string, description: string, variant?: "default" | "destructive") => {
+    toast({ title, description, ...(variant ? { variant } : {}) });
+  }, [toast]);
+
   const processFile = async (file: File): Promise<void> => {
     const fileId = Math.random().toString(36).substr(2, 9);
     const timer = performanceMonitor.startTimer('file_upload_process');
@@ -219,11 +223,11 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
           
           markFileError(fileId, `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}`);
           
-          toast({
-            title: `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
-            description: `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
-            variant: riskColor as any
-          });
+          showUploadToast(
+            `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
+            `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
+            riskColor === 'secondary' ? 'default' : (riskColor as 'default' | 'destructive')
+          );
           return;
         }
 
@@ -236,11 +240,11 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
             { filename: file.name, issues: securityCheck.issues }
           );
           
-          toast({
-            title: "Security Notice",
-            description: "File flagged for review but proceeding with upload",
-            variant: "default"
-          });
+          showUploadToast(
+            "Security Notice",
+            "File flagged for review but proceeding with upload",
+            "default"
+          );
         }
 
         // Data validation phase
@@ -289,11 +293,11 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
               // Show validation warnings if any
               if (validationReport.warnings.length > 0) {
-                toast({
-                  title: "Data Quality Notice",
-                  description: `${validationReport.warnings.length} data quality warnings found`,
-                  variant: "default"
-                });
+                showUploadToast(
+                  "Data Quality Notice",
+                  `${validationReport.warnings.length} data quality warnings found`,
+                  "default"
+                );
               }
             }
           } catch (error) {
@@ -316,10 +320,10 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
           
           updateFile(fileId, (file) => ({ ...file, status: "success", progress: 100, records: result.rows_processed }));
           
-          toast({
-            title: "Upload Successful",
-            description: `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`,
-          });
+          showUploadToast(
+            "Upload Successful",
+            `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`
+          );
           
           // Call success callback
           onUploadSuccess?.(result);
@@ -333,11 +337,11 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
           
           markFileError(fileId, result.errors?.join(', ') || "Failed to process file");
           
-          toast({
-            title: "Upload Failed",
-            description: `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
-            variant: "destructive"
-          });
+          showUploadToast(
+            "Upload Failed",
+            `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
+            "destructive"
+          );
         }
     } catch (error) {
       finishUploadProgress(progressInterval, timer, false);
@@ -348,11 +352,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
       
       markFileError(fileId, errorMessage);
       
-      toast({
-        title: "Upload Error",
-        description: errorMessage,
-        variant: "destructive"
-      });
+      showUploadToast("Upload Error", errorMessage, "destructive");
     }
   };
 
@@ -360,17 +360,17 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     for (const file of selectedFiles) {
       const securityCheck = await performSecurityCheck(file);
       if (!securityCheck.isSecure) {
-        toast({
-          title: "Security Validation Failed",
-          description: `${file.name}: ${securityCheck.issues.join(', ')}`,
-          variant: securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
-        });
+        showUploadToast(
+          "Security Validation Failed",
+          `${file.name}: ${securityCheck.issues.join(', ')}`,
+          securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
+        );
         continue;
       }
 
       await processFile(file);
     }
-  }, [toast]);
+  }, [showUploadToast]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
@@ -386,7 +386,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
     // Clear input
     e.target.value = '';
-  }, [toast]);
+  }, [handleSelectedFiles]);
 
   const removeFile = (fileId: string) => {
     setFiles(prev => prev.filter(f => f.id !== fileId));
