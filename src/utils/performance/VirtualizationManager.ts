@@ -3,8 +3,7 @@
  * Implements efficient rendering for large datasets
  */
 
-import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { logger } from '@/utils/secureLogger';
+import React, { useMemo, useCallback, useState } from 'react';
 
 export interface VirtualizationConfig {
   itemHeight: number;

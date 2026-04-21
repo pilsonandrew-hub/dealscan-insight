@@ -31,22 +31,6 @@ vi.mock('@/integrations/supabase/client', () => ({
   }
 }));
 
-// Mock logger
-vi.mock('@/utils/secureLogger', () => ({
-  logger: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    scope: vi.fn(() => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    })),
-  }
-}));
-
 // Mock IntersectionObserver
 global.IntersectionObserver = class IntersectionObserver {
   root = null;
