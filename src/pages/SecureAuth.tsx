@@ -106,7 +106,7 @@ export function AuthPage() {
               setMessage({ type: 'error', text: result.error.message });
             }
           } else {
-            logger.setContext('auth').info('User signed in successfully');
+            logger.withContext('auth').info('User signed in successfully');
             // Navigation handled by useEffect
           }
           break;
@@ -136,7 +136,7 @@ export function AuthPage() {
           break;
       }
     } catch (error) {
-      logger.setContext('auth').error('Auth form error', error);
+      logger.withContext('auth').error('Auth form error', error);
       setMessage({ type: 'error', text: 'An unexpected error occurred' });
     } finally {
       setIsSubmitting(false);

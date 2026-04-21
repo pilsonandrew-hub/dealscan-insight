@@ -32,7 +32,7 @@ export function SecureProtectedRoute({ children, requiredRole }: ProtectedRouteP
 
   // Redirect to auth if not authenticated
   if (!isAuthenticated) {
-    logger.setContext('security').warn('Unauthorized access attempt', {
+    logger.withContext('security').warn('Unauthorized access attempt', {
       path: location.pathname,
       requiredRole
     });
@@ -50,7 +50,7 @@ export function SecureProtectedRoute({ children, requiredRole }: ProtectedRouteP
   if (requiredRole && user) {
     // This would check user roles from the database
     // For now, we'll allow all authenticated users
-    logger.setContext('auth').info('Authorized access', {
+    logger.withContext('auth').info('Authorized access', {
       userId: user.id,
       path: location.pathname,
       requiredRole

@@ -29,7 +29,7 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
   useEffect(() => {
     if (initialData && initialData.length > 0) {
       setOpportunities(initialData);
-      logger.setContext('system').info('Initialized opportunities', { count: initialData.length });
+      logger.withContext('system').info('Initialized opportunities', { count: initialData.length });
     }
   }, [initialData]);
 
@@ -39,24 +39,24 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
 
   const pausePipeline = useCallback(() => {
     setPipelineStatus(prev => ({ ...prev, status: 'paused' }));
-    logger.setContext('system').info('Pipeline paused');
+    logger.withContext('system').info('Pipeline paused');
   }, []);
 
   const resumePipeline = useCallback(() => {
     setPipelineStatus(prev => ({ ...prev, status: 'running' }));
-    logger.setContext('system').info('Pipeline resumed');
+    logger.withContext('system').info('Pipeline resumed');
   }, []);
 
   const connect = useCallback(() => {
     setConnectionStatus(WebSocketStatus.CONNECTED);
     setIsConnected(true);
-    logger.setContext('system').info('Connection established');
+    logger.withContext('system').info('Connection established');
   }, []);
 
   const disconnect = useCallback(() => {
     setConnectionStatus(WebSocketStatus.DISCONNECTED);
     setIsConnected(false);
-    logger.setContext('system').info('Connection disconnected');
+    logger.withContext('system').info('Connection disconnected');
   }, []);
 
   return {

@@ -25,6 +25,14 @@ interface LogBackend {
   flush(): Promise<void>;
 }
 
+interface ContextualLogger {
+  debug(message: string, data?: any): void;
+  info(message: string, data?: any): void;
+  warn(message: string, data?: any): void;
+  error(message: string, data?: any): void;
+  fatal(message: string, data?: any): void;
+}
+
 class ConsoleBackend implements LogBackend {
   async write(entry: LogEntry): Promise<void> {
     const color = this.getColor(entry.level);
@@ -196,10 +204,44 @@ class UnifiedLogger {
     await Promise.allSettled(writePromises);
   }
 
+  private createContextualLogger(context: LogContext): ContextualLogger {
+    return {
+      debug: (message: string, data?: any) => {
+        if (this.shouldLog('debug')) {
+          this.logWithContext(context, 'debug', message, data);
+        }
+      },
+      info: (message: string, data?: any) => {
+        if (this.shouldLog('info')) {
+          this.logWithContext(context, 'info', message, data);
+        }
+      },
+      warn: (message: string, data?: any) => {
+        if (this.shouldLog('warn')) {
+          this.logWithContext(context, 'warn', message, data);
+        }
+      },
+      error: (message: string, data?: any) => {
+        if (this.shouldLog('error')) {
+          this.logWithContext(context, 'error', message, data);
+        }
+      },
+      fatal: (message: string, data?: any) => {
+        if (this.shouldLog('fatal')) {
+          this.logWithContext(context, 'fatal', message, data);
+        }
+      },
+    };
+  }
+
   // Context setters
   setContext(context: LogContext): UnifiedLogger {
     this.context = context;
     return this;
+  }
+
+  withContext(context: LogContext): ContextualLogger {
+    return this.createContextualLogger(context);
   }
 
   setUserId(userId: string): UnifiedLogger {
@@ -249,10 +291,14 @@ class UnifiedLogger {
   }
 
   private log(level: LogLevel, message: string, data?: any): void {
+    this.logWithContext(this.context, level, message, data);
+  }
+
+  private logWithContext(context: LogContext, level: LogLevel, message: string, data?: any): void {
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
-      context: this.context,
+      context,
       message,
       data,
       userId: this.userId,
@@ -266,17 +312,17 @@ class UnifiedLogger {
 
   // Performance logging helpers
   performance(message: string, data?: any): void {
-    this.setContext('performance').info(message, data);
+    this.withContext('performance').info(message, data);
   }
 
   // Security logging helpers
   security(message: string, data?: any): void {
-    this.setContext('security').warn(message, data);
+    this.withContext('security').warn(message, data);
   }
 
   // Business logging helpers
   business(message: string, data?: any): void {
-    this.setContext('business').info(message, data);
+    this.withContext('business').info(message, data);
   }
 
   // Timing helpers
