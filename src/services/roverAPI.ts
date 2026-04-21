@@ -53,6 +53,28 @@ export interface UserPreferences {
 }
 
 class RoverAPIService {
+  private async getSessionAuth() {
+    const { data: { session } } = await supabase.auth.getSession();
+    return {
+      session,
+      token: session?.access_token ?? null,
+      userId: session?.user?.id ?? null,
+    };
+  }
+
+  private buildAuthHeaders(token: string | null, withJson: boolean = false): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (withJson) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }
+
+  private async fetchRecommendationsFromApi(userId: string, token: string, limit: number): Promise<Response> {
+    return fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
+      headers: this.buildAuthHeaders(token),
+    });
+  }
+
   private buildEventItem(item: DealItem) {
     return {
       deal_id: item.deal_id || item.id,
@@ -71,17 +93,10 @@ class RoverAPIService {
 
   async trackEvent(event: RoverEvent): Promise<void> {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
+      const { token } = await this.getSessionAuth();
       await fetch(`${API_BASE}/api/rover/events`, {
         method: "POST",
-        headers,
+        headers: this.buildAuthHeaders(token, true),
         body: JSON.stringify({
           event: event.event,
           userId: event.userId,
@@ -90,22 +105,15 @@ class RoverAPIService {
         }),
       });
     } catch (error) {
-      // Fire and forget - don't block UX on tracking failures
       logger.warn("Rover event tracking failed", { message: String(error) });
     }
   }
 
   async getRecommendations(limit: number = 25): Promise<RoverRecommendations> {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const userId = session?.user?.id;
-      if (!userId) throw new Error("No user session");
-      const resp = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-      });
+      const { token, userId } = await this.getSessionAuth();
+      if (!userId || !token) throw new Error("No user session");
+      const resp = await this.fetchRecommendationsFromApi(userId, token, limit);
 
       if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
 
@@ -113,7 +121,6 @@ class RoverAPIService {
       return data as RoverRecommendations;
     } catch (error) {
       logger.error("Rover recommendations failed", { message: String(error) });
-      // Fallback: return empty with cold start indicator
       return { precomputedAt: null, items: [], totalCount: 0, confidence: 0 };
     }
   }
@@ -158,9 +165,7 @@ class RoverAPIService {
 
   async getRecommendationsWithToken(userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
     try {
-      const resp = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const resp = await this.fetchRecommendationsFromApi(userId, token, limit);
       if (!resp.ok) {
         const body = await resp.text();
         const fallback = await this.getFallbackRecommendations(limit);
@@ -184,14 +189,10 @@ class RoverAPIService {
     options?: { dosThreshold?: number; telegramChatId?: string }
   ): Promise<void> {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const { token } = await this.getSessionAuth();
       const resp = await fetch(`${API_BASE}/api/saved-searches`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+        headers: this.buildAuthHeaders(token, true),
         body: JSON.stringify({
           name: title,
           filters: query || {},
