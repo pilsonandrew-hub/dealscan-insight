@@ -96,6 +96,18 @@ const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: 
 
 const STORAGE_KEY = 'dealerscope_sniper_targets';
 
+function readSavedTargets(): SavedTarget[] {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedTargets(targets: SavedTarget[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(targets));
+}
+
 // ─── Active DB Sniper Targets ─────────────────────────────────────────────────
 interface LiveTarget {
   id: string;
@@ -257,13 +269,7 @@ export default function SniperScopeDashboard() {
     notes: '',
   });
 
-  const [saved, setSaved] = useState<SavedTarget[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [saved, setSaved] = useState<SavedTarget[]>(() => readSavedTargets());
 
   // ─── Live calculation ──────────────────────────────────────────────────────
   const calc = useMemo(() => {
@@ -419,13 +425,13 @@ export default function SniperScopeDashboard() {
     };
     const next = [entry, ...saved];
     setSaved(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeSavedTargets(next);
   };
 
   const deleteTarget = (id: string) => {
     const next = saved.filter(t => t.id !== id);
     setSaved(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeSavedTargets(next);
   };
 
   const loadTarget = (t: SavedTarget) => {
