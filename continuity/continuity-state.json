@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-04-21T18:27:38+00:00",
+  "generated_at": "2026-04-21T18:35:06+00:00",
   "overall_state": "advisory_drift",
-  "derived_state": "governed_dirty",
+  "derived_state": "needs_sync_and_push",
   "enforcement_mode": "audit",
   "governed_dirty": true,
   "branch": "master",
-  "head": "ea518d445efaf712e3055bb87866e5f6f3dbc157",
+  "head": "f60a423cbc319f076145845fe0b2198bc6994ee3",
   "upstream": "origin/master",
-  "ahead": 0,
+  "ahead": 1,
   "behind": 0,
   "mirror_status": {
     "named_paths_checked": 2,
@@ -17,7 +17,7 @@
     "full_scope_missing": [],
     "full_scope_mismatched": []
   },
-  "push_status": "aligned",
+  "push_status": "needs_push",
   "recall_status": "not_required",
   "open_loops": {
     "total": 0,
@@ -25,11 +25,14 @@
     "malformed": 0
   },
   "blocking_reasons": [
-    "governed_dirty"
+    "governed_dirty",
+    "needs_push"
   ],
   "advisory_reasons": [],
   "pending_promotions": [],
-  "pending_replication": [],
+  "pending_replication": [
+    "needs_push"
+  ],
   "pending_verification": [],
   "override_active": false,
   "degraded_subsystems": [],

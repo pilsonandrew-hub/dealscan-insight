@@ -1,16 +1,19 @@
 {
-  "generated_at": "2026-04-21T18:27:38+00:00",
+  "generated_at": "2026-04-21T18:35:06+00:00",
   "enforcement_mode": "audit",
   "cleanly_closable": false,
   "conditionally_closable": true,
   "blocked_if_enforced": true,
   "blocking_reasons": [
-    "governed_dirty"
+    "governed_dirty",
+    "needs_push"
   ],
   "advisory_reasons": [],
   "missing_requirements": {
     "malformed_open_loops": 0,
-    "pending_replication": [],
+    "pending_replication": [
+      "needs_push"
+    ],
     "recall_required": false
   }
 }
