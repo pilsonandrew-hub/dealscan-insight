@@ -58,14 +58,18 @@
           ],
           "require_resolution_note": true,
           "append_promotion_evidence": true,
-          "set_next_action_from_resolution": true
+          "set_next_action_from_resolution": true,
+          "require_fulfillment_proof": true,
+          "require_pre_post_evidence": true,
+          "require_target_status_echo": true
         }
       },
       "closure_board": {
         "path": "brains/dealerscope-brain/03_Operations/DealerScope-Governed-Closure-Board.md",
         "match_prefix": "### ",
+        "classification": "verification_only_by_design_until_real_close_case_proven",
         "execution": {
-          "enabled": true,
+          "enabled": false,
           "allowed_target_statuses": [
             "open",
             "in_progress",
@@ -81,16 +85,38 @@
       },
       "report": {
         "path_prefix": "brains/dealerscope-brain/reports/",
-        "require_file": true
+        "require_file": true,
+        "classification": "verification_only_pending_contract"
       },
       "doctrine": {
         "path_prefix": "brains/dealerscope-brain/",
-        "require_file": true
+        "require_file": true,
+        "classification": "verification_only_pending_contract"
       },
       "policy": {
         "path_prefix": "continuity/",
-        "require_file": true
+        "require_file": true,
+        "classification": "verification_only_pending_contract"
       }
+    },
+    "audit": {
+      "require_uniform_resolution_metadata": true,
+      "required_promoted_fields": [
+        "destination",
+        "destination_ref",
+        "resolution",
+        "resolved_at",
+        "execution_mode",
+        "fulfillment_proof"
+      ],
+      "required_executed_fields": [
+        "execution_mode",
+        "fulfillment_proof",
+        "pre_mutation_evidence",
+        "post_mutation_evidence",
+        "target_status",
+        "target_path"
+      ]
     }
   }
 }

@@ -105,7 +105,7 @@ def parse_backticked_value(line: str) -> Optional[str]:
     return parts[1] if len(parts) >= 3 else None
 
 
-def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> None:
+def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> dict:
     cfg = load_destination_cfg('work_queue')
     execution_cfg = cfg.get('execution') or {}
     if not execution_cfg.get('enabled', False):
@@ -161,11 +161,30 @@ def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str]
                 break
         if not inserted:
             block.append(promotion_note_line)
+    pre_status = current_status
+    pre_next_action = block[next_idx]
+    pre_evidence = block[evidence_idx]
     lines[start:end] = block
     target_path.write_text('\n'.join(lines) + '\n')
+    return {
+        'execution_mode': 'destination_mutation',
+        'target_path': str(target_path.relative_to(WORKSPACE)),
+        'target_status': target_status,
+        'fulfillment_proof': f'updated {destination_ref} in work_queue to {target_status}',
+        'pre_mutation_evidence': {
+            'status': pre_status,
+            'next_action': pre_next_action,
+            'evidence': pre_evidence,
+        },
+        'post_mutation_evidence': {
+            'status': target_status,
+            'next_action': block[next_idx],
+            'evidence': block[evidence_idx],
+        },
+    }
 
 
-def mutate_closure_board_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> None:
+def mutate_closure_board_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> dict:
     cfg = load_destination_cfg('closure_board')
     execution_cfg = cfg.get('execution') or {}
     if not execution_cfg.get('enabled', False):
@@ -214,16 +233,38 @@ def mutate_closure_board_item(item: dict, destination_ref: str, note: Optional[s
         block[existing_note_idx] = promotion_note_line
     else:
         block.append(promotion_note_line)
+    pre_status = current_status
+    pre_next_action = block[next_idx]
+    pre_evidence = block[evidence_idx]
     lines[start:end] = block
     target_path.write_text('\n'.join(lines) + '\n')
+    return {
+        'execution_mode': 'destination_mutation',
+        'target_path': str(target_path.relative_to(WORKSPACE)),
+        'target_status': target_status,
+        'fulfillment_proof': f'updated {destination_ref} in closure_board to {target_status}',
+        'pre_mutation_evidence': {
+            'status': pre_status,
+            'next_action': pre_next_action,
+            'evidence': pre_evidence,
+        },
+        'post_mutation_evidence': {
+            'status': target_status,
+            'next_action': block[next_idx],
+            'evidence': block[evidence_idx],
+        },
+    }
 
 
 def cmd_update(args, status: str) -> int:
     payload = load_queue()
+    policy = load_policy()
+    audit_cfg = ((policy.get('promotion') or {}).get('audit') or {})
     items = payload.setdefault('items', [])
     item = find_item(items, args.id)
     if not item:
         raise SystemExit(f'missing item: {args.id}')
+    execution_result = None
     if status == 'promoted':
         if not args.destination or args.destination not in ALLOWED_DESTINATIONS:
             raise SystemExit(f'valid --destination required for promoted item: {sorted(ALLOWED_DESTINATIONS)}')
@@ -232,9 +273,9 @@ def cmd_update(args, status: str) -> int:
         verify_destination(args.destination, args.destination_ref)
         if args.execute:
             if args.destination == 'work_queue':
-                mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
+                execution_result = mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
             elif args.destination == 'closure_board':
-                mutate_closure_board_item(item, args.destination_ref, args.note, args.target_status)
+                execution_result = mutate_closure_board_item(item, args.destination_ref, args.note, args.target_status)
             else:
                 raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
         item['destination'] = args.destination
@@ -242,6 +283,22 @@ def cmd_update(args, status: str) -> int:
     item['status'] = status
     item['resolution'] = args.note or None
     item['resolved_at'] = now_iso()
+    if execution_result:
+        item.update(execution_result)
+    elif status == 'promoted':
+        item['execution_mode'] = 'verification_only'
+        item.setdefault('fulfillment_proof', f'verified destination exists for {item["destination"]}:{item["destination_ref"]}')
+        item.setdefault('target_status', None)
+    required_promoted_fields = audit_cfg.get('required_promoted_fields') or []
+    required_executed_fields = audit_cfg.get('required_executed_fields') or []
+    if status == 'promoted' and audit_cfg.get('require_uniform_resolution_metadata', False):
+        for field in required_promoted_fields:
+            if not item.get(field):
+                raise SystemExit(f'missing required promoted audit field: {field}')
+        if item.get('execution_mode') == 'destination_mutation':
+            for field in required_executed_fields:
+                if not item.get(field):
+                    raise SystemExit(f'missing required executed audit field: {field}')
     write_queue(payload)
     print(f'{status} {args.id}')
     return 0

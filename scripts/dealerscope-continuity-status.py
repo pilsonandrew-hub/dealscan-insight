@@ -161,11 +161,14 @@ def find_latest_matching(glob_pattern: str, root: Path | None = None, exclude_na
     return None
 
 
-def malformed_pending_promotions(items: list[dict]) -> list[dict]:
+def malformed_pending_promotions(items: list[dict], audit_cfg: dict | None = None) -> list[dict]:
     bad = []
+    audit_cfg = audit_cfg or {}
     required = ['id', 'title', 'source', 'reason', 'created_at', 'status']
     allowed_status = {'pending', 'promoted', 'dismissed'}
     allowed_destinations = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
+    required_promoted_fields = audit_cfg.get('required_promoted_fields') or []
+    required_executed_fields = audit_cfg.get('required_executed_fields') or []
     for item in items:
         if any(not item.get(key) for key in required):
             bad.append(item)
@@ -180,6 +183,15 @@ def malformed_pending_promotions(items: list[dict]) -> list[dict]:
             if not item.get('destination_ref'):
                 bad.append(item)
                 continue
+            for field in required_promoted_fields:
+                if not item.get(field):
+                    bad.append(item)
+                    break
+            else:
+                if item.get('execution_mode') == 'destination_mutation':
+                    if any(not item.get(field) for field in required_executed_fields):
+                        bad.append(item)
+                        continue
     return bad
 
 
@@ -438,6 +450,7 @@ def main() -> int:
     requested_paths = args.paths or configured_paths
     briefing_cfg = policy.get('briefing') or {}
     promotion_cfg = policy.get('promotion') or {}
+    audit_cfg = promotion_cfg.get('audit') or {}
 
     git = git_status()
     named_ok, named_failures = check_named_paths(requested_paths) if requested_paths else ([], [])
@@ -453,7 +466,7 @@ def main() -> int:
     queue_rel = promotion_cfg.get('queue_path', 'continuity/pending-promotions.json')
     queue_path = WORKSPACE / queue_rel
     queue_items = load_pending_promotions(queue_path)
-    bad_queue_items = malformed_pending_promotions(queue_items)
+    bad_queue_items = malformed_pending_promotions(queue_items, audit_cfg)
     destination_failures = verified_destination_failures(queue_items, promotion_cfg)
     recall_policy = policy.get('recall') or {}
     recall_required = bool(
@@ -571,6 +584,7 @@ def main() -> int:
             'pending_replication': pending_replication,
             'recall_required': recall_required,
             'briefing_health': briefing_health,
+            'audit_policy_enforced': bool(audit_cfg.get('require_uniform_resolution_metadata', False)),
         },
     }
     write_json(CLOSEOUT_PATH, closeout_payload)
