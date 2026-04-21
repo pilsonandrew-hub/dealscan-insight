@@ -1,19 +1,14 @@
 {
-  "generated_at": "2026-04-21T18:35:06+00:00",
+  "generated_at": "2026-04-21T18:52:48+00:00",
   "enforcement_mode": "audit",
-  "cleanly_closable": false,
-  "conditionally_closable": true,
-  "blocked_if_enforced": true,
-  "blocking_reasons": [
-    "governed_dirty",
-    "needs_push"
-  ],
+  "cleanly_closable": true,
+  "conditionally_closable": false,
+  "blocked_if_enforced": false,
+  "blocking_reasons": [],
   "advisory_reasons": [],
   "missing_requirements": {
     "malformed_open_loops": 0,
-    "pending_replication": [
-      "needs_push"
-    ],
+    "pending_replication": [],
     "recall_required": false
   }
 }

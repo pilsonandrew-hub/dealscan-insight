@@ -2,15 +2,15 @@
   "version": 1,
   "days": {
     "2026-04-21": {
-      "events_written_today": 11,
-      "closeout_checks_today": 11,
+      "events_written_today": 13,
+      "closeout_checks_today": 13,
       "advisory_violations_today": 4,
-      "blocking_violations_today_if_enforced": 16,
+      "blocking_violations_today_if_enforced": 17,
       "sync_failures_today": 0,
       "briefing_failures_today": 0,
       "recall_required_today": 0,
       "overrides_today": 0,
-      "last_state": "advisory_drift"
+      "last_state": "aligned"
     }
   }
 }
