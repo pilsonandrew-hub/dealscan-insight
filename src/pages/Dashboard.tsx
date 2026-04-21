@@ -892,42 +892,69 @@ const RoverTab = () => {
     (localStorage.getItem('rover_mode') as 'ai' | 'manual') || 'ai'
   );
 
+  const mapOpportunityToRoverRecommendation = useCallback((d: any): RoverRecommendation => ({
+    id: d.id,
+    make: d.make,
+    model: d.model,
+    year: d.year,
+    mileage: d.mileage,
+    current_bid: d.current_bid,
+    estimated_sale_price: d.estimated_sale_price,
+    score: d.dos_score,
+    dos_score: d.dos_score,
+    gross_margin: d.gross_margin,
+    potential_profit: d.potential_profit,
+    profit_margin: d.profit_margin,
+    state: d.state,
+    source_site: d.source_site,
+    auction_end: d.auction_end,
+    listing_url: d.listing_url,
+    vin: d.vin,
+    total_cost: d.total_cost,
+    risk_score: d.risk_score,
+    transportation_cost: d.transportation_cost,
+    fees_cost: d.fees_cost,
+    roi: d.roi,
+    roi_percentage: d.roi_percentage,
+    confidence_score: d.confidence_score,
+    roi_per_day: d.roi_per_day,
+    retail_ctm_pct: d.retail_ctm_pct,
+    estimated_days_to_sale: d.estimated_days_to_sale,
+    max_bid: d.max_bid,
+    pricing_source: d.pricing_source,
+    manheim_mmr_mid: d.manheim_mmr_mid,
+    manheim_mmr_low: d.manheim_mmr_low,
+    manheim_mmr_high: d.manheim_mmr_high,
+    pricing_updated_at: d.pricing_updated_at,
+    investment_grade: d.investment_grade,
+    designated_lane: d.designated_lane,
+  }), []);
+
+  const fetchDirectRoverDeals = useCallback(async ({ fallbackOnly = false }: { fallbackOnly?: boolean } = {}): Promise<RoverRecommendation[]> => {
+    let query = supabase
+      .from('opportunities')
+      .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
+      .gte('dos_score', 65)
+      .order('dos_score', { ascending: false })
+      .limit(25);
+
+    if (fallbackOnly) {
+      query = query.or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`);
+    }
+
+    const { data } = await query;
+    return (data || []).map(mapOpportunityToRoverRecommendation);
+  }, [mapOpportunityToRoverRecommendation]);
+
   const load = useCallback(async () => {
     const token = session?.access_token;
     if (!user || !token) { setRoverDebug('No user session'); setLoading(false); return; }
     setLoading(true);
     setIsFallback(false);
 
-    // ── Manual mode: skip AI, query Supabase directly ────────────────────────
     if (roverMode === 'manual') {
       try {
-        const { data: manualDeals } = await supabase
-          .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
-          .gte('dos_score', 65)
-          .order('dos_score', { ascending: false })
-          .limit(25);
-        if (manualDeals && manualDeals.length > 0) {
-          const mapped: RoverRecommendation[] = manualDeals.map((d: any) => ({
-            id: d.id, make: d.make, model: d.model, year: d.year, mileage: d.mileage,
-            current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
-            score: d.dos_score, dos_score: d.dos_score, gross_margin: d.gross_margin,
-            potential_profit: d.potential_profit, profit_margin: d.profit_margin,
-            state: d.state, source_site: d.source_site, auction_end: d.auction_end,
-            listing_url: d.listing_url, vin: d.vin, total_cost: d.total_cost,
-            risk_score: d.risk_score, transportation_cost: d.transportation_cost,
-            fees_cost: d.fees_cost, roi: d.roi, roi_percentage: d.roi_percentage,
-            confidence_score: d.confidence_score, roi_per_day: d.roi_per_day,
-            retail_ctm_pct: d.retail_ctm_pct, estimated_days_to_sale: d.estimated_days_to_sale,
-            max_bid: d.max_bid, pricing_source: d.pricing_source,
-            manheim_mmr_mid: d.manheim_mmr_mid, manheim_mmr_low: d.manheim_mmr_low,
-            manheim_mmr_high: d.manheim_mmr_high, pricing_updated_at: d.pricing_updated_at,
-            investment_grade: d.investment_grade, designated_lane: d.designated_lane,
-          }));
-          setRecs(mapped);
-        } else {
-          setRecs([]);
-        }
+        setRecs(await fetchDirectRoverDeals());
       } catch (e) {
         console.error('RoverTab manual load error:', e);
       } finally {
@@ -936,7 +963,6 @@ const RoverTab = () => {
       return;
     }
 
-    // ── AI mode ──────────────────────────────────────────────────────────────
     setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     try {
       const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
@@ -944,7 +970,6 @@ const RoverTab = () => {
       setRoverDebug((result as any)._debug || `API returned ${items.length} items`);
 
       if (items.length > 0) {
-        // Map DealItem → RoverRecommendation; preserve why_signals from backend
         const mapped: RoverRecommendation[] = items.map((item: any) => ({
           id: item.id,
           make: item.make,
@@ -965,91 +990,23 @@ const RoverTab = () => {
         }));
         setRecs(mapped);
       } else {
-        // Cold-start fallback: query Supabase for top DOS score deals
-        const { data: fallbackDeals } = await supabase
-          .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
-          .gte('dos_score', 65)
-          .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
-          .order('dos_score', { ascending: false })
-          .limit(25);
-
-        if (fallbackDeals && fallbackDeals.length > 0) {
-          const mapped: RoverRecommendation[] = fallbackDeals.map((d: any) => ({
-            id: d.id,
-            make: d.make,
-            model: d.model,
-            year: d.year,
-            mileage: d.mileage,
-            current_bid: d.current_bid,
-            estimated_sale_price: d.estimated_sale_price,
-            score: d.dos_score,
-            dos_score: d.dos_score,
-            gross_margin: d.gross_margin,
-            potential_profit: d.potential_profit,
-            profit_margin: d.profit_margin,
-            state: d.state,
-            source_site: d.source_site,
-            auction_end: d.auction_end,
-            listing_url: d.listing_url,
-            vin: d.vin,
-            total_cost: d.total_cost,
-            risk_score: d.risk_score,
-            transportation_cost: d.transportation_cost,
-            fees_cost: d.fees_cost,
-            roi: d.roi,
-            roi_percentage: d.roi_percentage,
-            confidence_score: d.confidence_score,
-            roi_per_day: d.roi_per_day,
-            retail_ctm_pct: d.retail_ctm_pct,
-            estimated_days_to_sale: d.estimated_days_to_sale,
-            max_bid: d.max_bid,
-            pricing_source: d.pricing_source,
-            manheim_mmr_mid: d.manheim_mmr_mid,
-            manheim_mmr_low: d.manheim_mmr_low,
-            manheim_mmr_high: d.manheim_mmr_high,
-            pricing_updated_at: d.pricing_updated_at,
-            investment_grade: d.investment_grade, designated_lane: d.designated_lane,
-          }));
-          setRecs(mapped);
-          setIsFallback(true);
-        } else {
-          setRecs([]);
-        }
+        const fallbackDeals = await fetchDirectRoverDeals({ fallbackOnly: true });
+        setRecs(fallbackDeals);
+        setIsFallback(fallbackDeals.length > 0);
       }
     } catch (e) {
       console.error('RoverTab load error:', e);
-      // On error, still try the Supabase fallback
       try {
-        const { data: fallbackDeals } = await supabase
-          .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
-          .gte('dos_score', 65)
-          .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
-          .order('dos_score', { ascending: false })
-          .limit(25);
-        if (fallbackDeals && fallbackDeals.length > 0) {
-          const mapped: RoverRecommendation[] = fallbackDeals.map((d: any) => ({
-            id: d.id, make: d.make, model: d.model, year: d.year, mileage: d.mileage,
-            current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
-            score: d.dos_score, dos_score: d.dos_score, potential_profit: d.potential_profit,
-            state: d.state, source_site: d.source_site, vin: d.vin,
-            roi_per_day: d.roi_per_day, retail_ctm_pct: d.retail_ctm_pct,
-            estimated_days_to_sale: d.estimated_days_to_sale, max_bid: d.max_bid,
-            pricing_source: d.pricing_source, manheim_mmr_mid: d.manheim_mmr_mid,
-            manheim_mmr_low: d.manheim_mmr_low, manheim_mmr_high: d.manheim_mmr_high,
-            pricing_updated_at: d.pricing_updated_at, investment_grade: d.investment_grade, designated_lane: d.designated_lane,
-          }));
-          setRecs(mapped);
-          setIsFallback(true);
-        }
+        const fallbackDeals = await fetchDirectRoverDeals({ fallbackOnly: true });
+        setRecs(fallbackDeals);
+        setIsFallback(fallbackDeals.length > 0);
       } catch (fallbackErr) {
         console.error('RoverTab fallback also failed:', fallbackErr);
       }
     } finally {
       setLoading(false);
     }
-  }, [user, session, authLoading, roverMode]);
+  }, [user, session, authLoading, roverMode, fetchDirectRoverDeals]);
 
   // Only fire after auth has fully initialized
   useEffect(() => {
