@@ -55,6 +55,15 @@ async function fetchJsonWithOptionalAuth<T>(input: string, message: string): Pro
   return requireOk(await fetchWithOptionalAuth(input), message).json();
 }
 
+async function withQueryFallback<T>(label: string, fallback: T, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(`${label} failed:`, error);
+    return fallback;
+  }
+}
+
 export interface CrosshairSearchFilters {
   make?: string;
   model?: string;
@@ -366,7 +375,7 @@ export const api = {
     const pageLimit = limit || 100;
     const offset = (page - 1) * pageLimit;
 
-    try {
+    return withQueryFallback('getOpportunities', { data: [], total: 0, hasMore: false }, async () => {
       let query = buildOpportunityQuery({
         make: filters?.make,
         model: filters?.model,
@@ -378,11 +387,9 @@ export const api = {
         minScore: filters?.minScore
       });
 
-      // Apply filters
       if (filters?.states && filters.states.length > 0) query = query.in('state', filters.states);
       if (filters?.source) query = query.eq('source', filters.source);
 
-      // Sort
       const sortField = filters?.sortBy === 'score' ? 'dos_score'
         : filters?.sortBy === 'profit_margin' ? 'gross_margin'
         : filters?.sortBy === 'auction_end' ? 'auction_end_date'
@@ -392,7 +399,6 @@ export const api = {
       query = query.order(sortField, { ascending, nullsFirst: false });
 
       const { data, error, count } = await query.range(offset, offset + pageLimit - 1);
-
       if (error) throw error;
 
       return {
@@ -400,14 +406,11 @@ export const api = {
         total: count || 0,
         hasMore: (count || 0) > offset + pageLimit
       };
-    } catch (error) {
-      console.error('getOpportunities failed:', error);
-      return { data: [], total: 0, hasMore: false };
-    }
+    });
   },
 
   async searchCrosshairOpportunities(filters: CrosshairSearchFilters): Promise<{ data: Opportunity[]; total: number }> {
-    try {
+    return withQueryFallback('searchCrosshairOpportunities', { data: [], total: 0 }, async () => {
       const limit = filters.limit ?? 50;
       const offset = filters.offset ?? 0;
       const { data, error, count } = await buildOpportunityQuery(filters)
@@ -420,14 +423,11 @@ export const api = {
         data: (data || []).map(transformOpportunity),
         total: count || 0
       };
-    } catch (error) {
-      console.error('searchCrosshairOpportunities failed:', error);
-      return { data: [], total: 0 };
-    }
+    });
   },
 
   async getOpportunityById(id: string): Promise<OpportunityDetail | null> {
-    try {
+    return withQueryFallback('getOpportunityById', null, async () => {
       const { data, error } = await supabase
         .from('opportunities')
         .select('*')
@@ -450,15 +450,12 @@ export const api = {
         buyer_premium: data.buyer_premium ?? 0,
         source: getRowSource(data)
       };
-    } catch (error) {
-      console.error('getOpportunityById failed:', error);
-      return null;
-    }
+    });
   },
 
   // Get hot deals (DOS score >= threshold)
   async getHotDeals(minScore = 80, limit = 50): Promise<Opportunity[]> {
-    try {
+    return withQueryFallback('getHotDeals', [], async () => {
       const { data, error } = await supabase
         .from('opportunities')
         .select('*')
@@ -476,10 +473,7 @@ export const api = {
           return (b.score || 0) - (a.score || 0);
         })
         .slice(0, limit);
-    } catch (error) {
-      console.error('getHotDeals failed:', error);
-      return [];
-    }
+    });
   },
 
   // Get dashboard metrics
