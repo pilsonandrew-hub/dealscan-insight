@@ -56,8 +56,7 @@ export interface ValidationWarning extends ValidationError {
   severity: 'warning';
 }
 
-// Common validation rules
-export const commonValidationRules = {
+const commonValidationRules = {
   // VIN validation
   vin: {
     name: 'vin_format',
@@ -278,8 +277,7 @@ export class DataValidator {
     });
   }
 
-  // Validate a single record
-  validateRecord(record: Record<string, any>, rowIndex?: number): ValidationError[] {
+  private validateRecord(record: Record<string, any>, rowIndex?: number): ValidationError[] {
     const errors: ValidationError[] = [];
 
     Object.entries(record).forEach(([field, value]) => {
