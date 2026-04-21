@@ -46,6 +46,15 @@ async function fetchWithRequiredAuth(input: string, init: RequestInit = {}, miss
   });
 }
 
+function requireOk(res: Response, message: string): Response {
+  if (!res.ok) throw new Error(`${message}: ${res.status}`);
+  return res;
+}
+
+async function fetchJsonWithOptionalAuth<T>(input: string, message: string): Promise<T> {
+  return requireOk(await fetchWithOptionalAuth(input), message).json();
+}
+
 export interface CrosshairSearchFilters {
   make?: string;
   model?: string;
@@ -625,10 +634,12 @@ export const api = {
 
   // Pass (permanently dismiss) an opportunity for the current user
   async passOpportunity(opportunityId: string): Promise<void> {
-    const res = await fetchWithOptionalAuth(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
-      method: 'POST',
-    });
-    if (!res.ok) throw new Error(`passOpportunity failed: HTTP ${res.status}`);
+    requireOk(
+      await fetchWithOptionalAuth(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
+        method: 'POST',
+      }),
+      'passOpportunity failed'
+    );
   },
 
   // Health check for Railway backend
@@ -743,15 +754,11 @@ export const api = {
     };
     freshness?: AnalyticsFreshness;
   }> {
-    const res = await fetchWithOptionalAuth(`${API_BASE}/api/analytics/summary`);
-    if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/analytics/summary`, 'Analytics fetch failed');
   },
 
   async getSourceHealth(): Promise<SourceHealthResponse> {
-    const res = await fetchWithOptionalAuth(`${API_BASE}/api/analytics/source-health`);
-    if (!res.ok) throw new Error(`Source health fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/analytics/source-health`, 'Source health fetch failed');
   },
 
   async getRecentAnalyticsTrustEvents(limit: number = 25): Promise<{
@@ -783,9 +790,7 @@ export const api = {
     limit: number;
     notes: string[];
   }> {
-    const res = await fetchWithOptionalAuth(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`);
-    if (!res.ok) throw new Error(`Recent trust events fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`, 'Recent trust events fetch failed');
   },
 
   async getOutcomeSummary(): Promise<{
@@ -793,9 +798,7 @@ export const api = {
     total_gross_margin: number;
     avg_roi: number | null;
   }> {
-    const res = await fetchWithOptionalAuth(`${API_BASE}/outcomes/summary`);
-    if (!res.ok) throw new Error(`Outcome summary fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/outcomes/summary`, 'Outcome summary fetch failed');
   },
 
   async recordOutcome(payload: {
@@ -803,14 +806,16 @@ export const api = {
     outcome: 'won' | 'lost' | 'passed';
     sold_price?: number;
   }): Promise<void> {
-    const res = await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        outcome: payload.outcome,
-        sold_price: payload.sold_price ?? null,
+    requireOk(
+      await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          outcome: payload.outcome,
+          sold_price: payload.sold_price ?? null,
+        }),
       }),
-    });
-    if (!res.ok) throw new Error(`Record outcome failed: ${res.status}`);
+      'Record outcome failed'
+    );
   },
 
   async logSaleOutcome(payload: {
@@ -855,11 +860,13 @@ export const api = {
     if (payload.purchase_price != null && !payload.won) {
       throw new Error('Winning purchase price is only valid when the bid was won');
     }
-    const res = await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/bid`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`Log bid outcome failed: ${res.status}`);
+    requireOk(
+      await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/bid`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      'Log bid outcome failed'
+    );
   },
 
   // Legacy health check
