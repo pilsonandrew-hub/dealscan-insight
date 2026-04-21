@@ -40,6 +40,7 @@ export interface RoverRecommendations {
   items: DealItem[];
   totalCount: number;
   confidence: number;
+  source?: 'personalized' | 'fallback';
 }
 
 export interface UserPreferences {
@@ -128,6 +129,44 @@ class RoverAPIService {
     }
   }
 
+  private mapOpportunityToDealItem(opportunity: any): DealItem {
+    return {
+      id: opportunity.id,
+      make: opportunity.make,
+      model: opportunity.model,
+      year: opportunity.year,
+      price: opportunity.current_bid ?? opportunity.estimated_sale_price ?? 0,
+      current_bid: opportunity.current_bid ?? opportunity.estimated_sale_price ?? 0,
+      mileage: opportunity.mileage,
+      source: opportunity.source_site,
+      source_site: opportunity.source_site,
+      state: opportunity.state,
+      vin: opportunity.vin,
+      arbitrage_score: opportunity.dos_score,
+      roi_percentage: opportunity.roi_percentage,
+      potential_profit: opportunity.potential_profit,
+    };
+  }
+
+  private async getFallbackRecommendations(limit: number = 25): Promise<RoverRecommendations> {
+    const { data: opportunities } = await supabase
+      .from('opportunities')
+      .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,state,source_site,vin,roi_percentage,potential_profit,auction_end_date')
+      .gte('dos_score', 65)
+      .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
+      .order('dos_score', { ascending: false })
+      .limit(limit);
+
+    const items = (opportunities || []).map((opportunity) => this.mapOpportunityToDealItem(opportunity));
+    return {
+      precomputedAt: null,
+      items,
+      totalCount: items.length,
+      confidence: 0,
+      source: 'fallback',
+    };
+  }
+
   async getRecommendationsWithToken(userId: string, token: string, limit: number = 25): Promise<RoverRecommendations & { _debug?: string }> {
     try {
       const resp = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
@@ -135,12 +174,18 @@ class RoverAPIService {
       });
       if (!resp.ok) {
         const body = await resp.text();
-        return { precomputedAt: null, items: [], totalCount: 0, confidence: 0, _debug: `HTTP ${resp.status}: ${body.slice(0,80)}` };
+        const fallback = await this.getFallbackRecommendations(limit);
+        return { ...fallback, _debug: `HTTP ${resp.status}: ${body.slice(0,80)}` };
       }
       const data = await resp.json() as RoverRecommendations;
-      return { ...data, _debug: `OK ${data.items?.length ?? 0} items` };
+      if ((data.items?.length ?? 0) === 0) {
+        const fallback = await this.getFallbackRecommendations(limit);
+        return { ...fallback, _debug: `OK 0 items` };
+      }
+      return { ...data, source: 'personalized', _debug: `OK ${data.items?.length ?? 0} items` };
     } catch (error) {
-      return { precomputedAt: null, items: [], totalCount: 0, confidence: 0, _debug: `Error: ${String(error).slice(0,80)}` };
+      const fallback = await this.getFallbackRecommendations(limit);
+      return { ...fallback, _debug: `Error: ${String(error).slice(0,80)}` };
     }
   }
 
