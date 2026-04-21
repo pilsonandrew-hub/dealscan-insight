@@ -9,7 +9,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../core/UnifiedLogger';
+import { logger } from '../lib/logger';
 
 interface MigrationCheck {
   name: string;
@@ -29,9 +29,9 @@ const MIGRATION_CHECKS: MigrationCheck[] = [
     description: 'Should not reintroduce deleted config-wrapper surfaces'
   },
   {
-    name: 'Old Logger Imports', 
-    pattern: /import.*from.*['"].*productionLogger|secureLogger['"]/g,
-    description: 'Historical cleanup check: prefer current logger surfaces over removed legacy logger imports'
+    name: 'Removed secureLogger Imports',
+    pattern: /import.*from.*['"].*secureLogger['"]/g,
+    description: 'Should not reintroduce deleted secureLogger imports'
   },
   {
     name: 'Old Auth Context',
@@ -39,9 +39,9 @@ const MIGRATION_CHECKS: MigrationCheck[] = [
     description: 'Should use ModernAuthContext'
   },
   {
-    name: 'createLogger Usage',
-    pattern: /createLogger\(/g,
-    description: 'Historical cleanup check for stale createLogger usage'
+    name: 'Legacy UnifiedLogger Imports',
+    pattern: /import.*from.*['"].*UnifiedLogger['"]/g,
+    description: 'Should prefer current logger surfaces over legacy UnifiedLogger imports'
   }
 ];
 
@@ -143,9 +143,9 @@ async function runMigrationVerification() {
   console.log('🔧 RECOMMENDED ACTIONS:');
   console.log('1. Replace console.* with current approved logger methods');
   console.log('2. Remove imports of deleted config-wrapper surfaces');
-  console.log('3. Replace old logger imports with current supported logger surfaces');
+  console.log('3. Remove imports of deleted secureLogger surfaces');
   console.log('4. Update auth context imports to ModernAuthContext');
-  console.log('5. Review createLogger usage as historical migration residue, not automatic proof of invalidity\n');
+  console.log('5. Replace legacy UnifiedLogger imports with current supported logger surfaces\n');
   
   return false;
 }
