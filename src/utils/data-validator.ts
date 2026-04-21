@@ -237,15 +237,6 @@ const validationRules: Record<string, ValidationRule> = {
 };
 
 class DataValidator {
-  constructor() {
-    Object.entries(validationRules).forEach(([field, rule]) => {
-      auditLogger.log('validation_rule_registered', 'system', 'info', {
-        field,
-        ruleName: rule.name,
-      });
-    });
-  }
-
   private validateRecord(record: Record<string, any>, rowIndex?: number): ValidationError[] {
     const errors: ValidationError[] = [];
 
