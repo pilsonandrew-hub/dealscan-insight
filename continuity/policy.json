@@ -70,33 +70,35 @@
         "classification": "verification_only_by_design_until_real_close_case_proven",
         "execution": {
           "enabled": false,
-          "allowed_target_statuses": [
-            "open",
-            "in_progress",
-            "blocked"
-          ],
-          "allowed_new_statuses": [
-            "closed"
-          ],
-          "require_resolution_note": true,
-          "append_promotion_evidence": true,
-          "set_next_action_from_resolution": true
+          "reason": "intentionally disabled until a real closeable case is proven and evidence-backed close mutation is validated end to end"
         }
       },
       "report": {
         "path_prefix": "brains/dealerscope-brain/reports/",
         "require_file": true,
-        "classification": "verification_only_pending_contract"
+        "classification": "verification_only_pending_contract",
+        "execution": {
+          "enabled": false,
+          "reason": "no destination-specific enterprise mutation contract exists"
+        }
       },
       "doctrine": {
         "path_prefix": "brains/dealerscope-brain/",
         "require_file": true,
-        "classification": "verification_only_pending_contract"
+        "classification": "verification_only_pending_contract",
+        "execution": {
+          "enabled": false,
+          "reason": "no destination-specific enterprise mutation contract exists"
+        }
       },
       "policy": {
         "path_prefix": "continuity/",
         "require_file": true,
-        "classification": "verification_only_pending_contract"
+        "classification": "verification_only_pending_contract",
+        "execution": {
+          "enabled": false,
+          "reason": "no destination-specific enterprise mutation contract exists"
+        }
       }
     },
     "audit": {
