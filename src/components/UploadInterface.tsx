@@ -11,7 +11,6 @@ import { performanceMonitor } from "@/utils/performance-monitor";
 import { rateLimiter } from "@/utils/rate-limiter";
 import { auditLogger } from "@/utils/audit-logger";
 import { dataValidator } from "@/utils/data-validator";
-import { batchUtils } from "@/utils/batch-processor";
 import { settings } from "@/config/settings";
 import { uploadHardening } from "@/security/uploadHardening";
 import { inputSanitizer } from "@/utils/inputSanitizer";
