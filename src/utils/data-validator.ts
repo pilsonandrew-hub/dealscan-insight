@@ -427,14 +427,7 @@ export class DataValidator {
     return recommendations;
   }
 
-  // Get validation statistics
-  getStats() {
-    return {
-      rulesRegistered: this.rules.size,
-      availableRules: Array.from(this.rules.keys())
-    };
   }
-}
 
 // Global validator instance
 export const dataValidator = new DataValidator();
