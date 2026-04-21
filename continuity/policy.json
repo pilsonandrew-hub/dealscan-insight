@@ -37,6 +37,29 @@
     "surface_in_briefing": true,
     "open_loop_promote_flag": true,
     "closeout_blocking_creates_candidate": true,
-    "malformed_open_loops_create_candidate": true
+    "malformed_open_loops_create_candidate": true,
+    "verify_destinations": true,
+    "destinations": {
+      "work_queue": {
+        "path": "brains/dealerscope-brain/03_Operations/DealerScope-Active-Work-Queue.md",
+        "match_prefix": "### "
+      },
+      "closure_board": {
+        "path": "brains/dealerscope-brain/03_Operations/DealerScope-Governed-Closure-Board.md",
+        "match_prefix": "### "
+      },
+      "report": {
+        "path_prefix": "brains/dealerscope-brain/reports/",
+        "require_file": true
+      },
+      "doctrine": {
+        "path_prefix": "brains/dealerscope-brain/",
+        "require_file": true
+      },
+      "policy": {
+        "path_prefix": "continuity/",
+        "require_file": true
+      }
+    }
   }
 }

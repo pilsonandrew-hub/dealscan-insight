@@ -183,6 +183,43 @@ def malformed_pending_promotions(items: list[dict]) -> list[dict]:
     return bad
 
 
+def verified_destination_failures(items: list[dict], promotion_cfg: dict) -> list[str]:
+    if not promotion_cfg.get('verify_destinations', False):
+        return []
+    destinations = promotion_cfg.get('destinations') or {}
+    failures: list[str] = []
+    for item in items:
+        if item.get('status') != 'promoted':
+            continue
+        destination = item.get('destination')
+        destination_ref = item.get('destination_ref')
+        if not destination or not destination_ref:
+            continue
+        cfg = destinations.get(destination) or {}
+        if destination in {'work_queue', 'closure_board'}:
+            raw_path = cfg.get('path')
+            if not raw_path:
+                failures.append(f"{item.get('id')}:missing_destination_config")
+                continue
+            target_path = WORKSPACE / raw_path
+            if not target_path.exists():
+                failures.append(f"{item.get('id')}:{destination}:missing_target_file")
+                continue
+            content = target_path.read_text()
+            expected = f"{cfg.get('match_prefix', '### ')}{destination_ref}"
+            if expected not in content:
+                failures.append(f"{item.get('id')}:{destination}:{destination_ref}:missing_reference")
+        else:
+            prefix = cfg.get('path_prefix')
+            if not prefix:
+                failures.append(f"{item.get('id')}:missing_destination_config")
+                continue
+            target_path = WORKSPACE / prefix / destination_ref
+            if cfg.get('require_file', False) and not target_path.exists():
+                failures.append(f"{item.get('id')}:{destination}:{destination_ref}:missing_file")
+    return failures
+
+
 def active_pending_promotions(items: list[dict]) -> list[dict]:
     return [item for item in items if item.get('status') == 'pending']
 
@@ -417,6 +454,7 @@ def main() -> int:
     queue_path = WORKSPACE / queue_rel
     queue_items = load_pending_promotions(queue_path)
     bad_queue_items = malformed_pending_promotions(queue_items)
+    destination_failures = verified_destination_failures(queue_items, promotion_cfg)
     recall_policy = policy.get('recall') or {}
     recall_required = bool(
         (args.post_gap and recall_policy.get('post_gap_requires_recall', True))
@@ -451,6 +489,8 @@ def main() -> int:
         advisory_reasons.append('missing_promotion_queue')
     if bad_queue_items:
         advisory_reasons.append('malformed_pending_promotions')
+    if destination_failures:
+        advisory_reasons.append('promotion_destination_unverified')
     if recall_required:
         advisory_reasons.append('needs_recall')
     if not daily_memory_today.exists():
@@ -527,6 +567,7 @@ def main() -> int:
         'missing_requirements': {
             'malformed_open_loops': len(bad_loops),
             'malformed_pending_promotions': len(bad_queue_items),
+            'promotion_destination_failures': destination_failures,
             'pending_replication': pending_replication,
             'recall_required': recall_required,
             'briefing_health': briefing_health,
