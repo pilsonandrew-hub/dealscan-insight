@@ -1133,12 +1133,7 @@ const RoverTab = () => {
                         const id = rec.id || rec.opportunity_id || Math.random().toString();
                         return (
                           <div key={id} className="relative">
-                            {rec.match_pct != null && (
-                              <div className="absolute -top-2 -right-2 z-10 bg-emerald-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                {rec.match_pct}% match
-                              </div>
-                            )}
-                            <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} whySignals={rec.why_signals} />
+                            <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} />
                           </div>
                         );
                       })}
