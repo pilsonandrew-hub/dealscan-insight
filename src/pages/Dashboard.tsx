@@ -1014,9 +1014,31 @@ const RoverTab = () => {
   }, [load, authLoading]);
 
   const handleAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
-    await api.trackRoverEvent(deal, action);
+    if (!deal.id) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) return;
+
+    await roverAPI.trackEvent({
+      userId,
+      event: action,
+      item: {
+        id: deal.id,
+        make: deal.make,
+        model: deal.model,
+        year: deal.year,
+        price: deal.current_bid ?? 0,
+        current_bid: deal.current_bid ?? 0,
+        source: deal.source_site,
+        source_site: deal.source_site,
+        state: deal.state,
+        mileage: deal.mileage,
+        vin: deal.vin,
+      },
+    });
+
     setActionedIds(prev => new Set([...prev, `${deal.id}-${action}`]));
-    // Refresh recommendations after save or pass so the ranking reflects the new signal
     if (action === 'save' || action === 'pass') {
       load();
     }
