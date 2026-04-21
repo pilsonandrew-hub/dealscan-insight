@@ -168,6 +168,19 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     }
   };
 
+  const updateFile = useCallback((fileId: string, updater: (file: UploadFile) => UploadFile) => {
+    setFiles(prev => prev.map(f => (f.id === fileId ? updater(f) : f)));
+  }, []);
+
+  const markFileError = useCallback((fileId: string, error: string) => {
+    updateFile(fileId, (file) => ({ ...file, status: "error", progress: 0, error }));
+  }, [updateFile]);
+
+  const finishUploadProgress = useCallback((progressInterval: ReturnType<typeof setInterval>, timer: { end: (success?: boolean) => void }, success: boolean) => {
+    clearInterval(progressInterval);
+    timer.end(success);
+  }, []);
+
   const processFile = async (file: File): Promise<void> => {
     const fileId = Math.random().toString(36).substr(2, 9);
     const timer = performanceMonitor.startTimer('file_upload_process');
@@ -188,11 +201,10 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
     // Progress simulation
     const progressInterval = setInterval(() => {
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
-          ? { ...f, progress: Math.min(f.progress + Math.random() * 20, 90) }
-          : f
-      ));
+      updateFile(fileId, (file) => ({
+        ...file,
+        progress: Math.min(file.progress + Math.random() * 20, 90)
+      }));
     }, 500);
 
     try {
@@ -200,22 +212,12 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         const securityCheck = await performSecurityCheck(file);
         
         if (!securityCheck.isSecure) {
-          clearInterval(progressInterval);
-          timer.end(false);
+          finishUploadProgress(progressInterval, timer, false);
           
           const riskColor = securityCheck.riskLevel === 'high' ? 'destructive' : 
                            securityCheck.riskLevel === 'medium' ? 'default' : 'secondary';
           
-          setFiles(prev => prev.map(f => 
-            f.id === fileId 
-              ? { 
-                  ...f, 
-                  status: "error", 
-                  progress: 0, 
-                  error: `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}` 
-                }
-              : f
-          ));
+          markFileError(fileId, `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}`);
           
           toast({
             title: `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
@@ -242,9 +244,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         }
 
         // Data validation phase
-        setFiles(prev => prev.map(f => 
-          f.id === fileId ? { ...f, status: "validating", progress: 50 } : f
-        ));
+        updateFile(fileId, (file) => ({ ...file, status: "validating", progress: 50 }));
 
         // Parse and validate CSV data if it's a CSV file
         if (file.name.toLowerCase().endsWith('.csv')) {
@@ -280,16 +280,12 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
               );
 
               // Update file status with validation results
-              setFiles(prev => prev.map(f => 
-                f.id === fileId 
-                  ? { 
-                      ...f, 
-                      validationReport,
-                      validRecords: validationReport.validRecords,
-                      warnings: validationReport.warnings.length
-                    }
-                  : f
-              ));
+              updateFile(fileId, (file) => ({
+                ...file,
+                validationReport,
+                validRecords: validationReport.validRecords,
+                warnings: validationReport.warnings.length
+              }));
 
               // Show validation warnings if any
               if (validationReport.warnings.length > 0) {
@@ -311,19 +307,14 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         const result = await apiService.uploadCSV(file);
         apiTimer.end(result.status === "success");
         
-        clearInterval(progressInterval);
-        timer.end(result.status === "success");
+        finishUploadProgress(progressInterval, timer, result.status === "success");
 
         if (result.status === "success") {
           // Log successful upload
           auditLogger.logUpload(file.name, file.size, true);
           auditLogger.logDataAccess('opportunities', 'write');
           
-          setFiles(prev => prev.map(f => 
-            f.id === fileId 
-              ? { ...f, status: "success", progress: 100, records: result.rows_processed }
-              : f
-          ));
+          updateFile(fileId, (file) => ({ ...file, status: "success", progress: 100, records: result.rows_processed }));
           
           toast({
             title: "Upload Successful",
@@ -340,16 +331,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
             { filename: file.name, errors: result.errors }
           );
           
-          setFiles(prev => prev.map(f => 
-            f.id === fileId 
-              ? { 
-                  ...f, 
-                  status: "error", 
-                  progress: 0, 
-                  error: result.errors?.join(', ') || "Failed to process file" 
-                }
-              : f
-          ));
+          markFileError(fileId, result.errors?.join(', ') || "Failed to process file");
           
           toast({
             title: "Upload Failed",
@@ -358,18 +340,13 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
           });
         }
     } catch (error) {
-      clearInterval(progressInterval);
-      timer.end(false);
+      finishUploadProgress(progressInterval, timer, false);
       
       const errorMessage = error instanceof Error ? error.message : "Network error occurred";
       
       auditLogger.logError(error as Error, 'file_upload');
       
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
-          ? { ...f, status: "error", progress: 0, error: errorMessage }
-          : f
-      ));
+      markFileError(fileId, errorMessage);
       
       toast({
         title: "Upload Error",
