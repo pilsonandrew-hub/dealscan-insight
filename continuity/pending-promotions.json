@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-21T19:48:19+00:00",
+  "updated_at": "2026-04-21T19:50:28+00:00",
   "items": [
     {
       "id": "test-promotion-1",
@@ -25,6 +25,18 @@
       "destination_ref": "DS-WQ-013",
       "resolution": "validated landing zone discipline",
       "resolved_at": "2026-04-21T19:43:28+00:00"
+    },
+    {
+      "id": "test-promotion-3",
+      "title": "Execution Aware Destination Check",
+      "source": "manual-test",
+      "reason": "prove resolve fails on fake landing zone",
+      "created_at": "2026-04-21T19:50:07+00:00",
+      "status": "promoted",
+      "destination": "work_queue",
+      "destination_ref": "DS-WQ-013",
+      "resolution": "execution-aware destination verification passed",
+      "resolved_at": "2026-04-21T19:50:28+00:00"
     }
   ]
 }

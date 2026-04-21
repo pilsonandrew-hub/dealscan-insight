@@ -8,6 +8,7 @@ from pathlib import Path
 
 WORKSPACE = Path('/Users/andrewpilson/.openclaw/workspace')
 QUEUE_PATH = WORKSPACE / 'continuity' / 'pending-promotions.json'
+POLICY_PATH = WORKSPACE / 'continuity' / 'policy.json'
 ALLOWED_STATUS = {'pending', 'promoted', 'dismissed'}
 ALLOWED_DESTINATIONS = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
 
@@ -23,6 +24,15 @@ def load_queue() -> dict:
         return json.loads(QUEUE_PATH.read_text())
     except Exception:
         return {'version': 1, 'updated_at': None, 'items': []}
+
+
+def load_policy() -> dict:
+    if not POLICY_PATH.exists():
+        return {}
+    try:
+        return json.loads(POLICY_PATH.read_text())
+    except Exception:
+        return {}
 
 
 def write_queue(payload: dict) -> None:
@@ -60,6 +70,28 @@ def cmd_add(args) -> int:
     return 0
 
 
+def verify_destination(destination: str, destination_ref: str) -> None:
+    policy = load_policy().get('promotion', {})
+    cfg = (policy.get('destinations') or {}).get(destination)
+    if not cfg:
+        raise SystemExit(f'missing destination config for {destination}')
+    if destination in {'work_queue', 'closure_board'}:
+        target_path = WORKSPACE / cfg['path']
+        if not target_path.exists():
+            raise SystemExit(f'missing target file for {destination}: {target_path}')
+        content = target_path.read_text()
+        expected = f"{cfg.get('match_prefix', '### ')}{destination_ref}"
+        if expected not in content:
+            raise SystemExit(f'unverified destination ref {destination_ref} in {destination}')
+        return
+    prefix = cfg.get('path_prefix')
+    if not prefix:
+        raise SystemExit(f'missing path_prefix for {destination}')
+    target_path = WORKSPACE / prefix / destination_ref
+    if cfg.get('require_file', False) and not target_path.exists():
+        raise SystemExit(f'missing destination file for {destination}: {destination_ref}')
+
+
 def cmd_update(args, status: str) -> int:
     payload = load_queue()
     items = payload.setdefault('items', [])
@@ -71,6 +103,7 @@ def cmd_update(args, status: str) -> int:
             raise SystemExit(f'valid --destination required for promoted item: {sorted(ALLOWED_DESTINATIONS)}')
         if not args.destination_ref:
             raise SystemExit('--destination-ref required for promoted item')
+        verify_destination(args.destination, args.destination_ref)
         item['destination'] = args.destination
         item['destination_ref'] = args.destination_ref
     item['status'] = status
