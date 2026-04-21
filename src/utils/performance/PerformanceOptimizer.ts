@@ -77,36 +77,6 @@ export const useAdvancedMemo = <T>(
   }, [key, factory, cacheSize]);
 };
 
-// Performance monitoring hook
-export const usePerformanceMonitor = (name: string) => {
-  const startTime = useRef<number>();
-  
-  useEffect(() => {
-    startTime.current = performance.now();
-    
-    return () => {
-      if (startTime.current) {
-        const duration = performance.now() - startTime.current;
-        logger.debug(`Performance: ${name} took ${duration.toFixed(2)}ms`);
-        
-        // Report slow operations
-        if (duration > 100) {
-          logger.warn(`Slow operation detected: ${name} took ${duration.toFixed(2)}ms`);
-        }
-      }
-    };
-  }, [name]);
-  
-  const mark = useCallback((label: string) => {
-    if (startTime.current) {
-      const duration = performance.now() - startTime.current;
-      logger.debug(`Performance marker: ${name}.${label} at ${duration.toFixed(2)}ms`);
-    }
-  }, [name]);
-  
-  return { mark };
-};
-
 // Resource cleanup hook
 export const useResourceCleanup = () => {
   const resources = useRef<(() => void)[]>([]);
@@ -135,6 +105,5 @@ export default {
   useDebounce,
   useThrottle,
   useAdvancedMemo,
-  usePerformanceMonitor,
   useResourceCleanup
 };

@@ -8,7 +8,6 @@ import { CrosshairSearchForm } from './CrosshairSearchForm';
 import { CrosshairResults } from './CrosshairResults';
 import { useRealtimeOpportunities } from '@/hooks/useRealtimeOpportunities';
 import { useAdvancedOptimizer } from '@/hooks/useAdvancedOptimizer';
-import { usePerformanceMonitor } from '@/hooks/usePerformanceMonitor';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CanonicalQuery, SearchResponse, CrosshairIntent, CanonicalListing } from '@/types/crosshair';
@@ -27,7 +26,6 @@ export const CrosshairDashboard = () => {
     totalResults: 0
   });
 
-  const { measureAsync } = usePerformanceMonitor('CrosshairDashboard');
   const { toast } = useToast();
   
   const {
@@ -153,17 +151,15 @@ export const CrosshairDashboard = () => {
     try {
       console.log('Initiating Crosshair search:', { query, options });
       
-      const searchResponse = await measureAsync('crosshair-search', async () => {
-        const { data, error } = await supabase.functions.invoke('crosshair-search', {
-          body: { 
-            canonical_query: query, 
-            search_options: options 
-          }
-        });
-
-        if (error) throw error;
-        return data as SearchResponse;
+      const { data, error } = await supabase.functions.invoke('crosshair-search', {
+        body: {
+          canonical_query: query,
+          search_options: options
+        }
       });
+
+      if (error) throw error;
+      const searchResponse = data as SearchResponse;
 
       const processedResults = await batchProcess(
         searchResponse.results,

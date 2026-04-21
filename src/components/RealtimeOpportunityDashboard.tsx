@@ -16,7 +16,6 @@ import { CrosshairDashboard } from './CrosshairDashboard';
 import { SystemHealthDashboard } from './SystemHealthDashboard';
 import { useRealtimeOpportunities } from '@/hooks/useRealtimeOpportunities';
 import { useAdvancedOptimizer } from '@/hooks/useAdvancedOptimizer';
-import { usePerformanceMonitor } from '@/hooks/usePerformanceMonitor';
 import { useOptimizedOpportunities } from '@/hooks/useOptimizedOpportunities';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -61,7 +60,6 @@ export function RealtimeOpportunityDashboard() {
   const [showPerformanceMetrics, setShowPerformanceMetrics] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(true);
 
-  const { measureAsync } = usePerformanceMonitor('RealtimeOpportunityDashboard');
   const { toast } = useToast();
 
   const {
