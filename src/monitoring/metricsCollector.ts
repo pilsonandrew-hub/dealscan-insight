@@ -311,31 +311,8 @@ class MetricsCollector {
    * Start business metrics monitoring
    */
   private startBusinessMetricsMonitoring(): void {
-    // Monitor API calls and their outcomes
-    const originalFetch = window.fetch;
-    window.fetch = async (...args) => {
-      const startTime = Date.now();
-      try {
-        const response = await originalFetch(...args);
-        const duration = Date.now() - startTime;
-        
-        this.recordBusiness('api_calls_total', 1);
-        this.recordPerformance('api_response_time', duration);
-        
-        if (response.ok) {
-          this.recordBusiness('api_calls_success', 1);
-        } else {
-          this.recordBusiness('api_calls_error', 1);
-        }
-        
-        return response;
-      } catch (error) {
-        this.recordBusiness('api_calls_error', 1);
-        throw error;
-      }
-    };
-
-    // Monitor business-specific events
+    // Monitor business-specific events without owning global fetch interception.
+    // Network-failure interception belongs to the centralized error handler.
     this.monitorOpportunityMetrics();
     this.monitorUserEngagement();
   }
@@ -403,9 +380,6 @@ class MetricsCollector {
   private startUserBehaviorTracking(): void {
     // Track feature usage
     this.trackFeatureUsage();
-    
-    // Track errors
-    this.trackErrorMetrics();
   }
 
   /**
@@ -418,42 +392,6 @@ class MetricsCollector {
     features.forEach(feature => {
       // This would be integrated with actual feature usage tracking
       this.recordUserBehavior(`feature_usage_${feature}`, 1);
-    });
-  }
-
-  /**
-   * Track error metrics
-   */
-  private trackErrorMetrics(): void {
-    window.addEventListener('error', (event) => {
-      this.recordMetric({
-        name: 'errors.javascript_error',
-        value: 1,
-        unit: 'count',
-        timestamp: Date.now(),
-        category: 'technical',
-        importance: 'high',
-        metadata: {
-          message: event.error?.message,
-          filename: event.filename,
-          line: event.lineno,
-          column: event.colno
-        }
-      });
-    });
-
-    window.addEventListener('unhandledrejection', (event) => {
-      this.recordMetric({
-        name: 'errors.unhandled_promise_rejection',
-        value: 1,
-        unit: 'count',
-        timestamp: Date.now(),
-        category: 'technical',
-        importance: 'high',
-        metadata: {
-          reason: event.reason?.toString()
-        }
-      });
     });
   }
 

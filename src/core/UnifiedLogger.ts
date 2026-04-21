@@ -155,7 +155,6 @@ class UnifiedLogger {
   private constructor() {
     this.minLevel = isDevelopment() ? 'debug' : 'info';
     this.setupBackends();
-    this.setupGlobalErrorHandling();
   }
 
   static getInstance(): UnifiedLogger {
@@ -178,27 +177,6 @@ class UnifiedLogger {
     if (isPerformanceMonitoringEnabled()) {
       this.backends.push(new PerformanceBackend());
     }
-  }
-
-  private setupGlobalErrorHandling(): void {
-    // Catch unhandled errors
-    window.addEventListener('error', (event) => {
-      this.error('Unhandled error', {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-        stack: event.error?.stack,
-      });
-    });
-
-    // Catch unhandled promise rejections
-    window.addEventListener('unhandledrejection', (event) => {
-      this.error('Unhandled promise rejection', {
-        reason: event.reason,
-        stack: event.reason?.stack,
-      });
-    });
   }
 
   private shouldLog(level: LogLevel): boolean {

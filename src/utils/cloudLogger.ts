@@ -30,7 +30,6 @@ class CloudLogger {
 
   private constructor() {
     this.setupPeriodicFlush();
-    this.setupGlobalErrorHandlers();
   }
 
   public static getInstance(): CloudLogger {
@@ -50,56 +49,6 @@ class CloudLogger {
       window.addEventListener('beforeunload', () => {
         this.flushLogs();
       });
-    }
-  }
-
-  private setupGlobalErrorHandlers(): void {
-    if (typeof window !== 'undefined') {
-      // Capture unhandled errors
-      window.addEventListener('error', (event) => {
-        this.logError(event.error || new Error(event.message), {
-          filename: event.filename,
-          lineno: event.lineno,
-          colno: event.colno,
-          type: 'javascript_error'
-        });
-      });
-
-      // Capture unhandled promise rejections
-      window.addEventListener('unhandledrejection', (event) => {
-        this.logError(event.reason, {
-          type: 'unhandled_promise_rejection'
-        });
-      });
-
-      // Capture network errors
-      const originalFetch = window.fetch;
-      window.fetch = async (...args) => {
-        const [url] = args;
-        const startTime = Date.now();
-        
-        try {
-          const response = await originalFetch(...args);
-          
-          if (!response.ok) {
-            this.logWarning(`Network request failed: ${response.status} ${response.statusText}`, {
-              url: typeof url === 'string' ? url : url.toString(),
-              status: response.status,
-              duration: Date.now() - startTime,
-              type: 'network_error'
-            });
-          }
-          
-          return response;
-        } catch (error) {
-          this.logError(error as Error, {
-            url: typeof url === 'string' ? url : url.toString(),
-            duration: Date.now() - startTime,
-            type: 'network_failure'
-          });
-          throw error;
-        }
-      };
     }
   }
 

@@ -31,19 +31,6 @@ vi.mock('@/integrations/supabase/client', () => ({
   }
 }));
 
-// Mock global error handler
-vi.mock('@/utils/globalErrorHandler', () => ({
-  globalErrorHandler: {
-    handleError: vi.fn(),
-    wrapAsync: vi.fn((fn) => fn()),
-    wrapSync: vi.fn((fn) => fn()),
-    getMetrics: vi.fn(() => ({ errorCounts: {}, recentErrors: [], totalErrors: 0 })),
-  },
-  handleError: vi.fn(),
-  wrapAsync: vi.fn((fn) => fn()),
-  wrapSync: vi.fn((fn) => fn()),
-}));
-
 // Mock logger
 vi.mock('@/utils/secureLogger', () => ({
   logger: {

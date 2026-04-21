@@ -5,7 +5,6 @@
  */
 
 import { logger } from '@/utils/secureLogger';
-import { globalErrorHandler } from '@/utils/globalErrorHandler';
 import { supabase } from '@/integrations/supabase/client';
 import { cloudLogger } from '@/utils/cloudLogger';
 
@@ -198,9 +197,6 @@ class CentralizedErrorHandler {
     if (severity === 'critical' || severity === 'high') {
       this.storeErrorInDatabase(errorReport);
     }
-
-    // Notify global error handler
-    globalErrorHandler.handleError(errorObj, context);
 
     // Send to external monitoring (if configured)
     this.sendToExternalMonitoring(errorReport);
