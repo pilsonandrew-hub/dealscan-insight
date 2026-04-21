@@ -12,6 +12,8 @@ QUEUE_PATH = WORKSPACE / 'continuity' / 'pending-promotions.json'
 POLICY_PATH = WORKSPACE / 'continuity' / 'policy.json'
 ALLOWED_STATUS = {'pending', 'promoted', 'dismissed'}
 ALLOWED_DESTINATIONS = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
+EXECUTION_CAPABLE_DESTINATIONS = {'work_queue'}
+WORK_QUEUE_TARGET_STATUSES = ['ready_for_review', 'closed']
 
 
 def now_iso() -> str:
@@ -200,10 +202,10 @@ def cmd_update(args, status: str) -> int:
             raise SystemExit('--destination-ref required for promoted item')
         verify_destination(args.destination, args.destination_ref)
         if args.execute:
+            if args.destination not in EXECUTION_CAPABLE_DESTINATIONS:
+                raise SystemExit(f'{args.destination} execution is intentionally disabled by the single-supported-destination model')
             if args.destination == 'work_queue':
                 execution_result = mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
-            elif args.destination == 'closure_board':
-                raise SystemExit('closure_board execution is intentionally disabled until a real closeable case is proven')
             else:
                 raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
         item['destination'] = args.destination
@@ -258,7 +260,7 @@ def main() -> int:
     resolve.add_argument('--destination-ref', required=True)
     resolve.add_argument('--note')
     resolve.add_argument('--execute', action='store_true')
-    resolve.add_argument('--target-status', choices=['ready_for_review', 'in_progress', 'closed'], default='ready_for_review')
+    resolve.add_argument('--target-status', choices=WORK_QUEUE_TARGET_STATUSES, default='ready_for_review')
     resolve.set_defaults(func=lambda args: cmd_update(args, 'promoted'))
 
     dismiss = sub.add_parser('dismiss')

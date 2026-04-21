@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-21T21:26:46+00:00",
+  "updated_at": "2026-04-21T21:39:35+00:00",
   "items": [
     {
       "id": "test-promotion-1",
@@ -123,6 +123,18 @@
       "execution_mode": "verification_only",
       "fulfillment_proof": "verified destination exists for report:DealerScope-Memory-Funnel-and-Open-Loops-Implementation-Closeout-2026-04-18.md",
       "target_status": null
+    },
+    {
+      "id": "test-promotion-10",
+      "title": "Single supported destination model proof",
+      "source": "manual-test",
+      "reason": "prove execute is blocked outside work_queue at the CLI layer",
+      "created_at": "2026-04-21T21:39:35+00:00",
+      "status": "dismissed",
+      "destination": null,
+      "destination_ref": null,
+      "resolution": "guardrail proof only; non-work_queue execute remains disabled by model",
+      "resolved_at": "2026-04-21T21:39:35+00:00"
     }
   ]
 }
