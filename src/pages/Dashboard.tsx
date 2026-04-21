@@ -24,7 +24,7 @@ import type { LucideIcon } from 'lucide-react';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
-import { OnboardingFlow } from '@/components/OnboardingFlow';
+import { OnboardingFlow, ONBOARDING_COMPLETED_KEY } from '@/components/OnboardingFlow';
 import LaneBadge from '@/components/LaneBadge';
 const SonarTab = React.lazy(() => import('@/components/SonarTab').then(m => ({ default: m.SonarTab })));
 const AnalyticsOpenTrustCasesPanel = React.lazy(() => import('@/components/AnalyticsOpenTrustCasesPanel'));
@@ -2010,7 +2010,7 @@ export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = parseTab(searchParams.get('tab'));
   const [showOnboarding, setShowOnboarding] = useState(
-    !localStorage.getItem('onboarding_completed')
+    !localStorage.getItem(ONBOARDING_COMPLETED_KEY)
   );
 
   const navigateToTab = (tab: Tab) => {

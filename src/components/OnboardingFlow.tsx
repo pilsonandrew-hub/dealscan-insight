@@ -18,6 +18,12 @@ const PRICE_BUCKETS = [
   { label: "$40k+", value: "40k_plus" },
 ];
 
+export const ONBOARDING_COMPLETED_KEY = "onboarding_completed";
+
+export function markOnboardingCompleted(): void {
+  localStorage.setItem(ONBOARDING_COMPLETED_KEY, "true");
+}
+
 interface OnboardingFlowProps {
   onComplete: () => void;
 }
@@ -123,7 +129,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   };
 
   const finish = () => {
-    localStorage.setItem("onboarding_completed", "true");
+    markOnboardingCompleted();
     onComplete();
   };
 
