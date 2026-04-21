@@ -267,21 +267,15 @@ export class DataValidator {
   private rules: Map<string, ValidationRule> = new Map();
 
   constructor() {
-    // Register common rules
     Object.entries(commonValidationRules).forEach(([key, rule]) => {
-      this.registerRule(key, rule);
+      this.rules.set(key, rule);
+      auditLogger.log(
+        'validation_rule_registered',
+        'system',
+        'info',
+        { field: key, ruleName: rule.name }
+      );
     });
-  }
-
-  // Register a validation rule
-  registerRule(field: string, rule: ValidationRule) {
-    this.rules.set(field, rule);
-    auditLogger.log(
-      'validation_rule_registered',
-      'system',
-      'info',
-      { field, ruleName: rule.name }
-    );
   }
 
   // Validate a single record
