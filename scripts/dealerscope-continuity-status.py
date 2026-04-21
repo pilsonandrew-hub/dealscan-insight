@@ -425,6 +425,7 @@ def destination_model_status(policy: dict) -> dict:
     return {
         'execution_model': promotion.get('execution_model'),
         'architecture_decision': promotion.get('architecture_decision'),
+        'system_grade_classification': promotion.get('system_grade_classification') or {},
         'execution_scope_decision': promotion.get('execution_scope_decision'),
         'scope_interpretation': promotion.get('scope_interpretation'),
         'execution_complete_destinations': promotion.get('execution_complete_destinations') or [],
@@ -657,10 +658,15 @@ def main() -> int:
         print(f'BLOCKING {reason}')
     execution_model = destination_model.get('execution_model') or '<unset>'
     architecture_decision = destination_model.get('architecture_decision') or '<unset>'
+    system_grade = destination_model.get('system_grade_classification') or {}
+    broad_grade = system_grade.get('broad_enterprise_system_claim', '<unset>')
+    narrow_grade = system_grade.get('narrow_explicitly_scoped_architecture', '<unset>')
     execution_scope_decision = destination_model.get('execution_scope_decision') or '<unset>'
     scope_interpretation = destination_model.get('scope_interpretation') or '<unset>'
     print(f'DESTINATION_MODEL execution_model={execution_model}')
     print(f'DESTINATION_MODEL architecture_decision={architecture_decision}')
+    print(f'DESTINATION_MODEL broad_enterprise_system_claim={broad_grade}')
+    print(f'DESTINATION_MODEL narrow_explicitly_scoped_architecture={narrow_grade}')
     print(f'DESTINATION_MODEL execution_scope_decision={execution_scope_decision}')
     print(f'DESTINATION_MODEL scope_interpretation={scope_interpretation}')
     print('DESTINATION_MODEL execution_complete=' + ','.join(destination_model.get('execution_complete_destinations') or []))
