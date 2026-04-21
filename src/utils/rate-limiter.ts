@@ -30,22 +30,6 @@ class RateLimiter {
     this.limits.set(key, state);
     return true;
   }
-
-  cleanup(windowMs = 60000): void {
-    const now = Date.now();
-
-    this.limits.forEach((state, key) => {
-      state.requests = state.requests.filter(time => now - time < windowMs);
-
-      if (state.requests.length === 0) {
-        this.limits.delete(key);
-      }
-    });
-  }
 }
 
 export const rateLimiter = new RateLimiter();
-
-setInterval(() => {
-  rateLimiter.cleanup();
-}, 120000);
