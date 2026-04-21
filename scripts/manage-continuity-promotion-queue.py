@@ -9,6 +9,7 @@ from pathlib import Path
 WORKSPACE = Path('/Users/andrewpilson/.openclaw/workspace')
 QUEUE_PATH = WORKSPACE / 'continuity' / 'pending-promotions.json'
 ALLOWED_STATUS = {'pending', 'promoted', 'dismissed'}
+ALLOWED_DESTINATIONS = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
 
 
 def now_iso() -> str:
@@ -49,6 +50,8 @@ def cmd_add(args) -> int:
         'reason': args.reason,
         'created_at': now_iso(),
         'status': 'pending',
+        'destination': None,
+        'destination_ref': None,
         'resolution': None,
         'resolved_at': None,
     })
@@ -63,6 +66,13 @@ def cmd_update(args, status: str) -> int:
     item = find_item(items, args.id)
     if not item:
         raise SystemExit(f'missing item: {args.id}')
+    if status == 'promoted':
+        if not args.destination or args.destination not in ALLOWED_DESTINATIONS:
+            raise SystemExit(f'valid --destination required for promoted item: {sorted(ALLOWED_DESTINATIONS)}')
+        if not args.destination_ref:
+            raise SystemExit('--destination-ref required for promoted item')
+        item['destination'] = args.destination
+        item['destination_ref'] = args.destination_ref
     item['status'] = status
     item['resolution'] = args.note or None
     item['resolved_at'] = now_iso()
@@ -93,6 +103,8 @@ def main() -> int:
 
     resolve = sub.add_parser('resolve')
     resolve.add_argument('--id', required=True)
+    resolve.add_argument('--destination', choices=sorted(ALLOWED_DESTINATIONS), required=True)
+    resolve.add_argument('--destination-ref', required=True)
     resolve.add_argument('--note')
     resolve.set_defaults(func=lambda args: cmd_update(args, 'promoted'))
 

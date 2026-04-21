@@ -165,6 +165,7 @@ def malformed_pending_promotions(items: list[dict]) -> list[dict]:
     bad = []
     required = ['id', 'title', 'source', 'reason', 'created_at', 'status']
     allowed_status = {'pending', 'promoted', 'dismissed'}
+    allowed_destinations = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
     for item in items:
         if any(not item.get(key) for key in required):
             bad.append(item)
@@ -172,6 +173,13 @@ def malformed_pending_promotions(items: list[dict]) -> list[dict]:
         if item.get('status') not in allowed_status:
             bad.append(item)
             continue
+        if item.get('status') == 'promoted':
+            if item.get('destination') not in allowed_destinations:
+                bad.append(item)
+                continue
+            if not item.get('destination_ref'):
+                bad.append(item)
+                continue
     return bad
 
 
