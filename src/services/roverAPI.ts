@@ -178,7 +178,11 @@ class RoverAPIService {
     }
   }
 
-  async saveIntent(query: any, title: string): Promise<void> {
+  async saveIntent(
+    query: any,
+    title: string,
+    options?: { dosThreshold?: number; telegramChatId?: string }
+  ): Promise<void> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -191,7 +195,8 @@ class RoverAPIService {
         body: JSON.stringify({
           name: title,
           filters: query || {},
-          dos_threshold: 65,
+          dos_threshold: options?.dosThreshold ?? 65,
+          telegram_chat_id: options?.telegramChatId?.trim() || undefined,
         }),
       });
 
@@ -205,31 +210,8 @@ class RoverAPIService {
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
       });
+      throw error;
     }
-  }
-
-  async createIntent(params: { title: string; make?: string; model?: string; year?: number }): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const filters = {
-      make: params.make,
-      model: params.model,
-      yearMin: params.year,
-      yearMax: params.year,
-    };
-    const resp = await fetch(`${API_BASE}/api/saved-searches`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
-      },
-      body: JSON.stringify({
-        name: params.title,
-        filters,
-        dos_threshold: 65,
-      }),
-    });
-    if (!resp.ok) throw new Error(`Saved search API error: ${resp.status}`);
   }
 
   async getUserIntents(): Promise<any[]> {
