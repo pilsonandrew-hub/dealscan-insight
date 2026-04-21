@@ -21,13 +21,9 @@ export interface AuditEvent {
 class AuditLogger {
   private events: AuditEvent[] = [];
   private sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-  private flushInterval?: ReturnType<typeof setInterval>;
 
   constructor() {
     this.loadStoredEvents();
-    this.flushInterval = setInterval(() => {
-      this.persistEvents();
-    }, 30000);
   }
 
   log(
@@ -96,15 +92,3 @@ class AuditLogger {
 }
 
 export const auditLogger = new AuditLogger();
-
-window.addEventListener('beforeunload', () => {
-  // Best-effort persistence for the minimal client audit trail.
-  try {
-    const stored = localStorage.getItem('dealerscope_audit_events');
-    if (stored === null) {
-      localStorage.setItem('dealerscope_audit_events', JSON.stringify([]));
-    }
-  } catch {
-    // Ignore unload persistence failures.
-  }
-});
