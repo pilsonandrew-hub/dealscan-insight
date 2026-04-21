@@ -13,6 +13,45 @@ import { CanonicalQuery, SearchResponse, CrosshairIntent, CanonicalListing } fro
 import { Zap, Activity, TrendingUp, Clock, Search, Crosshair } from 'lucide-react';
 import { roverAPI } from '@/services/roverAPI';
 
+async function createListingWatchAlert(listing: CanonicalListing): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return null;
+
+  const { error } = await supabase
+    .from('user_alerts')
+    .insert({
+      id: crypto.randomUUID(),
+      type: 'listing_watch',
+      title: `Watching: ${listing.year} ${listing.make} ${listing.model}`,
+      message: `Price: ${listing.bid_current ? `$${listing.bid_current}` : 'N/A'} - ${listing.source}`,
+      priority: 'medium',
+      opportunity_data: listing as any,
+      user_id: userId,
+    });
+
+  if (error) throw error;
+  return userId;
+}
+
+async function trackWatchedListingSave(listing: CanonicalListing, userId: string): Promise<void> {
+  await roverAPI.trackEvent({
+    userId,
+    event: 'save',
+    item: {
+      id: listing.id,
+      make: listing.make,
+      model: listing.model,
+      year: listing.year,
+      price: listing.bid_current ?? listing.buy_now ?? 0,
+      source: listing.source,
+      source_site: listing.source,
+      state: listing.location.state,
+      mileage: listing.odo_miles,
+    },
+  });
+}
+
 export const CrosshairDashboard = () => {
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -207,40 +246,10 @@ export const CrosshairDashboard = () => {
 
   const handleWatch = async (listing: CanonicalListing) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const userId = session?.user?.id;
+      const userId = await createListingWatchAlert(listing);
+      if (!userId) throw new Error('No authenticated user');
 
-      const { error } = await supabase
-        .from('user_alerts')
-        .insert({
-          id: crypto.randomUUID(),
-          type: 'listing_watch',
-          title: `Watching: ${listing.year} ${listing.make} ${listing.model}`,
-          message: `Price: ${listing.bid_current ? `$${listing.bid_current}` : 'N/A'} - ${listing.source}`,
-          priority: 'medium',
-          opportunity_data: listing as any,
-          user_id: userId!
-        });
-
-      if (error) throw error;
-
-      if (userId) {
-        roverAPI.trackEvent({
-          userId,
-          event: 'save',
-          item: {
-            id: listing.id,
-            make: listing.make,
-            model: listing.model,
-            year: listing.year,
-            price: listing.bid_current ?? listing.buy_now ?? 0,
-            source: listing.source,
-            source_site: listing.source,
-            state: listing.location.state,
-            mileage: listing.odo_miles,
-          },
-        });
-      }
+      await trackWatchedListingSave(listing, userId);
 
       toast({
         title: 'Watching Listing',
