@@ -1,10 +1,9 @@
 # Enterprise Core Cluster Classification — 2026-04-20
 
 ## Scope
-This pass audited the browser-side enterprise-core cluster that had accumulated around fake orchestration, fake governance, demo UI, and overlapping runtime wrappers.
+This report records the enterprise-core/browser-governance cleanup wave and its later reconciliation against current repo truth.
 
-## Final verified outcomes
-### Removed as synthetic or dead
+## Final verified removals from this cluster
 - `src/core/AdvancedMetricsCollector.ts`
 - `src/core/SystemIntegrationProtocols.ts`
 - `src/core/EnterpriseSystemOrchestrator.ts`
@@ -18,100 +17,82 @@ This pass audited the browser-side enterprise-core cluster that had accumulated 
 - `src/config/productionConfig.ts`
 - `src/core/UnifiedConfigService.ts`
 
-### Why these removals were justified
-#### `src/core/AdvancedMetricsCollector.ts`
+## Why these removals were justified
+### `src/core/AdvancedMetricsCollector.ts`
 - No verified external import consumers.
-- Duplicated monitoring concerns already handled more credibly by `src/monitoring/metricsCollector.ts`.
-- Contained synthetic browser metrics and enterprise theater rather than product-runtime authority.
+- Synthetic browser metrics stack.
+- Later monitoring reconciliation removed the remaining narrower monitoring sidecar too, but this file was dead even before that.
 
-#### `src/core/SystemIntegrationProtocols.ts`
+### `src/core/SystemIntegrationProtocols.ts`
 - No verified external import consumers.
-- Self-instantiating sidecar with synthetic integration events and stale compatibility metadata.
-- Safe to remove after confirming nothing imported it.
+- Self-instantiating synthetic sidecar.
 
-#### `src/core/EnterpriseSystemOrchestrator.ts`
+### `src/core/EnterpriseSystemOrchestrator.ts`
 - No verified external import consumers after protocol cleanup.
-- Self-instantiating browser orchestration layer coordinating mostly synthetic singleton systems.
-- Removal held cleanly.
+- Synthetic browser orchestration layer.
 
-#### `src/core/UnifiedStateManager.ts`
+### `src/core/UnifiedStateManager.ts`
 - No verified external import consumers.
-- Enterprise-core-local state framework with no proven live runtime necessity.
-- Removal held cleanly.
+- Local enterprise-core state framework with no proven product-runtime role.
 
-#### `src/core/PerformanceEmergencyKit.ts`
-- Not real database or backend infrastructure.
-- Implemented browser-side fake connection pooling, placeholder query behavior, and synthetic request orchestration.
-- Remaining live path was only a demo-style analytics panel plus the already-demoted readiness heuristic.
+### `src/core/PerformanceEmergencyKit.ts`
+- Fake browser-side infrastructure.
+- Survived temporarily only through demo/heuristic dependents.
 - Removal held after those dependents were removed.
 
-#### `src/core/ProductionReadinessGate.ts`
+### `src/core/ProductionReadinessGate.ts`
 - Browser-side heuristic pretending to assess production readiness.
-- Relied on fake performance-kit metrics and local/browser checks.
-- Not deployment authority, not CI authority, not runtime authority.
-- Removed together with its dead runner.
+- Not deployment authority, CI authority, or runtime authority.
 
-#### `src/components/UpdatedDealScoringPanel.tsx`
-- Explicitly sample/demo component.
-- Simulated scoring with fake delay and fake deduplication.
-- Mounted in analytics view, but not authoritative scoring logic.
-- Removed as demo noise that was keeping synthetic infrastructure alive.
+### `src/components/UpdatedDealScoringPanel.tsx`
+- Demo/sample UI.
+- Kept fake infra alive without representing real scoring authority.
 
-#### `src/scripts/run-production-assessment.ts`
-- Only remaining import path to deleted readiness heuristic.
-- TypeScript did not catch it because it sat outside the active compile surface.
-- Removed as dead residue once direct grep exposed it.
+### `src/scripts/run-production-assessment.ts`
+- Dead script residue outside active compile coverage.
+- Removed once direct grep exposed it.
 
-#### `src/config/deploymentConfig.ts`
-- Had no verified remaining consumers.
-- Contained legacy deployment templates and hardcoded deployment assumptions.
-- Safe to remove after direct consumer verification.
+### `src/config/deploymentConfig.ts`
+- No verified remaining consumers.
+- Legacy deployment template/config residue.
 
-#### `src/config/environmentManager.ts`
-- Was narrowed first, then rechecked.
-- Remaining behavior was tiny enough to inline directly into `healthCheck.ts` and `webVitals.ts`.
-- Keeping it would have preserved a dead compatibility seam with no real authority value.
+### `src/config/environmentManager.ts`
+- Narrowed first, then eliminated.
+- Its remaining logic was small enough to inline at the time.
+- The inline consumers referenced in the earlier phase were later removed in subsequent cleanup waves.
 
-#### `src/config/productionConfig.ts`
-- Was narrowed first, then rechecked.
-- Remaining behavior was tiny enough to inline directly into `metricsCollector.ts`.
-- Keeping it would have preserved ceremony, not architecture.
+### `src/config/productionConfig.ts`
+- Narrowed first, then eliminated.
+- Its remaining logic was small enough to inline at the time.
+- The inline consumer referenced in the earlier phase was later removed in subsequent cleanup waves.
 
-#### `src/core/UnifiedConfigService.ts`
-- Survived temporarily during the earlier audit phase.
-- Final consumer check showed only three remaining importers: `UnifiedLogger.ts`, `ErrorBoundary.tsx`, and `safeConsole.ts`.
-- Remaining behavior was tiny enough to inline directly, so the file was removed.
+### `src/core/UnifiedConfigService.ts`
+- Survived temporarily during intermediate narrowing.
+- Final consumer check reduced it to tiny compatibility behavior, which was then inlined and removed.
 
-## Verified survivors
-### `src/config/settings.ts`
-**Status:** primary frontend/runtime settings authority
-**Reason:** verified broad real-runtime usage across components, services, hooks, and utilities.
+## Reconciled current truth
+The earlier version of this report overstated some survivors because later cleanup waves continued beyond the original cluster pass.
 
-### `src/monitoring/metricsCollector.ts`
-**Status:** live narrow monitoring path
-**Reason:** more credible than the deleted enterprise-core metrics stack and still referenced as actual monitoring logic.
+These are **not** surviving live exceptions anymore:
+- `src/monitoring/metricsCollector.ts` — later removed in `a3c1886`
+- `src/services/healthCheck.ts` — later removed in `12a4b61`
+- `src/utils/safeConsole.ts` — later removed in `a263fea`
+- `src/services/webVitals.ts` — later removed in `a3c1886`
 
-### `src/utils/runtimeEnvironment.ts`
-**Status:** tiny environment-resolution utility
-**Reason:** environment resolution had already spread across multiple direct consumers after wrapper collapse. A tiny shared utility was cleaner than leaving the same helper copied across the codebase.
+## Surviving truth after reconciliation
+- `src/config/settings.ts` remains the primary runtime settings authority in this surface.
+- `src/utils/runtimeEnvironment.ts` survives only as a tiny environment-resolution utility.
 
-## Hard corrections made during this pass
-- `src/config/productionConfig.ts` previously claimed to be narrowed while still referencing removed `this.config.api.*` fields. That contradiction was real. It was fixed before the final wrapper-removal pass.
-- Earlier report drafts became stale as removals landed. This report replaces those stale intermediate claims.
-- `verify-migration.ts` also became stale and must no longer instruct future cleanup toward deleted fake config surfaces.
+## Verification used across the full cleanup chain
+- direct grep/import-path checks before removal
+- post-removal residue scans
+- repeated `npx tsc --noEmit`
+- repeated production builds
+- report/script reconciliation after later waves invalidated intermediate claims
 
-## Verification performed
-- direct grep/import reachability checks before each removal
-- post-removal grep checks for residue
-- repeated `npx tsc --noEmit` runs after bounded cuts
-- live review of remaining import paths when grep exposed stale residues outside compile coverage
+## Hard conclusion
+The enterprise-core cluster was synthetic browser-side orchestration and governance theater, not serious runtime architecture.
 
-## Current conclusion
-The audited enterprise-core cluster was not a serious runtime architecture. It was a pile of browser-side synthetic orchestration, fake infra, fake governance, demo surfaces, and wrapper ceremony around narrower real utilities.
+That cluster is gone.
 
-That junk cluster is now removed.
-
-## Remaining open work from this pass
-- keep reviewing remaining reports and scripts so they do not preserve stale fake-architecture guidance
-- keep `settings.ts` as runtime authority unless stronger contrary evidence appears
-- keep `runtimeEnvironment.ts` tiny and prevent it from growing into another fake config layer
+This report is now reconciled to current repo truth instead of stopping at the intermediate phase snapshot.

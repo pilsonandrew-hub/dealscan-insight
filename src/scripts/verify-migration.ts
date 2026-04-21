@@ -2,7 +2,9 @@
 
 /**
  * Migration Verification Script
- * Verifies all legacy imports have been replaced with unified systems
+ * Verifies reintroduction of deleted legacy/config-wrapper patterns and other
+ * stale migration residue. This is cleanup tooling, not proof that the repo
+ * should converge on one grand "unified systems" architecture.
  */
 
 import * as fs from 'fs';
@@ -29,7 +31,7 @@ const MIGRATION_CHECKS: MigrationCheck[] = [
   {
     name: 'Old Logger Imports', 
     pattern: /import.*from.*['"].*productionLogger|secureLogger['"]/g,
-    description: 'Should use UnifiedLogger'
+    description: 'Historical cleanup check: prefer current logger surfaces over removed legacy logger imports'
   },
   {
     name: 'Old Auth Context',
@@ -39,7 +41,7 @@ const MIGRATION_CHECKS: MigrationCheck[] = [
   {
     name: 'createLogger Usage',
     pattern: /createLogger\(/g,
-    description: 'Should use unified logger instance'
+    description: 'Historical cleanup check for stale createLogger usage'
   }
 ];
 
@@ -93,7 +95,7 @@ function checkFile(filePath: string): { file: string; issues: Array<{ check: str
 }
 
 async function runMigrationVerification() {
-  logger.info('🔍 Starting Migration Verification');
+  logger.info('🔍 Starting migration residue verification');
   
   const srcDir = path.join(process.cwd(), 'src');
   const files = scanDirectory(srcDir);
@@ -120,8 +122,8 @@ async function runMigrationVerification() {
   console.log('=====================================');
   
   if (totalIssues === 0) {
-    console.log('✅ ALL MIGRATIONS COMPLETED SUCCESSFULLY!');
-    console.log('🎉 No legacy imports or patterns found.');
+    console.log('✅ No configured migration-residue patterns found.');
+    console.log('🎉 The current scan did not find banned legacy patterns.');
     return true;
   }
   
@@ -139,11 +141,11 @@ async function runMigrationVerification() {
   }
   
   console.log('🔧 RECOMMENDED ACTIONS:');
-  console.log('1. Replace console.* with logger methods');
+  console.log('1. Replace console.* with current approved logger methods');
   console.log('2. Remove imports of deleted config-wrapper surfaces');
-  console.log('3. Replace old logger imports with UnifiedLogger');
+  console.log('3. Replace old logger imports with current supported logger surfaces');
   console.log('4. Update auth context imports to ModernAuthContext');
-  console.log('5. Remove createLogger usage in favor of unified logger\n');
+  console.log('5. Review createLogger usage as historical migration residue, not automatic proof of invalidity\n');
   
   return false;
 }

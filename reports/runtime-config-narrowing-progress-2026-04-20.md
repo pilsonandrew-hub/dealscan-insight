@@ -1,38 +1,41 @@
 # Runtime Config Narrowing Progress — 2026-04-20
 
-## Verified cuts completed
+## Reconciled outcome
+The narrowing phase happened in multiple steps and the earlier version of this report stopped too early.
+This version reflects the full later cleanup chain.
 
+## Verified eliminations
 ### `src/config/environmentManager.ts`
 **Final outcome:** deleted.
 
-**Reason:**
-- after shrinkage, it had exactly two importers
-- its remaining logic was small enough to inline directly into `src/services/healthCheck.ts` and `src/services/webVitals.ts`
-- keeping the wrapper would have preserved an unnecessary compatibility seam with no real authority value
+**Historical role during narrowing:**
+- was first reduced to a tiny wrapper
+- its remaining logic was then inlined
+- the direct consumers named in the earlier phase were themselves later removed in subsequent waves
 
 ---
 
 ### `src/config/productionConfig.ts`
 **Final outcome:** deleted.
 
-**Reason:**
-- after shrinkage, it had exactly one importer
-- its remaining logic was small enough to inline directly into `src/monitoring/metricsCollector.ts`
-- keeping the wrapper would have preserved an unnecessary compatibility seam with no real authority value
+**Historical role during narrowing:**
+- was first reduced to a tiny wrapper
+- its remaining logic was then inlined
+- the direct consumer named in the earlier phase was itself later removed in subsequent waves
 
 ---
 
 ### `src/core/UnifiedConfigService.ts`
 **Final outcome:** deleted.
 
-**Reason:**
-- after the earlier collapse, it had exactly three importers
-- its remaining logic was small enough to inline directly into `src/core/UnifiedLogger.ts`, `src/core/ErrorBoundary.tsx`, and `src/utils/safeConsole.ts`
-- keeping the file would have preserved one last fake config seam with no real authority value
+**Historical role during narrowing:**
+- survived temporarily as a tiny compatibility shim
+- was then inlined into its last consumers
+- one of those named consumers, `safeConsole.ts`, was later removed entirely in a later wave
 
 ---
 
-### Removed during this cleanup wave
+## Removed during this cleanup chain
 - `src/config/deploymentConfig.ts`
 - `src/config/environmentManager.ts`
 - `src/config/productionConfig.ts`
@@ -45,15 +48,18 @@
 - `src/core/ProductionReadinessGate.ts`
 - `src/components/UpdatedDealScoringPanel.tsx`
 - `src/scripts/run-production-assessment.ts`
+- `src/monitoring/metricsCollector.ts`
+- `src/services/healthCheck.ts`
+- `src/services/webVitals.ts`
+- `src/utils/safeConsole.ts`
 
-## Current post-cut authority split
+## Current post-chain authority split
 - `src/config/settings.ts` — primary app/runtime config
+- `src/utils/runtimeEnvironment.ts` — tiny environment-resolution helper only
 
-## Remaining structural problem
-The problem is no longer fake enterprise sprawl.
-The remaining problem is limited residual duplication across a few direct consumers, not broad fake wrapper ownership.
-
-## Next strict step
+## Hard conclusion
 Wrapper collapse is complete.
-The follow-on duplication check showed environment resolution had already spread across six direct consumers, so leaving it inline would have created drift. That duplication was replaced with one tiny utility: `src/utils/runtimeEnvironment.ts`.
-The honest next move is to keep that utility tiny and prevent it from turning into another fake config layer.
+The intermediate tiny wrappers are gone.
+The temporary inline consumers that once justified some of that narrowing are also gone where later repo-truth audits proved them unowned.
+
+The honest surviving config picture is now much simpler than the earlier version of this report stated.
