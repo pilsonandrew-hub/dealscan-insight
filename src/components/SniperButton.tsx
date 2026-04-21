@@ -11,10 +11,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Target, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
-import { settings } from '@/config/settings';
-
-const API_BASE = settings.api.baseUrl;
+import { sniperAPI } from '@/services/sniperAPI';
 
 // Minimal shape we need from an opportunity — keeps this component decoupled.
 interface SniperOpportunity {
@@ -54,15 +51,8 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
 
     const restore = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) return;
-
-        const resp = await fetch(`${API_BASE}/api/sniper/targets`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        if (!resp.ok || cancelled) return;
-
-        const data = await resp.json().catch(() => ({}));
+        const data = await sniperAPI.listTargets<{ id: string; opportunity_id: string; status: string }>();
+        if (cancelled) return;
         const targets: Array<{ id: string; opportunity_id: string; status: string }> =
           data?.targets ?? [];
 
@@ -109,44 +99,20 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
     setErrorMsg('');
 
     try {
-      // Get Supabase JWT
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        setErrorMsg('You must be logged in to snipe.');
-        setState('modal');
-        return;
-      }
-
-      const body: Record<string, unknown> = {
+      const payload: { opportunity_id: string; max_bid: number; telegram_chat_id?: string } = {
         opportunity_id: opportunity.id,
         max_bid: bidValue,
       };
       if (telegramChatId.trim()) {
-        body.telegram_chat_id = telegramChatId.trim();
+        payload.telegram_chat_id = telegramChatId.trim();
       }
 
-      const resp = await fetch(`${API_BASE}/api/sniper/targets`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        setErrorMsg(errData.detail || `API error ${resp.status}`);
-        setState('modal');
-        return;
-      }
-
-      const respData = await resp.json().catch(() => ({}));
+      const respData = await sniperAPI.createTarget(payload);
       if (respData?.target?.id) setArmedTargetId(respData.target.id);
       setState('armed');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setErrorMsg(`Network error: ${msg}`);
+      setErrorMsg(msg);
       setState('modal');
     }
   }, [opportunity.id, maxBid, telegramChatId]);
@@ -155,13 +121,7 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
   const handleCancel = useCallback(async () => {
     if (armedTargetId) {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          await fetch(`${API_BASE}/api/sniper/targets/${armedTargetId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${session.access_token}` },
-          });
-        }
+        await sniperAPI.deleteTarget(armedTargetId);
       } catch {
         // non-fatal — UI state update still happens
       }

@@ -3,8 +3,8 @@ import { Target, Lock, Trash2, Calculator, Upload, Search, RefreshCw, Crosshair,
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { settings } from '@/config/settings';
 import api, { type OpportunityDetail } from '@/services/api';
+import { sniperAPI } from '@/services/sniperAPI';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SniperInputs {
@@ -95,7 +95,6 @@ const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: 
 ];
 
 const STORAGE_KEY = 'dealerscope_sniper_targets';
-const API_BASE = settings.api.baseUrl;
 
 // ─── Active DB Sniper Targets ─────────────────────────────────────────────────
 interface LiveTarget {
@@ -140,13 +139,7 @@ function ActiveSniperTargets() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) { setLoading(false); return; }
-      const resp = await fetch(`${API_BASE}/api/sniper/targets`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (!resp.ok) return;
-      const json = await resp.json();
+      const json = await sniperAPI.listTargets<LiveTarget>();
       setTargets(json.targets || []);
     } catch { /* non-fatal */ }
     finally { setLoading(false); }
