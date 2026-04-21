@@ -76,28 +76,28 @@
       "report": {
         "path_prefix": "brains/dealerscope-brain/reports/",
         "require_file": true,
-        "classification": "verification_only_pending_contract",
+        "classification": "verification_only_by_default_local_archive_boundary",
         "execution": {
           "enabled": false,
-          "reason": "no destination-specific enterprise mutation contract exists"
+          "reason": "report mutation is not approved by default; workspace reports are local archive artifacts unless explicitly promoted into governed surfaces"
         }
       },
       "doctrine": {
         "path_prefix": "brains/dealerscope-brain/",
         "require_file": true,
-        "classification": "verification_only_pending_contract",
+        "classification": "verification_only_manual_governed_by_default",
         "execution": {
           "enabled": false,
-          "reason": "no destination-specific enterprise mutation contract exists"
+          "reason": "doctrine remains manual/governed by default; no automation is approved without an explicit narrow contract"
         }
       },
       "policy": {
         "path_prefix": "continuity/",
         "require_file": true,
-        "classification": "verification_only_pending_contract",
+        "classification": "verification_only_manual_governed_by_default",
         "execution": {
           "enabled": false,
-          "reason": "no destination-specific enterprise mutation contract exists"
+          "reason": "policy remains manual/governed by default unless an exact safe writable subset is explicitly approved"
         }
       }
     },
