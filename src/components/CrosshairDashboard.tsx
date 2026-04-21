@@ -218,15 +218,10 @@ export const CrosshairDashboard = () => {
 
   const handleSaveIntent = useCallback(async (query: CanonicalQuery, options: any, title: string) => {
     try {
-      const { error } = await supabase.functions.invoke('crosshair-save-intent', {
-        body: {
-          canonical_query: query,
-          search_options: options,
-          title
-        }
+      await roverAPI.saveIntent(query, title, {
+        dos_threshold: options?.dos_threshold,
+        telegram_chat_id: options?.telegram_chat_id,
       });
-
-      if (error) throw error;
 
       toast({
         title: 'Intent Saved',
