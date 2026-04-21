@@ -63,7 +63,21 @@
       },
       "closure_board": {
         "path": "brains/dealerscope-brain/03_Operations/DealerScope-Governed-Closure-Board.md",
-        "match_prefix": "### "
+        "match_prefix": "### ",
+        "execution": {
+          "enabled": true,
+          "allowed_target_statuses": [
+            "open",
+            "in_progress",
+            "blocked"
+          ],
+          "allowed_new_statuses": [
+            "closed"
+          ],
+          "require_resolution_note": true,
+          "append_promotion_evidence": true,
+          "set_next_action_from_resolution": true
+        }
       },
       "report": {
         "path_prefix": "brains/dealerscope-brain/reports/",

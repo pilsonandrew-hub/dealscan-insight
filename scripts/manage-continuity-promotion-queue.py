@@ -165,6 +165,59 @@ def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str]
     target_path.write_text('\n'.join(lines) + '\n')
 
 
+def mutate_closure_board_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> None:
+    cfg = load_destination_cfg('closure_board')
+    execution_cfg = cfg.get('execution') or {}
+    if not execution_cfg.get('enabled', False):
+        raise SystemExit('closure_board execution is not enabled by policy')
+    if target_status not in set(execution_cfg.get('allowed_new_statuses') or []):
+        raise SystemExit(f'target status not allowed by policy: {target_status}')
+    if execution_cfg.get('require_resolution_note', False) and not note:
+        raise SystemExit('closure_board execution requires --note')
+
+    target_path = WORKSPACE / cfg['path']
+    if not target_path.exists():
+        raise SystemExit(f'missing target file for closure_board: {target_path}')
+    lines = target_path.read_text().splitlines()
+    heading_prefix = f"{cfg.get('match_prefix', '### ')}{destination_ref}"
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip().startswith(heading_prefix))
+    except StopIteration:
+        raise SystemExit(f'unverified destination ref {destination_ref} in closure_board')
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith('### '):
+            end = i
+            break
+    block = lines[start:end]
+    status_idx = next((i for i, line in enumerate(block) if line.startswith('- Current status:')), None)
+    next_idx = next((i for i, line in enumerate(block) if line.startswith('- Next action:')), None)
+    evidence_idx = next((i for i, line in enumerate(block) if line.startswith('- Evidence link:')), None)
+    if status_idx is None or next_idx is None or evidence_idx is None:
+        raise SystemExit(f'closure_board item missing required fields for mutation: {destination_ref}')
+
+    current_status = parse_backticked_value(block[status_idx])
+    if current_status not in set(execution_cfg.get('allowed_target_statuses') or []):
+        raise SystemExit(f'current closure_board status not eligible for execution mutation: {current_status}')
+
+    block[status_idx] = f"- Current status: `{target_status}`"
+    if execution_cfg.get('set_next_action_from_resolution', False):
+        block[next_idx] = f"- Next action: {note}"
+    if execution_cfg.get('append_promotion_evidence', False):
+        evidence_text = block[evidence_idx]
+        addition = f"promotion `{item['id']}`"
+        if addition not in evidence_text:
+            block[evidence_idx] = evidence_text.rstrip() + f", {addition}"
+    promotion_note_line = f"- Promotion resolution note: {note}"
+    existing_note_idx = next((i for i, line in enumerate(block) if line.startswith('- Promotion resolution note:')), None)
+    if existing_note_idx is not None:
+        block[existing_note_idx] = promotion_note_line
+    else:
+        block.append(promotion_note_line)
+    lines[start:end] = block
+    target_path.write_text('\n'.join(lines) + '\n')
+
+
 def cmd_update(args, status: str) -> int:
     payload = load_queue()
     items = payload.setdefault('items', [])
@@ -180,6 +233,8 @@ def cmd_update(args, status: str) -> int:
         if args.execute:
             if args.destination == 'work_queue':
                 mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
+            elif args.destination == 'closure_board':
+                mutate_closure_board_item(item, args.destination_ref, args.note, args.target_status)
             else:
                 raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
         item['destination'] = args.destination
@@ -218,7 +273,7 @@ def main() -> int:
     resolve.add_argument('--destination-ref', required=True)
     resolve.add_argument('--note')
     resolve.add_argument('--execute', action='store_true')
-    resolve.add_argument('--target-status', choices=['ready_for_review', 'closed'], default='ready_for_review')
+    resolve.add_argument('--target-status', choices=['ready_for_review', 'in_progress', 'closed'], default='ready_for_review')
     resolve.set_defaults(func=lambda args: cmd_update(args, 'promoted'))
 
     dismiss = sub.add_parser('dismiss')

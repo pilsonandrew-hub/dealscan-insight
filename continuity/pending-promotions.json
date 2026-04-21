@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-21T19:56:43+00:00",
+  "updated_at": "2026-04-21T20:00:15+00:00",
   "items": [
     {
       "id": "test-promotion-1",
@@ -61,6 +61,30 @@
       "destination_ref": "DS-WQ-013",
       "resolution": "review whether continuity behavioral adoption proof now has enough evidence to promote toward governed closure",
       "resolved_at": "2026-04-21T19:56:43+00:00"
+    },
+    {
+      "id": "test-promotion-6",
+      "title": "Closure Board Execution Contract",
+      "source": "manual-test",
+      "reason": "prove destination-specific mutation on governed closure board",
+      "created_at": "2026-04-21T19:59:44+00:00",
+      "status": "promoted",
+      "destination": "closure_board",
+      "destination_ref": "GOV-CB-001",
+      "resolution": "continue live pressure-testing after work_queue promotion execution and governed mutation proof",
+      "resolved_at": "2026-04-21T19:59:47+00:00"
+    },
+    {
+      "id": "test-promotion-7",
+      "title": "Closure Board Guardrail",
+      "source": "manual-test",
+      "reason": "prove closure board execution rejects non-meaningful status transitions",
+      "created_at": "2026-04-21T20:00:15+00:00",
+      "status": "pending",
+      "destination": null,
+      "destination_ref": null,
+      "resolution": null,
+      "resolved_at": null
     }
   ]
 }
