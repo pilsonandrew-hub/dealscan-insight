@@ -76,6 +76,25 @@
       ]
     }
   },
+  "workspace_boundary": {
+    "tracked_by_continuity_loop": [
+      "brains/dealerscope-brain",
+      "continuity/policy.json",
+      "continuity/open-loops.json",
+      "continuity/pending-promotions.json",
+      "scripts/dealerscope-continuity-status.py",
+      "scripts/manage-continuity-promotion-queue.py",
+      "scripts/generate-dealerscope-daily-briefing.py",
+      "scripts/continuity-closeout-check.sh"
+    ],
+    "explicitly_out_of_scope_local_surfaces": [
+      "MEMORY.md",
+      "SOUL.md",
+      "NORTH_STAR.md",
+      "memory/*.md"
+    ],
+    "interpretation": "personal_workspace_surfaces_do_not_count_as_continuity_loop_dirt"
+  },
   "promotion": {
     "queue_path": "continuity/pending-promotions.json",
     "require_queue_file": true,

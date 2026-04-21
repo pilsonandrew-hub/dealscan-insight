@@ -420,6 +420,15 @@ def artifact_family_status(policy: dict) -> dict:
     return summary
 
 
+def workspace_boundary_status(policy: dict) -> dict:
+    boundary = policy.get('workspace_boundary') or {}
+    return {
+        'tracked_by_continuity_loop': boundary.get('tracked_by_continuity_loop') or [],
+        'explicitly_out_of_scope_local_surfaces': boundary.get('explicitly_out_of_scope_local_surfaces') or [],
+        'interpretation': boundary.get('interpretation'),
+    }
+
+
 def destination_model_status(policy: dict) -> dict:
     promotion = policy.get('promotion') or {}
     return {
@@ -477,6 +486,7 @@ def main() -> int:
     audit_cfg = promotion_cfg.get('audit') or {}
     artifact_families = artifact_family_status(policy)
     destination_model = destination_model_status(policy)
+    workspace_boundary = workspace_boundary_status(policy)
 
     git = git_status()
     named_ok, named_failures = check_named_paths(requested_paths) if requested_paths else ([], [])
@@ -593,6 +603,7 @@ def main() -> int:
         'last_successful_weekly_audit': find_latest_matching('*anti-regression*.md'),
         'briefing_health': briefing_health,
         'artifact_families': artifact_families,
+        'workspace_boundary': workspace_boundary,
         'destination_model': destination_model,
     }
     write_json(STATE_PATH, state_payload)
@@ -607,6 +618,7 @@ def main() -> int:
         'advisory_reasons': advisory_reasons,
         'briefing_health': briefing_health,
         'artifact_families': artifact_families,
+        'workspace_boundary': workspace_boundary,
         'destination_model': destination_model,
         'missing_requirements': {
             'malformed_open_loops': len(bad_loops),
@@ -673,6 +685,9 @@ def main() -> int:
     print('DESTINATION_MODEL verification_only=' + ','.join(destination_model.get('verification_only_destinations') or []))
     for family_name, family in artifact_families.items():
         print(f"ARTIFACT_FAMILY {family_name} classification={family.get('classification')}")
+    print('WORKSPACE_BOUNDARY tracked_by_continuity_loop=' + ','.join(workspace_boundary.get('tracked_by_continuity_loop') or []))
+    print('WORKSPACE_BOUNDARY out_of_scope_local_surfaces=' + ','.join(workspace_boundary.get('explicitly_out_of_scope_local_surfaces') or []))
+    print('WORKSPACE_BOUNDARY interpretation=' + str(workspace_boundary.get('interpretation') or '<unset>'))
     for reason in advisory_reasons:
         print(f'ADVISORY {reason}')
 
