@@ -24,6 +24,28 @@ import { roverAPI } from "@/services/roverAPI";
 import { supabase } from "@/integrations/supabase/client";
 import { SniperButton } from "@/components/SniperButton";
 
+async function trackWatchedListingSave(listing: CanonicalListing): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return;
+
+  await roverAPI.trackEvent({
+    userId,
+    event: 'save',
+    item: {
+      id: listing.id,
+      make: listing.make,
+      model: listing.model,
+      year: listing.year,
+      price: listing.bid_current ?? listing.buy_now ?? 0,
+      source: listing.source,
+      source_site: listing.source,
+      state: listing.location.state,
+      mileage: listing.odo_miles,
+    },
+  });
+}
+
 interface CrosshairResultsProps {
   searchResponse: SearchResponse;
   onWatch?: (listing: CanonicalListing) => void;
@@ -317,26 +339,7 @@ export const CrosshairResults = ({
                       size="sm"
                       onClick={() => {
                         onWatch?.(listing);
-                        // Fire Rover save event (non-blocking)
-                        supabase.auth.getSession().then(({ data: { session } }) => {
-                          const userId = session?.user?.id;
-                          if (!userId) return;
-                          roverAPI.trackEvent({
-                            userId,
-                            event: 'save',
-                            item: {
-                              id: listing.id,
-                              make: listing.make,
-                              model: listing.model,
-                              year: listing.year,
-                              price: listing.bid_current ?? listing.buy_now ?? 0,
-                              source: listing.source,
-                              source_site: listing.source,
-                              state: listing.location.state,
-                              mileage: listing.odo_miles,
-                            },
-                          });
-                        });
+                        void trackWatchedListingSave(listing);
                       }}
                     >
                       <Bell className="w-3 h-3 mr-1" />
