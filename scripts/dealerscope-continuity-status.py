@@ -424,6 +424,7 @@ def destination_model_status(policy: dict) -> dict:
     promotion = policy.get('promotion') or {}
     return {
         'execution_model': promotion.get('execution_model'),
+        'architecture_decision': promotion.get('architecture_decision'),
         'execution_scope_decision': promotion.get('execution_scope_decision'),
         'scope_interpretation': promotion.get('scope_interpretation'),
         'execution_complete_destinations': promotion.get('execution_complete_destinations') or [],
@@ -603,16 +604,16 @@ def main() -> int:
         'blocked_if_enforced': bool(blocking_reasons),
         'blocking_reasons': blocking_reasons,
         'advisory_reasons': advisory_reasons,
+        'briefing_health': briefing_health,
+        'artifact_families': artifact_families,
+        'destination_model': destination_model,
         'missing_requirements': {
             'malformed_open_loops': len(bad_loops),
             'malformed_pending_promotions': len(bad_queue_items),
             'promotion_destination_failures': destination_failures,
             'pending_replication': pending_replication,
             'recall_required': recall_required,
-            'briefing_health': briefing_health,
             'audit_policy_enforced': bool(audit_cfg.get('require_uniform_resolution_metadata', False)),
-            'artifact_families': artifact_families,
-            'destination_model': destination_model,
         },
     }
     write_json(CLOSEOUT_PATH, closeout_payload)
@@ -655,9 +656,11 @@ def main() -> int:
     for reason in blocking_reasons:
         print(f'BLOCKING {reason}')
     execution_model = destination_model.get('execution_model') or '<unset>'
+    architecture_decision = destination_model.get('architecture_decision') or '<unset>'
     execution_scope_decision = destination_model.get('execution_scope_decision') or '<unset>'
     scope_interpretation = destination_model.get('scope_interpretation') or '<unset>'
     print(f'DESTINATION_MODEL execution_model={execution_model}')
+    print(f'DESTINATION_MODEL architecture_decision={architecture_decision}')
     print(f'DESTINATION_MODEL execution_scope_decision={execution_scope_decision}')
     print(f'DESTINATION_MODEL scope_interpretation={scope_interpretation}')
     print('DESTINATION_MODEL execution_complete=' + ','.join(destination_model.get('execution_complete_destinations') or []))
