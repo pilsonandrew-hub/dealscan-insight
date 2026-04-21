@@ -379,30 +379,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     }
   };
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    
-    for (const file of droppedFiles) {
-      const securityCheck = await performSecurityCheck(file);
-      if (!securityCheck.isSecure) {
-        toast({
-          title: "Security Validation Failed",
-          description: `${file.name}: ${securityCheck.issues.join(', ')}`,
-          variant: securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
-        });
-        continue;
-      }
-      
-      await processFile(file);
-    }
-  }, [toast]);
-
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = Array.from(e.target.files || []);
-    
+  const handleSelectedFiles = useCallback(async (selectedFiles: File[]) => {
     for (const file of selectedFiles) {
       const securityCheck = await performSecurityCheck(file);
       if (!securityCheck.isSecure) {
@@ -413,10 +390,23 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         });
         continue;
       }
-      
+
       await processFile(file);
     }
-    
+  }, [toast]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    await handleSelectedFiles(droppedFiles);
+  }, [handleSelectedFiles]);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    await handleSelectedFiles(selectedFiles);
+
     // Clear input
     e.target.value = '';
   }, [toast]);
