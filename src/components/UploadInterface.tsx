@@ -185,7 +185,10 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     toast({ title, description, ...(variant ? { variant } : {}) });
   }, [toast]);
 
-  const processFile = async (file: File): Promise<void> => {
+  const processFile = async (
+    file: File,
+    precomputedSecurityCheck?: { isSecure: boolean; issues: string[]; riskLevel: 'low' | 'medium' | 'high' }
+  ): Promise<void> => {
     const fileId = Math.random().toString(36).substr(2, 9);
     const timer = performanceMonitor.startTimer('file_upload_process');
     
@@ -213,7 +216,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
     try {
         // Enhanced security validation with configuration
-        const securityCheck = await performSecurityCheck(file);
+        const securityCheck = precomputedSecurityCheck ?? await performSecurityCheck(file);
         
         if (!securityCheck.isSecure) {
           finishUploadProgress(progressInterval, timer, false);
@@ -368,7 +371,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         continue;
       }
 
-      await processFile(file);
+      await processFile(file, securityCheck);
     }
   }, [showUploadToast]);
 
