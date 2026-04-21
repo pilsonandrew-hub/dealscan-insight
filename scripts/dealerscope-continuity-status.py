@@ -424,6 +424,7 @@ def destination_model_status(policy: dict) -> dict:
     promotion = policy.get('promotion') or {}
     return {
         'execution_model': promotion.get('execution_model'),
+        'execution_scope_decision': promotion.get('execution_scope_decision'),
         'execution_complete_destinations': promotion.get('execution_complete_destinations') or [],
         'verification_only_destinations': promotion.get('verification_only_destinations') or [],
     }
@@ -653,7 +654,9 @@ def main() -> int:
     for reason in blocking_reasons:
         print(f'BLOCKING {reason}')
     execution_model = destination_model.get('execution_model') or '<unset>'
+    execution_scope_decision = destination_model.get('execution_scope_decision') or '<unset>'
     print(f'DESTINATION_MODEL execution_model={execution_model}')
+    print(f'DESTINATION_MODEL execution_scope_decision={execution_scope_decision}')
     print('DESTINATION_MODEL execution_complete=' + ','.join(destination_model.get('execution_complete_destinations') or []))
     print('DESTINATION_MODEL verification_only=' + ','.join(destination_model.get('verification_only_destinations') or []))
     for family_name, family in artifact_families.items():

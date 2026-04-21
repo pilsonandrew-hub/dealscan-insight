@@ -85,6 +85,7 @@
     "closeout_blocking_creates_candidate": true,
     "malformed_open_loops_create_candidate": true,
     "execution_model": "single_supported_destination_only",
+    "execution_scope_decision": "non_work_queue_destinations_remain_verification_only_by_design_until_explicitly_reapproved",
     "execution_complete_destinations": [
       "work_queue"
     ],
