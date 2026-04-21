@@ -888,9 +888,6 @@ const RoverTab = () => {
   const [isFallback, setIsFallback] = useState(false);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
   const [roverDebug, setRoverDebug] = useState<string>('');
-  const [roverMode, setRoverMode] = useState<'ai' | 'manual'>(() =>
-    (localStorage.getItem('rover_mode') as 'ai' | 'manual') || 'ai'
-  );
 
   const mapOpportunityToRoverRecommendation = useCallback((d: any): RoverRecommendation => ({
     id: d.id,
@@ -952,17 +949,6 @@ const RoverTab = () => {
     setLoading(true);
     setIsFallback(false);
 
-    if (roverMode === 'manual') {
-      try {
-        setRecs(await fetchDirectRoverDeals());
-      } catch (e) {
-        console.error('RoverTab manual load error:', e);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
     setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     try {
       const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
@@ -1006,7 +992,7 @@ const RoverTab = () => {
     } finally {
       setLoading(false);
     }
-  }, [user, session, authLoading, roverMode, fetchDirectRoverDeals]);
+  }, [user, session, authLoading, fetchDirectRoverDeals]);
 
   // Only fire after auth has fully initialized
   useEffect(() => {
@@ -1044,21 +1030,14 @@ const RoverTab = () => {
     }
   };
 
-  const handleModeChange = (mode: 'ai' | 'manual') => {
-    localStorage.setItem('rover_mode', mode);
-    setRoverMode(mode);
-  };
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white">Rover</h2>
           <p className="text-sm text-gray-400">
-            {roverMode === 'manual'
-              ? 'Sorted by DOS Score'
-              : isFallback
-              ? 'Top Deals — Training Rover — interact with deals to personalize'
+            {isFallback
+              ? 'Top deals while Rover learns from your activity'
               : 'Personalized recommendations based on your activity'}
           </p>
         </div>
@@ -1067,31 +1046,7 @@ const RoverTab = () => {
         </button>
       </div>
 
-      {/* Mode toggle */}
-      <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
-        <button
-          onClick={() => handleModeChange('ai')}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            roverMode === 'ai'
-              ? 'bg-emerald-600 text-white'
-              : 'text-gray-400 hover:text-white'
-          }`}
-        >
-          🤖 AI Personalized
-        </button>
-        <button
-          onClick={() => handleModeChange('manual')}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            roverMode === 'manual'
-              ? 'bg-emerald-600 text-white'
-              : 'text-gray-400 hover:text-white'
-          }`}
-        >
-          📊 Manual (DOS Sorted)
-        </button>
-      </div>
-
-      {roverMode === 'ai' && isFallback && (
+      {isFallback && (
         <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
           <Navigation className="h-4 w-4 flex-shrink-0" />
           <span>Training Rover — interact with deals to personalize your recommendations over time.</span>
@@ -1148,25 +1103,6 @@ const RoverTab = () => {
             investment_grade: rec.investment_grade as Opportunity['investment_grade'],
             vehicle: { make: rec.make || '', model: rec.model || '', year: rec.year || 0, vin: rec.vin || '', mileage: rec.mileage || 0 },
           });
-
-          // Manual mode: flat grid sorted by DOS score, no why-signals
-          if (roverMode === 'manual') {
-            return (
-              <div className="space-y-4">
-                <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">📊 Sorted by DOS Score</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {recs.map(rec => {
-                    const id = rec.id || rec.opportunity_id || Math.random().toString();
-                    return (
-                      <div key={id}>
-                        <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          }
 
           // Infer body type from model name for cold-start categorization
           const inferType = (model = ''): 'truck' | 'suv' | 'other' => {
