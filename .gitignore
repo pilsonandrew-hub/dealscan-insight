@@ -63,3 +63,9 @@ reports/
 scripts/codex-warmstart.sh
 scripts/promote-routing-governor-v2.py
 scripts/promote-specialist-routing-artifacts.py
+
+# Continuity runtime outputs are generated state, not source
+continuity/closeout-evaluation.json
+continuity/continuity-events.jsonl
+continuity/continuity-metrics.json
+continuity/continuity-state.json
