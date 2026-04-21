@@ -9,6 +9,43 @@ import { settings } from '@/config/settings';
 
 const API_BASE = settings.api.baseUrl;
 
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
+
+async function fetchWithOptionalAuth(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers || {});
+
+  if (!headers.has('Content-Type') && init.body != null) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  headers.set('Authorization', token ? `Bearer ${token}` : '');
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+}
+
+async function fetchWithRequiredAuth(input: string, init: RequestInit = {}, missingAuthMessage = 'You must be signed in to perform this action.'): Promise<Response> {
+  const token = await getAccessToken();
+  if (!token) throw new Error(missingAuthMessage);
+
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Content-Type') && init.body != null) {
+    headers.set('Content-Type', 'application/json');
+  }
+  headers.set('Authorization', `Bearer ${token}`);
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+}
+
 export interface CrosshairSearchFilters {
   make?: string;
   model?: string;
@@ -588,14 +625,8 @@ export const api = {
 
   // Pass (permanently dismiss) an opportunity for the current user
   async passOpportunity(opportunityId: string): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
+    const res = await fetchWithOptionalAuth(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
       method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-        'Content-Type': 'application/json',
-      },
     });
     if (!res.ok) throw new Error(`passOpportunity failed: HTTP ${res.status}`);
   },
@@ -712,27 +743,13 @@ export const api = {
     };
     freshness?: AnalyticsFreshness;
   }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/analytics/summary`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
+    const res = await fetchWithOptionalAuth(`${API_BASE}/api/analytics/summary`);
     if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
     return res.json();
   },
 
   async getSourceHealth(): Promise<SourceHealthResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/analytics/source-health`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
+    const res = await fetchWithOptionalAuth(`${API_BASE}/api/analytics/source-health`);
     if (!res.ok) throw new Error(`Source health fetch failed: ${res.status}`);
     return res.json();
   },
@@ -766,14 +783,7 @@ export const api = {
     limit: number;
     notes: string[];
   }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
+    const res = await fetchWithOptionalAuth(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`);
     if (!res.ok) throw new Error(`Recent trust events fetch failed: ${res.status}`);
     return res.json();
   },
@@ -783,14 +793,7 @@ export const api = {
     total_gross_margin: number;
     avg_roi: number | null;
   }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/outcomes/summary`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
+    const res = await fetchWithOptionalAuth(`${API_BASE}/outcomes/summary`);
     if (!res.ok) throw new Error(`Outcome summary fetch failed: ${res.status}`);
     return res.json();
   },
@@ -800,14 +803,8 @@ export const api = {
     outcome: 'won' | 'lost' | 'passed';
     sold_price?: number;
   }): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
+    const res = await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       body: JSON.stringify({
         outcome: payload.outcome,
         sold_price: payload.sold_price ?? null,
@@ -823,24 +820,20 @@ export const api = {
     days_to_sale: number;
     notes?: string | null;
   }): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error('You must be signed in to log a sale outcome.');
-
-    const res = await fetch(`${API_BASE}/api/outcomes`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+    const res = await fetchWithRequiredAuth(
+      `${API_BASE}/api/outcomes`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          opportunity_id: payload.opportunity_id,
+          sale_price: payload.sale_price,
+          sale_date: payload.sale_date,
+          days_to_sale: payload.days_to_sale,
+          notes: payload.notes ?? null,
+        }),
       },
-      body: JSON.stringify({
-        opportunity_id: payload.opportunity_id,
-        sale_price: payload.sale_price,
-        sale_date: payload.sale_date,
-        days_to_sale: payload.days_to_sale,
-        notes: payload.notes ?? null,
-      }),
-    });
+      'You must be signed in to log a sale outcome.'
+    );
 
     if (!res.ok) {
       const err = await res.json().catch(() => null);
@@ -862,14 +855,8 @@ export const api = {
     if (payload.purchase_price != null && !payload.won) {
       throw new Error('Winning purchase price is only valid when the bid was won');
     }
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/outcomes/bid`, {
+    const res = await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/bid`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`Log bid outcome failed: ${res.status}`);
