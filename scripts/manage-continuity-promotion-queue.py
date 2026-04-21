@@ -5,6 +5,7 @@ import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 WORKSPACE = Path('/Users/andrewpilson/.openclaw/workspace')
 QUEUE_PATH = WORKSPACE / 'continuity' / 'pending-promotions.json'
@@ -70,11 +71,16 @@ def cmd_add(args) -> int:
     return 0
 
 
-def verify_destination(destination: str, destination_ref: str) -> None:
+def load_destination_cfg(destination: str) -> dict:
     policy = load_policy().get('promotion', {})
     cfg = (policy.get('destinations') or {}).get(destination)
     if not cfg:
         raise SystemExit(f'missing destination config for {destination}')
+    return cfg
+
+
+def verify_destination(destination: str, destination_ref: str) -> None:
+    cfg = load_destination_cfg(destination)
     if destination in {'work_queue', 'closure_board'}:
         target_path = WORKSPACE / cfg['path']
         if not target_path.exists():
@@ -92,6 +98,73 @@ def verify_destination(destination: str, destination_ref: str) -> None:
         raise SystemExit(f'missing destination file for {destination}: {destination_ref}')
 
 
+def parse_backticked_value(line: str) -> Optional[str]:
+    if '`' not in line:
+        return None
+    parts = line.split('`')
+    return parts[1] if len(parts) >= 3 else None
+
+
+def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> None:
+    cfg = load_destination_cfg('work_queue')
+    execution_cfg = cfg.get('execution') or {}
+    if not execution_cfg.get('enabled', False):
+        raise SystemExit('work_queue execution is not enabled by policy')
+    if target_status not in set(execution_cfg.get('allowed_new_statuses') or []):
+        raise SystemExit(f'target status not allowed by policy: {target_status}')
+    if execution_cfg.get('require_resolution_note', False) and not note:
+        raise SystemExit('work_queue execution requires --note')
+
+    target_path = WORKSPACE / cfg['path']
+    if not target_path.exists():
+        raise SystemExit(f'missing target file for work_queue: {target_path}')
+    lines = target_path.read_text().splitlines()
+    heading_prefix = f"{cfg.get('match_prefix', '### ')}{destination_ref}"
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip().startswith(heading_prefix))
+    except StopIteration:
+        raise SystemExit(f'unverified destination ref {destination_ref} in work_queue')
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith('### '):
+            end = i
+            break
+    block = lines[start:end]
+    status_idx = next((i for i, line in enumerate(block) if line.startswith('- Status:')), None)
+    next_idx = next((i for i, line in enumerate(block) if line.startswith('- Next action:')), None)
+    evidence_idx = next((i for i, line in enumerate(block) if line.startswith('- Evidence/source basis:')), None)
+    if status_idx is None or next_idx is None or evidence_idx is None:
+        raise SystemExit(f'work_queue item missing required fields for mutation: {destination_ref}')
+
+    current_status = parse_backticked_value(block[status_idx])
+    if current_status not in set(execution_cfg.get('allowed_target_statuses') or []):
+        raise SystemExit(f'current work_queue status not eligible for execution mutation: {current_status}')
+
+    block[status_idx] = f"- Status: `{target_status}`"
+    if execution_cfg.get('set_next_action_from_resolution', False):
+        block[next_idx] = f"- Next action: {note}"
+    if execution_cfg.get('append_promotion_evidence', False):
+        evidence_text = block[evidence_idx]
+        addition = f"promotion `{item['id']}`"
+        if addition not in evidence_text:
+            block[evidence_idx] = evidence_text.rstrip() + f", {addition}"
+    promotion_note_line = f"- Promotion resolution note: {note}"
+    existing_note_idx = next((i for i, line in enumerate(block) if line.startswith('- Promotion resolution note:')), None)
+    if existing_note_idx is not None:
+        block[existing_note_idx] = promotion_note_line
+    else:
+        inserted = False
+        for i, line in enumerate(block):
+            if line.startswith('- Originating sweep/carry-forward context:'):
+                block.insert(i + 1, promotion_note_line)
+                inserted = True
+                break
+        if not inserted:
+            block.append(promotion_note_line)
+    lines[start:end] = block
+    target_path.write_text('\n'.join(lines) + '\n')
+
+
 def cmd_update(args, status: str) -> int:
     payload = load_queue()
     items = payload.setdefault('items', [])
@@ -104,6 +177,11 @@ def cmd_update(args, status: str) -> int:
         if not args.destination_ref:
             raise SystemExit('--destination-ref required for promoted item')
         verify_destination(args.destination, args.destination_ref)
+        if args.execute:
+            if args.destination == 'work_queue':
+                mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
+            else:
+                raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
         item['destination'] = args.destination
         item['destination_ref'] = args.destination_ref
     item['status'] = status
@@ -139,6 +217,8 @@ def main() -> int:
     resolve.add_argument('--destination', choices=sorted(ALLOWED_DESTINATIONS), required=True)
     resolve.add_argument('--destination-ref', required=True)
     resolve.add_argument('--note')
+    resolve.add_argument('--execute', action='store_true')
+    resolve.add_argument('--target-status', choices=['ready_for_review', 'closed'], default='ready_for_review')
     resolve.set_defaults(func=lambda args: cmd_update(args, 'promoted'))
 
     dismiss = sub.add_parser('dismiss')

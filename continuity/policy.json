@@ -42,7 +42,24 @@
     "destinations": {
       "work_queue": {
         "path": "brains/dealerscope-brain/03_Operations/DealerScope-Active-Work-Queue.md",
-        "match_prefix": "### "
+        "match_prefix": "### ",
+        "execution": {
+          "enabled": true,
+          "allowed_target_statuses": [
+            "queued",
+            "ready",
+            "in_progress",
+            "blocked",
+            "parked"
+          ],
+          "allowed_new_statuses": [
+            "ready_for_review",
+            "closed"
+          ],
+          "require_resolution_note": true,
+          "append_promotion_evidence": true,
+          "set_next_action_from_resolution": true
+        }
       },
       "closure_board": {
         "path": "brains/dealerscope-brain/03_Operations/DealerScope-Governed-Closure-Board.md",
