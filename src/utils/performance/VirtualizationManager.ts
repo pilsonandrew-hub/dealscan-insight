@@ -108,12 +108,6 @@ export class VirtualizationManager<T> {
     this.scrollTop = scrollTop;
   }
 
-  scrollToIndex(index: number, itemCount: number): void {
-    const offset = this.getItemOffset(index);
-    if (this.containerRef.current) {
-      this.containerRef.current.scrollTop = offset;
-    }
-  }
 
   getContainerRef(): React.RefObject<HTMLDivElement> {
     return this.containerRef;
@@ -147,9 +141,6 @@ export const useVirtualization = <T>(
     setScrollTop(event.currentTarget.scrollTop);
   }, []);
   
-  const scrollToIndex = useCallback((index: number) => {
-    manager.scrollToIndex(index, data.length);
-  }, [manager, data.length]);
   
   const setItemHeight = useCallback((index: number, height: number) => {
     manager.setItemHeight(index, height);
@@ -160,9 +151,7 @@ export const useVirtualization = <T>(
     totalHeight,
     containerRef,
     handleScroll,
-    scrollToIndex,
-    setItemHeight,
-    visibleRange
+    setItemHeight
   };
 };
 
