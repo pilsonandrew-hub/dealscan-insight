@@ -1,5 +1,16 @@
 {
   "version": 1,
-  "updated_at": null,
-  "items": []
+  "updated_at": "2026-04-21T19:40:19+00:00",
+  "items": [
+    {
+      "id": "test-promotion-1",
+      "title": "Test Promotion Candidate",
+      "source": "manual-test",
+      "reason": "exercise lifecycle",
+      "created_at": "2026-04-21T19:40:07+00:00",
+      "status": "promoted",
+      "resolution": "lifecycle exercised",
+      "resolved_at": "2026-04-21T19:40:19+00:00"
+    }
+  ]
 }

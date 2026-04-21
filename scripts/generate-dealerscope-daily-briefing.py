@@ -27,7 +27,12 @@ def infer_promotion_candidates(state: dict, closeout: dict, open_loops: list[dic
     candidates: list[str] = []
     pending_promotions = state.get('pending_promotions', [])
     for item in pending_promotions:
-        candidates.append(f"pending_promotion: {item}")
+        if isinstance(item, dict):
+            candidates.append(
+                f"pending_promotion: {item.get('id', 'missing-id')} | {item.get('title', 'untitled')} | source={item.get('source', 'unknown')} | reason={item.get('reason', 'unknown')}"
+            )
+        else:
+            candidates.append(f"pending_promotion: {item}")
 
     if closeout.get('blocked_if_enforced'):
         candidates.append("closeout_policy_or_state_change: current closeout would block if enforcement were enabled")

@@ -175,6 +175,10 @@ def malformed_pending_promotions(items: list[dict]) -> list[dict]:
     return bad
 
 
+def active_pending_promotions(items: list[dict]) -> list[dict]:
+    return [item for item in items if item.get('status') == 'pending']
+
+
 def derive_pending_promotions(policy: dict, closeout_blocking: list[str], malformed_loops: list[dict], open_loops: list[dict], queue_items: list[dict]) -> list[dict]:
     derived = []
     if policy.get('closeout_blocking_creates_candidate', True):
@@ -431,7 +435,7 @@ def main() -> int:
         blocking_reasons.append('mirror_drift')
 
     state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
-    pending_promotions = derive_pending_promotions(promotion_cfg, blocking_reasons, bad_loops, open_loops, queue_items)
+    pending_promotions = derive_pending_promotions(promotion_cfg, blocking_reasons, bad_loops, open_loops, active_pending_promotions(queue_items))
 
     if bad_loops:
         advisory_reasons.append('malformed_open_loops')
