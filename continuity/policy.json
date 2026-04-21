@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "enforcement_mode": "audit",
+  "closeout": {
+    "block_on_governed_dirty": true,
+    "block_on_missing_next_start": true,
+    "block_on_pending_replication": true,
+    "block_on_unsatisfied_recall": true
+  },
+  "recall": {
+    "post_gap_requires_recall": true,
+    "post_compaction_requires_recall": true,
+    "exact_claim_requires_recall": true,
+    "closure_claim_requires_recall_if_prior_context_dependency": true
+  },
+  "mirror": {
+    "named_paths": [
+      "03_Operations/DealerScope-Active-Work-Queue.md",
+      "03_Operations/DealerScope-Governed-Closure-Board.md"
+    ]
+  },
+  "briefing": {
+    "daily_briefing_glob": "*Morning-Briefing*.md",
+    "cto_note_glob": "*CTO*.md",
+    "daily_briefing_root": "brains/dealerscope-brain/03_Operations"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-04-21T18:27:38+00:00",
+  "overall_state": "advisory_drift",
+  "derived_state": "governed_dirty",
+  "enforcement_mode": "audit",
+  "governed_dirty": true,
+  "branch": "master",
+  "head": "ea518d445efaf712e3055bb87866e5f6f3dbc157",
+  "upstream": "origin/master",
+  "ahead": 0,
+  "behind": 0,
+  "mirror_status": {
+    "named_paths_checked": 2,
+    "named_paths_ok": 2,
+    "named_paths_failed": [],
+    "full_scope_checked": 356,
+    "full_scope_missing": [],
+    "full_scope_mismatched": []
+  },
+  "push_status": "aligned",
+  "recall_status": "not_required",
+  "open_loops": {
+    "total": 0,
+    "active": 0,
+    "malformed": 0
+  },
+  "blocking_reasons": [
+    "governed_dirty"
+  ],
+  "advisory_reasons": [],
+  "pending_promotions": [],
+  "pending_replication": [],
+  "pending_verification": [],
+  "override_active": false,
+  "degraded_subsystems": [],
+  "daily_memory_today_present": true,
+  "last_successful_daily_briefing": "brains/dealerscope-brain/03_Operations/DealerScope-Morning-Briefing-2026-04-21.md",
+  "last_successful_cto_note": "GROK_RED_4_ACTORS.md",
+  "last_successful_weekly_audit": null
+}
