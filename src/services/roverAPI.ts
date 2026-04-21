@@ -145,6 +145,7 @@ class RoverAPIService {
   }
 
   private async generateRecommendations(userId: string, limit: number): Promise<RoverRecommendations> {
+    const scoringStart = performance.now();
     try {
       // Get user preferences from past events
       const preferences = await this.getUserPreferences(userId);
@@ -175,7 +176,7 @@ class RoverAPIService {
 
       // Record metrics
       const { roverMetrics } = await import('./roverMetrics');
-      roverMetrics.recordMLScoringLatency(Date.now() - performance.now());
+      roverMetrics.recordMLScoringLatency(performance.now() - scoringStart);
 
       return {
         precomputedAt: Date.now(),
