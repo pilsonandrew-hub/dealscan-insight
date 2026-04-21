@@ -125,6 +125,37 @@ function fmtPct(n: number | null | undefined): string {
   return `${n.toFixed(1)}%`;
 }
 
+async function trackRoverActionForDeal(
+  deal: Opportunity,
+  action: 'view' | 'save' | 'pass'
+): Promise<boolean> {
+  if (!deal.id) return false;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return false;
+
+  await roverAPI.trackEvent({
+    userId,
+    event: action,
+    item: {
+      id: deal.id,
+      make: deal.make,
+      model: deal.model,
+      year: deal.year,
+      price: deal.current_bid ?? 0,
+      current_bid: deal.current_bid ?? 0,
+      source: deal.source_site,
+      source_site: deal.source_site,
+      state: deal.state,
+      mileage: deal.mileage,
+      vin: deal.vin,
+    },
+  });
+
+  return true;
+}
+
 function fmtConfidence(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return `${Math.round(n * 100)}%`;
@@ -710,25 +741,7 @@ const CrosshairTab = () => {
 
   const handleCrosshairAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
     if (action === 'pass' || action === 'view') return;
-    // Fire Rover save event (non-blocking)
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id;
-    if (!userId) return;
-    roverAPI.trackEvent({
-      userId,
-      event: 'save',
-      item: {
-        id: deal.id || '',
-        make: deal.make,
-        model: deal.model,
-        year: deal.year,
-        price: deal.current_bid ?? 0,
-        source: deal.source_site,
-        source_site: deal.source_site,
-        state: deal.state,
-        mileage: deal.mileage,
-      },
-    });
+    void trackRoverActionForDeal(deal, 'save');
   };
 
   const inputCls = "w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500";
@@ -936,29 +949,8 @@ const RoverTab = () => {
   }, [load, authLoading]);
 
   const handleAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
-    if (!deal.id) return;
-
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id;
-    if (!userId) return;
-
-    await roverAPI.trackEvent({
-      userId,
-      event: action,
-      item: {
-        id: deal.id,
-        make: deal.make,
-        model: deal.model,
-        year: deal.year,
-        price: deal.current_bid ?? 0,
-        current_bid: deal.current_bid ?? 0,
-        source: deal.source_site,
-        source_site: deal.source_site,
-        state: deal.state,
-        mileage: deal.mileage,
-        vin: deal.vin,
-      },
-    });
+    const tracked = await trackRoverActionForDeal(deal, action);
+    if (!tracked) return;
 
     setActionedIds(prev => new Set([...prev, `${deal.id}-${action}`]));
     if (action === 'save' || action === 'pass') {
