@@ -420,6 +420,15 @@ def artifact_family_status(policy: dict) -> dict:
     return summary
 
 
+def destination_model_status(policy: dict) -> dict:
+    promotion = policy.get('promotion') or {}
+    return {
+        'execution_model': promotion.get('execution_model'),
+        'execution_complete_destinations': promotion.get('execution_complete_destinations') or [],
+        'verification_only_destinations': promotion.get('verification_only_destinations') or [],
+    }
+
+
 def composite_state(git: dict, named_failures: list[str], full_missing: list[str], full_mismatched: list[str], malformed_loops: list[dict], recall_required: bool) -> str:
     mirror_bad = bool(named_failures or full_missing or full_mismatched)
     if malformed_loops or recall_required:
@@ -463,6 +472,7 @@ def main() -> int:
     promotion_cfg = policy.get('promotion') or {}
     audit_cfg = promotion_cfg.get('audit') or {}
     artifact_families = artifact_family_status(policy)
+    destination_model = destination_model_status(policy)
 
     git = git_status()
     named_ok, named_failures = check_named_paths(requested_paths) if requested_paths else ([], [])
@@ -579,6 +589,7 @@ def main() -> int:
         'last_successful_weekly_audit': find_latest_matching('*anti-regression*.md'),
         'briefing_health': briefing_health,
         'artifact_families': artifact_families,
+        'destination_model': destination_model,
     }
     write_json(STATE_PATH, state_payload)
 
@@ -599,6 +610,7 @@ def main() -> int:
             'briefing_health': briefing_health,
             'audit_policy_enforced': bool(audit_cfg.get('require_uniform_resolution_metadata', False)),
             'artifact_families': artifact_families,
+            'destination_model': destination_model,
         },
     }
     write_json(CLOSEOUT_PATH, closeout_payload)
@@ -640,6 +652,10 @@ def main() -> int:
             print(f'MISMATCH {rel}')
     for reason in blocking_reasons:
         print(f'BLOCKING {reason}')
+    execution_model = destination_model.get('execution_model') or '<unset>'
+    print(f'DESTINATION_MODEL execution_model={execution_model}')
+    print('DESTINATION_MODEL execution_complete=' + ','.join(destination_model.get('execution_complete_destinations') or []))
+    print('DESTINATION_MODEL verification_only=' + ','.join(destination_model.get('verification_only_destinations') or []))
     for family_name, family in artifact_families.items():
         print(f"ARTIFACT_FAMILY {family_name} classification={family.get('classification')}")
     for reason in advisory_reasons:

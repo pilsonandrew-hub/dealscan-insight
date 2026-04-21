@@ -84,6 +84,16 @@
     "open_loop_promote_flag": true,
     "closeout_blocking_creates_candidate": true,
     "malformed_open_loops_create_candidate": true,
+    "execution_model": "single_supported_destination_only",
+    "execution_complete_destinations": [
+      "work_queue"
+    ],
+    "verification_only_destinations": [
+      "closure_board",
+      "report",
+      "doctrine",
+      "policy"
+    ],
     "verify_destinations": true,
     "destinations": {
       "work_queue": {
