@@ -6,7 +6,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { logger } from '@/lib/logger';
 import { Opportunity } from '@/types/dealerscope';
-import { WebSocketStatus } from './useWebSocket';
+
+type RealtimeConnectionStatus = 'CONNECTED' | 'DISCONNECTED';
 
 interface PipelineStatus {
   status: 'running' | 'paused' | 'stopped';
@@ -22,7 +23,7 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
     processedCount: 0
   });
   const [newOpportunitiesCount, setNewOpportunitiesCount] = useState(0);
-  const [connectionStatus, setConnectionStatus] = useState<WebSocketStatus>(WebSocketStatus.CONNECTED);
+  const [connectionStatus, setConnectionStatus] = useState<RealtimeConnectionStatus>('CONNECTED');
   const [isConnected, setIsConnected] = useState(true);
 
   // Initialize with provided data
@@ -48,13 +49,13 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
   }, []);
 
   const connect = useCallback(() => {
-    setConnectionStatus(WebSocketStatus.CONNECTED);
+    setConnectionStatus('CONNECTED');
     setIsConnected(true);
     logger.info('Connection established', { context: 'system' });
   }, []);
 
   const disconnect = useCallback(() => {
-    setConnectionStatus(WebSocketStatus.DISCONNECTED);
+    setConnectionStatus('DISCONNECTED');
     setIsConnected(false);
     logger.info('Connection disconnected', { context: 'system' });
   }, []);
