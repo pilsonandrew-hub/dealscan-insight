@@ -8,10 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DollarSign, TrendingUp, AlertTriangle, CheckCircle, Search, Clock, ChevronRight } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { settings } from '@/config/settings';
-
-const API_BASE = settings.api.baseUrl;
+import { reconAPI } from '@/services/reconAPI';
 
 interface ReconResult {
   id: string;
@@ -90,11 +87,6 @@ const defaultForm: FormState = {
   fleet_has_records: false,
 };
 
-async function getAuthToken(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
-
 export const ReconPanel: React.FC = () => {
   const [form, setForm] = useState<FormState>(defaultForm);
   const [result, setResult] = useState<ReconResult | null>(null);
@@ -118,12 +110,7 @@ export const ReconPanel: React.FC = () => {
     setVinLoading(true);
     setError(null);
     try {
-      const token = await getAuthToken();
-      const res = await fetch(`${API_BASE}/api/recon/vin/${form.vin.trim()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`VIN decode failed: ${res.status}`);
-      const data = await res.json();
+      const data = await reconAPI.decodeVIN(form.vin.trim());
       const results = data.Results || [];
       const get = (variable: string) => results.find((r: { Variable: string; Value: string }) => r.Variable === variable)?.Value || '';
       const make = get('Make');
@@ -155,7 +142,6 @@ export const ReconPanel: React.FC = () => {
     setError(null);
     setResult(null);
     try {
-      const token = await getAuthToken();
       const payload = {
         vin: form.vin || undefined,
         year: form.year ? parseInt(form.year) : undefined,
@@ -171,19 +157,7 @@ export const ReconPanel: React.FC = () => {
         fleet: form.is_fleet,
         fleet_has_records: form.fleet_has_records,
       };
-      const res = await fetch(`${API_BASE}/api/recon/evaluate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(errBody || `Evaluate failed: ${res.status}`);
-      }
-      const data: ReconResult = await res.json();
+      const data: ReconResult = await reconAPI.evaluate(payload);
       setResult(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Evaluation failed');
@@ -196,12 +170,7 @@ export const ReconPanel: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const token = await getAuthToken();
-      const res = await fetch(`${API_BASE}/api/recon/history`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`History failed: ${res.status}`);
-      const data: ReconResult[] = await res.json();
+      const data: ReconResult[] = await reconAPI.getHistory();
       setHistory((data || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load history');
@@ -212,11 +181,7 @@ export const ReconPanel: React.FC = () => {
 
   const promote = async (recon_id: string) => {
     try {
-      const token = await getAuthToken();
-      const res = await fetch(`${API_BASE}/api/recon/promote/${recon_id}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await reconAPI.promote(recon_id);
       if (res.status === 409) { setPromoted(prev => new Set([...prev, recon_id])); setResult(prev => prev ? { ...prev, promoted_to_pipeline: true } : prev); return; }
       if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
       setPromoted(prev => new Set([...prev, recon_id]));
