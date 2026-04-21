@@ -66,6 +66,24 @@ export const CrosshairDashboard = () => {
 
   const { toast } = useToast();
 
+  const showCrosshairToast = useCallback((
+    title: string,
+    description: string,
+    variant: 'default' | 'destructive' = 'default'
+  ) => {
+    toast({ title, description, variant });
+  }, [toast]);
+
+  const logAndToastError = useCallback((
+    context: string,
+    error: unknown,
+    title: string,
+    description: string
+  ) => {
+    console.error(context, error);
+    showCrosshairToast(title, description, 'destructive');
+  }, [showCrosshairToast]);
+
   const {
     pipelineStatus,
     newOpportunitiesCount,
@@ -193,28 +211,24 @@ export const CrosshairDashboard = () => {
       });
 
       if (searchResponse.pivots) {
-        toast({
-          title: 'Query Adjusted',
-          description: searchResponse.pivots.explanation,
-          variant: 'default',
-        });
+        showCrosshairToast('Query Adjusted', searchResponse.pivots.explanation);
       }
 
-      toast({
-        title: 'Search Completed',
-        description: `Found ${searchResponse.total_count} results in ${searchResponse.execution_time_ms}ms`,
-      });
+      showCrosshairToast(
+        'Search Completed',
+        `Found ${searchResponse.total_count} results in ${searchResponse.execution_time_ms}ms`
+      );
     } catch (error) {
-      console.error('Search failed:', error);
-      toast({
-        title: 'Search Failed',
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
-        variant: 'destructive'
-      });
+      logAndToastError(
+        'Search failed:',
+        error,
+        'Search Failed',
+        error instanceof Error ? error.message : 'Unknown error occurred'
+      );
     } finally {
       setIsSearching(false);
     }
-  }, [clearNewCount, toast]);
+  }, [clearNewCount, logAndToastError, showCrosshairToast]);
 
   const handleSaveIntent = useCallback(async (query: CanonicalQuery, options: any, title: string) => {
     try {
@@ -223,21 +237,13 @@ export const CrosshairDashboard = () => {
         telegram_chat_id: options?.telegram_chat_id,
       });
 
-      toast({
-        title: 'Intent Saved',
-        description: `"${title}" will be monitored for new results`,
-      });
+      showCrosshairToast('Intent Saved', `"${title}" will be monitored for new results`);
 
       loadSavedIntents();
     } catch (error) {
-      console.error('Error saving intent:', error);
-      toast({
-        title: 'Save Failed',
-        description: 'Could not save search intent',
-        variant: 'destructive'
-      });
+      logAndToastError('Error saving intent:', error, 'Save Failed', 'Could not save search intent');
     }
-  }, [toast, loadSavedIntents]);
+  }, [loadSavedIntents, logAndToastError, showCrosshairToast]);
 
   const handleWatch = async (listing: CanonicalListing) => {
     try {
@@ -246,28 +252,18 @@ export const CrosshairDashboard = () => {
 
       await trackWatchedListingSave(listing, userId);
 
-      toast({
-        title: 'Watching Listing',
-        description: `You'll be notified of updates to this ${listing.year} ${listing.make} ${listing.model}`,
-        variant: 'default',
-      });
+      showCrosshairToast(
+        'Watching Listing',
+        `You'll be notified of updates to this ${listing.year} ${listing.make} ${listing.model}`
+      );
     } catch (error) {
-      console.error('Watch listing error:', error);
-      toast({
-        title: 'Watch Failed',
-        description: 'Failed to set up listing watch',
-        variant: 'destructive',
-      });
+      logAndToastError('Watch listing error:', error, 'Watch Failed', 'Failed to set up listing watch');
     }
   };
 
   const handleExport = async (format: 'csv' | 'pdf') => {
     if (!searchResponse?.results.length) {
-      toast({
-        title: 'Export Failed',
-        description: 'No results to export',
-        variant: 'destructive',
-      });
+      showCrosshairToast('Export Failed', 'No results to export', 'destructive');
       return;
     }
 
@@ -293,29 +289,21 @@ export const CrosshairDashboard = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast({
-        title: 'Export Complete',
-        description: `Results exported as ${format.toUpperCase()}`,
-        variant: 'default',
-      });
+      showCrosshairToast('Export Complete', `Results exported as ${format.toUpperCase()}`);
     } catch (error) {
-      console.error('Export error:', error);
-      toast({
-        title: 'Export Failed',
-        description: `Failed to export results as ${format.toUpperCase()}`,
-        variant: 'destructive',
-      });
+      logAndToastError(
+        'Export error:',
+        error,
+        'Export Failed',
+        `Failed to export results as ${format.toUpperCase()}`
+      );
     }
   };
 
   const handlePinQuery = async () => {
     if (!searchResponse) return;
 
-    toast({
-      title: 'Query Pinned',
-      description: 'Search criteria saved for quick access',
-      variant: 'default',
-    });
+    showCrosshairToast('Query Pinned', 'Search criteria saved for quick access');
   };
 
   return (
