@@ -214,27 +214,6 @@ class RoverAPIService {
     }
   }
 
-  async getUserIntents(): Promise<any[]> {
-    try {
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) return [];
-
-      const { data: intents } = await supabase
-        .from('crosshair_intents')
-        .select('*')
-        .eq('user_id', user.user.id)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-
-      return intents || [];
-    } catch (error) {
-      logger.error('Failed to get user intents', { 
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      return [];
-    }
-  }
 }
 
 export const roverAPI = new RoverAPIService();
