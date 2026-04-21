@@ -29,5 +29,14 @@
     "require_today_file": true,
     "require_mirror_projection": true,
     "ignore_protocol_and_template": true
+  },
+  "promotion": {
+    "queue_path": "continuity/pending-promotions.json",
+    "require_queue_file": true,
+    "max_advisory_item_age_hours": 24,
+    "surface_in_briefing": true,
+    "open_loop_promote_flag": true,
+    "closeout_blocking_creates_candidate": true,
+    "malformed_open_loops_create_candidate": true
   }
 }

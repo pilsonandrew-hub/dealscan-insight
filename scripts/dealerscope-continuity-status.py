@@ -20,6 +20,7 @@ METRICS_PATH = CONTINUITY_DIR / 'continuity-metrics.json'
 CLOSEOUT_PATH = CONTINUITY_DIR / 'closeout-evaluation.json'
 OPEN_LOOPS_PATH = CONTINUITY_DIR / 'open-loops.json'
 POLICY_PATH = CONTINUITY_DIR / 'policy.json'
+PENDING_PROMOTIONS_PATH = CONTINUITY_DIR / 'pending-promotions.json'
 DAILY_MEMORY_DIR = WORKSPACE / 'memory'
 INCLUDE_DIRS = {
     '00_Start-Here',
@@ -116,6 +117,12 @@ def load_open_loops() -> list[dict]:
     return [item for item in items if isinstance(item, dict)]
 
 
+def load_pending_promotions(queue_path: Path) -> list[dict]:
+    payload = load_json(queue_path, {'items': []})
+    items = payload.get('items') or []
+    return [item for item in items if isinstance(item, dict)]
+
+
 def malformed_open_loops(items: list[dict]) -> list[dict]:
     bad = []
     required = ['id', 'title', 'status', 'severity', 'next_start', 'closure_condition', 'owner']
@@ -152,6 +159,64 @@ def find_latest_matching(glob_pattern: str, root: Path | None = None, exclude_na
     for path in matches:
         return str(path.relative_to(WORKSPACE))
     return None
+
+
+def malformed_pending_promotions(items: list[dict]) -> list[dict]:
+    bad = []
+    required = ['id', 'title', 'source', 'reason', 'created_at', 'status']
+    allowed_status = {'pending', 'promoted', 'dismissed'}
+    for item in items:
+        if any(not item.get(key) for key in required):
+            bad.append(item)
+            continue
+        if item.get('status') not in allowed_status:
+            bad.append(item)
+            continue
+    return bad
+
+
+def derive_pending_promotions(policy: dict, closeout_blocking: list[str], malformed_loops: list[dict], open_loops: list[dict], queue_items: list[dict]) -> list[dict]:
+    derived = []
+    if policy.get('closeout_blocking_creates_candidate', True):
+        for reason in closeout_blocking:
+            derived.append({
+                'id': f'closeout-{reason}',
+                'title': f'Closeout pressure: {reason}',
+                'source': 'continuity-status',
+                'reason': f'blocking_reason:{reason}',
+                'created_at': now_iso(),
+                'status': 'pending',
+            })
+    if policy.get('malformed_open_loops_create_candidate', True) and malformed_loops:
+        derived.append({
+            'id': 'malformed-open-loops',
+            'title': 'Malformed open loops require process or schema promotion',
+            'source': 'continuity-status',
+            'reason': f'malformed_open_loops:{len(malformed_loops)}',
+            'created_at': now_iso(),
+            'status': 'pending',
+        })
+    if policy.get('open_loop_promote_flag', True):
+        for item in open_loops:
+            if item.get('promote') is True:
+                derived.append({
+                    'id': f"open-loop-{item.get('id', 'missing-id')}",
+                    'title': item.get('title', 'untitled'),
+                    'source': 'open-loops',
+                    'reason': 'promote_flag',
+                    'created_at': now_iso(),
+                    'status': 'pending',
+                })
+
+    merged = []
+    seen = set()
+    for item in [*queue_items, *derived]:
+        key = item.get('id')
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
 
 
 def get_briefing_health(briefing_cfg: dict, git: dict) -> dict:
@@ -319,10 +384,11 @@ def main() -> int:
     if args.sync:
         run_sync()
 
-    policy = load_json(POLICY_PATH, {'enforcement_mode': 'audit', 'mirror': {'named_paths': []}, 'recall': {}, 'briefing': {}})
+    policy = load_json(POLICY_PATH, {'enforcement_mode': 'audit', 'mirror': {'named_paths': []}, 'recall': {}, 'briefing': {}, 'promotion': {}})
     configured_paths = (policy.get('mirror') or {}).get('named_paths') or []
     requested_paths = args.paths or configured_paths
     briefing_cfg = policy.get('briefing') or {}
+    promotion_cfg = policy.get('promotion') or {}
 
     git = git_status()
     named_ok, named_failures = check_named_paths(requested_paths) if requested_paths else ([], [])
@@ -335,6 +401,10 @@ def main() -> int:
     open_loops = load_open_loops()
     bad_loops = malformed_open_loops(open_loops)
     serious_open_loops = [item for item in open_loops if item.get('status') != 'closed']
+    queue_rel = promotion_cfg.get('queue_path', 'continuity/pending-promotions.json')
+    queue_path = WORKSPACE / queue_rel
+    queue_items = load_pending_promotions(queue_path)
+    bad_queue_items = malformed_pending_promotions(queue_items)
     recall_policy = policy.get('recall') or {}
     recall_required = bool(
         (args.post_gap and recall_policy.get('post_gap_requires_recall', True))
@@ -348,8 +418,6 @@ def main() -> int:
     latest_cto_note = find_latest_matching(briefing_cfg.get('cto_note_glob', '*CTO*.md'))
     briefing_health = get_briefing_health(briefing_cfg, git)
 
-    state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
-
     blocking_reasons = []
     advisory_reasons = []
     pending_replication = []
@@ -361,8 +429,16 @@ def main() -> int:
     if named_failures or full_missing or full_mismatched:
         pending_replication.append('mirror_drift')
         blocking_reasons.append('mirror_drift')
+
+    state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
+    pending_promotions = derive_pending_promotions(promotion_cfg, blocking_reasons, bad_loops, open_loops, queue_items)
+
     if bad_loops:
         advisory_reasons.append('malformed_open_loops')
+    if promotion_cfg.get('require_queue_file', True) and not queue_path.exists():
+        advisory_reasons.append('missing_promotion_queue')
+    if bad_queue_items:
+        advisory_reasons.append('malformed_pending_promotions')
     if recall_required:
         advisory_reasons.append('needs_recall')
     if not daily_memory_today.exists():
@@ -415,7 +491,7 @@ def main() -> int:
         },
         'blocking_reasons': blocking_reasons,
         'advisory_reasons': advisory_reasons,
-        'pending_promotions': [],
+        'pending_promotions': pending_promotions,
         'pending_replication': pending_replication,
         'pending_verification': [],
         'override_active': False,
@@ -438,6 +514,7 @@ def main() -> int:
         'advisory_reasons': advisory_reasons,
         'missing_requirements': {
             'malformed_open_loops': len(bad_loops),
+            'malformed_pending_promotions': len(bad_queue_items),
             'pending_replication': pending_replication,
             'recall_required': recall_required,
             'briefing_health': briefing_health,
