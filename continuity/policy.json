@@ -20,8 +20,14 @@
     ]
   },
   "briefing": {
-    "daily_briefing_glob": "*Morning-Briefing*.md",
+    "daily_briefing_glob": "DealerScope-Morning-Briefing-*.md",
     "cto_note_glob": "*CTO*.md",
-    "daily_briefing_root": "brains/dealerscope-brain/03_Operations"
+    "daily_briefing_root": "brains/dealerscope-brain/03_Operations",
+    "projection_artifact": true,
+    "tracked_canonical": false,
+    "freshness_max_hours": 18,
+    "require_today_file": true,
+    "require_mirror_projection": true,
+    "ignore_protocol_and_template": true
   }
 }

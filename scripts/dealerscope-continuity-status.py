@@ -6,7 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -134,12 +134,15 @@ def malformed_open_loops(items: list[dict]) -> list[dict]:
     return bad
 
 
-def find_latest_matching(glob_pattern: str, root: Path | None = None) -> str | None:
+def find_latest_matching(glob_pattern: str, root: Path | None = None, exclude_names: set[str] | None = None) -> str | None:
     ignored_roots = {'node_modules', '.git', '.tmp', 'workspace-gateway-5d55f022-d60c-44d1-a777-bd291c352331'}
+    exclude_names = exclude_names or set()
     search_root = root or WORKSPACE
     matches = []
     for path in search_root.rglob(glob_pattern):
         if not path.is_file():
+            continue
+        if path.name in exclude_names:
             continue
         rel = path.relative_to(WORKSPACE)
         if rel.parts and rel.parts[0] in ignored_roots:
@@ -149,6 +152,40 @@ def find_latest_matching(glob_pattern: str, root: Path | None = None) -> str | N
     for path in matches:
         return str(path.relative_to(WORKSPACE))
     return None
+
+
+def get_briefing_health(briefing_cfg: dict, git: dict) -> dict:
+    root_raw = briefing_cfg.get('daily_briefing_root')
+    root = (WORKSPACE / root_raw) if root_raw else WORKSPACE
+    today_name = f"DealerScope-Morning-Briefing-{datetime.now().date().isoformat()}.md"
+    today_rel = None
+    if root_raw:
+        today_rel = str(Path(root_raw) / today_name)
+    today_path = root / today_name
+    mirror_rel = Path(today_name)
+    mirror_path = MIRROR / '03_Operations' / mirror_rel
+    freshness_max_hours = int(briefing_cfg.get('freshness_max_hours', 18))
+    freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=freshness_max_hours)
+    exists_today = today_path.exists() and today_path.is_file()
+    projected = exists_today and mirror_path.exists() and mirror_path.is_file()
+    mirrored_hash_match = projected and sha256_file(today_path) == sha256_file(mirror_path)
+    fresh = False
+    age_hours = None
+    if exists_today:
+        modified = datetime.fromtimestamp(today_path.stat().st_mtime, tz=timezone.utc)
+        age_hours = round((datetime.now(timezone.utc) - modified).total_seconds() / 3600, 2)
+        fresh = modified >= freshness_cutoff
+    return {
+        'today_relpath': today_rel,
+        'exists_today': exists_today,
+        'fresh': fresh,
+        'age_hours': age_hours,
+        'projected_to_mirror': projected,
+        'mirror_hash_match': mirrored_hash_match,
+        'projection_artifact': bool(briefing_cfg.get('projection_artifact', False)),
+        'tracked_canonical_expected': bool(briefing_cfg.get('tracked_canonical', False)),
+        'canonical_repo_dirty': git['dirty'],
+    }
 
 
 def run_git(args: list[str]) -> str:
@@ -306,8 +343,10 @@ def main() -> int:
     daily_memory_today = DAILY_MEMORY_DIR / f"{datetime.now().date().isoformat()}.md"
     briefing_root_raw = briefing_cfg.get('daily_briefing_root')
     briefing_root = (WORKSPACE / briefing_root_raw) if briefing_root_raw else WORKSPACE
-    latest_daily_briefing = find_latest_matching(briefing_cfg.get('daily_briefing_glob', 'Daily Briefing*.md'), briefing_root)
+    exclude_names = {'DealerScope-Morning-Briefing-Protocol.md', 'DealerScope-Morning-Briefing-Template.md'} if briefing_cfg.get('ignore_protocol_and_template', True) else set()
+    latest_daily_briefing = find_latest_matching(briefing_cfg.get('daily_briefing_glob', 'Daily Briefing*.md'), briefing_root, exclude_names=exclude_names)
     latest_cto_note = find_latest_matching(briefing_cfg.get('cto_note_glob', '*CTO*.md'))
+    briefing_health = get_briefing_health(briefing_cfg, git)
 
     state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
 
@@ -330,6 +369,14 @@ def main() -> int:
         advisory_reasons.append('missing_daily_memory_today')
     if latest_daily_briefing is None:
         advisory_reasons.append('missing_daily_briefing')
+    if briefing_cfg.get('require_today_file', True) and not briefing_health['exists_today']:
+        advisory_reasons.append('briefing_not_generated_today')
+    if briefing_health['exists_today'] and not briefing_health['fresh']:
+        advisory_reasons.append('briefing_stale')
+    if briefing_cfg.get('require_mirror_projection', True) and briefing_health['exists_today'] and not briefing_health['projected_to_mirror']:
+        blocking_reasons.append('briefing_not_projected')
+    if briefing_cfg.get('require_mirror_projection', True) and briefing_health['exists_today'] and briefing_health['projected_to_mirror'] and not briefing_health['mirror_hash_match']:
+        blocking_reasons.append('briefing_projection_mismatch')
     if latest_cto_note is None:
         advisory_reasons.append('missing_cto_note')
 
@@ -377,6 +424,7 @@ def main() -> int:
         'last_successful_daily_briefing': latest_daily_briefing,
         'last_successful_cto_note': latest_cto_note,
         'last_successful_weekly_audit': find_latest_matching('*anti-regression*.md'),
+        'briefing_health': briefing_health,
     }
     write_json(STATE_PATH, state_payload)
 
@@ -392,6 +440,7 @@ def main() -> int:
             'malformed_open_loops': len(bad_loops),
             'pending_replication': pending_replication,
             'recall_required': recall_required,
+            'briefing_health': briefing_health,
         },
     }
     write_json(CLOSEOUT_PATH, closeout_payload)
@@ -401,6 +450,7 @@ def main() -> int:
         'derived_state': state,
         'blocking_reasons': blocking_reasons,
         'advisory_reasons': advisory_reasons,
+        'briefing_health': briefing_health,
     })
     update_metrics(overall_state, len(advisory_reasons), len(blocking_reasons), recall_required)
 
