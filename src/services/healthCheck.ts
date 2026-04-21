@@ -3,8 +3,8 @@
  * Provides endpoints and monitoring for system health
  */
 
-import { environmentManager } from '@/config/environmentManager';
 import logger from '@/utils/productionLogger';
+import { getEnvironment, isProduction } from '@/utils/runtimeEnvironment';
 
 export enum HealthStatus {
   HEALTHY = 'healthy',
@@ -105,7 +105,7 @@ export class HealthCheckService {
       services: results,
       uptime: this.getUptime(),
       version: this.getVersion(),
-      environment: environmentManager.getEnvironment(),
+      environment: getEnvironment(),
       timestamp: new Date().toISOString()
     };
 
@@ -124,7 +124,7 @@ export class HealthCheckService {
    * Start periodic health checks
    */
   private startPeriodicChecks(): void {
-    if (environmentManager.isProduction()) {
+    if (isProduction()) {
       setInterval(async () => {
         try {
           await this.performHealthCheck();
@@ -362,7 +362,7 @@ export class HealthCheckService {
    */
   private async storeHealthCheck(result: SystemHealth): Promise<void> {
     try {
-      if (environmentManager.isProduction()) {
+      if (isProduction()) {
         // Store in database when types are available
         logger.info('Health check completed', {
           overall: result.overall,

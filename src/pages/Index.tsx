@@ -9,7 +9,6 @@ import { MarketAnalytics } from "@/components/MarketAnalytics";
 import { CrosshairDashboard } from "@/components/CrosshairDashboard";
 import { RoverDashboard } from "@/components/RoverDashboard";
 import { MLModelDashboard } from "@/components/MLModelDashboard";
-import { UpdatedDealScoringPanel } from "@/components/UpdatedDealScoringPanel";
 import Settings from "@/pages/Settings";
 import { useRealtimeOpportunities } from "@/hooks/useRealtimeOpportunities";
 import { RealtimeStatusBadge } from "@/components/RealtimeStatusBadge";
@@ -96,7 +95,6 @@ const Index = () => {
           <div className="space-y-8">
             <MarketAnalytics opportunities={opportunities} />
             <MLModelDashboard />
-            <UpdatedDealScoringPanel />
           </div>
         );
       case "settings":

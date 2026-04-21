@@ -4,8 +4,8 @@
  */
 
 import React, { Component, ReactNode } from 'react';
+import { isDevelopment, isProduction } from '@/utils/runtimeEnvironment';
 import { logger } from './UnifiedLogger';
-import { configService } from './UnifiedConfigService';
 
 interface ErrorInfo {
   componentStack: string;
@@ -94,7 +94,7 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   private reportToErrorService(error: Error, errorInfo: ErrorInfo): void {
-    if (configService.isProduction) {
+    if (isProduction()) {
       // Report to external service (Sentry, LogRocket, etc.)
       try {
         fetch('/api/errors', {
@@ -173,7 +173,7 @@ class ErrorBoundary extends Component<Props, State> {
               <p className="text-sm text-red-700">
                 A critical error occurred that prevented the application from loading properly.
               </p>
-              {configService.isDevelopment && error && (
+              {isDevelopment() && error && (
                 <details className="mt-2">
                   <summary className="text-sm text-red-600 cursor-pointer">
                     Error Details

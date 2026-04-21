@@ -4,7 +4,7 @@
  */
 
 import logger from '@/utils/productionLogger';
-import { environmentManager } from '@/config/environmentManager';
+import { isProduction, isPerformanceMonitoringEnabled } from '@/utils/runtimeEnvironment';
 
 export interface WebVitalsMetric {
   name: string;
@@ -33,7 +33,7 @@ export class WebVitalsMonitor {
   private observers: Map<string, PerformanceObserver> = new Map();
 
   private constructor() {
-    if (typeof window !== 'undefined' && environmentManager.isFeatureEnabled('enablePerformanceMonitoring')) {
+    if (typeof window !== 'undefined' && isPerformanceMonitoringEnabled()) {
       this.initializeWebVitals();
     }
   }
@@ -240,7 +240,7 @@ export class WebVitalsMonitor {
     });
 
     // Send to analytics if in production
-    if (environmentManager.isProduction()) {
+    if (isProduction()) {
       this.sendToAnalytics(metric, details);
     }
   }

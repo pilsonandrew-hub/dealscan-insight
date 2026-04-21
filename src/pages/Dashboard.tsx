@@ -2139,7 +2139,7 @@ const SettingsTab = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-white">Supabase</p>
-              <p className="text-xs text-gray-500">lbnxzvqppccajllsqaaw.supabase.co</p>
+              <p className="text-xs text-gray-500">Configured via environment</p>
             </div>
             <div className="text-right">
               <StatusBadge status={supabaseStatus?.status} />

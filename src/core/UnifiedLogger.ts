@@ -3,7 +3,7 @@
  * Replaces 3 separate logging systems with a single, efficient interface
  */
 
-import { configService } from './UnifiedConfigService';
+import { isDevelopment, isProduction, isPerformanceMonitoringEnabled } from '@/utils/runtimeEnvironment';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 export type LogContext = 'auth' | 'database' | 'api' | 'security' | 'performance' | 'business' | 'system';
@@ -153,7 +153,7 @@ class UnifiedLogger {
   private minLevel: LogLevel;
 
   private constructor() {
-    this.minLevel = configService.isDevelopment ? 'debug' : 'info';
+    this.minLevel = isDevelopment() ? 'debug' : 'info';
     this.setupBackends();
     this.setupGlobalErrorHandling();
   }
@@ -170,12 +170,12 @@ class UnifiedLogger {
     this.backends.push(new ConsoleBackend());
     
     // Add remote backend for production only when explicitly configured
-    if (configService.isProduction && safeRemoteLogsEndpoint) {
+    if (isProduction() && safeRemoteLogsEndpoint) {
       this.backends.push(new RemoteBackend());
     }
 
     // Add performance backend if monitoring is enabled
-    if (configService.performance.monitoring.enabled) {
+    if (isPerformanceMonitoringEnabled()) {
       this.backends.push(new PerformanceBackend());
     }
   }

@@ -22,9 +22,9 @@ const MIGRATION_CHECKS: MigrationCheck[] = [
     description: 'Should use logger instead of console'
   },
   {
-    name: 'Old Config Imports',
-    pattern: /import.*from.*['"]\.\.\/config\//g,
-    description: 'Should use UnifiedConfigService'
+    name: 'Legacy Config Wrapper Imports',
+    pattern: /import.*from.*['"].*(environmentManager|productionConfig|deploymentConfig|UnifiedConfigService)['"]/g,
+    description: 'Should not reintroduce deleted config-wrapper surfaces'
   },
   {
     name: 'Old Logger Imports', 
@@ -140,7 +140,7 @@ async function runMigrationVerification() {
   
   console.log('🔧 RECOMMENDED ACTIONS:');
   console.log('1. Replace console.* with logger methods');
-  console.log('2. Update config imports to use UnifiedConfigService');
+  console.log('2. Remove imports of deleted config-wrapper surfaces');
   console.log('3. Replace old logger imports with UnifiedLogger');
   console.log('4. Update auth context imports to ModernAuthContext');
   console.log('5. Remove createLogger usage in favor of unified logger\n');

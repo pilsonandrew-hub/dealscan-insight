@@ -97,11 +97,11 @@ export class SecurityHeaders {
   private getCSPHeader(): string {
     const directives = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://lbnxzvqppccajllsqaaw.supabase.co",
+      "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: https: blob:",
-      "connect-src 'self' https://lbnxzvqppccajllsqaaw.supabase.co wss://lbnxzvqppccajllsqaaw.supabase.co",
+      `connect-src 'self'${this.getConfiguredConnectSources()}`,
       "frame-src 'none'",
       "object-src 'none'",
       "base-uri 'self'",
@@ -111,6 +111,25 @@ export class SecurityHeaders {
     ];
 
     return directives.join('; ');
+  }
+
+  private getConfiguredConnectSources(): string {
+    const raw = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL)
+      ? String(import.meta.env.VITE_SUPABASE_URL)
+      : '';
+
+    if (!raw) {
+      return '';
+    }
+
+    try {
+      const url = new URL(raw);
+      const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${url.host}`;
+      return ` ${url.origin} ${wsUrl}`;
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -157,9 +176,13 @@ export const securityMiddleware = () => {
 
 // CORS configuration for secure origins
 export const getCORSConfig = (environment: 'development' | 'production' = 'production') => {
-  const allowedOrigins = environment === 'development' 
-    ? ['http://localhost:3000', 'http://localhost:8080', 'https://lbnxzvqppccajllsqaaw.supabase.co']
-    : ['https://lbnxzvqppccajllsqaaw.supabase.co'];
+  const configuredOrigin = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL)
+    ? import.meta.env.VITE_SUPABASE_URL
+    : '';
+
+  const allowedOrigins = environment === 'development'
+    ? ['http://localhost:3000', 'http://localhost:8080', ...(configuredOrigin ? [configuredOrigin] : [])]
+    : [...(configuredOrigin ? [configuredOrigin] : [])];
 
   return {
     origin: allowedOrigins,

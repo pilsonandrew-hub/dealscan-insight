@@ -5,7 +5,10 @@
 
 import { createLogger } from '@/utils/productionLogger';
 import { supabase } from '@/integrations/supabase/client';
-import { productionConfig } from '@/config/productionConfig';
+import { getEnvironment, isProduction } from '@/utils/runtimeEnvironment';
+
+const isMonitoringEnabled = (): boolean => isProduction();
+const getMetricsFlushInterval = (): number => 30000;
 
 const logger = createLogger('MetricsCollector');
 
@@ -43,7 +46,7 @@ export interface MetricsSummary {
   }>;
 }
 
-class AdvancedMetricsCollector {
+class MetricsCollector {
   private metrics: Map<string, Metric[]> = new Map();
   private flushInterval?: NodeJS.Timeout;
   private thresholds: Map<string, { warning: number; critical: number }> = new Map();
@@ -73,7 +76,7 @@ class AdvancedMetricsCollector {
     this.startUserBehaviorTracking();
 
     // Start periodic flush
-    const flushInterval = productionConfig.getConfig().monitoring.metricsFlushInterval;
+    const flushInterval = getMetricsFlushInterval();
     this.flushInterval = setInterval(() => {
       this.flushMetrics();
     }, flushInterval);
@@ -133,7 +136,7 @@ class AdvancedMetricsCollector {
       importance: 'high',
       tags: {
         type: 'performance',
-        environment: productionConfig.getConfig().app.environment
+        environment: getEnvironment()
       }
     });
   }
@@ -151,7 +154,7 @@ class AdvancedMetricsCollector {
       importance: 'critical',
       tags: {
         type: 'business',
-        environment: productionConfig.getConfig().app.environment
+        environment: getEnvironment()
       }
     });
   }
@@ -170,7 +173,7 @@ class AdvancedMetricsCollector {
       metadata,
       tags: {
         type: 'user_behavior',
-        environment: productionConfig.getConfig().app.environment
+        environment: getEnvironment()
       }
     });
   }
@@ -586,9 +589,9 @@ class AdvancedMetricsCollector {
 }
 
 // Global metrics collector instance
-export const metricsCollector = new AdvancedMetricsCollector();
+export const metricsCollector = new MetricsCollector();
 
 // Auto-start collection in production
-if (productionConfig.getConfig().monitoring.enabled) {
+if (isMonitoringEnabled()) {
   metricsCollector.startCollection();
 }

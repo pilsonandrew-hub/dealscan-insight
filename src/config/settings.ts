@@ -98,7 +98,7 @@ const defaultSettings: AppSettings = {
   },
   
   database: {
-    url: import.meta.env.VITE_DATABASE_URL || 'sqlite://dealerscope.db',
+    url: import.meta.env.VITE_DATABASE_URL || '',
     poolSize: 10,
     maxOverflow: 20,
     timeout: 30000
@@ -229,8 +229,8 @@ export const environmentInfo = {
   isDevelopment: settings.environment === 'development',
   isStaging: settings.environment === 'staging',
   isProduction: settings.environment === 'production',
-  version: import.meta.env.VITE_APP_VERSION || '5.0.0',
-  buildTime: import.meta.env.VITE_BUILD_TIME || new Date().toISOString(),
+  version: import.meta.env.VITE_APP_VERSION || 'unknown',
+  buildTime: import.meta.env.VITE_BUILD_TIME || '',
   gitCommit: import.meta.env.VITE_GIT_COMMIT || 'unknown'
 };
 
