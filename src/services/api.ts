@@ -586,31 +586,6 @@ export const api = {
     }
   },
 
-  // Rover recommendations via Railway API
-  async getRoverRecommendations(): Promise<Array<Record<string, unknown>>> {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const userId = session?.user?.id;
-      const res = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId || '')}&limit=25`, {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (Array.isArray(json?.items)) return json.items;
-      if (Array.isArray(json?.recommendations)) return json.recommendations;
-      if (Array.isArray(json?.data)) return json.data;
-      return Array.isArray(json) ? json : [];
-    } catch (error) {
-      console.error('getRoverRecommendations failed:', error);
-      return [];
-    }
-  },
-
   // Pass (permanently dismiss) an opportunity for the current user
   async passOpportunity(opportunityId: string): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession();
@@ -623,46 +598,6 @@ export const api = {
       },
     });
     if (!res.ok) throw new Error(`passOpportunity failed: HTTP ${res.status}`);
-  },
-
-  // Track rover event (view/save/pass)
-  async trackRoverEvent(
-    opportunity: Pick<Opportunity, 'id' | 'make' | 'model' | 'year' | 'source_site' | 'current_bid' | 'state' | 'mileage'>,
-    event: 'view' | 'save' | 'pass'
-  ): Promise<void> {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const userId = session?.user?.id;
-
-      await fetch(`${API_BASE}/api/rover/events`, {
-        method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          event,
-          userId,
-          user_id: userId,
-          item: {
-            deal_id: opportunity.id,
-            id: opportunity.id,
-            make: opportunity.make,
-            model: opportunity.model,
-            year: opportunity.year,
-            source: opportunity.source_site,
-            source_site: opportunity.source_site,
-            price: opportunity.current_bid,
-            current_bid: opportunity.current_bid,
-            state: opportunity.state,
-            mileage: opportunity.mileage ?? null,
-          }
-        })
-      });
-    } catch (error) {
-      console.error('trackRoverEvent failed:', error);
-    }
   },
 
   // Health check for Railway backend
