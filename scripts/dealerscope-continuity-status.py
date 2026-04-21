@@ -409,6 +409,17 @@ def run_sync() -> None:
         raise RuntimeError('mirror sync failed')
 
 
+def artifact_family_status(policy: dict) -> dict:
+    families = policy.get('artifact_families') or {}
+    summary = {}
+    for name, cfg in families.items():
+        summary[name] = {
+            'classification': cfg.get('classification'),
+            'roots': cfg.get('roots') or [],
+        }
+    return summary
+
+
 def composite_state(git: dict, named_failures: list[str], full_missing: list[str], full_mismatched: list[str], malformed_loops: list[dict], recall_required: bool) -> str:
     mirror_bad = bool(named_failures or full_missing or full_mismatched)
     if malformed_loops or recall_required:
@@ -451,6 +462,7 @@ def main() -> int:
     briefing_cfg = policy.get('briefing') or {}
     promotion_cfg = policy.get('promotion') or {}
     audit_cfg = promotion_cfg.get('audit') or {}
+    artifact_families = artifact_family_status(policy)
 
     git = git_status()
     named_ok, named_failures = check_named_paths(requested_paths) if requested_paths else ([], [])
@@ -566,6 +578,7 @@ def main() -> int:
         'last_successful_cto_note': latest_cto_note,
         'last_successful_weekly_audit': find_latest_matching('*anti-regression*.md'),
         'briefing_health': briefing_health,
+        'artifact_families': artifact_families,
     }
     write_json(STATE_PATH, state_payload)
 
@@ -585,6 +598,7 @@ def main() -> int:
             'recall_required': recall_required,
             'briefing_health': briefing_health,
             'audit_policy_enforced': bool(audit_cfg.get('require_uniform_resolution_metadata', False)),
+            'artifact_families': artifact_families,
         },
     }
     write_json(CLOSEOUT_PATH, closeout_payload)
@@ -626,6 +640,8 @@ def main() -> int:
             print(f'MISMATCH {rel}')
     for reason in blocking_reasons:
         print(f'BLOCKING {reason}')
+    for family_name, family in artifact_families.items():
+        print(f"ARTIFACT_FAMILY {family_name} classification={family.get('classification')}")
     for reason in advisory_reasons:
         print(f'ADVISORY {reason}')
 

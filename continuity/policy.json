@@ -30,6 +30,52 @@
     "require_mirror_projection": true,
     "ignore_protocol_and_template": true
   },
+  "artifact_families": {
+    "governed_source": {
+      "classification": "canonical_tracked_truth",
+      "roots": [
+        "brains/dealerscope-brain/00_Start-Here",
+        "brains/dealerscope-brain/01_Standards",
+        "brains/dealerscope-brain/02_Architecture",
+        "brains/dealerscope-brain/03_Operations",
+        "brains/dealerscope-brain/05_Incidents",
+        "brains/dealerscope-brain/06_Integrations",
+        "brains/dealerscope-brain/90_Templates",
+        "brains/dealerscope-brain/people",
+        "brains/dealerscope-brain/companies",
+        "brains/dealerscope-brain/concepts",
+        "brains/dealerscope-brain/deals",
+        "brains/dealerscope-brain/meetings",
+        "brains/dealerscope-brain/operations",
+        "brains/dealerscope-brain/projects",
+        "brains/dealerscope-brain/systems",
+        "brains/dealerscope-brain/sources",
+        "brains/dealerscope-brain/originals"
+      ]
+    },
+    "mirror_projection": {
+      "classification": "operator_visible_projection",
+      "roots": [
+        "/Users/andrewpilson/Documents/Obsidian Vault/DealerScope Brain"
+      ]
+    },
+    "local_archive": {
+      "classification": "workspace_local_archive_not_governed_truth",
+      "roots": [
+        "reports"
+      ]
+    },
+    "ignored_runtime": {
+      "classification": "generated_runtime_state_not_governed_truth",
+      "roots": [
+        "continuity/continuity-state.json",
+        "continuity/closeout-evaluation.json",
+        "continuity/continuity-events.jsonl",
+        "continuity/continuity-metrics.json",
+        "brains/dealerscope-brain/03_Operations/DealerScope-Morning-Briefing-20*.md"
+      ]
+    }
+  },
   "promotion": {
     "queue_path": "continuity/pending-promotions.json",
     "require_queue_file": true,
