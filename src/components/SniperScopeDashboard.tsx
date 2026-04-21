@@ -472,32 +472,13 @@ export default function SniperScopeDashboard() {
     setSavingOutcome(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-
-      if (!token) {
-        throw new Error('You must be signed in to log a sale outcome.');
-      }
-
-      const response = await fetch(`${API_BASE}/api/outcomes`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          opportunity_id: opportunityId,
-          sale_price: parseFloat(outcomeForm.salePrice),
-          sale_date: outcomeForm.saleDate,
-          days_to_sale: parseInt(outcomeForm.daysToSale, 10),
-          notes: outcomeForm.notes.trim() || null,
-        }),
+      await api.logSaleOutcome({
+        opportunity_id: opportunityId,
+        sale_price: parseFloat(outcomeForm.salePrice),
+        sale_date: outcomeForm.saleDate,
+        days_to_sale: parseInt(outcomeForm.daysToSale, 10),
+        notes: outcomeForm.notes.trim() || null,
       });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.detail || `Request failed with status ${response.status}`);
-      }
 
       setOutcomeForm(prev => ({
         ...prev,

@@ -816,6 +816,38 @@ export const api = {
     if (!res.ok) throw new Error(`Record outcome failed: ${res.status}`);
   },
 
+  async logSaleOutcome(payload: {
+    opportunity_id: string;
+    sale_price: number;
+    sale_date: string;
+    days_to_sale: number;
+    notes?: string | null;
+  }): Promise<void> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('You must be signed in to log a sale outcome.');
+
+    const res = await fetch(`${API_BASE}/api/outcomes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        opportunity_id: payload.opportunity_id,
+        sale_price: payload.sale_price,
+        sale_date: payload.sale_date,
+        days_to_sale: payload.days_to_sale,
+        notes: payload.notes ?? null,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Log sale outcome failed: ${res.status}`);
+    }
+  },
+
   // Log a bid/win outcome for an opportunity
   async logBidOutcome(payload: {
     opportunity_id: string;
