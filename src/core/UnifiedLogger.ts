@@ -315,11 +315,3 @@ class UnifiedLogger {
 
 // Export singleton instance
 export const logger = UnifiedLogger.getInstance();
-
-// Export typed logger instances for different contexts
-export const authLogger = logger.setContext('auth');
-export const dbLogger = logger.setContext('database');
-export const apiLogger = logger.setContext('api');
-export const securityLogger = logger.setContext('security');
-export const performanceLogger = logger.setContext('performance');
-export const businessLogger = logger.setContext('business');
