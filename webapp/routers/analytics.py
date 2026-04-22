@@ -963,8 +963,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         notes.extend(trust_rule_notes)
         if "trust" not in degraded_sections:
             degraded_sections.append("trust")
-    if execution_has_data and "execution" not in degraded_sections:
-        degraded_sections.append("execution")
     trust_status = "healthy" if not degraded_sections else "degraded"
 
     response = {
