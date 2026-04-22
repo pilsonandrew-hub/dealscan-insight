@@ -285,6 +285,20 @@ def consistency_failures(queue_items: list[dict], state: str) -> tuple[list[str]
                 blocking.append(f'{item_id}:reverted_without_resolved_recovery_status')
             if not item.get('recovery_evidence'):
                 advisory.append(f'{item_id}:reverted_without_recovery_evidence')
+        if status == 'promoted' and item.get('destination') == 'work_queue' and item.get('execution_mode') == 'destination_mutation':
+            destination_ref = item.get('destination_ref')
+            target_status = item.get('target_status')
+            expected_heading = f'### {destination_ref}' if destination_ref else None
+            if expected_heading and expected_heading not in work_queue_text:
+                blocking.append(f'{item_id}:work_queue_target_missing')
+            elif expected_heading and target_status:
+                marker = f"### {destination_ref}"
+                start = work_queue_text.find(marker)
+                end = work_queue_text.find('\n### ', start + 1)
+                block = work_queue_text[start:] if end == -1 else work_queue_text[start:end]
+                expected_status_line = f"- Status: `{target_status}`"
+                if expected_status_line not in block:
+                    blocking.append(f'{item_id}:work_queue_target_status_mismatch')
         if status == 'pending' and briefing_text:
             title = item.get('title', '').strip()
             if title and title not in briefing_text:
