@@ -606,7 +606,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     try:
         opp_resp = (
             supa.table("opportunities")
-            .select("id,created_at,dos_score,source_site,state")
+            .select("id,created_at,updated_at,processed_at,dos_score,source_site,state")
             .limit(5000)
             .execute()
         )
@@ -618,18 +618,25 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         source_set = set()
         state_set = set()
         for row in opp_rows:
-            created_at_raw = row.get("created_at")
-            if created_at_raw:
+            freshest_pipeline_ts = None
+            for ts_key in ("processed_at", "updated_at", "created_at"):
+                ts_raw = row.get(ts_key)
+                if not ts_raw:
+                    continue
                 try:
-                    created_at = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
-                    if pipeline_updated_at is None or created_at > pipeline_updated_at:
-                        pipeline_updated_at = created_at
-                    if created_at >= cutoff_24h:
-                        fresh_opportunities_24h += 1
-                    if created_at >= cutoff_7d:
-                        fresh_opportunities_7d += 1
+                    freshest_pipeline_ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                    break
                 except Exception:
-                    pass
+                    continue
+
+            if freshest_pipeline_ts is not None:
+                if pipeline_updated_at is None or freshest_pipeline_ts > pipeline_updated_at:
+                    pipeline_updated_at = freshest_pipeline_ts
+                if freshest_pipeline_ts >= cutoff_24h:
+                    fresh_opportunities_24h += 1
+                if freshest_pipeline_ts >= cutoff_7d:
+                    fresh_opportunities_7d += 1
+
             score = row.get("dos_score")
             if score is not None:
                 try:
