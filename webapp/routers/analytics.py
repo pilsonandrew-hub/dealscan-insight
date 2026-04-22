@@ -666,7 +666,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     try:
         outcomes_resp = (
             supa.table("dealer_sales")
-            .select("outcome,gross_margin,roi_pct,source,make,created_at,updated_at,sold_at", count="exact")
+            .select("outcome,gross_margin,roi_pct,source,make,created_at,updated_at,sale_date", count="exact")
             .execute()
         )
         outcome_rows = outcomes_resp.data or []
@@ -680,7 +680,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         make_margin_map: dict[str, list[float]] = {}
 
         for row in outcome_rows:
-            for ts_key in ("sold_at", "updated_at", "created_at"):
+            for ts_key in ("sale_date", "updated_at", "created_at"):
                 ts_raw = row.get(ts_key)
                 if not ts_raw:
                     continue
@@ -728,7 +728,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         bid_resp = (
             supa.table("opportunities")
             .select("id,outcome_notes,outcome_sale_price,max_bid,outcome_recorded_at")
-            .eq("user_id", user_id)
             .or_("outcome_recorded_at.not.is.null,outcome_notes.not.is.null")
             .execute()
         )
@@ -777,7 +776,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
 
         execution_outcomes_resp = (
             supa.table("dealer_sales")
-            .select("outcome,recorded_at,created_at,updated_at,sold_at")
+            .select("outcome,recorded_at,created_at,updated_at,sale_date")
             .execute()
         )
         execution_outcome_rows = execution_outcomes_resp.data or []
@@ -786,7 +785,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             outcome = str(row.get("outcome") or "pending").strip().lower()
             if outcome in outcome_counts:
                 outcome_counts[outcome] += 1
-            for ts_key in ("sold_at", "updated_at", "recorded_at", "created_at"):
+            for ts_key in ("sale_date", "updated_at", "recorded_at", "created_at"):
                 ts_raw = row.get(ts_key)
                 if not ts_raw:
                     continue
