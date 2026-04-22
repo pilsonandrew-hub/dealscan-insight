@@ -777,7 +777,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
 
         execution_outcomes_resp = (
             supa.table("dealer_sales")
-            .select("outcome,recorded_at,created_at,updated_at")
+            .select("outcome,recorded_at,created_at,updated_at,sold_at")
             .eq("user_id", user_id)
             .execute()
         )
@@ -787,7 +787,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             outcome = str(row.get("outcome") or "pending").strip().lower()
             if outcome in outcome_counts:
                 outcome_counts[outcome] += 1
-            for ts_key in ("updated_at", "recorded_at", "created_at"):
+            for ts_key in ("sold_at", "updated_at", "recorded_at", "created_at"):
                 ts_raw = row.get(ts_key)
                 if not ts_raw:
                     continue
@@ -920,7 +920,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         or avg_max_bid is not None
         or ceiling_compliance is not None
     )
-    execution_status = "degraded" if execution_has_data else "empty"
+    execution_status = "empty" if not execution_has_data else ("degraded" if "execution" in degraded_sections else "healthy")
     outcomes_status = "empty" if total_outcomes == 0 else ("degraded" if "outcomes" in degraded_sections else "healthy")
     pipeline_status = "empty" if total_opportunities == 0 else ("degraded" if "pipeline" in degraded_sections else "healthy")
     freshness = {
@@ -963,8 +963,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         notes.extend(trust_rule_notes)
         if "trust" not in degraded_sections:
             degraded_sections.append("trust")
-    if execution_has_data and "execution" not in degraded_sections:
-        degraded_sections.append("execution")
     trust_status = "healthy" if not degraded_sections else "degraded"
 
     response = {
