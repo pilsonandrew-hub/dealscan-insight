@@ -727,7 +727,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     try:
         bid_resp = (
             supa.table("opportunities")
-            .select("id,outcome_notes,outcome_sale_price,max_bid,outcome_recorded_at")
+            .select("id,outcome_notes,outcome_sale_price,max_bid,outcome_recorded_at,won")
             .or_("outcome_recorded_at.not.is.null,outcome_notes.not.is.null")
             .execute()
         )
