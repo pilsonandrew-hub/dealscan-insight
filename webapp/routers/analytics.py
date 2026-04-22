@@ -734,7 +734,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         purchase_prices: list[float] = []
         max_bids_on_bid_rows: list[float] = []
 
-        for row in (bid_resp.data or []):
+        for row in bid_rows:
             recorded_at_raw = row.get("outcome_recorded_at")
             if recorded_at_raw:
                 try:
@@ -776,12 +776,15 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
 
         execution_outcomes_resp = (
             supa.table("dealer_sales")
-            .select("outcome,recorded_at,created_at,updated_at,sale_date")
+            .select("opportunity_id,outcome,recorded_at,created_at,updated_at,sale_date")
             .execute()
         )
         execution_outcome_rows = execution_outcomes_resp.data or []
+        opportunity_ids_with_sales = {row.get("opportunity_id") for row in execution_outcome_rows if row.get("opportunity_id")}
         outcome_counts = {"pending": 0, "won": 0, "lost": 0, "passed": 0}
         for row in execution_outcome_rows:
+            if row.get("opportunity_id") not in opportunity_ids_with_sales:
+                continue
             outcome = str(row.get("outcome") or "pending").strip().lower()
             if outcome in outcome_counts:
                 outcome_counts[outcome] += 1
@@ -797,13 +800,18 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
                 except Exception:
                     continue
 
+        bid_rows = []
+        for row in (bid_resp.data or []):
+            if row.get("id") in opportunity_ids_with_sales:
+                bid_rows.append(row)
+
         passes = outcome_counts["passed"]
         losses = outcome_counts["lost"]
         pending_outcomes = outcome_counts["pending"]
 
         compliant_bids = 0
         wins_with_purchase_and_cap = 0
-        for row in (bid_resp.data or []):
+        for row in bid_rows:
             notes_raw = row.get("outcome_notes") or ""
             bid_data: dict = {}
             try:
