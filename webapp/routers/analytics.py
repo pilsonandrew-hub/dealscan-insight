@@ -667,7 +667,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         outcomes_resp = (
             supa.table("dealer_sales")
             .select("outcome,gross_margin,roi_pct,source,make,created_at,updated_at,sold_at", count="exact")
-            .eq("user_id", user_id)
             .execute()
         )
         outcome_rows = outcomes_resp.data or []
@@ -779,7 +778,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         execution_outcomes_resp = (
             supa.table("dealer_sales")
             .select("outcome,recorded_at,created_at,updated_at,sold_at")
-            .eq("user_id", user_id)
             .execute()
         )
         execution_outcome_rows = execution_outcomes_resp.data or []
