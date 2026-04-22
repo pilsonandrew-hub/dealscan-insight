@@ -132,7 +132,8 @@
             "ready",
             "in_progress",
             "blocked",
-            "parked"
+            "parked",
+            "ready_for_review"
           ],
           "allowed_new_statuses": [
             "ready_for_review",
