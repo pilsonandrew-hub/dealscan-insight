@@ -568,6 +568,12 @@ def main() -> int:
     latest_daily_briefing = find_latest_matching(briefing_cfg.get('daily_briefing_glob', 'Daily Briefing*.md'), briefing_root, exclude_names=exclude_names)
     latest_cto_note = find_latest_matching(briefing_cfg.get('cto_note_glob', '*CTO*.md'))
     briefing_health = get_briefing_health(briefing_cfg, git)
+    projection_pending = bool(
+        briefing_health['exists_today']
+        and briefing_health['projection_artifact']
+        and briefing_health['projected_to_mirror']
+        and not briefing_health['mirror_hash_match']
+    )
 
     blocking_reasons = []
     advisory_reasons = []
@@ -577,13 +583,24 @@ def main() -> int:
     if git['ahead'] > 0:
         pending_replication.append('needs_push')
         blocking_reasons.append('needs_push')
-    if named_failures or full_missing or full_mismatched:
+    effective_full_missing = full_missing
+    effective_full_mismatched = full_mismatched
+    briefing_rel = None
+    today_relpath = briefing_health.get('today_relpath')
+    if today_relpath:
+        try:
+            briefing_rel = str(normalize_relpath(today_relpath))
+        except Exception:
+            briefing_rel = today_relpath
+    if projection_pending and not full_missing and len(full_mismatched) == 1 and briefing_rel in full_mismatched:
+        effective_full_mismatched = []
+    if named_failures or effective_full_missing or effective_full_mismatched:
         pending_replication.append('mirror_drift')
         blocking_reasons.append('mirror_drift')
 
-    preliminary_state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
+    preliminary_state = composite_state(git, named_failures, effective_full_missing, effective_full_mismatched, bad_loops, recall_required)
     queue_blocking_failures, queue_advisory_failures = consistency_failures(queue_items, preliminary_state)
-    state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required, has_consistency_blocking=bool(queue_blocking_failures), has_consistency_advisory=bool(queue_advisory_failures))
+    state = composite_state(git, named_failures, effective_full_missing, effective_full_mismatched, bad_loops, recall_required, has_consistency_blocking=bool(queue_blocking_failures), has_consistency_advisory=bool(queue_advisory_failures or projection_pending))
     pending_promotions = derive_pending_promotions(promotion_cfg, blocking_reasons, bad_loops, open_loops, active_pending_promotions(queue_items))
 
     if bad_loops:
@@ -611,7 +628,10 @@ def main() -> int:
     if briefing_cfg.get('require_mirror_projection', True) and briefing_health['exists_today'] and not briefing_health['projected_to_mirror']:
         blocking_reasons.append('briefing_not_projected')
     if briefing_cfg.get('require_mirror_projection', True) and briefing_health['exists_today'] and briefing_health['projected_to_mirror'] and not briefing_health['mirror_hash_match']:
-        blocking_reasons.append('briefing_projection_mismatch')
+        if projection_pending:
+            advisory_reasons.append('briefing_projection_pending')
+        else:
+            blocking_reasons.append('briefing_projection_mismatch')
     if latest_cto_note is None:
         advisory_reasons.append('missing_cto_note')
 
@@ -638,8 +658,8 @@ def main() -> int:
             'named_paths_ok': len(named_ok),
             'named_paths_failed': named_failures,
             'full_scope_checked': checked if args.full else None,
-            'full_scope_missing': full_missing if args.full else [],
-            'full_scope_mismatched': full_mismatched if args.full else [],
+            'full_scope_missing': effective_full_missing if args.full else [],
+            'full_scope_mismatched': effective_full_mismatched if args.full else [],
         },
         'push_status': 'needs_push' if git['ahead'] > 0 else 'aligned',
         'recall_status': 'required' if recall_required else 'not_required',
@@ -659,7 +679,10 @@ def main() -> int:
         'last_successful_daily_briefing': latest_daily_briefing,
         'last_successful_cto_note': latest_cto_note,
         'last_successful_weekly_audit': find_latest_matching('*anti-regression*.md'),
-        'briefing_health': briefing_health,
+        'briefing_health': {
+            **briefing_health,
+            'projection_pending': projection_pending,
+        },
         'artifact_families': artifact_families,
         'workspace_boundary': workspace_boundary,
         'destination_model': destination_model,
@@ -730,11 +753,11 @@ def main() -> int:
             print(item)
     if args.full:
         print(f'full_scope_checked={checked}')
-        print(f'full_scope_missing={len(full_missing)}')
-        print(f'full_scope_mismatched={len(full_mismatched)}')
-        for rel in full_missing:
+        print(f'full_scope_missing={len(effective_full_missing)}')
+        print(f'full_scope_mismatched={len(effective_full_mismatched)}')
+        for rel in effective_full_missing:
             print(f'MISSING {rel}')
-        for rel in full_mismatched:
+        for rel in effective_full_mismatched:
             print(f'MISMATCH {rel}')
     for reason in blocking_reasons:
         print(f'BLOCKING {reason}')
