@@ -912,6 +912,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
     execution_has_data = (
         total_bids > 0
         or total_wins > 0
+        or total_outcomes > 0
         or any(v not in (None, 0) for v in [passes, losses, pending_outcomes])
         or avg_purchase_price is not None
         or avg_max_bid is not None
