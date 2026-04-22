@@ -734,46 +734,6 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         purchase_prices: list[float] = []
         max_bids_on_bid_rows: list[float] = []
 
-        for row in bid_rows:
-            recorded_at_raw = row.get("outcome_recorded_at")
-            if recorded_at_raw:
-                try:
-                    recorded_at = datetime.fromisoformat(str(recorded_at_raw).replace("Z", "+00:00"))
-                    if execution_updated_at is None or recorded_at > execution_updated_at:
-                        execution_updated_at = recorded_at
-                except Exception:
-                    pass
-
-            notes_raw = row.get("outcome_notes") or ""
-            bid_data: dict = {}
-            try:
-                parsed = json.loads(notes_raw)
-                if isinstance(parsed, dict) and parsed.get("type") == "bid_outcome":
-                    bid_data = parsed
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-            has_execution_signal = bool(bid_data) or bool(recorded_at_raw)
-            if not has_execution_signal:
-                continue
-
-            if bid_data.get("bid"):
-                total_bids += 1
-                mb = row.get("max_bid")
-                if mb is not None:
-                    try:
-                        max_bids_on_bid_rows.append(float(mb))
-                    except (TypeError, ValueError):
-                        pass
-            if bid_data.get("won"):
-                total_wins += 1
-                pp = bid_data.get("purchase_price") or row.get("outcome_sale_price")
-                if pp is not None:
-                    try:
-                        purchase_prices.append(float(pp))
-                    except (TypeError, ValueError):
-                        pass
-
         execution_outcomes_resp = (
             supa.table("dealer_sales")
             .select("opportunity_id,outcome,recorded_at,created_at,updated_at,sale_date")
@@ -812,26 +772,57 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
         compliant_bids = 0
         wins_with_purchase_and_cap = 0
         for row in bid_rows:
+            recorded_at_raw = row.get("outcome_recorded_at")
+            if recorded_at_raw:
+                try:
+                    recorded_at = datetime.fromisoformat(str(recorded_at_raw).replace("Z", "+00:00"))
+                    if execution_updated_at is None or recorded_at > execution_updated_at:
+                        execution_updated_at = recorded_at
+                except Exception:
+                    pass
+
             notes_raw = row.get("outcome_notes") or ""
             bid_data: dict = {}
+            parsed = None
             try:
                 parsed = json.loads(notes_raw)
                 if isinstance(parsed, dict) and parsed.get("type") == "bid_outcome":
                     bid_data = parsed
             except (json.JSONDecodeError, TypeError):
-                pass
-            if not bid_data or not bid_data.get("won"):
+                parsed = None
+
+            is_manual_outcome = isinstance(parsed, dict) and parsed.get("type") == "manual_outcome"
+            has_execution_signal = bool(bid_data) or bool(recorded_at_raw) or is_manual_outcome or bool(row.get("won"))
+            if not has_execution_signal:
                 continue
-            purchase_price = bid_data.get("purchase_price") or row.get("outcome_sale_price")
-            max_bid = row.get("max_bid")
-            if purchase_price is None or max_bid is None:
-                continue
-            try:
-                wins_with_purchase_and_cap += 1
-                if float(purchase_price) <= float(max_bid):
-                    compliant_bids += 1
-            except (TypeError, ValueError):
-                continue
+
+            total_bids += 1
+            mb = row.get("max_bid")
+            if mb is not None:
+                try:
+                    max_bids_on_bid_rows.append(float(mb))
+                except (TypeError, ValueError):
+                    pass
+
+            won_signal = bool(bid_data.get("won")) or is_manual_outcome or bool(row.get("won"))
+            if won_signal:
+                total_wins += 1
+                purchase_price = (
+                    bid_data.get("purchase_price")
+                    or row.get("outcome_sale_price")
+                )
+                if purchase_price is not None:
+                    try:
+                        purchase_prices.append(float(purchase_price))
+                    except (TypeError, ValueError):
+                        pass
+                if purchase_price is not None and mb is not None:
+                    try:
+                        wins_with_purchase_and_cap += 1
+                        if float(purchase_price) <= float(mb):
+                            compliant_bids += 1
+                    except (TypeError, ValueError):
+                        pass
         ceiling_compliance = round((compliant_bids / wins_with_purchase_and_cap) * 100, 1) if wins_with_purchase_and_cap > 0 else None
 
         win_rate = round(total_wins / total_bids * 100, 1) if total_bids > 0 else None
