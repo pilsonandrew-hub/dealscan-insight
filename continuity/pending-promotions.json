@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-22T03:36:44+00:00",
+  "updated_at": "2026-04-22T03:44:39+00:00",
   "items": [
     {
       "id": "test-promotion-1",
@@ -280,6 +280,18 @@
       "resolution": "test executed after manual narrow-scope close already landed; contract correctly blocked non-eligible already-closed board item",
       "resolved_at": "2026-04-22T03:36:44+00:00",
       "execution_mode": "destination_mutation"
+    },
+    {
+      "id": "closure-board-disabled-proof",
+      "title": "Closure board disabled by design proof",
+      "source": "manual-test",
+      "reason": "verify code and policy now agree that closure_board is verification-only again",
+      "created_at": "2026-04-22T03:44:32+00:00",
+      "status": "dismissed",
+      "destination": "closure_board",
+      "destination_ref": "GOV-CB-005",
+      "resolution": "guardrail proof only; closure_board intentionally re-locked to verification-only until a new real pre-close case exists",
+      "resolved_at": "2026-04-22T03:44:39+00:00"
     }
   ]
 }

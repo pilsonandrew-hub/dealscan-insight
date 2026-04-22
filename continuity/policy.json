@@ -150,30 +150,10 @@
       "closure_board": {
         "path": "brains/dealerscope-brain/03_Operations/DealerScope-Governed-Closure-Board.md",
         "match_prefix": "### ",
-        "classification": "proposed_execution_contract_pending_real_close_case_proof",
+        "classification": "verification_only_until_new_real_preclose_case_exists",
         "execution": {
-          "enabled": true,
-          "allowed_target_statuses": [
-            "in_progress",
-            "blocked"
-          ],
-          "allowed_new_statuses": [
-            "closed"
-          ],
-          "require_resolution_note": true,
-          "require_fulfillment_proof": true,
-          "require_pre_post_evidence": true,
-          "require_target_status_echo": true,
-          "require_evidence_link": true,
-          "require_closure_condition_match": true,
-          "forbid_closure_condition_mutation": true,
-          "forbid_schema_mutation": true,
-          "forbid_unrelated_item_mutation": true,
-          "bounded_mutation_fields": [
-            "Current status",
-            "Evidence link",
-            "Next action"
-          ]
+          "enabled": false,
+          "reason": "disabled again because no eligible real pre-close case currently exists and execution-complete reclassification has not been earned"
         }
       },
       "report": {

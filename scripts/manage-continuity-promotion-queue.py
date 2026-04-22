@@ -21,9 +21,8 @@ ALLOWED_STATUS = {
     'recovery_required',
 }
 ALLOWED_DESTINATIONS = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
-EXECUTION_CAPABLE_DESTINATIONS = {'work_queue', 'closure_board'}
+EXECUTION_CAPABLE_DESTINATIONS = {'work_queue'}
 WORK_QUEUE_TARGET_STATUSES = ['ready_for_review', 'closed']
-CLOSURE_BOARD_TARGET_STATUSES = ['closed']
 
 
 def now_iso() -> str:
@@ -198,89 +197,6 @@ def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str]
     }
 
 
-def mutate_closure_board_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> dict:
-    cfg = load_destination_cfg('closure_board')
-    execution_cfg = cfg.get('execution') or {}
-    if not execution_cfg.get('enabled', False):
-        raise SystemExit('closure_board execution is not enabled by policy')
-    if target_status not in set(execution_cfg.get('allowed_new_statuses') or []):
-        raise SystemExit(f'target status not allowed by policy: {target_status}')
-    if execution_cfg.get('require_resolution_note', False) and not note:
-        raise SystemExit('closure_board execution requires --note')
-
-    target_path = WORKSPACE / cfg['path']
-    if not target_path.exists():
-        raise SystemExit(f'missing target file for closure_board: {target_path}')
-    lines = target_path.read_text().splitlines()
-    heading_prefix = f"{cfg.get('match_prefix', '### ')}{destination_ref}"
-    try:
-        start = next(i for i, line in enumerate(lines) if line.strip().startswith(heading_prefix))
-    except StopIteration:
-        raise SystemExit(f'unverified destination ref {destination_ref} in closure_board')
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        if lines[i].startswith('### '):
-            end = i
-            break
-    block = lines[start:end]
-    status_idx = next((i for i, line in enumerate(block) if line.startswith('- Current status:')), None)
-    next_idx = next((i for i, line in enumerate(block) if line.startswith('- Next action:')), None)
-    evidence_idx = next((i for i, line in enumerate(block) if line.startswith('- Evidence link:')), None)
-    closure_idx = next((i for i, line in enumerate(block) if line.startswith('- Closure condition:')), None)
-    if status_idx is None or next_idx is None or evidence_idx is None or closure_idx is None:
-        raise SystemExit(f'closure_board item missing required fields for mutation: {destination_ref}')
-
-    current_status = parse_backticked_value(block[status_idx])
-    if current_status not in set(execution_cfg.get('allowed_target_statuses') or []):
-        raise SystemExit(f'current closure_board status not eligible for execution mutation: {current_status}')
-
-    evidence_line = block[evidence_idx]
-    if execution_cfg.get('require_evidence_link', False) and '[[' not in evidence_line:
-        raise SystemExit('closure_board execution requires governed evidence link before close')
-
-    closure_line = block[closure_idx]
-    if execution_cfg.get('require_closure_condition_match', False):
-        closure_text = closure_line.lower()
-        if 'repeated live sessions' not in closure_text or 'queue admission remains honest' not in closure_text:
-            raise SystemExit('closure condition does not satisfy required live behavioral proof semantics')
-
-    pre_status_line = block[status_idx]
-    pre_next_line = block[next_idx]
-    pre_evidence_line = block[evidence_idx]
-    pre_closure_line = block[closure_idx]
-
-    block[status_idx] = f"- Current status: `{target_status}`"
-    block[next_idx] = f"- Next action: {note}"
-
-    lines[start:end] = block
-    target_path.write_text('\n'.join(lines) + '\n')
-    post_block = lines[start:end]
-
-    if execution_cfg.get('forbid_closure_condition_mutation', False):
-        post_closure_line = next((line for line in post_block if line.startswith('- Closure condition:')), '')
-        if post_closure_line != pre_closure_line:
-            raise SystemExit('closure_board execution illegally mutated closure condition')
-
-    return {
-        'execution_mode': 'destination_mutation',
-        'target_path': str(target_path.relative_to(WORKSPACE)),
-        'target_status': target_status,
-        'fulfillment_proof': f'updated {destination_ref} in closure_board to {target_status}',
-        'pre_mutation_evidence': {
-            'status': parse_backticked_value(pre_status_line),
-            'next_action': pre_next_line,
-            'evidence': pre_evidence_line,
-            'closure_condition': pre_closure_line,
-        },
-        'post_mutation_evidence': {
-            'status': target_status,
-            'next_action': next((line for line in post_block if line.startswith('- Next action:')), ''),
-            'evidence': next((line for line in post_block if line.startswith('- Evidence link:')), ''),
-            'closure_condition': next((line for line in post_block if line.startswith('- Closure condition:')), ''),
-        },
-    }
-
-
 def fail_item(payload: dict, item: dict, status: str, reason: str, destination: Optional[str] = None, destination_ref: Optional[str] = None) -> int:
     item['status'] = status
     item['resolution'] = reason
@@ -327,8 +243,6 @@ def cmd_update(args, status: str) -> int:
             try:
                 if args.destination == 'work_queue':
                     execution_result = mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
-                elif args.destination == 'closure_board':
-                    execution_result = mutate_closure_board_item(item, args.destination_ref, args.note, args.target_status)
                 else:
                     raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
             except SystemExit as exc:
@@ -412,7 +326,7 @@ def main() -> int:
     resolve.add_argument('--destination-ref', required=True)
     resolve.add_argument('--note')
     resolve.add_argument('--execute', action='store_true')
-    resolve.add_argument('--target-status', choices=sorted(set(WORK_QUEUE_TARGET_STATUSES + CLOSURE_BOARD_TARGET_STATUSES)), default='ready_for_review')
+    resolve.add_argument('--target-status', choices=WORK_QUEUE_TARGET_STATUSES, default='ready_for_review')
     resolve.set_defaults(func=lambda args: cmd_update(args, 'promoted'))
 
     dismiss = sub.add_parser('dismiss')
