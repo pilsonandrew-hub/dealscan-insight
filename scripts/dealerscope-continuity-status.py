@@ -304,9 +304,25 @@ def consistency_failures(queue_items: list[dict], state: dict) -> tuple[list[str
             if title and title not in briefing_text:
                 advisory.append(f'{item_id}:pending_promotion_not_surfaced_in_briefing')
     if briefing_text:
-        blocking = state.get('blocking_reasons', []) or []
-        advisory_state = state.get('advisory_reasons', []) or []
-        if (blocking or advisory_state) and ('closure-ready' in briefing_text.lower() or 'cleanly closable' in briefing_text.lower()):
+        state_blocking = state.get('blocking_reasons', []) or []
+        state_advisory = state.get('advisory_reasons', []) or []
+        lower_briefing = briefing_text.lower()
+        positive_overclaim_markers = [
+            'system is closure-ready',
+            'safe to close',
+            'ready for closure',
+            'cleanly closable: true',
+            'blocked_if_enforced: false',
+        ]
+        negative_guardrail_markers = [
+            'do not describe the system as closure-ready',
+            'must not overstate closure posture',
+            'resolve blocking continuity reasons before claiming closure',
+            'closeout would block under enforcement',
+        ]
+        has_positive_overclaim = any(marker in lower_briefing for marker in positive_overclaim_markers)
+        has_negative_guardrail = any(marker in lower_briefing for marker in negative_guardrail_markers)
+        if (state_blocking or state_advisory) and has_positive_overclaim and not has_negative_guardrail:
             advisory.append('briefing_overstates_closeout_posture')
     return blocking, advisory
 
@@ -641,7 +657,7 @@ def main() -> int:
         advisory_reasons.append('malformed_pending_promotions')
     if destination_failures:
         advisory_reasons.append('promotion_destination_unverified')
-    if queue_advisory_failures:
+    if any(failure.endswith(':failed_precondition') for failure in queue_advisory_failures):
         advisory_reasons.append('promotion_precondition_failures_present')
     if queue_blocking_failures:
         blocking_reasons.append('promotion_consistency_failure')
