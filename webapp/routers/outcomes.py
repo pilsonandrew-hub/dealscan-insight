@@ -125,7 +125,7 @@ def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = Non
 
     resp = (
         supabase_client.table("opportunities")
-        .select("id,user_id,make,model,year,mileage,current_bid,state")
+        .select("id,make,model,year,mileage,current_bid,state")
         .eq("id", opportunity_id)
         .limit(1)
         .execute()
@@ -134,8 +134,6 @@ def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = Non
     if not opportunities:
         raise HTTPException(status_code=404, detail="Opportunity not found")
     opp = opportunities[0]
-    if require_user_id and opp.get("user_id") != require_user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this opportunity")
     return opp
 
 
@@ -235,7 +233,7 @@ async def patch_outcome(
                 "sold_price": sold_price,
             }),
         }
-        supabase_client.table("opportunities").update(opportunity_update).eq("id", opportunity_id).eq("user_id", user_id).execute()
+        supabase_client.table("opportunities").update(opportunity_update).eq("id", opportunity_id).execute()
 
         return {
             "success": True,
