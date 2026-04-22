@@ -254,7 +254,7 @@ def active_pending_promotions(items: list[dict]) -> list[dict]:
     return [item for item in items if item.get('status') == 'pending']
 
 
-def consistency_failures(queue_items: list[dict], state: str) -> tuple[list[str], list[str]]:
+def consistency_failures(queue_items: list[dict], state: dict) -> tuple[list[str], list[str]]:
     blocking: list[str] = []
     advisory: list[str] = []
     work_queue_path = WORKSPACE / 'brains' / 'dealerscope-brain' / '03_Operations' / 'DealerScope-Active-Work-Queue.md'
@@ -303,6 +303,11 @@ def consistency_failures(queue_items: list[dict], state: str) -> tuple[list[str]
             title = item.get('title', '').strip()
             if title and title not in briefing_text:
                 advisory.append(f'{item_id}:pending_promotion_not_surfaced_in_briefing')
+    if briefing_text:
+        blocking = state.get('blocking_reasons', []) or []
+        advisory_state = state.get('advisory_reasons', []) or []
+        if (blocking or advisory_state) and ('closure-ready' in briefing_text.lower() or 'cleanly closable' in briefing_text.lower()):
+            advisory.append('briefing_overstates_closeout_posture')
     return blocking, advisory
 
 
@@ -619,7 +624,12 @@ def main() -> int:
         blocking_reasons.append('mirror_drift')
 
     preliminary_state = composite_state(git, named_failures, effective_full_missing, effective_full_mismatched, bad_loops, recall_required)
-    queue_blocking_failures, queue_advisory_failures = consistency_failures(queue_items, preliminary_state)
+    preliminary_state_payload = {
+        'overall_state': preliminary_state,
+        'blocking_reasons': list(blocking_reasons),
+        'advisory_reasons': list(advisory_reasons),
+    }
+    queue_blocking_failures, queue_advisory_failures = consistency_failures(queue_items, preliminary_state_payload)
     state = composite_state(git, named_failures, effective_full_missing, effective_full_mismatched, bad_loops, recall_required, has_consistency_blocking=bool(queue_blocking_failures), has_consistency_advisory=bool(queue_advisory_failures or projection_pending))
     pending_promotions = derive_pending_promotions(promotion_cfg, blocking_reasons, bad_loops, open_loops, active_pending_promotions(queue_items))
 

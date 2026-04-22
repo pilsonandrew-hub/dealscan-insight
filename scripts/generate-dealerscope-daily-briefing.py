@@ -124,6 +124,8 @@ def main() -> int:
         next_actions.append("Resolve blocking continuity reasons before claiming closure")
     if advisory:
         next_actions.append("Resolve advisory drift before tightening enforcement posture")
+    if closeout.get('blocked_if_enforced'):
+        next_actions.append("Do not describe the system as closure-ready while closeout would still block under enforcement")
     if promotion_candidates:
         next_actions.append("Classify and promote any durable truth surfaced in promotion candidates")
     if not next_actions:
@@ -138,7 +140,7 @@ def main() -> int:
     lines.extend([
         "",
         "## CTO Note",
-        f"- Continuity OS current state: {state.get('overall_state', 'unknown')} / {derived_state}. Briefing projection integrity is now explicit. Next hardening priority is promotion discipline becoming first-class operational output instead of living only in doctrine.",
+        f"- Continuity OS current state: {state.get('overall_state', 'unknown')} / {derived_state}. Briefing projection integrity is explicit, and the briefing must not overstate closure posture beyond what closeout and governed state can actually support. Next hardening priority is keeping operator-facing narrative aligned with closeout truth and governed artifact truth.",
         "",
     ])
 
