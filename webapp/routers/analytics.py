@@ -730,7 +730,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             supa.table("opportunities")
             .select("id,outcome_notes,outcome_sale_price,max_bid,outcome_recorded_at")
             .eq("user_id", user_id)
-            .not_.is_("outcome_recorded_at", "null")
+            .or_("outcome_recorded_at.not.is.null,outcome_notes.not.is.null")
             .execute()
         )
         purchase_prices: list[float] = []
@@ -755,7 +755,8 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-            if not bid_data:
+            has_execution_signal = bool(bid_data) or bool(recorded_at_raw)
+            if not has_execution_signal:
                 continue
 
             if bid_data.get("bid"):
