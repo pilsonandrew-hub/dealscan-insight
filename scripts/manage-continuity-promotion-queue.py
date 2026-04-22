@@ -10,7 +10,16 @@ from typing import Optional
 WORKSPACE = Path('/Users/andrewpilson/.openclaw/workspace')
 QUEUE_PATH = WORKSPACE / 'continuity' / 'pending-promotions.json'
 POLICY_PATH = WORKSPACE / 'continuity' / 'policy.json'
-ALLOWED_STATUS = {'pending', 'promoted', 'dismissed'}
+ALLOWED_STATUS = {
+    'pending',
+    'executing',
+    'promoted',
+    'dismissed',
+    'failed_precondition',
+    'failed_partial_mutation',
+    'reverted',
+    'recovery_required',
+}
 ALLOWED_DESTINATIONS = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
 EXECUTION_CAPABLE_DESTINATIONS = {'work_queue'}
 WORK_QUEUE_TARGET_STATUSES = ['ready_for_review', 'closed']
@@ -108,6 +117,8 @@ def parse_backticked_value(line: str) -> Optional[str]:
 
 
 def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str], target_status: str) -> dict:
+    if note and '[simulate-partial-failure]' in note:
+        raise SystemExit('simulated partial mutation failure requested for enterprise recovery test')
     cfg = load_destination_cfg('work_queue')
     execution_cfg = cfg.get('execution') or {}
     if not execution_cfg.get('enabled', False):
@@ -186,6 +197,23 @@ def mutate_work_queue_item(item: dict, destination_ref: str, note: Optional[str]
     }
 
 
+def fail_item(payload: dict, item: dict, status: str, reason: str, destination: Optional[str] = None, destination_ref: Optional[str] = None) -> int:
+    item['status'] = status
+    item['resolution'] = reason
+    item['resolved_at'] = now_iso()
+    item['failure_stage'] = 'precondition' if status == 'failed_precondition' else 'mutation'
+    item['failure_reason'] = reason
+    item['recovery_status'] = 'not_required' if status == 'failed_precondition' else 'pending'
+    item['final_resolution_classification'] = 'failed_precondition' if status == 'failed_precondition' else 'failed_partial_mutation'
+    if destination:
+        item['destination'] = destination
+    if destination_ref:
+        item['destination_ref'] = destination_ref
+    write_queue(payload)
+    print(f'{status} {item["id"]}')
+    return 0
+
+
 def cmd_update(args, status: str) -> int:
     payload = load_queue()
     policy = load_policy()
@@ -200,25 +228,63 @@ def cmd_update(args, status: str) -> int:
             raise SystemExit(f'valid --destination required for promoted item: {sorted(ALLOWED_DESTINATIONS)}')
         if not args.destination_ref:
             raise SystemExit('--destination-ref required for promoted item')
-        verify_destination(args.destination, args.destination_ref)
+        try:
+            verify_destination(args.destination, args.destination_ref)
+        except SystemExit as exc:
+            return fail_item(payload, item, 'failed_precondition', str(exc), args.destination, args.destination_ref)
         if args.execute:
             if args.destination not in EXECUTION_CAPABLE_DESTINATIONS:
-                raise SystemExit(f'{args.destination} execution is intentionally disabled by the single-supported-destination model')
-            if args.destination == 'work_queue':
-                execution_result = mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
-            else:
-                raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
+                return fail_item(payload, item, 'failed_precondition', f'{args.destination} execution is intentionally disabled by the single-supported-destination model', args.destination, args.destination_ref)
+            item['status'] = 'executing'
+            item['destination'] = args.destination
+            item['destination_ref'] = args.destination_ref
+            item['execution_mode'] = 'destination_mutation'
+            write_queue(payload)
+            try:
+                if args.destination == 'work_queue':
+                    execution_result = mutate_work_queue_item(item, args.destination_ref, args.note, args.target_status)
+                else:
+                    raise SystemExit(f'--execute is not yet supported for destination: {args.destination}')
+            except SystemExit as exc:
+                item['partial_mutation_evidence'] = {
+                    'destination': args.destination,
+                    'destination_ref': args.destination_ref,
+                    'attempted_target_status': args.target_status,
+                }
+                item['degraded_subsystem'] = args.destination
+                item['recovery_action'] = 'manual_or_scripted_revert_required'
+                item['recovery_status'] = 'pending'
+                return fail_item(payload, item, 'failed_partial_mutation', str(exc), args.destination, args.destination_ref)
         item['destination'] = args.destination
         item['destination_ref'] = args.destination_ref
     item['status'] = status
     item['resolution'] = args.note or None
     item['resolved_at'] = now_iso()
+    if status == 'reverted':
+        item['recovery_status'] = 'resolved'
+        item['final_resolution_classification'] = 'reverted_after_partial_failure'
+        item['recovery_evidence'] = args.note or 'reverted cleanly'
+    elif status == 'recovery_required':
+        item['recovery_status'] = 'pending_manual_recovery'
+        item['final_resolution_classification'] = 'recovery_required'
+    else:
+        item.pop('failure_stage', None)
+        item.pop('failure_reason', None)
+        item.pop('partial_mutation_evidence', None)
+        item.pop('degraded_subsystem', None)
+        item.pop('recovery_action', None)
+        item.pop('recovery_status', None)
+        item.pop('recovery_evidence', None)
+        item.pop('final_resolution_classification', None)
     if execution_result:
         item.update(execution_result)
+        item['recovery_status'] = 'not_required'
+        item['final_resolution_classification'] = 'promoted_executed'
     elif status == 'promoted':
         item['execution_mode'] = 'verification_only'
         item.setdefault('fulfillment_proof', f'verified destination exists for {item["destination"]}:{item["destination_ref"]}')
         item.setdefault('target_status', None)
+        item['final_resolution_classification'] = 'promoted_verified_only'
     required_promoted_fields = audit_cfg.get('required_promoted_fields') or []
     required_executed_fields = audit_cfg.get('required_executed_fields') or []
     if status == 'promoted' and audit_cfg.get('require_uniform_resolution_metadata', False):
@@ -267,6 +333,12 @@ def main() -> int:
     dismiss.add_argument('--id', required=True)
     dismiss.add_argument('--note')
     dismiss.set_defaults(func=lambda args: cmd_update(args, 'dismissed'))
+
+    recover = sub.add_parser('recover')
+    recover.add_argument('--id', required=True)
+    recover.add_argument('--note', required=True)
+    recover.add_argument('--status', choices=['reverted', 'recovery_required'], required=True)
+    recover.set_defaults(func=lambda args: cmd_update(args, args.status))
 
     ls = sub.add_parser('list')
     ls.add_argument('--status', choices=sorted(ALLOWED_STATUS))

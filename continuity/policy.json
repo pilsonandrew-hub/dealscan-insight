@@ -200,6 +200,23 @@
         "post_mutation_evidence",
         "target_status",
         "target_path"
+      ],
+      "failure_states": [
+        "failed_precondition",
+        "failed_partial_mutation",
+        "reverted",
+        "recovery_required"
+      ],
+      "require_recovery_fields_on_failure": true,
+      "required_failure_fields": [
+        "failure_stage",
+        "failure_reason",
+        "recovery_status"
+      ],
+      "required_partial_failure_fields": [
+        "partial_mutation_evidence",
+        "degraded_subsystem",
+        "recovery_action"
       ]
     }
   }

@@ -165,7 +165,7 @@ def malformed_pending_promotions(items: list[dict], audit_cfg: dict | None = Non
     bad = []
     audit_cfg = audit_cfg or {}
     required = ['id', 'title', 'source', 'reason', 'created_at', 'status']
-    allowed_status = {'pending', 'promoted', 'dismissed'}
+    allowed_status = {'pending', 'executing', 'promoted', 'dismissed', 'failed_precondition', 'failed_partial_mutation', 'reverted', 'recovery_required'}
     allowed_destinations = {'work_queue', 'closure_board', 'report', 'doctrine', 'policy'}
     required_promoted_fields = audit_cfg.get('required_promoted_fields') or []
     required_executed_fields = audit_cfg.get('required_executed_fields') or []
@@ -176,13 +176,14 @@ def malformed_pending_promotions(items: list[dict], audit_cfg: dict | None = Non
         if item.get('status') not in allowed_status:
             bad.append(item)
             continue
-        if item.get('status') == 'promoted':
+        if item.get('status') in {'promoted', 'executing', 'failed_precondition', 'failed_partial_mutation', 'reverted', 'recovery_required'}:
             if item.get('destination') not in allowed_destinations:
                 bad.append(item)
                 continue
             if not item.get('destination_ref'):
                 bad.append(item)
                 continue
+        if item.get('status') == 'promoted':
             for field in required_promoted_fields:
                 if not item.get(field):
                     bad.append(item)
@@ -192,6 +193,23 @@ def malformed_pending_promotions(items: list[dict], audit_cfg: dict | None = Non
                     if any(not item.get(field) for field in required_executed_fields):
                         bad.append(item)
                         continue
+        if item.get('status') in {'failed_precondition', 'failed_partial_mutation', 'recovery_required'}:
+            required_failure_fields = audit_cfg.get('required_failure_fields') or []
+            if audit_cfg.get('require_recovery_fields_on_failure', False):
+                for field in required_failure_fields:
+                    if not item.get(field):
+                        bad.append(item)
+                        break
+                else:
+                    if item.get('status') == 'failed_partial_mutation':
+                        for field in (audit_cfg.get('required_partial_failure_fields') or []):
+                            if not item.get(field):
+                                bad.append(item)
+                                break
+                    continue
+            if not item.get('failure_reason'):
+                bad.append(item)
+                continue
     return bad
 
 
@@ -234,6 +252,38 @@ def verified_destination_failures(items: list[dict], promotion_cfg: dict) -> lis
 
 def active_pending_promotions(items: list[dict]) -> list[dict]:
     return [item for item in items if item.get('status') == 'pending']
+
+
+def consistency_failures(queue_items: list[dict], state: str) -> tuple[list[str], list[str]]:
+    blocking: list[str] = []
+    advisory: list[str] = []
+    work_queue_path = WORKSPACE / 'brains' / 'dealerscope-brain' / '03_Operations' / 'DealerScope-Active-Work-Queue.md'
+    work_queue_text = work_queue_path.read_text() if work_queue_path.exists() else ''
+    for item in queue_items:
+        status = item.get('status')
+        item_id = item.get('id', '<missing-id>')
+        if status == 'failed_precondition':
+            advisory.append(f'{item_id}:failed_precondition')
+        if status == 'failed_partial_mutation' and item.get('recovery_status') != 'resolved':
+            blocking.append(f'{item_id}:partial_mutation_without_resolved_recovery')
+        if status == 'recovery_required':
+            blocking.append(f'{item_id}:explicit_recovery_required')
+        if status == 'promoted' and item.get('execution_mode') == 'destination_mutation':
+            if not item.get('fulfillment_proof'):
+                blocking.append(f'{item_id}:executed_without_fulfillment_proof')
+            if item.get('destination') == 'work_queue':
+                ref = item.get('destination_ref')
+                target_status = item.get('target_status')
+                if ref and f'### {ref}' not in work_queue_text:
+                    blocking.append(f'{item_id}:work_queue_target_missing_after_execution')
+                if ref and target_status and f'### {ref}' in work_queue_text and f'- Status: `{target_status}`' not in work_queue_text:
+                    blocking.append(f'{item_id}:work_queue_status_not_materialized')
+        if status == 'reverted':
+            if item.get('recovery_status') != 'resolved':
+                blocking.append(f'{item_id}:reverted_without_resolved_recovery_status')
+            if not item.get('recovery_evidence'):
+                advisory.append(f'{item_id}:reverted_without_recovery_evidence')
+    return blocking, advisory
 
 
 def derive_pending_promotions(policy: dict, closeout_blocking: list[str], malformed_loops: list[dict], open_loops: list[dict], queue_items: list[dict]) -> list[dict]:
@@ -442,9 +492,11 @@ def destination_model_status(policy: dict) -> dict:
     }
 
 
-def composite_state(git: dict, named_failures: list[str], full_missing: list[str], full_mismatched: list[str], malformed_loops: list[dict], recall_required: bool) -> str:
+def composite_state(git: dict, named_failures: list[str], full_missing: list[str], full_mismatched: list[str], malformed_loops: list[dict], recall_required: bool, has_consistency_blocking: bool = False, has_consistency_advisory: bool = False) -> str:
     mirror_bad = bool(named_failures or full_missing or full_mismatched)
-    if malformed_loops or recall_required:
+    if has_consistency_blocking:
+        return 'integrity_failure'
+    if malformed_loops or recall_required or has_consistency_advisory:
         return 'advisory_drift'
     if git['dirty'] and (git['ahead'] > 0 or mirror_bad):
         return 'needs_sync_and_push'
@@ -529,7 +581,9 @@ def main() -> int:
         pending_replication.append('mirror_drift')
         blocking_reasons.append('mirror_drift')
 
-    state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
+    preliminary_state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required)
+    queue_blocking_failures, queue_advisory_failures = consistency_failures(queue_items, preliminary_state)
+    state = composite_state(git, named_failures, full_missing, full_mismatched, bad_loops, recall_required, has_consistency_blocking=bool(queue_blocking_failures), has_consistency_advisory=bool(queue_advisory_failures))
     pending_promotions = derive_pending_promotions(promotion_cfg, blocking_reasons, bad_loops, open_loops, active_pending_promotions(queue_items))
 
     if bad_loops:
@@ -540,6 +594,10 @@ def main() -> int:
         advisory_reasons.append('malformed_pending_promotions')
     if destination_failures:
         advisory_reasons.append('promotion_destination_unverified')
+    if queue_advisory_failures:
+        advisory_reasons.append('promotion_precondition_failures_present')
+    if queue_blocking_failures:
+        blocking_reasons.append('promotion_consistency_failure')
     if recall_required:
         advisory_reasons.append('needs_recall')
     if not daily_memory_today.exists():
@@ -596,7 +654,7 @@ def main() -> int:
         'pending_replication': pending_replication,
         'pending_verification': [],
         'override_active': False,
-        'degraded_subsystems': [],
+        'degraded_subsystems': ['promotion_execution'] if (queue_blocking_failures or queue_advisory_failures) else [],
         'daily_memory_today_present': daily_memory_today.exists(),
         'last_successful_daily_briefing': latest_daily_briefing,
         'last_successful_cto_note': latest_cto_note,
@@ -605,6 +663,10 @@ def main() -> int:
         'artifact_families': artifact_families,
         'workspace_boundary': workspace_boundary,
         'destination_model': destination_model,
+        'consistency_failures': {
+            'blocking': queue_blocking_failures,
+            'advisory': queue_advisory_failures,
+        },
     }
     write_json(STATE_PATH, state_payload)
 
@@ -620,6 +682,10 @@ def main() -> int:
         'artifact_families': artifact_families,
         'workspace_boundary': workspace_boundary,
         'destination_model': destination_model,
+        'consistency_failures': {
+            'blocking': queue_blocking_failures,
+            'advisory': queue_advisory_failures,
+        },
         'missing_requirements': {
             'malformed_open_loops': len(bad_loops),
             'malformed_pending_promotions': len(bad_queue_items),
@@ -627,6 +693,10 @@ def main() -> int:
             'pending_replication': pending_replication,
             'recall_required': recall_required,
             'audit_policy_enforced': bool(audit_cfg.get('require_uniform_resolution_metadata', False)),
+            'consistency_failures': {
+                'blocking': queue_blocking_failures,
+                'advisory': queue_advisory_failures,
+            },
         },
     }
     write_json(CLOSEOUT_PATH, closeout_payload)
@@ -668,6 +738,10 @@ def main() -> int:
             print(f'MISMATCH {rel}')
     for reason in blocking_reasons:
         print(f'BLOCKING {reason}')
+    for failure in queue_blocking_failures:
+        print(f'CONSISTENCY_FAILURE_BLOCKING {failure}')
+    for failure in queue_advisory_failures:
+        print(f'CONSISTENCY_FAILURE_ADVISORY {failure}')
     execution_model = destination_model.get('execution_model') or '<unset>'
     architecture_decision = destination_model.get('architecture_decision') or '<unset>'
     system_grade = destination_model.get('system_grade_classification') or {}
