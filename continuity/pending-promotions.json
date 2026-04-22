@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-22T03:07:50+00:00",
+  "updated_at": "2026-04-22T03:14:47+00:00",
   "items": [
     {
       "id": "test-promotion-1",
@@ -200,6 +200,18 @@
       "failure_reason": "simulated partial mutation failure requested for enterprise recovery test",
       "final_resolution_classification": "reverted_after_partial_failure",
       "recovery_evidence": "revert completed and recovery evidence recorded"
+    },
+    {
+      "id": "test-briefing-queue-1",
+      "title": "Briefing queue consistency test",
+      "source": "manual-test",
+      "reason": "verify pending promotion must surface in briefing",
+      "created_at": "2026-04-22T03:14:35+00:00",
+      "status": "dismissed",
+      "destination": null,
+      "destination_ref": null,
+      "resolution": "briefing queue consistency test completed",
+      "resolved_at": "2026-04-22T03:14:47+00:00"
     }
   ]
 }

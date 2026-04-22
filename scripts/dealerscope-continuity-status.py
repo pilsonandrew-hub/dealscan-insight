@@ -259,6 +259,8 @@ def consistency_failures(queue_items: list[dict], state: str) -> tuple[list[str]
     advisory: list[str] = []
     work_queue_path = WORKSPACE / 'brains' / 'dealerscope-brain' / '03_Operations' / 'DealerScope-Active-Work-Queue.md'
     work_queue_text = work_queue_path.read_text() if work_queue_path.exists() else ''
+    briefing_path = WORKSPACE / 'brains' / 'dealerscope-brain' / '03_Operations' / f"DealerScope-Morning-Briefing-{datetime.now().date().isoformat()}.md"
+    briefing_text = briefing_path.read_text() if briefing_path.exists() else ''
     for item in queue_items:
         status = item.get('status')
         item_id = item.get('id', '<missing-id>')
@@ -283,6 +285,10 @@ def consistency_failures(queue_items: list[dict], state: str) -> tuple[list[str]
                 blocking.append(f'{item_id}:reverted_without_resolved_recovery_status')
             if not item.get('recovery_evidence'):
                 advisory.append(f'{item_id}:reverted_without_recovery_evidence')
+        if status == 'pending' and briefing_text:
+            title = item.get('title', '').strip()
+            if title and title not in briefing_text:
+                advisory.append(f'{item_id}:pending_promotion_not_surfaced_in_briefing')
     return blocking, advisory
 
 
