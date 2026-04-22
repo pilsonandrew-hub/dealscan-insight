@@ -736,7 +736,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
 
         execution_outcomes_resp = (
             supa.table("dealer_sales")
-            .select("opportunity_id,outcome,recorded_at,created_at,updated_at,sale_date")
+            .select("opportunity_id,outcome,created_at,updated_at,sale_date")
             .execute()
         )
         execution_outcome_rows = execution_outcomes_resp.data or []
@@ -748,7 +748,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
             outcome = str(row.get("outcome") or "pending").strip().lower()
             if outcome in outcome_counts:
                 outcome_counts[outcome] += 1
-            for ts_key in ("sale_date", "updated_at", "recorded_at", "created_at"):
+            for ts_key in ("sale_date", "updated_at", "created_at"):
                 ts_raw = row.get(ts_key)
                 if not ts_raw:
                     continue
