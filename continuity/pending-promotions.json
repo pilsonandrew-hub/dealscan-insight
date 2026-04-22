@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-22T03:28:39+00:00",
+  "updated_at": "2026-04-22T03:36:44+00:00",
   "items": [
     {
       "id": "test-promotion-1",
@@ -267,6 +267,19 @@
       },
       "recovery_status": "not_required",
       "final_resolution_classification": "promoted_executed"
+    },
+    {
+      "id": "close-gov-cb-001",
+      "title": "Close GOV-CB-001 on narrow continuity proof",
+      "source": "manual-test",
+      "reason": "prove closure_board contract on the one real narrow close case",
+      "created_at": "2026-04-22T03:36:17+00:00",
+      "status": "dismissed",
+      "destination": "closure_board",
+      "destination_ref": "GOV-CB-001",
+      "resolution": "test executed after manual narrow-scope close already landed; contract correctly blocked non-eligible already-closed board item",
+      "resolved_at": "2026-04-22T03:36:44+00:00",
+      "execution_mode": "destination_mutation"
     }
   ]
 }
