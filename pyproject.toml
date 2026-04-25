@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "super-ace-v1"
+version = "0.1.0"
+description = "Super A.C.E. V1 - local durable continuity substrate for DealerScope work"
+readme = "ace/README.md"
+requires-python = ">=3.14"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Andrew Pilson" }
+]
+dependencies = []
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["ace*"]
+
+[tool.setuptools.package-data]
+ace = [
+  "state/.gitkeep",
+  "tests/fixtures/**/*.db",
+  "tests/fixtures/**/*.json"
+]
