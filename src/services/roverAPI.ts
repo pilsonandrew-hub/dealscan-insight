@@ -111,10 +111,12 @@ class RoverAPIService {
       const token = session?.access_token;
       const userId = session?.user?.id;
       if (!userId) throw new Error("No user session");
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
       const resp = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+        headers,
       });
 
       if (!resp.ok) throw new Error(`Rover API error: ${resp.status}`);
@@ -291,12 +293,15 @@ class RoverAPIService {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
       const resp = await fetch(`${API_BASE}/api/saved-searches`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+        headers,
         body: JSON.stringify({
           name: title,
           filters: query || {},
@@ -326,12 +331,15 @@ class RoverAPIService {
       yearMin: params.year,
       yearMax: params.year,
     };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const resp = await fetch(`${API_BASE}/api/saved-searches`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      headers,
       body: JSON.stringify({
         name: params.title,
         filters,

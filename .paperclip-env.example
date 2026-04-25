@@ -1,0 +1,11 @@
+# Paperclip Agent Environment — DealerScope
+export PAPERCLIP_API_URL='http://localhost:3100'
+export PAPERCLIP_COMPANY_ID='REPLACE_ME'
+
+# Agent IDs
+export PAPERCLIP_JAARIOUS_AGENT_ID='REPLACE_ME'
+export PAPERCLIP_CODEX_AGENT_ID='REPLACE_ME'
+export PAPERCLIP_CURSOR_AGENT_ID='REPLACE_ME'
+
+# Ja'various (CEO) API Key
+export PAPERCLIP_API_KEY='REDACTED_SECRET'

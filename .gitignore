@@ -35,3 +35,6 @@ data/*.sqlite
 
 # Codex session artifacts
 codex-session-summary-*.md
+
+# Local secret material
+.paperclip-env
