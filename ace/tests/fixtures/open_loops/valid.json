@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-25T00:00:00Z",
+  "items": [
+    {
+      "id": "open-loop-001",
+      "title": "Fix telemetry gap",
+      "status": "open",
+      "severity": "high",
+      "next_start": "2026-04-26T09:00:00Z",
+      "closure_condition": "telemetry gap is documented and assigned",
+      "owner": "ace-team"
+    },
+    {
+      "id": "open-loop-002",
+      "title": "Refresh continuity note",
+      "status": "waiting",
+      "severity": "medium",
+      "next_start": "2026-04-26T12:00:00Z",
+      "closure_condition": "continuity note updated with current boundary",
+      "owner": "ace-team"
+    }
+  ]
+}

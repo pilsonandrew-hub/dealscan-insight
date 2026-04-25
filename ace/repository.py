@@ -559,6 +559,37 @@ class ItemRepository:
             row = connection.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         return self._row_to_item(row) if row else None
 
+    def get_item_by_source_and_session(
+        self,
+        source: str,
+        source_session: str,
+    ) -> Item | None:
+        normalized_source = source.strip()
+        if not normalized_source:
+            raise ValidationError("source must not be empty or whitespace-only")
+        normalized_source_session = source_session.strip()
+        if not normalized_source_session:
+            raise ValidationError("source_session must not be empty or whitespace-only")
+
+        with connect(self.db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM items
+                WHERE source = ? AND source_session = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (normalized_source, normalized_source_session),
+            ).fetchall()
+
+        if not rows:
+            return None
+        if len(rows) > 1:
+            raise ValidationError(
+                f"duplicate provenance rows for source={normalized_source} source_session={normalized_source_session}"
+            )
+        return self._row_to_item(rows[0])
+
     def list_items(self, *, state: str | None = None) -> list[Item]:
         query = "SELECT * FROM items"
         params: list[Any] = []

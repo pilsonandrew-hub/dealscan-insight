@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-25T00:00:00Z",
+  "items": [
+    {
+      "id": "broken-open-loop",
+      "title": "Broken fixture",
+      "status": "open",
+      "severity": "high",
+      "next_start": "2026-04-26T09:00:00Z",
+      "closure_condition": "missing closing brace",
+      "owner": "ace-team"
+    }
+  ]
