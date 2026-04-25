@@ -1,0 +1,26 @@
+name: ACE CI
+
+on:
+  push:
+    paths:
+      - "ace/**"
+      - ".github/workflows/ace-ci.yml"
+  pull_request:
+    paths:
+      - "ace/**"
+      - ".github/workflows/ace-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Run ACE tests
+        run: python -m unittest discover -s ace/tests -t .

@@ -17,6 +17,7 @@ Super A.C.E. V1 is the local, durable context-and-continuity substrate for Deale
 - Python 3
 - standard library only
 - entrypoint: `python3 ace/ace.py`
+- CI proof: GitHub Actions runs `python -m unittest discover -s ace/tests -t .` on push and pull request changes under `ace/`
 
 ## State
 
