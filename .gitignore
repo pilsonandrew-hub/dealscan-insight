@@ -69,3 +69,7 @@ continuity/closeout-evaluation.json
 continuity/continuity-events.jsonl
 continuity/continuity-metrics.json
 continuity/continuity-state.json
+
+# Packaging/build residue is generated proof output, not governed source
+*.egg-info/
+.eggs/
