@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "broken-promotion-001",
+      "title": "Broken promotion"
+      "source": "continuity-policy",
+      "reason": "broken json should fail",
+      "created_at": "2026-04-22T01:02:03+00:00",
+      "status": "pending"
+    }
+  ]
+}

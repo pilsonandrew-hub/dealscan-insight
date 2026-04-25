@@ -10,6 +10,7 @@ Super A.C.E. V1 is the local, durable context-and-continuity substrate for Deale
 - explicit item state transitions with loud failure on illegal moves
 - a minimal item repository
 - read-only continuity/open-loops ingest proof into a temp ACE DB with deterministic provenance and replay reuse
+- read-only continuity/pending-promotions ingest proof into ACE TRIAGE for pending rows only, with deterministic provenance and replay reuse
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
 ## Runtime
@@ -27,6 +28,7 @@ Super A.C.E. V1 is the local, durable context-and-continuity substrate for Deale
 - `ACTIVE` is tolerated for legacy records, but not the primary happy path
 - `resolve` enforces closeout gate checks for evidence, contradictions, and obligations, then writes `closeout_runs`
 - continuity open-loop ingest stays read-only, maps only active-like items to `TRIAGE`, and reuses rows by deterministic `source + source_session`
+- continuity pending-promotions ingest stays read-only, maps only `status == "pending"` items to `TRIAGE`, and reuses rows by deterministic `source + source_session`
 
 ## Current scope
 
