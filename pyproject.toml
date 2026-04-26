@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "super-ace-v1"
+name = "super-ace-governed-foundation"
 version = "0.1.0"
-description = "Super A.C.E. V1 - local durable continuity substrate for DealerScope work"
+description = "Super A.C.E. governed foundation / Phase 0 continuity substrate for DealerScope work"
 readme = "ace/README.md"
 requires-python = ">=3.14"
 license = { text = "Proprietary" }
