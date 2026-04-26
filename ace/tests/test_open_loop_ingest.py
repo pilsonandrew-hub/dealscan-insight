@@ -77,6 +77,56 @@ class ContinuityOpenLoopIngestTests(unittest.TestCase):
         repo = ItemRepository(self.db_path)
         self.assertEqual(len(repo.list_items()), 2)
 
+    def test_invalid_severity_is_rejected_without_writing_rows(self) -> None:
+        with self.assertRaises(OpenLoopIngestError):
+            ingest_continuity_open_loops(
+                self.db_path,
+                source_path=FIXTURES / "invalid_severity.json",
+            )
+
+        repo = ItemRepository(self.db_path)
+        self.assertEqual(repo.list_items(), [])
+
+    def test_missing_required_field_is_rejected_without_writing_rows(self) -> None:
+        with self.assertRaises(OpenLoopIngestError):
+            ingest_continuity_open_loops(
+                self.db_path,
+                source_path=FIXTURES / "missing_required.json",
+            )
+
+        repo = ItemRepository(self.db_path)
+        self.assertEqual(repo.list_items(), [])
+
+    def test_non_object_item_is_rejected_without_writing_rows(self) -> None:
+        with self.assertRaises(OpenLoopIngestError):
+            ingest_continuity_open_loops(
+                self.db_path,
+                source_path=FIXTURES / "non_object_item.json",
+            )
+
+        repo = ItemRepository(self.db_path)
+        self.assertEqual(repo.list_items(), [])
+
+    def test_non_object_payload_is_rejected_without_writing_rows(self) -> None:
+        with self.assertRaises(OpenLoopIngestError):
+            ingest_continuity_open_loops(
+                self.db_path,
+                source_path=FIXTURES / "non_object_payload.json",
+            )
+
+        repo = ItemRepository(self.db_path)
+        self.assertEqual(repo.list_items(), [])
+
+    def test_missing_items_array_is_rejected_without_writing_rows(self) -> None:
+        with self.assertRaises(OpenLoopIngestError):
+            ingest_continuity_open_loops(
+                self.db_path,
+                source_path=FIXTURES / "missing_items_array.json",
+            )
+
+        repo = ItemRepository(self.db_path)
+        self.assertEqual(repo.list_items(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
