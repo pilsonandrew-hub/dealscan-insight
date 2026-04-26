@@ -73,3 +73,4 @@ continuity/continuity-state.json
 # Packaging/build residue is generated proof output, not governed source
 *.egg-info/
 .eggs/
+.coverage
