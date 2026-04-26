@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-26T07:00:00Z",
+  "items": [
+    {
+      "id": "open-loop-phase1b-high-001",
+      "title": "Escalate severe continuity gap",
+      "status": "open",
+      "severity": "high",
+      "next_start": "Investigate immediately",
+      "closure_condition": "Operator acknowledges escalation",
+      "owner": "ace"
+    }
+  ]
+}

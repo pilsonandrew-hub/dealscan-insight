@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-26T07:00:00Z",
+  "items": [
+    {
+      "id": "open-loop-phase1b-medium-001",
+      "title": "Track moderate continuity follow-up",
+      "status": "waiting",
+      "severity": "medium",
+      "next_start": "Review in next pass",
+      "closure_condition": "Tracked without escalation",
+      "owner": "ace"
+    }
+  ]
+}
