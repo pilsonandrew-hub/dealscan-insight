@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from contextlib import closing, redirect_stdout
+from contextlib import closing, redirect_stdout, redirect_stderr
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,6 +17,57 @@ from ace.storage import append_event, bootstrap_db, utc_now
 
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+class AceCliParserContractTests(unittest.TestCase):
+    def run_cli(self, *argv: str) -> tuple[int, str]:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(list(argv))
+        return code, buffer.getvalue()
+
+    def test_main_without_command_bootstraps_default_db_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "default.db"
+            original_db_path = Path(main.__globals__["DB_PATH"])
+            main.__globals__["DB_PATH"] = db_path
+            try:
+                code, output = self.run_cli()
+            finally:
+                main.__globals__["DB_PATH"] = original_db_path
+            self.assertEqual(code, 0, output)
+            self.assertIn(f"Initialized ACE state at {db_path}", output)
+            self.assertTrue(db_path.exists())
+
+    def test_init_command_bootstraps_requested_db_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "init.db"
+            code, output = self.run_cli("--db", str(db_path), "init")
+            self.assertEqual(code, 0, output)
+            self.assertIn(f"Initialized ACE state at {db_path}", output)
+            self.assertTrue(db_path.exists())
+
+    def test_bootstrap_command_is_alias_for_init(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "bootstrap.db"
+            code, output = self.run_cli("--db", str(db_path), "bootstrap")
+            self.assertEqual(code, 0, output)
+            self.assertIn(f"Initialized ACE state at {db_path}", output)
+            self.assertTrue(db_path.exists())
+
+    def test_invalid_subcommand_exits_via_argparse(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as exc, redirect_stderr(stderr):
+            main(["definitely-not-a-command"])
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
+
+    def test_missing_required_arguments_exit_via_argparse(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as exc, redirect_stderr(stderr):
+            main(["intake", "note"])
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("the following arguments are required: title", stderr.getvalue())
 
 
 class AceCliTests(unittest.TestCase):
