@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-25T00:00:00Z",
+  "items": [
+    {
+      "id": "phase1-001",
+      "title": "Manual test item",
+      "source": "manual-test",
+      "reason": "local follow-up proof",
+      "created_at": "2026-04-25T00:00:01Z",
+      "status": "pending"
+    },
+    {
+      "id": "phase1-ignored-001",
+      "title": "Ignored residue",
+      "source": "manual-test",
+      "reason": "historical residue",
+      "created_at": "2026-04-25T00:00:02Z",
+      "status": "dismissed"
+    }
+  ]
+}
