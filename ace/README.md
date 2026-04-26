@@ -1,6 +1,6 @@
-# Super A.C.E. V1
+# Super A.C.E. — Governed Foundation
 
-Super A.C.E. V1 is the local, durable context-and-continuity substrate for DealerScope work.
+Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with one narrow local-only Phase 1 closed-loop proof.
 
 ## What this slice provides
 
