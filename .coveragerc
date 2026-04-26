@@ -1,0 +1,9 @@
+[run]
+source = ace
+omit =
+    ace/tests/*
+    */__pycache__/*
+
+[report]
+show_missing = true
+skip_empty = true
