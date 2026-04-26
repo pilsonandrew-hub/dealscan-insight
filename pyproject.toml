@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "super-ace-governed-foundation"
 version = "0.1.0"
-description = "Super A.C.E. governed foundation / Phase 0 continuity substrate for DealerScope work with two narrow local-only Phase 1 closed-loop proofs and two narrow local-only Phase 2 action-runtime proofs"
+description = "Super A.C.E. governed foundation / Phase 0 continuity substrate for DealerScope work with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, and one narrow local-only Phase 3 resume/recovery proof"
 readme = "ace/README.md"
 requires-python = ">=3.14"
 license = { text = "Proprietary" }
