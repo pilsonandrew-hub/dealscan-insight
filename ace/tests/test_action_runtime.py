@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import ace.action_runtime as action_runtime
 from ace.action_runtime import (
     ACTION_CREATED_BY,
     ACTION_EVIDENCE_URI,
@@ -61,6 +62,7 @@ class ActionRuntimeTests(unittest.TestCase):
         *,
         action_id: str,
         payload_json: str,
+        action_type: str = ACTION_KIND,
         status: str = "claimed",
         item_id: str | None = None,
         claimed_at: str | None = None,
@@ -77,7 +79,7 @@ class ActionRuntimeTests(unittest.TestCase):
                 (
                     action_id,
                     item_id if item_id is not None else self.item.id,
-                    ACTION_KIND,
+                    action_type,
                     payload_json,
                     status,
                     0,
@@ -260,6 +262,158 @@ class ActionRuntimeTests(unittest.TestCase):
         claim_record_operator_followup(self.db_path, action["action_id"])
 
         result = execute_record_operator_followup(self.db_path, action["action_id"])
+
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["evidence_written"])
+        self.assertIsNone(result["evidence_id"])
+        self.assertIn(missing_item_id, result["error_message"])
+
+        action_row = self._action_row(action["action_id"])
+        self.assertEqual(action_row["status"], "failed")
+        self.assertIsNotNone(action_row["completed_at"])
+        self.assertIsNotNone(action_row["error_message"])
+
+        with connect(self.db_path) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ?",
+                (missing_item_id,),
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_rejection_enqueue_claim_execute_writes_one_evidence_row_and_completes(self) -> None:
+        enqueue_result = action_runtime.enqueue_record_operator_rejection(
+            self.db_path,
+            self.item.id,
+            reason="Operator rejected the proposed change",
+        )
+        self.assertEqual(enqueue_result["action_type"], action_runtime.REJECTION_ACTION_KIND)
+        self.assertEqual(enqueue_result["item_id"], self.item.id)
+        self.assertEqual(enqueue_result["status"], "queued")
+
+        claim_result = action_runtime.claim_record_operator_rejection(self.db_path, enqueue_result["action_id"])
+        self.assertEqual(claim_result["status"], "claimed")
+        self.assertIsNotNone(claim_result["claimed_at"])
+
+        execute_result = action_runtime.execute_record_operator_rejection(self.db_path, enqueue_result["action_id"])
+        self.assertEqual(execute_result["status"], "completed")
+        self.assertTrue(execute_result["evidence_written"])
+        self.assertIsInstance(execute_result["evidence_id"], str)
+
+        action_row = self._action_row(enqueue_result["action_id"])
+        self.assertEqual(action_row["status"], "completed")
+        self.assertIsNotNone(action_row["claimed_at"])
+        self.assertIsNotNone(action_row["completed_at"])
+        self.assertIsNone(action_row["error_message"])
+
+        evidence_rows = self._evidence_rows()
+        self.assertEqual(len(evidence_rows), 1)
+        self.assertEqual(evidence_rows[0]["item_id"], self.item.id)
+        self.assertEqual(evidence_rows[0]["evidence_uri"], action_runtime.REJECTION_ACTION_EVIDENCE_URI)
+        self.assertEqual(evidence_rows[0]["created_by"], action_runtime.ACTION_CREATED_BY)
+        self.assertEqual(
+            json.loads(evidence_rows[0]["evidence_text"]),
+            {
+                "action_id": enqueue_result["action_id"],
+                "action_kind": action_runtime.REJECTION_ACTION_KIND,
+                "outcome": "operator_rejection_recorded",
+                "reason": "Operator rejected the proposed change",
+                "target_item_id": self.item.id,
+            },
+        )
+
+    def test_duplicate_enqueue_reuses_same_deterministic_rejection_action_row(self) -> None:
+        first = action_runtime.enqueue_record_operator_rejection(
+            self.db_path,
+            self.item.id,
+            reason="Operator rejected the proposed change",
+        )
+        second = action_runtime.enqueue_record_operator_rejection(
+            self.db_path,
+            self.item.id,
+            reason="Operator rejected the proposed change",
+        )
+
+        self.assertEqual(first["action_id"], second["action_id"])
+
+        with connect(self.db_path) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM action_queue WHERE id = ?",
+                (first["action_id"],),
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_duplicate_execute_does_not_duplicate_rejection_evidence(self) -> None:
+        action = action_runtime.enqueue_record_operator_rejection(
+            self.db_path,
+            self.item.id,
+            reason="Operator rejected the proposed change",
+        )
+        action_runtime.claim_record_operator_rejection(self.db_path, action["action_id"])
+
+        first = action_runtime.execute_record_operator_rejection(self.db_path, action["action_id"])
+        second = action_runtime.execute_record_operator_rejection(self.db_path, action["action_id"])
+
+        self.assertEqual(first["evidence_id"], second["evidence_id"])
+        self.assertTrue(first["evidence_written"])
+        self.assertFalse(second["evidence_written"])
+
+        with connect(self.db_path) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                (self.item.id, action_runtime.REJECTION_ACTION_EVIDENCE_URI, action_runtime.ACTION_CREATED_BY),
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_rejection_claim_is_replay_safe_and_does_not_double_claim(self) -> None:
+        action = action_runtime.enqueue_record_operator_rejection(
+            self.db_path,
+            self.item.id,
+            reason="Operator rejected the proposed change",
+        )
+
+        first_claim = action_runtime.claim_record_operator_rejection(self.db_path, action["action_id"])
+        second_claim = action_runtime.claim_record_operator_rejection(self.db_path, action["action_id"])
+
+        self.assertEqual(first_claim["status"], "claimed")
+        self.assertEqual(second_claim["status"], "claimed")
+        self.assertEqual(first_claim["claimed_at"], second_claim["claimed_at"])
+        self.assertEqual(first_claim["action_id"], second_claim["action_id"])
+
+        action_row = self._action_row(action["action_id"])
+        self.assertEqual(action_row["status"], "claimed")
+        self.assertEqual(action_row["claimed_at"], first_claim["claimed_at"])
+
+    def test_rejection_execute_rejects_malformed_payload_without_writing_success_artifact(self) -> None:
+        action_id = "action_rejection_malformed_payload"
+        self._insert_action_row(
+            action_id=action_id,
+            payload_json='{"broken":',
+            action_type=action_runtime.REJECTION_ACTION_KIND,
+        )
+
+        result = action_runtime.execute_record_operator_rejection(self.db_path, action_id)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["evidence_written"])
+        self.assertIsNone(result["evidence_id"])
+        self.assertIn("malformed", result["error_message"])
+
+        action_row = self._action_row(action_id)
+        self.assertEqual(action_row["status"], "failed")
+        self.assertIsNotNone(action_row["completed_at"])
+        self.assertIsNotNone(action_row["error_message"])
+        self.assertEqual(self._evidence_rows(), [])
+
+    def test_rejection_execute_rejects_missing_target_without_writing_success_artifact(self) -> None:
+        missing_item_id = "item_missing_rejection"
+        action = action_runtime.enqueue_record_operator_rejection(
+            self.db_path,
+            missing_item_id,
+            reason="Operator rejected the proposed change",
+        )
+        action_runtime.claim_record_operator_rejection(self.db_path, action["action_id"])
+
+        result = action_runtime.execute_record_operator_rejection(self.db_path, action["action_id"])
 
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["evidence_written"])

@@ -13,6 +13,8 @@ from .storage import DB_PATH, append_event, bootstrap_db, connect, new_id, utc_n
 ACTION_KIND = "record_operator_followup"
 ACTION_CREATED_BY = "ace.phase2.action_runtime"
 ACTION_EVIDENCE_URI = "ace://phase2/action-outcome"
+REJECTION_ACTION_KIND = "record_operator_rejection"
+REJECTION_ACTION_EVIDENCE_URI = "ace://phase2/action-rejection"
 
 _ACTION_STATUS_QUEUED = "queued"
 _ACTION_STATUS_CLAIMED = "claimed"
@@ -27,15 +29,103 @@ def enqueue_record_operator_followup(
     note: str,
     actor: str | None = None,
 ) -> dict[str, Any]:
+    return _enqueue_record_operator_action(
+        db_path,
+        item_id,
+        action_kind=ACTION_KIND,
+        payload_field_name="note",
+        payload_field_value=note,
+        actor=actor,
+    )
+
+
+def enqueue_record_operator_rejection(
+    db_path: Path | str = DB_PATH,
+    item_id: str | None = None,
+    *,
+    reason: str,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    return _enqueue_record_operator_action(
+        db_path,
+        item_id,
+        action_kind=REJECTION_ACTION_KIND,
+        payload_field_name="reason",
+        payload_field_value=reason,
+        actor=actor,
+    )
+
+
+def claim_record_operator_followup(
+    db_path: Path | str = DB_PATH,
+    action_id: str | None = None,
+    *,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    return _claim_record_operator_action(db_path, action_id, action_kind=ACTION_KIND)
+
+
+def claim_record_operator_rejection(
+    db_path: Path | str = DB_PATH,
+    action_id: str | None = None,
+    *,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    return _claim_record_operator_action(db_path, action_id, action_kind=REJECTION_ACTION_KIND)
+
+
+def execute_record_operator_followup(
+    db_path: Path | str = DB_PATH,
+    action_id: str | None = None,
+    *,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    return _execute_record_operator_action(
+        db_path,
+        action_id,
+        action_kind=ACTION_KIND,
+        payload_field_name="note",
+        outcome="operator_followup_recorded",
+        evidence_uri=ACTION_EVIDENCE_URI,
+        actor=actor,
+    )
+
+
+def execute_record_operator_rejection(
+    db_path: Path | str = DB_PATH,
+    action_id: str | None = None,
+    *,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    return _execute_record_operator_action(
+        db_path,
+        action_id,
+        action_kind=REJECTION_ACTION_KIND,
+        payload_field_name="reason",
+        outcome="operator_rejection_recorded",
+        evidence_uri=REJECTION_ACTION_EVIDENCE_URI,
+        actor=actor,
+    )
+
+
+def _enqueue_record_operator_action(
+    db_path: Path | str,
+    item_id: str | None,
+    *,
+    action_kind: str,
+    payload_field_name: str,
+    payload_field_value: str,
+    actor: str | None = None,
+) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_item_id = _normalize_required_text(item_id, field_name="item_id")
-    normalized_note = _normalize_required_text(note, field_name="note")
+    normalized_value = _normalize_required_text(payload_field_value, field_name=payload_field_name)
     repo = ItemRepository(db_path)
     queued_item_id = normalized_item_id if repo.get_item(normalized_item_id) is not None else None
     payload = {
-        "action_kind": ACTION_KIND,
+        "action_kind": action_kind,
         "target_item_id": normalized_item_id,
-        "note": normalized_note,
+        payload_field_name: normalized_value,
     }
     action_id = _deterministic_action_id(payload)
     created_at = utc_now()
@@ -53,7 +143,7 @@ def enqueue_record_operator_followup(
                 (
                     action_id,
                     queued_item_id,
-                    ACTION_KIND,
+                    action_kind,
                     _canonical_json(payload),
                     _ACTION_STATUS_QUEUED,
                     0,
@@ -72,11 +162,11 @@ def enqueue_record_operator_followup(
     return _row_to_action_result(row, evidence_id=None, evidence_written=False)
 
 
-def claim_record_operator_followup(
-    db_path: Path | str = DB_PATH,
-    action_id: str | None = None,
+def _claim_record_operator_action(
+    db_path: Path | str,
+    action_id: str | None,
     *,
-    actor: str | None = None,
+    action_kind: str,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_action_id = _normalize_required_text(action_id, field_name="action_id")
@@ -86,6 +176,9 @@ def claim_record_operator_followup(
         row = _fetch_action_row(connection, normalized_action_id)
         if row is None:
             raise KeyError(f"unknown action_id: {normalized_action_id}")
+
+        if row["action_type"] != action_kind:
+            raise ValidationError(f"wrong action kind: expected {action_kind}, got {row['action_type']}")
 
         if row["status"] == _ACTION_STATUS_QUEUED:
             connection.execute(
@@ -103,10 +196,14 @@ def claim_record_operator_followup(
     return _row_to_action_result(row, evidence_id=None, evidence_written=False)
 
 
-def execute_record_operator_followup(
-    db_path: Path | str = DB_PATH,
-    action_id: str | None = None,
+def _execute_record_operator_action(
+    db_path: Path | str,
+    action_id: str | None,
     *,
+    action_kind: str,
+    payload_field_name: str,
+    outcome: str,
+    evidence_uri: str,
     actor: str | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
@@ -119,8 +216,18 @@ def execute_record_operator_followup(
         if row is None:
             raise KeyError(f"unknown action_id: {normalized_action_id}")
 
+        if row["action_type"] != action_kind:
+            raise ValidationError(f"wrong action kind: expected {action_kind}, got {row['action_type']}")
+
         if row["status"] in {_ACTION_STATUS_COMPLETED, _ACTION_STATUS_FAILED}:
-            evidence_id = _existing_action_evidence_id(connection, row)
+            evidence_id = _existing_action_evidence_id(
+                connection,
+                row,
+                action_kind=action_kind,
+                payload_field_name=payload_field_name,
+                outcome=outcome,
+                evidence_uri=evidence_uri,
+            )
             return _row_to_action_result(
                 row,
                 evidence_id=evidence_id,
@@ -128,7 +235,7 @@ def execute_record_operator_followup(
             )
 
         if row["status"] != _ACTION_STATUS_CLAIMED:
-            raise ValidationError("record_operator_followup actions must be claimed before execution")
+            raise ValidationError(f"{action_kind} actions must be claimed before execution")
 
         try:
             payload = _decode_action_payload(row["payload_json"])
@@ -172,7 +279,7 @@ def execute_record_operator_followup(
             )
         try:
             target_item_id = _normalize_required_text(payload.get("target_item_id"), field_name="target_item_id")
-            note = _normalize_required_text(payload.get("note"), field_name="note")
+            value = _normalize_required_text(payload.get(payload_field_name), field_name=payload_field_name)
         except ValidationError as exc:
             error_message = f"invalid action payload: {exc}"
             connection.execute(
@@ -216,9 +323,9 @@ def execute_record_operator_followup(
         evidence_text = _canonical_json(
             {
                 "action_id": normalized_action_id,
-                "action_kind": ACTION_KIND,
-                "note": note,
-                "outcome": "operator_followup_recorded",
+                "action_kind": action_kind,
+                payload_field_name: value,
+                "outcome": outcome,
                 "target_item_id": target_item_id,
             }
         )
@@ -230,7 +337,7 @@ def execute_record_operator_followup(
             ORDER BY created_at ASC, id ASC
             LIMIT 1
             """,
-            (target_item_id, ACTION_EVIDENCE_URI, ACTION_CREATED_BY, evidence_text),
+            (target_item_id, evidence_uri, ACTION_CREATED_BY, evidence_text),
         ).fetchone()
 
         evidence_written = False
@@ -247,7 +354,7 @@ def execute_record_operator_followup(
                     evidence_id,
                     target_item_id,
                     evidence_text,
-                    ACTION_EVIDENCE_URI,
+                    evidence_uri,
                     ACTION_CREATED_BY,
                     created_at,
                 ),
@@ -259,7 +366,7 @@ def execute_record_operator_followup(
                     "item_id": target_item_id,
                     "evidence_id": evidence_id,
                     "evidence_text": evidence_text,
-                    "evidence_uri": ACTION_EVIDENCE_URI,
+                    "evidence_uri": evidence_uri,
                     "created_by": ACTION_CREATED_BY,
                 },
                 item_id=target_item_id,
@@ -328,17 +435,28 @@ def _fetch_action_row(connection: sqlite3.Connection, action_id: str) -> sqlite3
     ).fetchone()
 
 
-def _existing_action_evidence_id(connection: sqlite3.Connection, row: sqlite3.Row) -> str | None:
-    payload = _decode_action_payload(row["payload_json"])
-    evidence_text = _canonical_json(
-        {
-            "action_id": row["id"],
-            "action_kind": ACTION_KIND,
-            "note": _normalize_required_text(payload.get("note"), field_name="note"),
-            "outcome": "operator_followup_recorded",
-            "target_item_id": _normalize_required_text(payload.get("target_item_id"), field_name="target_item_id"),
-        }
-    )
+def _existing_action_evidence_id(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    action_kind: str,
+    payload_field_name: str,
+    outcome: str,
+    evidence_uri: str,
+) -> str | None:
+    try:
+        payload = _decode_action_payload(row["payload_json"])
+        evidence_text = _canonical_json(
+            {
+                "action_id": row["id"],
+                "action_kind": action_kind,
+                payload_field_name: _normalize_required_text(payload.get(payload_field_name), field_name=payload_field_name),
+                "outcome": outcome,
+                "target_item_id": _normalize_required_text(payload.get("target_item_id"), field_name="target_item_id"),
+            }
+        )
+    except (json.JSONDecodeError, ValidationError):
+        return None
     evidence_row = connection.execute(
         """
         SELECT id
@@ -347,7 +465,7 @@ def _existing_action_evidence_id(connection: sqlite3.Connection, row: sqlite3.Ro
         ORDER BY created_at ASC, id ASC
         LIMIT 1
         """,
-        (row["item_id"], ACTION_EVIDENCE_URI, ACTION_CREATED_BY, evidence_text),
+        (row["item_id"], evidence_uri, ACTION_CREATED_BY, evidence_text),
     ).fetchone()
     return evidence_row["id"] if evidence_row is not None else None
 
