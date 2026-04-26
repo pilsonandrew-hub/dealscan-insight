@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-22T03:44:39+00:00",
+  "items": [
+    {
+      "id": "pending-promotion-whitespace-status",
+      "title": "Whitespace status",
+      "source": "continuity-policy",
+      "reason": "status must not be blank",
+      "created_at": "2026-04-22T01:02:03+00:00",
+      "status": "   "
+    }
+  ]
+}
