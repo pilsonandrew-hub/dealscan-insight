@@ -137,9 +137,6 @@ def release_runtime_ownership(
         if row is None:
             raise KeyError(f"unknown ownership_id: {normalized_ownership_id}")
 
-        payload = _decode_ownership_payload(row["payload_json"])
-        _assert_owner_matches(payload, normalized_owner, ownership_id=normalized_ownership_id)
-
         if row["status"] in {_OWNERSHIP_STATUS_COMPLETED, _OWNERSHIP_STATUS_FAILED}:
             evidence_id = _existing_ownership_evidence_id(connection, row)
             return _row_to_ownership_result(
@@ -151,6 +148,36 @@ def release_runtime_ownership(
 
         if row["status"] != _OWNERSHIP_STATUS_CLAIMED:
             raise ValidationError("ownership must be claimed before release")
+
+        try:
+            payload = _decode_ownership_payload(row["payload_json"])
+        except ValidationError as exc:
+            error_message = f"invalid ownership payload: {exc}"
+            connection.execute(
+                """
+                UPDATE action_queue
+                SET status = ?, completed_at = ?, error_message = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    _OWNERSHIP_STATUS_FAILED,
+                    completed_at,
+                    error_message,
+                    completed_at,
+                    normalized_ownership_id,
+                ),
+            )
+            connection.commit()
+            row = _fetch_ownership_row(connection, normalized_ownership_id)
+            assert row is not None, "ownership failure update failed unexpectedly"
+            return _row_to_ownership_result(
+                row,
+                evidence_id=None,
+                evidence_written=False,
+                error_message=error_message,
+            )
+
+        _assert_owner_matches(payload, normalized_owner, ownership_id=normalized_ownership_id)
 
         item = repo.get_item(row["item_id"])
         if item is None:
@@ -244,13 +271,18 @@ def _row_to_ownership_result(
     evidence_written: bool,
     error_message: str | None = None,
 ) -> dict[str, Any]:
-    payload = _decode_ownership_payload(row["payload_json"])
+    try:
+        payload = _decode_ownership_payload(row["payload_json"])
+    except ValidationError:
+        if row["status"] != _OWNERSHIP_STATUS_FAILED:
+            raise
+        payload = None
     return {
         "ownership_id": row["id"],
         "item_id": row["item_id"],
         "action_type": row["action_type"],
-        "owner": payload["owner"],
-        "metadata": payload["metadata"],
+        "owner": payload["owner"] if payload is not None else None,
+        "metadata": payload["metadata"] if payload is not None else None,
         "payload_json": row["payload_json"],
         "status": row["status"],
         "claimed_at": row["claimed_at"],

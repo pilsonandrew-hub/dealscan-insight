@@ -227,6 +227,37 @@ class RuntimeOwnershipTests(unittest.TestCase):
         self.assertIsNotNone(ownership_row["error_message"])
         self.assertEqual(self._evidence_rows(), [])
 
+    def test_release_rejects_malformed_persisted_payload_with_explicit_failure(self) -> None:
+        from ace.runtime_ownership import claim_runtime_ownership, register_runtime_ownership, release_runtime_ownership
+
+        registration = register_runtime_ownership(
+            self.db_path,
+            self.item.id,
+            owner="owner-a",
+            metadata={"kind": "bounded-work", "note": "phase4 ownership proof"},
+        )
+        claim_runtime_ownership(self.db_path, registration["ownership_id"], owner="owner-a")
+
+        with connect(self.db_path) as connection:
+            connection.execute(
+                "UPDATE action_queue SET payload_json = ? WHERE id = ?",
+                ('{"broken":', registration["ownership_id"]),
+            )
+            connection.commit()
+
+        result = release_runtime_ownership(self.db_path, registration["ownership_id"], owner="owner-a")
+
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["evidence_written"])
+        self.assertIsNone(result["evidence_id"])
+        self.assertIn("ownership payload", result["error_message"])
+
+        ownership_row = self._ownership_row(registration["ownership_id"])
+        self.assertEqual(ownership_row["status"], "failed")
+        self.assertIsNotNone(ownership_row["completed_at"])
+        self.assertIsNotNone(ownership_row["error_message"])
+        self.assertEqual(self._evidence_rows(), [])
+
     def test_register_rejects_conflicting_owner_for_same_work_item(self) -> None:
         from ace.runtime_ownership import register_runtime_ownership
 
