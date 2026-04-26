@@ -1,6 +1,6 @@
 # Super A.C.E. — Governed Foundation
 
-Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, and one narrow local-only Phase 3 resume/recovery proof.
+Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, one narrow local-only Phase 3 resume/recovery proof, and one narrow local-only Phase 4 runtime-ownership proof.
 
 ## What this slice provides
 
@@ -16,6 +16,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - local-only Phase 2 action-runtime proof that reuses the existing `action_queue` surface for one bounded ACE-owned lifecycle (`record_operator_followup`), proves queued/claimed/completed-or-failed semantics, writes only `ace://phase2/action-outcome` evidence, and stays replay-safe without continuity-source writes
 - local-only Phase 2B action-runtime proof that reuses the same bounded `action_queue` seam for a materially different ACE-owned lifecycle (`record_operator_rejection`), proves deterministic queued/claimed/completed-or-failed semantics, writes only `ace://phase2/action-rejection` evidence, and stays replay-safe without continuity-source writes
 - local-only Phase 3 resume/recovery proof that reuses existing `sessions` and `resume_candidates` surfaces for deterministic session registration, deterministic candidate registration, replay-safe claim semantics, bounded recovery completion, and explicit stale-target failure without continuity-source writes
+- local-only Phase 4 runtime-ownership proof that reuses the existing `action_queue` surface for deterministic ownership registration, replay-safe claim/release semantics, bounded local outcome evidence, and explicit missing-target failure without continuity-source writes
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
 ## Runtime
@@ -37,8 +38,9 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - phase1 closed-loop proof classifies pending items from the original pending-promotion source field, keeps `continuity/pending-promotions.json` as the ingest source label, writes only `ace://phase1/decision` evidence, and skips duplicate decision evidence on replay
 - phase1b closed-loop proof classifies eligible open-loop items from the original source-row severity field, keeps `continuity/open-loops.json` as the ingest source label, writes only `ace://phase1b/decision` evidence, and skips duplicate decision evidence on replay
 - phase2 action-runtime proof enqueues deterministic `record_operator_followup` rows, claims them explicitly, executes only a bounded ACE-owned local evidence effect, fails explicitly without success evidence when preconditions break, and replays completed/failed rows idempotently
+- phase4 runtime-ownership proof reuses the existing `action_queue` seam for deterministic ownership registration, replay-safe claim/release semantics, one ACE-owned local ownership outcome artifact, and explicit missing-target failure without continuity-source writes
 - read-only continuity handling is guarded by automated tests so ingest proofs cannot silently drift into source-surface mutation without breaking CI
 
 ## Current scope
 
-This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime orchestration beyond the two bounded Phase 2 proofs, or production deployment semantics.
+This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime or runtime-ownership orchestration beyond the bounded Phase 2 and Phase 4 proofs, or production deployment semantics.
