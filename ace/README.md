@@ -1,6 +1,6 @@
 # Super A.C.E. — Governed Foundation
 
-Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, one narrow local-only Phase 3 resume/recovery proof, and one narrow local-only Phase 4 runtime-ownership proof.
+Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, and one narrow local-only Phase 4 runtime-ownership proof.
 
 ## What this slice provides
 
@@ -16,6 +16,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - local-only Phase 2 action-runtime proof that reuses the existing `action_queue` surface for one bounded ACE-owned lifecycle (`record_operator_followup`), proves queued/claimed/completed-or-failed semantics, writes only `ace://phase2/action-outcome` evidence, and stays replay-safe without continuity-source writes
 - local-only Phase 2B action-runtime proof that reuses the same bounded `action_queue` seam for a materially different ACE-owned lifecycle (`record_operator_rejection`), proves deterministic queued/claimed/completed-or-failed semantics, writes only `ace://phase2/action-rejection` evidence, and stays replay-safe without continuity-source writes
 - local-only Phase 3 resume/recovery proof that reuses existing `sessions` and `resume_candidates` surfaces for deterministic session registration, deterministic candidate registration, replay-safe claim semantics, bounded recovery completion, and explicit stale-target failure without continuity-source writes
+- local-only Phase 3B bounded recovery proof that reuses the same `sessions` and `resume_candidates` seam for deterministic selection/dismissal behavior, replay-safe completion semantics, and explicit stale-target failure without continuity-source writes
 - local-only Phase 4 runtime-ownership proof that reuses the existing `action_queue` surface for deterministic ownership registration, replay-safe claim/release semantics, bounded local outcome evidence, and explicit missing-target failure without continuity-source writes
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
@@ -43,4 +44,4 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 
 ## Current scope
 
-This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime or runtime-ownership orchestration beyond the bounded Phase 2 and Phase 4 proofs, or production deployment semantics.
+This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime, recovery-runtime, or runtime-ownership orchestration beyond the bounded Phase 2, Phase 3, and Phase 4 proofs, or production deployment semantics.
