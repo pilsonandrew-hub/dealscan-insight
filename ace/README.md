@@ -1,6 +1,6 @@
 # Super A.C.E. — Governed Foundation
 
-Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs and one narrow local-only Phase 2 action-runtime proof.
+Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs and two narrow local-only Phase 2 action-runtime proofs.
 
 ## What this slice provides
 
@@ -14,6 +14,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - local-only Phase 1 closed-loop proof that reuses pending-promotions ingest, writes one ACE-owned decision evidence row per pending item, and stays replay-safe without queue or continuity-source writes
 - local-only Phase 1B closed-loop proof that reuses open-loops ingest, derives a bounded severity-based decision from original source rows, writes one ACE-owned decision evidence row per eligible item, and stays replay-safe without continuity-source writes
 - local-only Phase 2 action-runtime proof that reuses the existing `action_queue` surface for one bounded ACE-owned lifecycle (`record_operator_followup`), proves queued/claimed/completed-or-failed semantics, writes only `ace://phase2/action-outcome` evidence, and stays replay-safe without continuity-source writes
+- local-only Phase 2B action-runtime proof that reuses the same bounded `action_queue` seam for a materially different ACE-owned lifecycle (`record_operator_rejection`), proves deterministic queued/claimed/completed-or-failed semantics, writes only `ace://phase2/action-rejection` evidence, and stays replay-safe without continuity-source writes
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
 ## Runtime
@@ -39,4 +40,4 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 
 ## Current scope
 
-This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime orchestration beyond the one bounded Phase 2 proof, or production deployment semantics.
+This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime orchestration beyond the two bounded Phase 2 proofs, or production deployment semantics.
