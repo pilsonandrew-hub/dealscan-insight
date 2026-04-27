@@ -216,5 +216,96 @@ class OwnedRecoveryRuntimeTests(unittest.TestCase):
         self.assertEqual(self._evidence_rows(), [])
 
 
+    def test_finalize_heals_interrupted_cross_surface_success_without_duplicate_evidence(self) -> None:
+        from ace.owned_recovery_runtime import (
+            finalize_owned_recovery_lifecycle,
+            start_owned_recovery_lifecycle,
+        )
+        from ace.resume_recovery_runtime import RECOVERY_CREATED_BY, RECOVERY_EVIDENCE_URI
+
+        started = start_owned_recovery_lifecycle(
+            self.db_path,
+            item_id=self.item.id,
+            owner="owner-a",
+            ownership_metadata={"kind": "owned-recovery", "note": "phase11"},
+            session_key="phase11.session",
+            session_metadata={"source": "unit-test"},
+            candidate_score=0.75,
+            candidate_reason={"kind": "resume", "detail": "phase11 ordered recovery"},
+        )
+
+        recovery_evidence_text = json.dumps(
+            {
+                "candidate_id": started["candidate_id"],
+                "item_id": self.item.id,
+                "outcome": "resume_recovery_dismissed",
+                "session_id": started["session_id"],
+                "session_key": "phase11.session",
+                "terminal_status": "dismissed",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        recovery_evidence_id = self.repo.add_evidence(
+            self.item.id,
+            evidence_text=recovery_evidence_text,
+            evidence_uri=RECOVERY_EVIDENCE_URI,
+            created_by=RECOVERY_CREATED_BY,
+        )
+
+        with connect(self.db_path) as connection:
+            connection.execute(
+                "UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?",
+                ("dismissed", "2026-04-27T00:00:00+00:00", started["session_id"]),
+            )
+            connection.commit()
+
+        ownership_before = self._ownership_row(started["ownership_id"])
+        self.assertEqual(ownership_before["status"], "claimed")
+        session_before = self._session_row(started["session_id"])
+        self.assertEqual(session_before["status"], "dismissed")
+        evidence_rows = self._evidence_rows()
+        self.assertEqual(len(evidence_rows), 1)
+
+        first = finalize_owned_recovery_lifecycle(
+            self.db_path,
+            ownership_id=started["ownership_id"],
+            session_id=started["session_id"],
+            candidate_id=started["candidate_id"],
+            owner="owner-a",
+        )
+        second = finalize_owned_recovery_lifecycle(
+            self.db_path,
+            ownership_id=started["ownership_id"],
+            session_id=started["session_id"],
+            candidate_id=started["candidate_id"],
+            owner="owner-a",
+        )
+
+        self.assertEqual(first["recovery_status"], "dismissed")
+        self.assertEqual(first["ownership_status"], "completed")
+        self.assertFalse(first["recovery_evidence_written"])
+        self.assertTrue(first["ownership_evidence_written"])
+        self.assertEqual(first["recovery_evidence_id"], recovery_evidence_id)
+
+        self.assertEqual(second["recovery_status"], "dismissed")
+        self.assertEqual(second["ownership_status"], "completed")
+        self.assertFalse(second["recovery_evidence_written"])
+        self.assertFalse(second["ownership_evidence_written"])
+        self.assertEqual(second["recovery_evidence_id"], recovery_evidence_id)
+        self.assertEqual(first["ownership_evidence_id"], second["ownership_evidence_id"])
+
+        ownership_after = self._ownership_row(started["ownership_id"])
+        self.assertEqual(ownership_after["status"], "completed")
+        self.assertIsNotNone(ownership_after["completed_at"])
+
+        evidence_rows = self._evidence_rows()
+        self.assertEqual(len(evidence_rows), 2)
+        self.assertEqual(
+            {row["evidence_uri"] for row in evidence_rows},
+            {"ace://phase3b/recovery-outcome", "ace://phase4/runtime-ownership-outcome"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
