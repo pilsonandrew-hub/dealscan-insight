@@ -283,6 +283,57 @@ class RuntimeOwnershipTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(count, 1)
 
+    def test_release_heals_interrupted_success_without_duplicate_evidence(self) -> None:
+        from ace.runtime_ownership import (
+            OWNERSHIP_CREATED_BY,
+            OWNERSHIP_EVIDENCE_URI,
+            claim_runtime_ownership,
+            register_runtime_ownership,
+            release_runtime_ownership,
+        )
+
+        registration = register_runtime_ownership(
+            self.db_path,
+            self.item.id,
+            owner="owner-a",
+            metadata={"kind": "bounded-work", "note": "phase9 durability proof"},
+        )
+        claim_runtime_ownership(self.db_path, registration["ownership_id"], owner="owner-a")
+
+        interrupted_evidence = {
+            "item_id": self.item.id,
+            "metadata": {"kind": "bounded-work", "note": "phase9 durability proof"},
+            "outcome": "ownership_released_completed",
+            "ownership_id": registration["ownership_id"],
+            "owner": "owner-a",
+        }
+        evidence_id = self.repo.add_evidence(
+            self.item.id,
+            evidence_text=json.dumps(interrupted_evidence, sort_keys=True, separators=(",", ":")),
+            evidence_uri=OWNERSHIP_EVIDENCE_URI,
+            created_by=OWNERSHIP_CREATED_BY,
+        )
+
+        interrupted_row = self._ownership_row(registration["ownership_id"])
+        self.assertEqual(interrupted_row["status"], "claimed")
+        self.assertEqual(len(self._evidence_rows()), 1)
+
+        result = release_runtime_ownership(self.db_path, registration["ownership_id"], owner="owner-a")
+
+        self.assertEqual(result["status"], "completed")
+        self.assertFalse(result["evidence_written"])
+        self.assertEqual(result["evidence_id"], evidence_id)
+
+        ownership_row = self._ownership_row(registration["ownership_id"])
+        self.assertEqual(ownership_row["status"], "completed")
+        self.assertIsNotNone(ownership_row["completed_at"])
+        self.assertIsNone(ownership_row["error_message"])
+
+        evidence_rows = self._evidence_rows()
+        self.assertEqual(len(evidence_rows), 1)
+        self.assertEqual(evidence_rows[0]["evidence_uri"], OWNERSHIP_EVIDENCE_URI)
+        self.assertEqual(result["evidence_id"], evidence_id)
+
 
 if __name__ == "__main__":
     unittest.main()
