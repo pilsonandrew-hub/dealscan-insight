@@ -1,6 +1,6 @@
 # Super A.C.E. — Governed Foundation
 
-Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, and two narrow local-only Phase 4 runtime-ownership proofs.
+Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, two narrow local-only Phase 4 runtime-ownership proofs, and one narrow local-only Phase 7A cross-seam owned-recovery lifecycle proof.
 
 ## What this slice provides
 
@@ -19,6 +19,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - local-only Phase 3B bounded recovery proof that reuses the same `sessions` and `resume_candidates` seam for deterministic selection/dismissal behavior, replay-safe completion semantics, and explicit stale-target failure without continuity-source writes
 - local-only Phase 4 runtime-ownership proof that reuses the existing `action_queue` surface for deterministic ownership registration, replay-safe claim/release semantics, bounded local outcome evidence, and explicit missing-target failure without continuity-source writes
 - local-only Phase 4B runtime-ownership proof on the same bounded seam that treats malformed or invalid persisted ownership payload during release as a durable explicit failed outcome, writes no success evidence, and remains replay-safe without continuity-source writes
+- local-only Phase 7A cross-seam owned-recovery lifecycle proof that composes the bounded ownership and recovery seams for the same work item, proves a replay-safe claimed-ownership → selected-recovery → dismissed/completed terminal path, rejects cross-item seam mismatch, and preserves claimed ownership without success artifacts when recovery fails
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
 ## Runtime
@@ -42,6 +43,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - phase2 action-runtime proof enqueues deterministic `record_operator_followup` rows, claims them explicitly, executes only a bounded ACE-owned local evidence effect, fails explicitly without success evidence when preconditions break, and replays completed/failed rows idempotently
 - phase4 runtime-ownership proof reuses the existing `action_queue` seam for deterministic ownership registration, replay-safe claim/release semantics, one ACE-owned local ownership outcome artifact, and explicit missing-target failure without continuity-source writes
 - phase4b runtime-ownership proof stays on the same bounded seam and treats malformed or invalid persisted ownership payload during release as a durable explicit failed outcome with no success evidence
+- phase7a cross-seam owned-recovery lifecycle proof composes bounded ownership and recovery behavior for the same item, writes exactly one recovery artifact plus one ownership artifact on the happy path, rejects cross-seam item mismatch, and leaves ownership claimed with no success artifacts when recovery fails
 - read-only continuity handling is guarded by automated tests so ingest proofs cannot silently drift into source-surface mutation without breaking CI
 
 ## Runtime ownership payload invariant
@@ -60,4 +62,4 @@ Current proof boundary:
 
 ## Current scope
 
-This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime, recovery-runtime, or runtime-ownership orchestration beyond the bounded Phase 2, Phase 3, and Phase 4/4B proofs, or production deployment semantics.
+This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime, recovery-runtime, or runtime-ownership orchestration beyond the bounded Phase 2, Phase 3, Phase 4/4B, and single Phase 7A proof, or production deployment semantics.
