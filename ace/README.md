@@ -1,6 +1,6 @@
 # Super A.C.E. — Governed Foundation
 
-Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, two narrow local-only Phase 4 runtime-ownership proofs, and one narrow local-only Phase 7A cross-seam owned-recovery lifecycle proof.
+Super A.C.E. is currently best described as a governed foundation / Phase 0 continuity substrate for DealerScope work, with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, two narrow local-only Phase 4 runtime-ownership proofs, one narrow local-only Phase 7A cross-seam owned-recovery lifecycle proof, and one narrow local-only Phase 9A ownership interruption replay-durability proof.
 
 ## What this slice provides
 
@@ -20,6 +20,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - local-only Phase 4 runtime-ownership proof that reuses the existing `action_queue` surface for deterministic ownership registration, replay-safe claim/release semantics, bounded local outcome evidence, and explicit missing-target failure without continuity-source writes
 - local-only Phase 4B runtime-ownership proof on the same bounded seam that treats malformed or invalid persisted ownership payload during release as a durable explicit failed outcome, writes no success evidence, and remains replay-safe without continuity-source writes
 - local-only Phase 7A cross-seam owned-recovery lifecycle proof that composes the bounded ownership and recovery seams for the same work item, proves a replay-safe claimed-ownership → selected-recovery → dismissed/completed terminal path, rejects cross-item seam mismatch, and preserves claimed ownership without success artifacts when recovery fails
+- local-only Phase 9A ownership interruption replay-durability proof that demonstrates a success artifact already written on the ownership seam can be replayed safely without duplicate evidence and without a false completed claim when the queue row is still only `claimed`
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
 ## Runtime
@@ -62,4 +63,4 @@ Current proof boundary:
 
 ## Current scope
 
-This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime, recovery-runtime, or runtime-ownership orchestration beyond the bounded Phase 2, Phase 3, Phase 4/4B, and single Phase 7A proof, or production deployment semantics.
+This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime, recovery-runtime, or runtime-ownership orchestration beyond the bounded Phase 2, Phase 3, Phase 4/4B, Phase 7A, and Phase 9A proofs, or production deployment semantics.
