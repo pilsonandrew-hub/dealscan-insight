@@ -23,6 +23,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - local-only Phase 9A ownership interruption replay-durability proof that demonstrates a success artifact already written on the ownership seam can be replayed safely without duplicate evidence and without a false completed claim when the queue row is still only `claimed`
 - local-only Phase 9B recovery interruption replay-durability proof that demonstrates a success artifact already written on the newer resume-recovery completion seam can be replayed safely without duplicate evidence and without a false completed claim when the session row is still only `claimed`
 - local-only Phase 11 owned-recovery cross-surface interrupted-success ordering proof that demonstrates replay-safe healing when recovery is already durably `dismissed` with recovery evidence present while ownership remains only `claimed`, completing ownership without duplicate recovery evidence and without false cross-surface terminal claims
+- broader local runtime contract doctrine stating what currently counts as durable local success, durable local failure, replay-healable intermediate state, evidence non-duplication, and ordered but explicitly non-atomic runtime behavior across the landed local seams
 - CLI commands: `intake`, `list`, `show`, `add-evidence`, `add-obligation`, `add-contradiction`, `approve`, `block`, `done`, `resolve`, `drop`
 
 ## Runtime
@@ -49,6 +50,7 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - phase7a cross-seam owned-recovery lifecycle proof composes bounded ownership and recovery behavior for the same item, writes exactly one recovery artifact plus one ownership artifact on the happy path, rejects cross-seam item mismatch, and leaves ownership claimed with no success artifacts when recovery fails
 - phase11 owned-recovery cross-surface ordering proof demonstrates replay-safe healing of the mixed interrupted-success state where recovery is already durably `dismissed` with recovery evidence present while ownership remains only `claimed`, completing ownership without duplicate recovery evidence and without false cross-surface terminal claims
 - read-only continuity handling is guarded by automated tests so ingest proofs cannot silently drift into source-surface mutation without breaking CI
+- landed runtime contract truth is local-only and seam-bounded: durable success requires the owning row to reach its seam-specific terminal success state plus its required success evidence; durable failure requires explicit terminal failure state plus inspectable failure context and no success evidence; interrupted states are acceptable only where landed proofs show they are replay-healable without duplicate evidence or false terminal claims
 
 ## Runtime ownership payload invariant
 
@@ -67,3 +69,5 @@ Current proof boundary:
 ## Current scope
 
 This slice does not include sweep logic, notifications, LaunchAgent wiring, LLM logic, broader continuity orchestration, write authority over continuity-loop sources, general action-runtime, recovery-runtime, or runtime-ownership orchestration beyond the bounded Phase 2, Phase 3, Phase 4/4B, Phase 7A, Phase 9A, Phase 9B, and Phase 11 proofs, or production deployment semantics.
+
+It also does not claim atomic all-at-once completion across seams. The strongest current runtime contract is narrower: ordered, replay-healable local behavior on landed seams, with explicit terminal states, explicit bounded failure states, and evidence non-duplication where proven.

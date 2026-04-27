@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "super-ace-governed-foundation"
 version = "0.1.0"
-description = "Super A.C.E. governed foundation / Phase 0 continuity substrate for DealerScope work with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, two narrow local-only Phase 4 runtime-ownership proofs, one narrow local-only Phase 7A cross-seam owned-recovery lifecycle proof, one narrow local-only Phase 9A ownership interruption replay-durability proof, one narrow local-only Phase 9B recovery interruption replay-durability proof, and one narrow local-only Phase 11 owned-recovery cross-surface interrupted-success ordering proof"
+description = "Super A.C.E. governed foundation / Phase 0 continuity substrate for DealerScope work with two narrow local-only Phase 1 closed-loop proofs, two narrow local-only Phase 2 action-runtime proofs, two narrow local-only Phase 3 resume/recovery proofs, two narrow local-only Phase 4 runtime-ownership proofs, one narrow local-only Phase 7A cross-seam owned-recovery lifecycle proof, one narrow local-only Phase 9A ownership interruption replay-durability proof, one narrow local-only Phase 9B recovery interruption replay-durability proof, one narrow local-only Phase 11 owned-recovery cross-surface interrupted-success ordering proof, and a doctrine-level local runtime contract clarifying durable success/failure, replay healing, evidence non-duplication, and explicitly non-atomic ordered local behavior on landed seams"
 readme = "ace/README.md"
 requires-python = ">=3.14"
 license = { text = "Proprietary" }
