@@ -173,6 +173,61 @@ class ResumeRuntimeTests(unittest.TestCase):
         self.assertEqual(first["session_id"], session["session_id"])
         self.assertEqual(second["session_id"], session["session_id"])
 
+    def test_complete_heals_interrupted_success_without_duplicate_evidence(self) -> None:
+        from ace.resume_runtime import (
+            RECOVERY_CREATED_BY,
+            RECOVERY_EVIDENCE_URI,
+            claim_resume_candidate,
+            complete_resume_candidate,
+            register_resume_candidate,
+            register_resume_session,
+        )
+
+        session = register_resume_session(self.db_path, session_key="phase3.session")
+        candidate = register_resume_candidate(
+            self.db_path,
+            item_id=self.item.id,
+            score=0.75,
+            reason={"kind": "stale_followup", "detail": "operator session expired"},
+        )
+        claim_resume_candidate(self.db_path, candidate["candidate_id"], session_id=session["session_id"])
+
+        evidence_text = json.dumps(
+            {
+                "candidate_id": candidate["candidate_id"],
+                "item_id": self.item.id,
+                "outcome": "resume_recovery_completed",
+                "session_id": session["session_id"],
+                "session_key": "phase3.session",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        evidence_id = self.repo.add_evidence(
+            self.item.id,
+            evidence_text=evidence_text,
+            evidence_uri=RECOVERY_EVIDENCE_URI,
+            created_by=RECOVERY_CREATED_BY,
+        )
+
+        session_row = self._session_row(session["session_id"])
+        self.assertEqual(session_row["status"], "claimed")
+        evidence_rows = self._evidence_rows()
+        self.assertEqual(len(evidence_rows), 1)
+
+        result = complete_resume_candidate(self.db_path, candidate["candidate_id"], session_id=session["session_id"])
+        self.assertEqual(result["status"], "completed")
+        self.assertFalse(result["evidence_written"])
+        self.assertEqual(result["evidence_id"], evidence_id)
+
+        session_row = self._session_row(session["session_id"])
+        self.assertEqual(session_row["status"], "completed")
+        self.assertIsNotNone(session_row["ended_at"])
+
+        evidence_rows = self._evidence_rows()
+        self.assertEqual(len(evidence_rows), 1)
+        self.assertEqual(evidence_rows[0]["evidence_uri"], RECOVERY_EVIDENCE_URI)
+
     def test_complete_rejects_stale_missing_target_without_writing_success_artifact(self) -> None:
         from ace.resume_runtime import claim_resume_candidate, complete_resume_candidate, register_resume_candidate, register_resume_session
 
