@@ -2,7 +2,7 @@ name: Scraper Health Agent
 
 on:
   schedule:
-    - cron: '30 */3 * * *'   # Every 3hrs, 30min after scraper runs
+    - cron: '30 */12 * * *'   # Every 12hrs, 30min after scraper runs
   workflow_dispatch:
 
 jobs:
@@ -29,11 +29,8 @@ jobs:
           ACTORS = {
               "ds-govdeals":      "CuKaIAcWyFS0EPrAz",
               "ds-publicsurplus": "9xxQLlRsROnSgA42i",
-              "ds-hibid":         "e8UeyRvQ6QSnX5fhP",
               "ds-allsurplus":    "gYGIfHeYeN3EzmLnB",
               "ds-municibid":     "svmsItf3CRBZuIntp",
-              "ds-bidcal":        "DF1THdFOBSYlxyNjD",
-              "ds-auctiontime":   "eb4oYXDf8qs1Ckbth",
               "ds-govplanet":     "pO2t5UDoSVmO1gvKJ",
               "ds-proxibid":      "bxhncvtHEP712WX2e",
               "ds-usgovbid":      "6XO9La81aEmtsCT3g",
