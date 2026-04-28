@@ -54,6 +54,15 @@ jobs:
               with urllib.request.urlopen(req, context=ctx) as resp:
                   return json.loads(resp.read())
 
+          def safe_send_telegram(text: str):
+              try:
+                  send_telegram(text)
+                  print("Telegram notification sent")
+                  return True
+              except Exception as exc:
+                  print(f"Telegram notification failed: {exc}")
+                  return False
+
           def fetch_ids(filters):
               ids = []
               offset = 0
@@ -108,6 +117,8 @@ jobs:
               f"Archived deals: <b>{archived_count}</b>\n"
               f"Run time: {now.strftime('%Y-%m-%d %H:%M UTC')}"
           )
-          send_telegram(message)
+          notification_ok = safe_send_telegram(message)
           print(message.replace("<b>", "").replace("</b>", ""))
+          if not notification_ok:
+              print("Sweep completed, but Telegram delivery failed; investigate TELEGRAM_BOT_TOKEN / chat permissions.")
           PYEOF
