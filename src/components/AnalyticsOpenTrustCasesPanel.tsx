@@ -37,6 +37,8 @@ export default function AnalyticsOpenTrustCasesPanel({
   recentOpenTrustEvents,
   recentNeedsActionCount,
 }: AnalyticsOpenTrustCasesPanelProps) {
+  const paperclipBaseUrl = import.meta.env.VITE_PAPERCLIP_BASE_URL?.trim().replace(/\/$/, '');
+
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -47,9 +49,9 @@ export default function AnalyticsOpenTrustCasesPanel({
               Needs action: {recentNeedsActionCount}
             </span>
           )}
-          {recentOpenTrustEvents.length > 0 && (
+          {recentOpenTrustEvents.length > 0 && paperclipBaseUrl && (
             <a
-              href="http://localhost:3100/DEA/issues?status=backlog"
+              href={`${paperclipBaseUrl}/DEA/issues?status=backlog`}
               target="_blank"
               rel="noreferrer"
               className="text-[11px] text-violet-300 underline underline-offset-2"
@@ -110,9 +112,9 @@ export default function AnalyticsOpenTrustCasesPanel({
                     <span className={`rounded border px-2 py-0.5 ${event.paperclip.status === 'issue_created' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : event.paperclip.status === 'issue_updated' ? 'border-violet-500/20 bg-violet-500/10 text-violet-300' : 'border-gray-500/20 bg-gray-500/10 text-gray-300'}`}>
                       Paperclip {event.paperclip.status === 'issue_created' ? 'created' : event.paperclip.status === 'issue_updated' ? 'updated' : event.paperclip.status.replaceAll('_', ' ')}
                     </span>
-                    {event.paperclip.identifier && event.paperclip.issue_id ? (
+                    {event.paperclip.identifier && event.paperclip.issue_id && paperclipBaseUrl ? (
                       <a
-                        href={`http://localhost:3100/DEA/issues/${event.paperclip.issue_id}`}
+                        href={`${paperclipBaseUrl}/DEA/issues/${event.paperclip.issue_id}`}
                         target="_blank"
                         rel="noreferrer"
                         className="text-violet-300 underline underline-offset-2"

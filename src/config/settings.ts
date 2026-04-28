@@ -81,12 +81,17 @@ export interface AppSettings {
 }
 
 // Default configuration
+const browserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+const browserWebSocketOrigin = typeof window !== 'undefined'
+  ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+  : '';
+
 const defaultSettings: AppSettings = {
   environment: import.meta.env.MODE as 'development' | 'staging' | 'production' || 'development',
   debug: import.meta.env.MODE === 'development',
   
   api: {
-    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    baseUrl: import.meta.env.VITE_API_URL || '/api',
     timeout: 30000,
     retries: 3,
     circuitBreakerThreshold: 5,
@@ -130,7 +135,7 @@ const defaultSettings: AppSettings = {
   },
   
   websocket: {
-    url: import.meta.env.VITE_WS_URL || 'ws://localhost:8000',
+    url: import.meta.env.VITE_WS_URL || browserWebSocketOrigin,
     autoReconnect: true,
     maxReconnectAttempts: 5,
     reconnectInterval: 3000
