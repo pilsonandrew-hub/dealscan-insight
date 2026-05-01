@@ -446,7 +446,7 @@ export const CrosshairDashboard = () => {
             Crosshair
           </h1>
           <p className="text-muted-foreground">
-            Premium directed retrieval system with dual-mode ingestion
+            Directed vehicle search across normalized listings with saved intents and job tracking
           </p>
         </div>
         <Badge variant="secondary" className="text-sm">

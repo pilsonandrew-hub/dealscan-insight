@@ -359,6 +359,9 @@ export const api = {
     }
   },
 
+  // Legacy quick-filter helper: queries the scored opportunities table directly.
+  // This is NOT the canonical Crosshair engine. The full Crosshair search is
+  // handled by the crosshair-search edge function over listings_normalized.
   async searchCrosshairOpportunities(filters: CrosshairSearchFilters): Promise<{ data: Opportunity[]; total: number }> {
     try {
       const limit = filters.limit ?? 50;

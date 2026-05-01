@@ -134,7 +134,7 @@ export const CrosshairResults = ({
             {total_count} Results Found
           </h3>
           <p className="text-sm text-muted-foreground">
-            Showing unified results from API and scraping sources
+            Showing results from normalized listings
           </p>
         </div>
         
