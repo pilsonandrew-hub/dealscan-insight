@@ -87,19 +87,19 @@ def _is_autonomy_eligible(item: Any, *, repo: ItemRepository | None = None) -> b
 def _approval_reason(item: Any) -> str:
     if item.item_type == AUTONOMY_ITEM_TYPE:
         return "machine-verifiable autonomy lane accepted item for governed execution"
-    return "governed real-work autonomy lane accepted machine-verifiable direct work item"
+    return "governed real-work autonomy lane accepted explicitly eligible direct work item"
 
 
 def _done_reason(item: Any) -> str:
     if item.item_type == AUTONOMY_ITEM_TYPE:
         return "machine-verifiable autonomy lane completed bounded work"
-    return "governed real-work autonomy lane completed machine-verifiable direct work item"
+    return "governed real-work autonomy lane completed explicitly eligible direct work item"
 
 
 def _resolve_reason(item: Any) -> str:
     if item.item_type == AUTONOMY_ITEM_TYPE:
         return "machine-verifiable autonomy lane closeout verified from bounded evidence"
-    return "governed real-work autonomy lane closeout verified from bounded evidence"
+    return "governed real-work autonomy lane closeout verified from explicit eligibility evidence"
 
 
 def _evidence_text(item: Any) -> str:
@@ -111,9 +111,9 @@ def _evidence_text(item: Any) -> str:
         )
     return (
         "ACE governed autonomy lane executed this direct real-work item without user touch: "
-        "the item matched the bounded machine-verifiable eligibility rules, ACE autonomously "
-        "approved it, captured evidence, marked it claimed-done, and resolved closeout "
-        "through the repository-owned workflow seam."
+        "the item carried explicit governed eligibility evidence, ACE autonomously approved "
+        "it, captured evidence, marked it claimed-done, and resolved closeout through the "
+        "repository-owned workflow seam."
     )
 
 
