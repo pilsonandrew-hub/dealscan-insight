@@ -358,6 +358,57 @@ class SupervisorRuntimeTests(unittest.TestCase):
         self.assertEqual(status["last_terminal_runtime"]["status"], STATUS_STOPPED)
         self.assertEqual(status["last_terminal_runtime"]["shutdown_status"], SHUTDOWN_STATUS_COMPLETED)
 
+    def test_start_reconciles_stale_runtime_without_shutdown_request_before_duplicate_start(self) -> None:
+        runtime = start_supervisor_runtime(self.db_path, runtime_family=RUNTIME_FAMILY_SINGLE_TENANT)
+        mark_supervisor_runtime_live(self.db_path, runtime["runtime_instance_id"])
+
+        with connect(self.db_path) as connection:
+            connection.execute(
+                "UPDATE runtime_instances SET status = ?, updated_at = ? WHERE runtime_instance_id = ?",
+                (STATUS_STALE, "2026-05-07T07:00:00Z", runtime["runtime_instance_id"]),
+            )
+            connection.commit()
+
+        restarted = start_supervisor_runtime(self.db_path, runtime_family=RUNTIME_FAMILY_SINGLE_TENANT)
+        self.assertTrue(restarted["created"])
+        self.assertFalse(restarted["duplicate_start"])
+        self.assertNotEqual(restarted["runtime_instance_id"], runtime["runtime_instance_id"])
+
+        status = get_supervisor_runtime_status(self.db_path)
+        self.assertIsNotNone(status["current_runtime"])
+        self.assertEqual(status["current_runtime"]["runtime_instance_id"], restarted["runtime_instance_id"])
+        self.assertIsNotNone(status["last_terminal_runtime"])
+        self.assertEqual(status["last_terminal_runtime"]["runtime_instance_id"], runtime["runtime_instance_id"])
+        self.assertEqual(status["last_terminal_runtime"]["status"], STATUS_FAILED)
+        self.assertEqual(status["last_terminal_runtime"]["failure_code"], "supervisor_stale_runtime_reconciled")
+
+    def test_start_reconciles_live_runtime_with_dead_process_before_duplicate_start(self) -> None:
+        runtime = start_supervisor_runtime(
+            self.db_path,
+            runtime_family=RUNTIME_FAMILY_SINGLE_TENANT,
+            host_identity="mac-hq",
+            metadata={"process_pid": 999999},
+        )
+        live = mark_supervisor_runtime_live(self.db_path, runtime["runtime_instance_id"])
+        self.assertEqual(live["status"], STATUS_LIVE)
+
+        restarted = start_supervisor_runtime(
+            self.db_path,
+            runtime_family=RUNTIME_FAMILY_SINGLE_TENANT,
+            host_identity="mac-hq",
+        )
+        self.assertTrue(restarted["created"])
+        self.assertFalse(restarted["duplicate_start"])
+        self.assertNotEqual(restarted["runtime_instance_id"], runtime["runtime_instance_id"])
+
+        status = get_supervisor_runtime_status(self.db_path)
+        self.assertIsNotNone(status["current_runtime"])
+        self.assertEqual(status["current_runtime"]["runtime_instance_id"], restarted["runtime_instance_id"])
+        self.assertIsNotNone(status["last_terminal_runtime"])
+        self.assertEqual(status["last_terminal_runtime"]["runtime_instance_id"], runtime["runtime_instance_id"])
+        self.assertEqual(status["last_terminal_runtime"]["status"], STATUS_FAILED)
+        self.assertEqual(status["last_terminal_runtime"]["failure_code"], "supervisor_process_missing")
+
 
 if __name__ == "__main__":
     unittest.main()

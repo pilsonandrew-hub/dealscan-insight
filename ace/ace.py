@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -547,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
                 heartbeat_count=args.heartbeat_count,
                 heartbeat_interval_seconds=args.heartbeat_interval_seconds,
                 host_identity=_normalize_optional_text(args.host_identity, field_name="host_identity"),
+                metadata={"process_pid": os.getpid()},
                 run_until_shutdown=args.run_until_shutdown,
             )
             _print_supervisor_run_result(result)

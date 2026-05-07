@@ -21,6 +21,7 @@ What it does prove when exercised honestly:
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,17 +126,34 @@ def start_supervisor_runtime(
             (normalized_runtime_family, STATUS_STARTING, STATUS_LIVE, STATUS_STALE),
         ).fetchone()
         if existing is not None:
-            if (
-                existing["status"] == STATUS_STALE
-                and existing["shutdown_status"] == SHUTDOWN_STATUS_REQUESTED
-            ):
+            if existing["status"] == STATUS_STALE:
+                if existing["shutdown_status"] == SHUTDOWN_STATUS_REQUESTED:
+                    _terminalize_runtime(
+                        db_path,
+                        runtime_instance_id=existing["runtime_instance_id"],
+                        target_status=STATUS_STOPPED,
+                        failure_code=None,
+                        failure_summary=None,
+                        failure_phase=None,
+                    )
+                else:
+                    _terminalize_runtime(
+                        db_path,
+                        runtime_instance_id=existing["runtime_instance_id"],
+                        target_status=STATUS_FAILED,
+                        failure_code="supervisor_stale_runtime_reconciled",
+                        failure_summary="stale supervisor runtime was reconciled before creating a fresh runtime",
+                        failure_phase=FAILURE_PHASE_RUNTIME,
+                    )
+                existing = None
+            elif _runtime_process_is_missing(existing):
                 _terminalize_runtime(
                     db_path,
                     runtime_instance_id=existing["runtime_instance_id"],
-                    target_status=STATUS_STOPPED,
-                    failure_code=None,
-                    failure_summary=None,
-                    failure_phase=None,
+                    target_status=STATUS_FAILED,
+                    failure_code="supervisor_process_missing",
+                    failure_summary="resident supervisor process is no longer running for the current runtime row",
+                    failure_phase=FAILURE_PHASE_RUNTIME,
                 )
                 existing = None
             else:
@@ -954,6 +972,40 @@ def _normalize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise ValidationError("metadata must be a mapping")
     return metadata
+
+
+def _parse_metadata_json(raw: str | None) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
+
+
+def _runtime_process_is_missing(row: Any) -> bool:
+    metadata = _parse_metadata_json(row["metadata_json"])
+    pid = metadata.get("process_pid")
+    if pid is None:
+        return False
+    try:
+        normalized_pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if normalized_pid <= 0:
+        return False
+    try:
+        os.kill(normalized_pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    except OSError:
+        return False
+    return False
 
 
 def _canonical_json(payload: dict[str, Any]) -> str:
