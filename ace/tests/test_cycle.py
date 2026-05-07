@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ace.cycle import run_cycle
+from ace.autonomy_lane import AUTONOMY_ITEM_TYPE
 from ace.governed_run_runtime import get_governed_cycle_run_status
 from ace.repository import ItemRepository, ValidationError
 from ace.storage import bootstrap_db, connect
@@ -114,6 +115,22 @@ class AceCycleTests(unittest.TestCase):
         self.assertIsNotNone(status["last_terminal_run"])
         self.assertEqual(status["last_terminal_run"]["status"], "interrupted")
         self.assertEqual(status["last_terminal_run"]["failure_code"], "cycle_interrupted")
+
+    def test_cycle_autonomously_closes_machine_verifiable_work(self) -> None:
+        item = self.repo.create_item(
+            item_type=AUTONOMY_ITEM_TYPE,
+            title="Autonomy closure target",
+            description="ACE should close this via the bounded machine-verifiable autonomy lane.",
+            actor="test",
+        )
+
+        result = run_cycle(self.db_path, now="2026-05-05T00:00:00Z", briefing_path=self.briefing_path)
+
+        final_item = self.repo.get_item(item.id)
+        assert final_item is not None
+        self.assertEqual(final_item.state, "VERIFIED_DONE")
+        self.assertEqual(result["autonomy"]["verified_done_ids"], [item.id])
+        self.assertEqual(result["actionable_finding_count"], 0)
 
 
 if __name__ == "__main__":

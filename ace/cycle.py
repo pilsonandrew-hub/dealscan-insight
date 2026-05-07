@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .action_runtime import NotificationSender, send_operator_notification
+from .autonomy_lane import run_autonomy_lane
 from .briefing import generate_briefing, render_briefing_text
 from .governed_run_runtime import (
     TRIGGER_KIND_OPERATOR,
@@ -42,6 +43,12 @@ def run_cycle(
         start_governed_run(db_path, governed_run["run_id"])
         mark_governed_run_running(db_path, governed_run["run_id"])
 
+        autonomy_result = run_autonomy_lane(
+            db_path,
+            actor=actor,
+            source_session=governed_run["run_id"],
+            now=now,
+        )
         sweep_result = run_sweep(db_path, thresholds=thresholds, actor=actor, now=now)
         briefing = generate_briefing(db_path, thresholds=thresholds, now=now)
 
@@ -81,6 +88,7 @@ def run_cycle(
 
         return {
             "governed_run": completed_run,
+            "autonomy": autonomy_result,
             "sweep": sweep_result,
             "briefing": briefing,
             "briefing_path": str(briefing_file),
