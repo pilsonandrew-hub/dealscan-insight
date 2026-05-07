@@ -5,6 +5,9 @@ __pycache__/
 # Local runtime state
 state/ace.db
 state/ace_briefing.md
+state/supervisor_acceptance.log
+state/supervisor_acceptance.err
+state/supervisor_acceptance.pid
 
 # Test/runtime scratch
 .pytest_cache/

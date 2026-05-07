@@ -17,6 +17,7 @@ from ace.supervisor_runtime import (
     request_supervisor_shutdown,
     run_supervisor_runtime,
 )
+from ace.supervisor_acceptance_monitor import run_supervisor_acceptance_monitor
 from ace.storage import DB_PATH, bootstrap_db
 from ace.sweep import SweepThresholds, run_sweep
 from ace.briefing import generate_briefing, render_briefing_text
@@ -112,6 +113,21 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "supervisor-status",
         help="Show current active and last terminal resident supervisor runtime",
+    )
+    supervisor_monitor = subparsers.add_parser(
+        "supervisor-acceptance-monitor",
+        help="Run a governed acceptance monitor for the resident supervisor seam",
+    )
+    supervisor_monitor.add_argument("--service-target", required=True)
+    supervisor_monitor.add_argument("--log-path", required=True)
+    supervisor_monitor.add_argument("--err-path", required=True)
+    supervisor_monitor.add_argument("--pid-path", required=True)
+    supervisor_monitor.add_argument("--iterations", type=int, default=65)
+    supervisor_monitor.add_argument("--sleep-seconds", type=float, default=60.0)
+    supervisor_monitor.add_argument(
+        "--truncate-on-start",
+        action="store_true",
+        help="Start a brand new log instead of appending to an existing lineage",
     )
     supervisor_shutdown = subparsers.add_parser(
         "supervisor-shutdown",
@@ -558,6 +574,18 @@ def main(argv: list[str] | None = None) -> int:
             result = get_supervisor_runtime_status(db_path)
             _print_supervisor_runtime_status(result)
             return 0
+
+        if command == "supervisor-acceptance-monitor":
+            return run_supervisor_acceptance_monitor(
+                db_path,
+                service_target=_normalize_required_text(args.service_target, field_name="service_target"),
+                log_path=_normalize_required_text(args.log_path, field_name="log_path"),
+                err_path=_normalize_required_text(args.err_path, field_name="err_path"),
+                pid_path=_normalize_required_text(args.pid_path, field_name="pid_path"),
+                iterations=args.iterations,
+                sleep_seconds=args.sleep_seconds,
+                append=not args.truncate_on_start,
+            )
 
         if command == "supervisor-shutdown":
             runtime_instance_id = _normalize_optional_text(

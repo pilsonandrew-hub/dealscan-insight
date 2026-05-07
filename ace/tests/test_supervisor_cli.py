@@ -7,6 +7,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from ace.ace import main
 from ace.supervisor_runtime import mark_supervisor_runtime_live, start_supervisor_runtime
@@ -218,6 +219,44 @@ class SupervisorCliTests(unittest.TestCase):
             self.assertIn("runtime_transition_history_count=5", output)
             self.assertIn("runtime_transition_history.3.event_type=ace.supervisor.recovery_requested", output)
             self.assertIn("runtime_transition_history.4.event_type=ace.supervisor.recovery_completed", output)
+
+    def test_supervisor_acceptance_monitor_cli_runs_governed_monitor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            log_path = Path(tmpdir) / "acceptance.log"
+            err_path = Path(tmpdir) / "acceptance.err"
+            pid_path = Path(tmpdir) / "acceptance.pid"
+
+            with patch("ace.ace.run_supervisor_acceptance_monitor", return_value=0) as monitor_mock:
+                code, output = self.run_cli(
+                    "--db",
+                    str(db_path),
+                    "supervisor-acceptance-monitor",
+                    "--service-target",
+                    "gui/501/ai.superace.supervisor",
+                    "--log-path",
+                    str(log_path),
+                    "--err-path",
+                    str(err_path),
+                    "--pid-path",
+                    str(pid_path),
+                    "--iterations",
+                    "5",
+                    "--sleep-seconds",
+                    "0.5",
+                )
+
+            self.assertEqual(code, 0, output)
+            monitor_mock.assert_called_once_with(
+                db_path,
+                service_target="gui/501/ai.superace.supervisor",
+                log_path=str(log_path),
+                err_path=str(err_path),
+                pid_path=str(pid_path),
+                iterations=5,
+                sleep_seconds=0.5,
+                append=True,
+            )
 
 
 if __name__ == "__main__":
