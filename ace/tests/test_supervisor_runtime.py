@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tempfile
+import time
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -139,6 +141,43 @@ class SupervisorRuntimeTests(unittest.TestCase):
         self.assertTrue(result["auto_stopped"])
         self.assertEqual(result["heartbeat_count"], 2)
         self.assertEqual(result["runtime"]["status"], STATUS_STOPPED)
+
+    def test_run_supervisor_runtime_can_hold_until_explicit_shutdown(self) -> None:
+        result_holder: dict[str, object] = {}
+
+        def _target() -> None:
+            result_holder["result"] = run_supervisor_runtime(
+                self.db_path,
+                heartbeat_interval_seconds=0.01,
+                stale_after_seconds=60,
+                run_until_shutdown=True,
+            )
+
+        thread = threading.Thread(target=_target)
+        thread.start()
+
+        runtime_instance_id = None
+        for _ in range(200):
+            status = get_supervisor_runtime_status(self.db_path)
+            current_runtime = status["current_runtime"]
+            if current_runtime is not None:
+                runtime_instance_id = current_runtime["runtime_instance_id"]
+                break
+            time.sleep(0.01)
+
+        self.assertIsNotNone(runtime_instance_id)
+        status = get_supervisor_runtime_status(self.db_path)
+        self.assertIsNotNone(status["current_runtime"])
+        self.assertEqual(status["current_runtime"]["status"], STATUS_LIVE)
+
+        request_supervisor_shutdown(self.db_path, runtime_instance_id)
+        thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+
+        result = result_holder["result"]
+        self.assertFalse(result["auto_stopped"])
+        self.assertEqual(result["runtime"]["status"], STATUS_STOPPED)
+        self.assertGreaterEqual(result["heartbeat_count"], 0)
 
     def test_fail_path_persists_terminal_failure_state(self) -> None:
         runtime = start_supervisor_runtime(self.db_path)

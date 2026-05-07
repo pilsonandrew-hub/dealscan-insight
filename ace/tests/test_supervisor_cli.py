@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -100,6 +102,50 @@ class SupervisorCliTests(unittest.TestCase):
             self.assertIn("runtime_transition_history_count=4", output)
             self.assertIn("runtime_transition_history.0.event_type=ace.supervisor.started", output)
             self.assertIn("runtime_transition_history.3.event_type=ace.supervisor.stopped", output)
+
+    def test_supervisor_run_can_hold_until_explicit_shutdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            result_holder: dict[str, tuple[int, str]] = {}
+
+            def _target() -> None:
+                result_holder["result"] = self.run_cli(
+                    "--db",
+                    str(db_path),
+                    "supervisor-run",
+                    "--run-until-shutdown",
+                    "--heartbeat-interval-seconds",
+                    "0.01",
+                )
+
+            thread = threading.Thread(target=_target)
+            thread.start()
+
+            runtime_instance_id = None
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                code, status_output = self.run_cli("--db", str(db_path), "supervisor-status")
+                if code == 0 and "current_runtime_present=true" in status_output:
+                    for line in status_output.splitlines():
+                        if line.startswith("current_runtime.runtime_instance_id="):
+                            runtime_instance_id = line.split("=", 1)[1]
+                            break
+                    if runtime_instance_id is not None:
+                        break
+                time.sleep(0.01)
+
+            self.assertIsNotNone(runtime_instance_id)
+
+            from ace.supervisor_runtime import request_supervisor_shutdown
+
+            request_supervisor_shutdown(db_path, runtime_instance_id)
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+
+            code, output = result_holder["result"]
+            self.assertEqual(code, 0, output)
+            self.assertIn("auto_stopped=false", output)
+            self.assertIn("runtime_status=stopped", output)
 
     def test_supervisor_status_reports_recovery_history_for_failed_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -557,12 +557,15 @@ def run_supervisor_runtime(
     heartbeat_interval_seconds: float = 0.0,
     host_identity: str | None = None,
     metadata: dict[str, Any] | None = None,
+    run_until_shutdown: bool = False,
 ) -> dict[str, Any]:
     normalized_heartbeat_count = _normalize_nonnegative_int(heartbeat_count, field_name="heartbeat_count")
     normalized_heartbeat_interval = _normalize_nonnegative_float(
         heartbeat_interval_seconds,
         field_name="heartbeat_interval_seconds",
     )
+    if run_until_shutdown and normalized_heartbeat_interval <= 0:
+        raise ValidationError("heartbeat_interval_seconds must be greater than zero when run_until_shutdown is enabled")
 
     runtime = start_supervisor_runtime(
         db_path,
@@ -586,6 +589,30 @@ def run_supervisor_runtime(
     try:
         live = mark_supervisor_runtime_live(db_path, runtime_instance_id)
         heartbeats_written = 0
+        if run_until_shutdown:
+            while True:
+                current_runtime = _get_runtime_or_raise(db_path, runtime_instance_id)
+                if current_runtime["shutdown_status"] == SHUTDOWN_STATUS_REQUESTED:
+                    shutdown_requested = current_runtime
+                    break
+                time.sleep(normalized_heartbeat_interval)
+                current_runtime = _get_runtime_or_raise(db_path, runtime_instance_id)
+                if current_runtime["shutdown_status"] == SHUTDOWN_STATUS_REQUESTED:
+                    shutdown_requested = current_runtime
+                    break
+                live = heartbeat_supervisor_runtime(db_path, runtime_instance_id)
+                heartbeats_written += 1
+
+            stopped = stop_supervisor_runtime(db_path, runtime_instance_id)
+            return {
+                "runtime": stopped,
+                "heartbeat_count": heartbeats_written,
+                "duplicate_start": False,
+                "auto_stopped": False,
+                "last_live_runtime": live,
+                "shutdown_requested_runtime": shutdown_requested,
+            }
+
         for _ in range(normalized_heartbeat_count):
             if normalized_heartbeat_interval > 0:
                 time.sleep(normalized_heartbeat_interval)
@@ -801,6 +828,15 @@ def _fetch_runtime_row(connection: Any, runtime_instance_id: str) -> Any:
         """,
         (runtime_instance_id,),
     ).fetchone()
+
+
+def _get_runtime_or_raise(db_path: Path | str, runtime_instance_id: str) -> dict[str, Any]:
+    bootstrap_db(db_path)
+    with connect(db_path) as connection:
+        row = _fetch_runtime_row(connection, runtime_instance_id)
+    if row is None:
+        raise KeyError(f"unknown runtime_instance_id: {runtime_instance_id}")
+    return _row_to_runtime(row)
 
 
 def _row_to_runtime(row: Any) -> dict[str, Any]:

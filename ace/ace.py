@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
     supervisor_run.add_argument("--heartbeat-count", type=int, default=0)
     supervisor_run.add_argument("--heartbeat-interval-seconds", type=float, default=0.0)
     supervisor_run.add_argument("--host-identity")
+    supervisor_run.add_argument(
+        "--run-until-shutdown",
+        action="store_true",
+        help="Keep the resident supervisor live until an explicit shutdown request is recorded",
+    )
     subparsers.add_parser(
         "supervisor-status",
         help="Show current active and last terminal resident supervisor runtime",
@@ -528,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
                 heartbeat_count=args.heartbeat_count,
                 heartbeat_interval_seconds=args.heartbeat_interval_seconds,
                 host_identity=_normalize_optional_text(args.host_identity, field_name="host_identity"),
+                run_until_shutdown=args.run_until_shutdown,
             )
             _print_supervisor_run_result(result)
             return 0
