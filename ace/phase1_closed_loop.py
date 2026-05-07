@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from .pending_promotions_ingest import (
     DEFAULT_SOURCE_LABEL,
     DEFAULT_SOURCE_PATH,
+    PendingPromotionParseError,
+    PendingPromotionSchemaError,
     _canonical_json,
+    _load_payload,
     _normalize_required_text,
+    _normalize_source_item,
     ingest_continuity_pending_promotions,
 )
 from .repository import Item, ItemRepository, ValidationError
@@ -86,35 +90,22 @@ process_phase1_closed_loop = run_phase1_closed_loop
 
 def _load_pending_source_rows(source_path: Path | str) -> dict[str, dict[str, str]]:
     source_path = Path(source_path)
-    payload = json.loads(source_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValidationError("phase1 source payload must be a JSON object")
-    items = payload.get("items")
-    if not isinstance(items, list):
-        raise ValidationError("phase1 source payload must contain an items array")
+    try:
+        payload = _load_payload(source_path)
+    except (PendingPromotionParseError, PendingPromotionSchemaError):
+        raise
 
     rows: dict[str, dict[str, str]] = {}
-    for raw_item in items:
-        if not isinstance(raw_item, dict):
-            continue
-        try:
-            status = _normalize_required_text(raw_item.get("status"), field_name="status").lower()
-        except Exception:
-            continue
+    for raw_item in payload["items"]:
+        if not isinstance(raw_item, Mapping):
+            raise PendingPromotionSchemaError("each pending-promotion item must be a JSON object")
+
+        status = _normalize_required_text(raw_item.get("status"), field_name="status").lower()
         if status != "pending":
             continue
-        try:
-            row = {
-                "id": _normalize_required_text(raw_item.get("id"), field_name="id"),
-                "title": _normalize_required_text(raw_item.get("title"), field_name="title"),
-                "source": _normalize_required_text(raw_item.get("source"), field_name="source"),
-                "reason": _normalize_required_text(raw_item.get("reason"), field_name="reason"),
-                "created_at": _normalize_required_text(raw_item.get("created_at"), field_name="created_at"),
-                "status": "pending",
-            }
-        except Exception:
-            continue
-        rows[row["id"]] = row
+
+        normalized_item = _normalize_source_item(raw_item)
+        rows[normalized_item["id"]] = normalized_item
     return rows
 
 

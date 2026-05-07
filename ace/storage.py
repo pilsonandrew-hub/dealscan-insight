@@ -151,6 +151,51 @@ SCHEMA_STATEMENTS = (
         FOREIGN KEY (target_item_id) REFERENCES items(id) ON DELETE CASCADE
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS governed_runs (
+        run_id TEXT PRIMARY KEY,
+        run_kind TEXT NOT NULL,
+        trigger_kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        briefing_path TEXT,
+        notification_action_id TEXT,
+        delivery_evidence_id TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        ended_at TEXT,
+        interrupted_at TEXT,
+        failure_code TEXT,
+        failure_summary TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS runtime_instances (
+        runtime_instance_id TEXT PRIMARY KEY,
+        runtime_family TEXT NOT NULL,
+        status TEXT NOT NULL,
+        host_identity TEXT,
+        metadata_json TEXT NOT NULL,
+        stale_after_seconds INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        ended_at TEXT,
+        failure_code TEXT,
+        failure_summary TEXT,
+        failure_phase TEXT,
+        startup_status TEXT NOT NULL DEFAULT 'starting',
+        startup_completed_at TEXT,
+        shutdown_status TEXT NOT NULL DEFAULT 'not_requested',
+        shutdown_requested_at TEXT,
+        shutdown_completed_at TEXT,
+        recovery_status TEXT NOT NULL DEFAULT 'not_requested',
+        recovery_attempt_count INTEGER NOT NULL DEFAULT 0,
+        recovery_last_requested_at TEXT,
+        recovery_last_completed_at TEXT,
+        recovery_last_result TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_items_state ON items(state)",
     "CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)",
     "CREATE INDEX IF NOT EXISTS idx_events_item_id ON events(item_id)",
@@ -159,6 +204,8 @@ SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_resume_candidates_score ON resume_candidates(score DESC)",
     "CREATE INDEX IF NOT EXISTS idx_contradictions_source ON contradictions(source_item_id)",
     "CREATE INDEX IF NOT EXISTS idx_contradictions_target ON contradictions(target_item_id)",
+    "CREATE INDEX IF NOT EXISTS idx_governed_runs_status_created_at ON governed_runs(status, created_at DESC, run_id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_instances_family_status_created_at ON runtime_instances(runtime_family, status, created_at DESC, runtime_instance_id DESC)",
 )
 
 
@@ -272,6 +319,42 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
                 """
             )
             connection.execute("DROP TABLE resume_candidates_legacy")
+
+        runtime_instance_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(runtime_instances)").fetchall()
+        }
+        if runtime_instance_columns:
+            if "failure_phase" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN failure_phase TEXT")
+            if "startup_status" not in runtime_instance_columns:
+                connection.execute(
+                    "ALTER TABLE runtime_instances ADD COLUMN startup_status TEXT NOT NULL DEFAULT 'starting'"
+                )
+            if "startup_completed_at" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN startup_completed_at TEXT")
+            if "shutdown_status" not in runtime_instance_columns:
+                connection.execute(
+                    "ALTER TABLE runtime_instances ADD COLUMN shutdown_status TEXT NOT NULL DEFAULT 'not_requested'"
+                )
+            if "shutdown_requested_at" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN shutdown_requested_at TEXT")
+            if "shutdown_completed_at" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN shutdown_completed_at TEXT")
+            if "recovery_status" not in runtime_instance_columns:
+                connection.execute(
+                    "ALTER TABLE runtime_instances ADD COLUMN recovery_status TEXT NOT NULL DEFAULT 'not_requested'"
+                )
+            if "recovery_attempt_count" not in runtime_instance_columns:
+                connection.execute(
+                    "ALTER TABLE runtime_instances ADD COLUMN recovery_attempt_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "recovery_last_requested_at" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN recovery_last_requested_at TEXT")
+            if "recovery_last_completed_at" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN recovery_last_completed_at TEXT")
+            if "recovery_last_result" not in runtime_instance_columns:
+                connection.execute("ALTER TABLE runtime_instances ADD COLUMN recovery_last_result TEXT")
 
         session_columns = {
             row["name"]
