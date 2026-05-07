@@ -35,7 +35,8 @@ def run_cycle(
     sender: NotificationSender | None = None,
 ) -> dict[str, Any]:
     thresholds = thresholds or SweepThresholds()
-    governed_run = create_governed_cycle_run(db_path, trigger_kind=TRIGGER_KIND_OPERATOR)
+    trigger_kind = "launchd" if actor == "launchd" else TRIGGER_KIND_OPERATOR
+    governed_run = create_governed_cycle_run(db_path, trigger_kind=trigger_kind)
     briefing_file = Path(briefing_path)
     notification_results: list[dict[str, Any]] = []
 

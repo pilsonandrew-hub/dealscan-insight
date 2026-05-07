@@ -132,6 +132,22 @@ class AceCycleTests(unittest.TestCase):
         self.assertEqual(result["autonomy"]["verified_done_ids"], [item.id])
         self.assertEqual(result["actionable_finding_count"], 0)
 
+    def test_cycle_uses_launchd_trigger_kind_when_actor_is_launchd(self) -> None:
+        self.repo.create_item(item_type="note", title="Launchd trigger target")
+
+        result = run_cycle(
+            self.db_path,
+            now="2026-05-05T00:00:00Z",
+            briefing_path=self.briefing_path,
+            actor="launchd",
+        )
+
+        self.assertEqual(result["governed_run"]["trigger_kind"], "launchd")
+
+        status = get_governed_cycle_run_status(self.db_path)
+        self.assertIsNotNone(status["last_terminal_run"])
+        self.assertEqual(status["last_terminal_run"]["trigger_kind"], "launchd")
+
 
 if __name__ == "__main__":
     unittest.main()
