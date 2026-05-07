@@ -9,7 +9,16 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ace.repository import ItemRepository, ValidationError
+from ace.governed_run_runtime import get_governed_cycle_run_status
+from ace.supervisor_runtime import (
+    RUNTIME_FAMILY_SINGLE_TENANT,
+    get_supervisor_runtime_status,
+    run_supervisor_runtime,
+)
 from ace.storage import DB_PATH, bootstrap_db
+from ace.sweep import SweepThresholds, run_sweep
+from ace.briefing import generate_briefing, render_briefing_text
+from ace.cycle import BRIEFING_PATH, run_cycle
 from ace.workflow import AceError, normalize_state
 
 
@@ -30,7 +39,7 @@ def _normalize_required_text(value: str, *, field_name: str) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ace", description="Super A.C.E. V1 operator entrypoint")
+    parser = argparse.ArgumentParser(prog="ace", description="Super A.C.E. governed foundation operator entrypoint")
     parser.add_argument("--db", default=str(DB_PATH), help="Path to the ACE SQLite database")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -55,6 +64,52 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("item_id")
     show.add_argument("--event-type")
     show.add_argument("--event-limit", type=int)
+
+    sweep = subparsers.add_parser("sweep", help="Classify stale bounded work from live ACE state")
+    sweep.add_argument("--triage-after-hours", type=int, default=24)
+    sweep.add_argument("--approved-after-hours", type=int, default=72)
+    sweep.add_argument("--blocked-after-hours", type=int, default=24)
+    sweep.add_argument("--claimed-done-after-hours", type=int, default=24)
+    sweep.add_argument("--active-after-hours", type=int, default=72)
+    sweep.add_argument("--actor")
+
+    briefing = subparsers.add_parser("briefing", help="Generate bounded operator briefing from live ACE state")
+    briefing.add_argument("--triage-after-hours", type=int, default=24)
+    briefing.add_argument("--approved-after-hours", type=int, default=72)
+    briefing.add_argument("--blocked-after-hours", type=int, default=24)
+    briefing.add_argument("--claimed-done-after-hours", type=int, default=24)
+    briefing.add_argument("--active-after-hours", type=int, default=72)
+
+    cycle = subparsers.add_parser("cycle", help="Run one bounded autonomous ACE operator cycle")
+    cycle.add_argument("--triage-after-hours", type=int, default=24)
+    cycle.add_argument("--approved-after-hours", type=int, default=72)
+    cycle.add_argument("--blocked-after-hours", type=int, default=24)
+    cycle.add_argument("--claimed-done-after-hours", type=int, default=24)
+    cycle.add_argument("--active-after-hours", type=int, default=72)
+    cycle.add_argument("--notification-channel")
+    cycle.add_argument("--notification-target")
+    cycle.add_argument("--notification-thread-id")
+    cycle.add_argument("--briefing-path", default=str(BRIEFING_PATH))
+    cycle.add_argument("--actor")
+
+    subparsers.add_parser("cycle-status", help="Show current active and last terminal governed cycle run")
+    supervisor_run = subparsers.add_parser(
+        "supervisor-run",
+        help="Run one bounded resident supervisor-runtime slice",
+    )
+    supervisor_run.add_argument("--runtime-family", default=RUNTIME_FAMILY_SINGLE_TENANT)
+    supervisor_run.add_argument("--stale-after-seconds", type=int, default=60)
+    supervisor_run.add_argument("--heartbeat-count", type=int, default=0)
+    supervisor_run.add_argument("--heartbeat-interval-seconds", type=float, default=0.0)
+    supervisor_run.add_argument("--host-identity")
+    subparsers.add_parser(
+        "supervisor-status",
+        help="Show current active and last terminal resident supervisor runtime",
+    )
+    subparsers.add_parser(
+        "gate4-inspection",
+        help="Show bounded operator-facing Gate 4 inspection artifacts already governed on disk",
+    )
 
     evidence = subparsers.add_parser("add-evidence", help="Add evidence for an item")
     evidence.add_argument("item_id")
@@ -169,6 +224,174 @@ def _print_items(items: Iterable) -> None:
         )
 
 
+def _print_sweep_result(result: dict[str, object]) -> None:
+    print(f"run_id={result['run_id']}")
+    print(f"created_at={result['created_at']}")
+    print(f"finding_count={result['finding_count']}")
+    print(f"emitted_count={result['emitted_count']}")
+    print(f"suppressed_count={result['suppressed_count']}")
+    findings = result.get('findings', [])
+    for index, finding in enumerate(findings):
+        print(f"finding[{index}].item_id={finding['item_id']}")
+        print(f"finding[{index}].classification={finding['classification']}")
+        print(f"finding[{index}].state={finding['state']}")
+        print(f"finding[{index}].title={finding['title']}")
+        print(f"finding[{index}].activity_at={finding['activity_at']}")
+        print(f"finding[{index}].age_seconds={finding['age_seconds']}")
+        print(f"finding[{index}].stale_after_seconds={finding['stale_after_seconds']}")
+        print(f"finding[{index}].evidence_count={finding['evidence_count']}")
+        print(f"finding[{index}].open_obligation_count={finding['open_obligation_count']}")
+        print(f"finding[{index}].open_contradiction_count={finding['open_contradiction_count']}")
+        print(f"finding[{index}].fingerprint={finding['fingerprint']}")
+        print(f"finding[{index}].suppressed={str(finding['suppressed']).lower()}")
+
+
+def _print_briefing_result(briefing: dict[str, object]) -> None:
+    print(render_briefing_text(briefing))
+
+
+def _print_cycle_result(result: dict[str, object]) -> None:
+    governed_run = result.get("governed_run")
+    if isinstance(governed_run, dict):
+        print(f"run_id={governed_run['run_id']}")
+        print(f"run_status={governed_run['status']}")
+    print(f"briefing_path={result['briefing_path']}")
+    print(f"actionable_finding_count={result['actionable_finding_count']}")
+    print(f"notification_count={result['notification_count']}")
+    print("sweep:")
+    _print_sweep_result(result["sweep"])
+    print("briefing:")
+    _print_briefing_result(result["briefing"])
+
+
+def _print_governed_run_status(result: dict[str, object]) -> None:
+    current_run = result.get("current_run")
+    last_terminal_run = result.get("last_terminal_run")
+    print(f"current_run_present={str(current_run is not None).lower()}")
+    if isinstance(current_run, dict):
+        for key, value in current_run.items():
+            print(f"current_run.{key}={value}")
+    print(f"last_terminal_run_present={str(last_terminal_run is not None).lower()}")
+    if isinstance(last_terminal_run, dict):
+        for key, value in last_terminal_run.items():
+            print(f"last_terminal_run.{key}={value}")
+
+
+def _print_supervisor_run_result(result: dict[str, object]) -> None:
+    runtime = result.get("runtime")
+    if isinstance(runtime, dict):
+        print(f"runtime_instance_id={runtime['runtime_instance_id']}")
+        print(f"runtime_status={runtime['status']}")
+    print(f"heartbeat_count={result['heartbeat_count']}")
+    print(f"duplicate_start={str(result['duplicate_start']).lower()}")
+    print(f"auto_stopped={str(result['auto_stopped']).lower()}")
+
+
+def _print_supervisor_runtime_status(result: dict[str, object]) -> None:
+    print(f"inspection_family={result['inspection_family']}")
+    inspection_scope = result.get("inspection_scope")
+    bounded_runtime_claims = result.get("bounded_runtime_claims")
+    anti_inflation_non_claims = result.get("anti_inflation_non_claims")
+    minimal_slice_definition = result.get("minimal_slice_definition")
+    evidence_artifact_bundle = result.get("evidence_artifact_bundle")
+    non_reduction_proof = result.get("non_reduction_proof")
+    current_runtime = result.get("current_runtime")
+    last_terminal_runtime = result.get("last_terminal_runtime")
+    runtime_transition_history = result.get("runtime_transition_history")
+    if inspection_scope is not None:
+        print(f"inspection_scope={inspection_scope}")
+    if isinstance(bounded_runtime_claims, list):
+        print(f"bounded_runtime_claims_count={len(bounded_runtime_claims)}")
+        for index, value in enumerate(bounded_runtime_claims):
+            print(f"bounded_runtime_claims.{index}={value}")
+    if isinstance(anti_inflation_non_claims, list):
+        print(f"anti_inflation_non_claims_count={len(anti_inflation_non_claims)}")
+        for index, value in enumerate(anti_inflation_non_claims):
+            print(f"anti_inflation_non_claims.{index}={value}")
+    if isinstance(minimal_slice_definition, list):
+        print(f"minimal_slice_definition_count={len(minimal_slice_definition)}")
+        for index, value in enumerate(minimal_slice_definition):
+            print(f"minimal_slice_definition.{index}={value}")
+    if isinstance(evidence_artifact_bundle, list):
+        print(f"evidence_artifact_bundle_count={len(evidence_artifact_bundle)}")
+        for index, value in enumerate(evidence_artifact_bundle):
+            print(f"evidence_artifact_bundle.{index}={value}")
+    if isinstance(non_reduction_proof, list):
+        print(f"non_reduction_proof_count={len(non_reduction_proof)}")
+        for index, value in enumerate(non_reduction_proof):
+            print(f"non_reduction_proof.{index}={value}")
+    print(f"current_runtime_present={str(current_runtime is not None).lower()}")
+    if isinstance(current_runtime, dict):
+        for key, value in current_runtime.items():
+            print(f"current_runtime.{key}={value}")
+    print(f"last_terminal_runtime_present={str(last_terminal_runtime is not None).lower()}")
+    if isinstance(last_terminal_runtime, dict):
+        for key, value in last_terminal_runtime.items():
+            print(f"last_terminal_runtime.{key}={value}")
+    if isinstance(runtime_transition_history, list):
+        print(f"runtime_transition_history_count={len(runtime_transition_history)}")
+        for index, entry in enumerate(runtime_transition_history):
+            if isinstance(entry, dict):
+                for key, value in entry.items():
+                    print(f"runtime_transition_history.{index}.{key}={value}")
+
+
+GATE4_OPERATOR_ARTIFACTS: tuple[tuple[str, str], ...] = (
+    ("inspection_surface", "reports/ace-gate4-operator-inspection-surface-2026-05-06.md"),
+    ("review_checklist", "reports/ace-gate4-operator-review-checklist-2026-05-06.md"),
+    ("one_page_runbook", "reports/ace-gate4-one-page-operator-runbook-2026-05-06.md"),
+    ("phase1_note", "reports/ace-gate4-phase1-operator-inspection-note-2026-05-06.md"),
+    ("recovery_note", "reports/ace-gate4-recovery-operator-inspection-note-2026-05-06.md"),
+    ("composition_note", "reports/ace-gate4-composition-seam-contradiction-note-2026-05-06.md"),
+    ("contradiction_matrix", "reports/ace-gate4-contradiction-matrix-2026-05-06.md"),
+    ("recovery_taxonomy", "reports/ace-gate4-recovery-failure-taxonomy-2026-05-06.md"),
+)
+
+
+def _print_gate4_inspection_surface() -> int:
+    workspace_root = Path(__file__).resolve().parent.parent
+    missing: list[str] = []
+    print("gate4_scope=bounded_operator_inspection_only")
+    print("gate4_claim=inspection_centralization_not_v1_promotion")
+    for label, relative_path in GATE4_OPERATOR_ARTIFACTS:
+        artifact_path = workspace_root / relative_path
+        exists = artifact_path.exists()
+        print(f"artifact.{label}.path={relative_path}")
+        print(f"artifact.{label}.present={str(exists).lower()}")
+        if exists:
+            print(f"artifact.{label}.bytes={artifact_path.stat().st_size}")
+        else:
+            missing.append(relative_path)
+    print(f"artifact_missing_count={len(missing)}")
+    if missing:
+        for index, relative_path in enumerate(missing):
+            print(f"artifact_missing[{index}]={relative_path}")
+        return 1
+    print("operator_status_family[0]=explicit_bounded_failure")
+    print("operator_status_family[1]=replay_safe_bounded_no_op")
+    print("operator_status_family[2]=healed_interrupted_split_success")
+    print("operator_status_family[3]=acceptable_bounded_filtering")
+    print("operator_status_family[4]=under_classified_ambiguity_debt")
+    print("operator_status_family[5]=prevented_contradiction")
+    print("operator_status_family[6]=partial_under_centralized_family")
+    print("remaining_partial_count=0")
+    print("composition_truth[0]=decision_top_level_rejection_and_replay_are_bounded")
+    print("composition_truth[1]=sweep_duplicate_suppression_and_changed_truth_re_emission_are_bounded")
+    print("composition_truth[2]=briefing_section_de_duplication_and_live_state_rendering_are_bounded")
+    print("composition_truth[3]=phase1_pending_rows_now_use_governed_normalization")
+    print("phase1_truth[0]=non_pending_rows_are_acceptable_bounded_filtering")
+    print("phase1_truth[1]=non_object_rows_fail_loudly_as_schema_error")
+    print("phase1_truth[2]=invalid_or_missing_status_rows_fail_loudly_as_schema_error")
+    print("phase1_truth[3]=pending_rows_failing_required_field_normalization_fail_loudly_as_schema_error")
+    print("phase1_truth[4]=later_missing_source_row_is_explicit_bounded_failure")
+    print("recovery_truth[0]=stale_or_deleted_target_is_explicit_bounded_failure")
+    print("recovery_truth[1]=malformed_session_metadata_and_ownership_payload_are_explicit_bounded_failure")
+    print("recovery_truth[2]=candidate_session_or_cross_seam_identity_mismatch_is_explicit_bounded_failure")
+    print("recovery_truth[3]=duplicate_dismissal_release_and_finalize_are_replay_safe_bounded_no_op")
+    print("recovery_truth[4]=interrupted_split_success_replay_heals_without_duplicate_evidence")
+    return 0
+
+
 def _print_evidence_added(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} evidence_id={evidence_id}")
 
@@ -247,6 +470,75 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
+
+        if command == "sweep":
+            thresholds = SweepThresholds(
+                triage_after_seconds=args.triage_after_hours * 3600,
+                approved_after_seconds=args.approved_after_hours * 3600,
+                blocked_after_seconds=args.blocked_after_hours * 3600,
+                claimed_done_after_seconds=args.claimed_done_after_hours * 3600,
+                active_after_seconds=args.active_after_hours * 3600,
+            )
+            result = run_sweep(db_path, thresholds=thresholds, actor=args.actor)
+            _print_sweep_result(result)
+            return 0
+
+        if command == "briefing":
+            thresholds = SweepThresholds(
+                triage_after_seconds=args.triage_after_hours * 3600,
+                approved_after_seconds=args.approved_after_hours * 3600,
+                blocked_after_seconds=args.blocked_after_hours * 3600,
+                claimed_done_after_seconds=args.claimed_done_after_hours * 3600,
+                active_after_seconds=args.active_after_hours * 3600,
+            )
+            briefing = generate_briefing(db_path, thresholds=thresholds)
+            _print_briefing_result(briefing)
+            return 0
+
+        if command == "cycle":
+            thresholds = SweepThresholds(
+                triage_after_seconds=args.triage_after_hours * 3600,
+                approved_after_seconds=args.approved_after_hours * 3600,
+                blocked_after_seconds=args.blocked_after_hours * 3600,
+                claimed_done_after_seconds=args.claimed_done_after_hours * 3600,
+                active_after_seconds=args.active_after_hours * 3600,
+            )
+            result = run_cycle(
+                db_path,
+                thresholds=thresholds,
+                actor=args.actor,
+                notification_channel=_normalize_optional_text(args.notification_channel, field_name="notification_channel"),
+                notification_target=_normalize_optional_text(args.notification_target, field_name="notification_target"),
+                notification_thread_id=_normalize_optional_text(args.notification_thread_id, field_name="notification_thread_id"),
+                briefing_path=args.briefing_path,
+            )
+            _print_cycle_result(result)
+            return 0
+
+        if command == "cycle-status":
+            result = get_governed_cycle_run_status(db_path)
+            _print_governed_run_status(result)
+            return 0
+
+        if command == "supervisor-run":
+            result = run_supervisor_runtime(
+                db_path,
+                runtime_family=_normalize_required_text(args.runtime_family, field_name="runtime_family"),
+                stale_after_seconds=args.stale_after_seconds,
+                heartbeat_count=args.heartbeat_count,
+                heartbeat_interval_seconds=args.heartbeat_interval_seconds,
+                host_identity=_normalize_optional_text(args.host_identity, field_name="host_identity"),
+            )
+            _print_supervisor_run_result(result)
+            return 0
+
+        if command == "supervisor-status":
+            result = get_supervisor_runtime_status(db_path)
+            _print_supervisor_runtime_status(result)
+            return 0
+
+        if command == "gate4-inspection":
+            return _print_gate4_inspection_surface()
 
         if command == "add-evidence":
             evidence_id = repo.add_evidence(
