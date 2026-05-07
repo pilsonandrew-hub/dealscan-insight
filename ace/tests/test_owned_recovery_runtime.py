@@ -188,10 +188,13 @@ class OwnedRecoveryRuntimeTests(unittest.TestCase):
             candidate_reason={"kind": "resume", "detail": "phase7a owned recovery"},
         )
 
-        with sqlite3.connect(self.db_path) as raw_connection:
+        raw_connection = sqlite3.connect(self.db_path)
+        try:
             raw_connection.execute("PRAGMA foreign_keys = OFF")
             raw_connection.execute("DELETE FROM items WHERE id = ?", (self.item.id,))
             raw_connection.commit()
+        finally:
+            raw_connection.close()
 
         result = finalize_owned_recovery_lifecycle(
             self.db_path,

@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from ace.pending_promotions_ingest import PendingPromotionParseError, PendingPromotionSchemaError
-from ace.phase1_closed_loop import run_phase1_closed_loop
+from ace.phase1_closed_loop import _load_pending_source_rows, run_phase1_closed_loop
 from ace.repository import ItemRepository
 from ace.storage import bootstrap_db, connect
 
@@ -137,6 +137,14 @@ class Phase1ClosedLoopTests(unittest.TestCase):
 
         self.assertEqual(ItemRepository(self.db_path).list_items(), [])
         self.assertEqual(_decision_rows(self.db_path), [])
+
+    def test_load_pending_source_rows_rejects_non_object_item(self) -> None:
+        with self.assertRaises(PendingPromotionSchemaError):
+            _load_pending_source_rows(FIXTURES / "non_object_item.json")
+
+    def test_load_pending_source_rows_rejects_missing_required_pending_field(self) -> None:
+        with self.assertRaises(PendingPromotionSchemaError):
+            _load_pending_source_rows(FIXTURES / "invalid_missing_required.json")
 
     def test_continuity_source_file_remains_unchanged_during_run(self) -> None:
         source_path = FIXTURES / "phase1_manual_test.json"

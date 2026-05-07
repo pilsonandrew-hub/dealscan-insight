@@ -4,15 +4,21 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import ace.action_runtime as action_runtime
 from ace.action_runtime import (
     ACTION_CREATED_BY,
     ACTION_EVIDENCE_URI,
     ACTION_KIND,
+    NOTIFICATION_ACTION_EVIDENCE_URI,
+    NOTIFICATION_ACTION_KIND,
     claim_record_operator_followup,
+    claim_operator_notification,
     enqueue_record_operator_followup,
+    enqueue_operator_notification,
     execute_record_operator_followup,
+    execute_operator_notification,
 )
 from ace.repository import ItemRepository
 from ace.repository import ValidationError
@@ -431,6 +437,201 @@ class ActionRuntimeTests(unittest.TestCase):
                 (missing_item_id,),
             ).fetchone()[0]
         self.assertEqual(count, 0)
+
+    def test_notification_enqueue_claim_execute_writes_one_evidence_row_and_completes(self) -> None:
+        action = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="telegram",
+            target="telegram:7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+        self.assertEqual(action["action_type"], NOTIFICATION_ACTION_KIND)
+        self.assertEqual(action["status"], "queued")
+
+        claim = claim_operator_notification(self.db_path, action["action_id"])
+        self.assertEqual(claim["status"], "claimed")
+
+        sender_calls: list[dict[str, object]] = []
+
+        def fake_sender(**kwargs: object) -> dict[str, object]:
+            sender_calls.append(kwargs)
+            return {"ok": True, "provider": "test"}
+
+        result = execute_operator_notification(
+            self.db_path,
+            action["action_id"],
+            sender=fake_sender,
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["evidence_written"])
+        self.assertEqual(len(sender_calls), 1)
+        self.assertEqual(sender_calls[0]["channel"], "telegram")
+        self.assertEqual(sender_calls[0]["target"], "telegram:7529788084")
+
+        with connect(self.db_path) as connection:
+            row = connection.execute(
+                "SELECT evidence_text, evidence_uri, created_by FROM evidence WHERE item_id = ? ORDER BY created_at ASC, id ASC LIMIT 1",
+                (self.item.id,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["evidence_uri"], NOTIFICATION_ACTION_EVIDENCE_URI)
+        self.assertEqual(row["created_by"], action_runtime.NOTIFICATION_ACTION_CREATED_BY)
+        payload = json.loads(row["evidence_text"])
+        self.assertEqual(payload["action_kind"], NOTIFICATION_ACTION_KIND)
+        self.assertEqual(payload["outcome"], "operator_notification_sent")
+        self.assertEqual(payload["target_item_id"], self.item.id)
+
+    def test_notification_duplicate_enqueue_reuses_same_deterministic_row(self) -> None:
+        first = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="telegram",
+            target="telegram:7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+        second = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="telegram",
+            target="telegram:7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+        self.assertEqual(first["action_id"], second["action_id"])
+
+    def test_notification_duplicate_execute_does_not_duplicate_evidence(self) -> None:
+        action = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="telegram",
+            target="telegram:7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+        claim_operator_notification(self.db_path, action["action_id"])
+
+        def fake_sender(**kwargs: object) -> dict[str, object]:
+            return {"ok": True, "provider": "test"}
+
+        first = execute_operator_notification(self.db_path, action["action_id"], sender=fake_sender)
+        second = execute_operator_notification(self.db_path, action["action_id"], sender=fake_sender)
+        self.assertEqual(first["evidence_id"], second["evidence_id"])
+        self.assertTrue(first["evidence_written"])
+        self.assertFalse(second["evidence_written"])
+
+        with connect(self.db_path) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                (self.item.id, NOTIFICATION_ACTION_EVIDENCE_URI, action_runtime.NOTIFICATION_ACTION_CREATED_BY),
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_notification_execute_marks_failed_on_delivery_error(self) -> None:
+        action = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="telegram",
+            target="telegram:7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+        claim_operator_notification(self.db_path, action["action_id"])
+
+        def failing_sender(**kwargs: object) -> dict[str, object]:
+            raise action_runtime.NotificationDeliveryError("telegram send failed")
+
+        result = execute_operator_notification(self.db_path, action["action_id"], sender=failing_sender)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["evidence_written"])
+        self.assertIn(action_runtime.NOTIFICATION_FAILURE_CODE, result["error_message"])
+
+    def test_notification_execute_marks_failed_on_missing_target_item(self) -> None:
+        action = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="telegram",
+            target="telegram:7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+        claim_operator_notification(self.db_path, action["action_id"])
+
+        with connect(self.db_path) as connection:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute("DELETE FROM items WHERE id = ?", (self.item.id,))
+            connection.commit()
+
+        result = execute_operator_notification(self.db_path, action["action_id"], sender=lambda **kwargs: {"ok": True})
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["evidence_written"])
+        self.assertIn(action_runtime.NOTIFICATION_FAILURE_CODE, result["error_message"])
+
+    def test_notification_enqueue_requires_age_or_deadline_context(self) -> None:
+        with self.assertRaises(ValidationError):
+            enqueue_operator_notification(
+                self.db_path,
+                self.item.id,
+                channel="telegram",
+                target="telegram:7529788084",
+                reason="stale_triage",
+            )
+
+    def test_openclaw_message_sender_uses_gateway_tool_invoke(self) -> None:
+        config_path = Path(self.tempdir.name) / "openclaw.json"
+        config_path.write_text(json.dumps({"gateway": {"auth": {"token": "test-token"}}}))
+
+        class FakeResponse:
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"ok": True, "result": {"messageId": "123"}}).encode("utf-8")
+
+        captured: dict[str, object] = {}
+
+        def fake_urlopen(request, timeout: int = 0):
+            captured["timeout"] = timeout
+            captured["url"] = request.full_url
+            captured["auth"] = request.get_header("Authorization")
+            captured["content_type"] = request.get_header("Content-type")
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch.object(action_runtime, "OPENCLAW_CONFIG_PATH", config_path), patch.object(
+            action_runtime.urllib.request,
+            "urlopen",
+            fake_urlopen,
+        ):
+            result = action_runtime._openclaw_message_sender(
+                channel="telegram",
+                target="7529788084",
+                message="ACE alert",
+            )
+
+        self.assertEqual(captured["url"], action_runtime.OPENCLAW_GATEWAY_URL)
+        self.assertEqual(captured["auth"], "Bearer test-token")
+        self.assertEqual(captured["content_type"], "application/json")
+        self.assertEqual(captured["timeout"], 20)
+        self.assertEqual(
+            captured["body"],
+            {
+                "tool": "message",
+                "args": {
+                    "action": "send",
+                    "channel": "telegram",
+                    "target": "7529788084",
+                    "message": "ACE alert",
+                },
+                "sessionKey": "main",
+            },
+        )
+        self.assertEqual(result, {"ok": True, "result": {"messageId": "123"}})
 
 
 if __name__ == "__main__":
