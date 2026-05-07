@@ -11,6 +11,7 @@ if __package__ in {None, ""}:
 
 from ace.repository import ItemRepository, ValidationError
 from ace.governed_run_runtime import get_governed_cycle_run_status
+from ace.governed_run_runtime import correct_governed_run_trigger_kind
 from ace.supervisor_runtime import (
     RUNTIME_FAMILY_SINGLE_TENANT,
     get_supervisor_runtime_status,
@@ -96,6 +97,16 @@ def build_parser() -> argparse.ArgumentParser:
     cycle.add_argument("--actor")
 
     subparsers.add_parser("cycle-status", help="Show current active and last terminal governed cycle run")
+    correct_governed_run = subparsers.add_parser(
+        "correct-governed-run-trigger",
+        help="Apply an audited trigger_kind correction to a historical governed run",
+    )
+    correct_governed_run.add_argument("run_id")
+    correct_governed_run.add_argument("trigger_kind")
+    correct_governed_run.add_argument("--reason", required=True)
+    correct_governed_run.add_argument("--actor")
+    correct_governed_run.add_argument("--source")
+    correct_governed_run.add_argument("--session")
     supervisor_run = subparsers.add_parser(
         "supervisor-run",
         help="Run one bounded resident supervisor-runtime slice",
@@ -303,6 +314,11 @@ def _print_governed_run_status(result: dict[str, object]) -> None:
     if isinstance(last_terminal_run, dict):
         for key, value in last_terminal_run.items():
             print(f"last_terminal_run.{key}={value}")
+
+
+def _print_governed_run(result: dict[str, object]) -> None:
+    for key, value in result.items():
+        print(f"{key}={value}")
 
 
 def _print_supervisor_run_result(result: dict[str, object]) -> None:
@@ -554,6 +570,19 @@ def main(argv: list[str] | None = None) -> int:
         if command == "cycle-status":
             result = get_governed_cycle_run_status(db_path)
             _print_governed_run_status(result)
+            return 0
+
+        if command == "correct-governed-run-trigger":
+            result = correct_governed_run_trigger_kind(
+                db_path,
+                args.run_id,
+                trigger_kind=_normalize_required_text(args.trigger_kind, field_name="trigger_kind"),
+                actor=_normalize_optional_text(args.actor, field_name="actor"),
+                source=_normalize_optional_text(args.source, field_name="source"),
+                source_session=_normalize_optional_text(args.session, field_name="source_session"),
+                reason=_normalize_required_text(args.reason, field_name="reason"),
+            )
+            _print_governed_run(result)
             return 0
 
         if command == "supervisor-run":

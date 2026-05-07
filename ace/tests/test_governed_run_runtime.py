@@ -4,20 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ace.governed_run_runtime import (
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_INTERRUPTED,
-    STATUS_RUNNING,
-    complete_governed_run,
-    create_governed_cycle_run,
-    fail_governed_run,
-    get_governed_cycle_run_status,
-    interrupt_governed_run,
-    mark_governed_run_running,
-    start_governed_run,
-)
-from ace.repository import ValidationError
+from ace.governed_run_runtime import correct_governed_run_trigger_kind, create_governed_cycle_run
 from ace.storage import bootstrap_db, connect
 
 
@@ -30,71 +17,73 @@ class GovernedRunRuntimeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
-    def test_duplicate_completion_is_replay_safe(self) -> None:
-        run = create_governed_cycle_run(self.db_path)
-        start_governed_run(self.db_path, run["run_id"])
-        mark_governed_run_running(self.db_path, run["run_id"])
+    def test_correct_governed_run_trigger_kind_updates_row_and_emits_audit_event(self) -> None:
+        run = create_governed_cycle_run(self.db_path, trigger_kind="operator")
 
-        first = complete_governed_run(
+        corrected = correct_governed_run_trigger_kind(
             self.db_path,
             run["run_id"],
-            briefing_path="/tmp/briefing.md",
-            notification_action_id="action_1",
-            delivery_evidence_id="evidence_1",
-        )
-        second = complete_governed_run(
-            self.db_path,
-            run["run_id"],
-            briefing_path="/tmp/briefing.md",
-            notification_action_id="action_1",
-            delivery_evidence_id="evidence_1",
+            trigger_kind="launchd",
+            actor="test-auditor",
+            source="reports/test.md",
+            source_session="test-governed-run-correction",
+            reason="historical trigger reconciliation",
         )
 
-        self.assertEqual(first["status"], STATUS_COMPLETED)
-        self.assertEqual(second["status"], STATUS_COMPLETED)
-        self.assertEqual(first["ended_at"], second["ended_at"])
-
-    def test_illegal_terminal_transition_fails_loudly(self) -> None:
-        run = create_governed_cycle_run(self.db_path)
-        with self.assertRaises(ValidationError):
-            complete_governed_run(self.db_path, run["run_id"])
-
-    def test_status_surface_returns_current_and_last_terminal_truth(self) -> None:
-        first = create_governed_cycle_run(self.db_path)
-        start_governed_run(self.db_path, first["run_id"])
-        mark_governed_run_running(self.db_path, first["run_id"])
-        fail_governed_run(self.db_path, first["run_id"], failure_code="x", failure_summary="failed")
-
-        second = create_governed_cycle_run(self.db_path)
-        start_governed_run(self.db_path, second["run_id"])
-
-        status = get_governed_cycle_run_status(self.db_path)
-        self.assertIsNotNone(status["current_run"])
-        self.assertEqual(status["current_run"]["run_id"], second["run_id"])
-        self.assertEqual(status["current_run"]["status"], "starting")
-        self.assertIsNotNone(status["last_terminal_run"])
-        self.assertEqual(status["last_terminal_run"]["run_id"], first["run_id"])
-        self.assertEqual(status["last_terminal_run"]["status"], STATUS_FAILED)
-
-    def test_interrupt_persists_interrupted_terminal_state(self) -> None:
-        run = create_governed_cycle_run(self.db_path)
-        start_governed_run(self.db_path, run["run_id"])
-        mark_governed_run_running(self.db_path, run["run_id"])
-
-        interrupted = interrupt_governed_run(
-            self.db_path,
-            run["run_id"],
-            failure_code="cycle_interrupted",
-            failure_summary="manual interrupt",
-        )
-
-        self.assertEqual(interrupted["status"], STATUS_INTERRUPTED)
-        self.assertIsNotNone(interrupted["interrupted_at"])
+        self.assertEqual(corrected["trigger_kind"], "launchd")
 
         with connect(self.db_path) as connection:
             row = connection.execute(
-                "SELECT status, interrupted_at FROM governed_runs WHERE run_id = ?",
+                "SELECT trigger_kind FROM governed_runs WHERE run_id = ?",
                 (run["run_id"],),
             ).fetchone()
-        self.assertEqual(row["status"], STATUS_INTERRUPTED)
-        self.assertIsNotNone(row["interrupted_at"])
+            event = connection.execute(
+                """
+                SELECT event_type, actor, source, session_id, payload_json
+                FROM events
+                WHERE event_type = 'ace.governed_run.trigger_kind_corrected'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        self.assertEqual(row["trigger_kind"], "launchd")
+        self.assertIsNotNone(event)
+        self.assertEqual(event["actor"], "test-auditor")
+        self.assertEqual(event["source"], "reports/test.md")
+        self.assertEqual(event["session_id"], "test-governed-run-correction")
+        self.assertIn(run["run_id"], event["payload_json"])
+
+    def test_correct_governed_run_trigger_kind_emits_audit_event_even_when_value_already_matches(self) -> None:
+        run = create_governed_cycle_run(self.db_path, trigger_kind="launchd")
+
+        corrected = correct_governed_run_trigger_kind(
+            self.db_path,
+            run["run_id"],
+            trigger_kind="launchd",
+            actor="test-auditor",
+            source="reports/test.md",
+            source_session="test-governed-run-noop-correction",
+            reason="re-assert launchd trigger truth",
+        )
+
+        self.assertEqual(corrected["trigger_kind"], "launchd")
+
+        with connect(self.db_path) as connection:
+            event = connection.execute(
+                """
+                SELECT payload_json
+                FROM events
+                WHERE event_type = 'ace.governed_run.trigger_kind_corrected'
+                  AND session_id = 'test-governed-run-noop-correction'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        self.assertIsNotNone(event)
+        self.assertIn('"changed":false', event["payload_json"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,6 +9,7 @@ from unittest.mock import patch
 from ace.cycle import run_cycle
 from ace.autonomy_lane import AUTONOMY_ITEM_TYPE
 from ace.governed_run_runtime import get_governed_cycle_run_status
+from ace.governed_run_runtime import correct_governed_run_trigger_kind
 from ace.repository import ItemRepository, ValidationError
 from ace.storage import bootstrap_db, connect
 
@@ -147,6 +148,43 @@ class AceCycleTests(unittest.TestCase):
         status = get_governed_cycle_run_status(self.db_path)
         self.assertIsNotNone(status["last_terminal_run"])
         self.assertEqual(status["last_terminal_run"]["trigger_kind"], "launchd")
+
+    def test_governed_run_trigger_correction_is_audited(self) -> None:
+        result = run_cycle(
+            self.db_path,
+            now="2026-05-05T00:00:00Z",
+            briefing_path=self.briefing_path,
+        )
+        run_id = result["governed_run"]["run_id"]
+
+        corrected = correct_governed_run_trigger_kind(
+            self.db_path,
+            run_id,
+            trigger_kind="launchd",
+            actor="test-auditor",
+            source="reports/test.md",
+            source_session="test-correction-session",
+            reason="historical reconciliation",
+        )
+
+        self.assertEqual(corrected["trigger_kind"], "launchd")
+
+        with connect(self.db_path) as connection:
+            event = connection.execute(
+                """
+                SELECT event_type, actor, source, session_id, payload_json
+                FROM events
+                WHERE event_type = 'ace.governed_run.trigger_kind_corrected'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["actor"], "test-auditor")
+        self.assertEqual(event["source"], "reports/test.md")
+        self.assertEqual(event["session_id"], "test-correction-session")
+        self.assertIn(run_id, event["payload_json"])
 
 
 if __name__ == "__main__":

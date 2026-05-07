@@ -17,6 +17,8 @@ STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_INTERRUPTED = "interrupted"
 
+TRIGGER_CORRECTION_REASON_HISTORICAL_RECONCILIATION = "historical_trigger_reconciliation"
+
 _ACTIVE_STATUSES = {STATUS_PENDING, STATUS_STARTING, STATUS_RUNNING}
 _TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED}
 
@@ -180,6 +182,68 @@ def get_governed_cycle_run_status(db_path: Path | str = DB_PATH) -> dict[str, An
         "current_run": _row_to_governed_run(current_row) if current_row is not None else None,
         "last_terminal_run": _row_to_governed_run(last_terminal_row) if last_terminal_row is not None else None,
     }
+
+
+def correct_governed_run_trigger_kind(
+    db_path: Path | str = DB_PATH,
+    run_id: str | None = None,
+    *,
+    trigger_kind: str,
+    actor: str | None,
+    source: str | None,
+    source_session: str | None,
+    reason: str,
+) -> dict[str, Any]:
+    bootstrap_db(db_path)
+    normalized_run_id = _normalize_required_text(run_id, field_name="run_id")
+    normalized_trigger_kind = _normalize_required_text(trigger_kind, field_name="trigger_kind")
+    normalized_reason = _normalize_required_text(reason, field_name="reason")
+    normalized_actor = _normalize_optional_text(actor)
+    normalized_source = _normalize_optional_text(source)
+    normalized_source_session = _normalize_optional_text(source_session)
+    corrected_at = utc_now()
+
+    with connect(db_path) as connection:
+        row = _fetch_run_row(connection, normalized_run_id)
+        if row is None:
+            raise KeyError(f"unknown run_id: {normalized_run_id}")
+
+        previous_trigger_kind = row["trigger_kind"]
+        changed = previous_trigger_kind != normalized_trigger_kind
+        if changed:
+            connection.execute(
+                """
+                UPDATE governed_runs
+                SET trigger_kind = ?
+                WHERE run_id = ?
+                """,
+                (normalized_trigger_kind, normalized_run_id),
+            )
+
+        payload = {
+            "run_id": normalized_run_id,
+            "from_trigger_kind": previous_trigger_kind,
+            "to_trigger_kind": normalized_trigger_kind,
+            "reason": normalized_reason,
+            "corrected_at": corrected_at,
+            "changed": changed,
+        }
+        from .storage import append_event
+
+        append_event(
+            connection,
+            event_type="ace.governed_run.trigger_kind_corrected",
+            payload=payload,
+            item_id=None,
+            actor=normalized_actor,
+            source=normalized_source,
+            session_id=normalized_source_session,
+            created_at=corrected_at,
+        )
+        connection.commit()
+        updated = _fetch_run_row(connection, normalized_run_id)
+        assert updated is not None, "governed run correction failed unexpectedly"
+    return _row_to_governed_run(updated)
 
 
 def _transition_run(
