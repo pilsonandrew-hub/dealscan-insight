@@ -10,6 +10,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ace.repository import ItemRepository, ValidationError
+from ace.autonomy_lane import mark_item_autonomy_eligible
 from ace.governed_run_runtime import get_governed_cycle_run_status
 from ace.governed_run_runtime import correct_governed_run_trigger_kind
 from ace.supervisor_runtime import (
@@ -156,6 +157,14 @@ def build_parser() -> argparse.ArgumentParser:
     evidence.add_argument("--evidence-uri")
     evidence.add_argument("--created-by")
     evidence.add_argument("--actor")
+
+    autonomy_eligible = subparsers.add_parser(
+        "mark-autonomy-eligible",
+        help="Mark a direct work item as explicitly eligible for governed autonomy",
+    )
+    autonomy_eligible.add_argument("item_id")
+    autonomy_eligible.add_argument("--reason", required=True)
+    autonomy_eligible.add_argument("--actor")
 
     obligation = subparsers.add_parser("add-obligation", help="Add an obligation for an item")
     obligation.add_argument("item_id")
@@ -448,6 +457,10 @@ def _print_evidence_added(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} evidence_id={evidence_id}")
 
 
+def _print_autonomy_eligibility_marked(*, item_id: str, evidence_id: str) -> None:
+    print(f"item_id={item_id} autonomy_eligibility_evidence_id={evidence_id}")
+
+
 def _print_obligation_added(*, item_id: str, obligation_id: str) -> None:
     print(f"item_id={item_id} obligation_id={obligation_id}")
 
@@ -644,6 +657,16 @@ def main(argv: list[str] | None = None) -> int:
                 actor=args.actor,
             )
             _print_evidence_added(item_id=args.item_id, evidence_id=evidence_id)
+            return 0
+
+        if command == "mark-autonomy-eligible":
+            evidence_id = mark_item_autonomy_eligible(
+                db_path,
+                args.item_id,
+                reason=_normalize_required_text(args.reason, field_name="reason"),
+                actor=_normalize_optional_text(args.actor, field_name="actor"),
+            )
+            _print_autonomy_eligibility_marked(item_id=args.item_id, evidence_id=evidence_id)
             return 0
 
         if command == "add-obligation":

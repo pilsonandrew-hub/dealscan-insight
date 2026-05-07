@@ -71,16 +71,36 @@ class AceCliParserContractTests(unittest.TestCase):
 
 
 class AceCliTests(unittest.TestCase):
+    class _ManagedConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self._connection = connection
+
+        def __getattr__(self, name: str):
+            return getattr(self._connection, name)
+
+        def __enter__(self):
+            self._connection.__enter__()
+            return self._connection
+
+        def __exit__(self, exc_type, exc, tb):
+            try:
+                return self._connection.__exit__(exc_type, exc, tb)
+            finally:
+                self._connection.close()
+
+        def close(self) -> None:
+            self._connection.close()
+
     def run_cli(self, *argv: str) -> tuple[int, str]:
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             code = main(list(argv))
         return code, buffer.getvalue()
 
-    def connect_db(self, db_path: Path) -> sqlite3.Connection:
+    def connect_db(self, db_path: Path):
         connection = sqlite3.connect(db_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        return self._ManagedConnection(connection)
 
     def test_show_trimmed_event_type_with_limit_one_selects_latest_matching_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -147,6 +167,57 @@ class AceCliTests(unittest.TestCase):
             self.assertIn('"evidence_text":"proof two"', output)
             self.assertNotIn('"evidence_text":"proof one"', output)
             self.assertNotIn("item.obligation_added", output)
+
+    def test_mark_autonomy_eligible_adds_single_governed_evidence_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake",
+                "work",
+                "Direct work item",
+                "--source",
+                "telegram/direct",
+                "--session",
+                "2026-05-07-direct-work",
+            )
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "mark-autonomy-eligible",
+                item_id,
+                "--reason",
+                "bounded direct-work proof",
+                "--actor",
+                "operator",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn("autonomy_eligibility_evidence_id=", output)
+
+            first_evidence_id = output.split("autonomy_eligibility_evidence_id=")[1].strip()
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "mark-autonomy-eligible",
+                item_id,
+                "--reason",
+                "duplicate bounded direct-work proof",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn(first_evidence_id, output)
+
+            with self.connect_db(db_path) as connection:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                    (item_id, "ace://autonomy/eligible-direct-work", "ace.autonomy_lane"),
+                ).fetchone()[0]
+            self.assertEqual(count, 1)
 
     def test_show_trimmed_event_type_with_limit_one_preserves_malformed_latest_matching_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

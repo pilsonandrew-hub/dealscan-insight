@@ -6,7 +6,10 @@ from pathlib import Path
 
 from ace.autonomy_lane import (
     AUTONOMY_EVIDENCE_URI,
+    AUTONOMY_ELIGIBILITY_CREATED_BY,
+    AUTONOMY_ELIGIBILITY_EVIDENCE_URI,
     AUTONOMY_ITEM_TYPE,
+    mark_item_autonomy_eligible,
     run_autonomy_lane,
 )
 from ace.repository import ItemRepository
@@ -61,7 +64,7 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertEqual(result["verified_done_ids"], [])
         self.assertEqual(result["evidence_ids"], [])
 
-    def test_eligible_real_work_item_closes_without_user_touch(self) -> None:
+    def test_keyword_only_real_work_item_is_untouched(self) -> None:
         item = self.repo.create_item(
             item_type="work",
             title="Real user work autonomy proof",
@@ -75,11 +78,51 @@ class AutonomyLaneTests(unittest.TestCase):
 
         final_item = self.repo.get_item(item.id)
         assert final_item is not None
+        self.assertEqual(final_item.state, "TRIAGE")
+        self.assertEqual(result["approved_ids"], [])
+        self.assertEqual(result["claimed_done_ids"], [])
+        self.assertEqual(result["verified_done_ids"], [])
+        self.assertEqual(result["evidence_ids"], [])
+
+    def test_explicitly_marked_real_work_item_closes_without_user_touch(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Dealer strategy follow-up",
+            description="Real direct work that should only run when explicitly marked eligible.",
+            source="telegram/direct",
+            source_session="2026-05-07-real-user-work-autonomy",
+            actor="test",
+        )
+
+        evidence_id = mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="bounded machine-verifiable direct-work proof",
+            actor="operator",
+        )
+
+        result = run_autonomy_lane(self.db_path, actor="ace-runtime", source_session="test-session")
+
+        final_item = self.repo.get_item(item.id)
+        assert final_item is not None
         self.assertEqual(final_item.state, "VERIFIED_DONE")
         self.assertEqual(result["approved_ids"], [item.id])
         self.assertEqual(result["claimed_done_ids"], [item.id])
         self.assertEqual(result["verified_done_ids"], [item.id])
         self.assertEqual(len(result["evidence_ids"]), 1)
+
+        with connect(self.db_path) as connection:
+            eligibility_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                (item.id, AUTONOMY_ELIGIBILITY_EVIDENCE_URI, AUTONOMY_ELIGIBILITY_CREATED_BY),
+            ).fetchone()[0]
+            eligibility_row = connection.execute(
+                "SELECT id FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                (item.id, AUTONOMY_ELIGIBILITY_EVIDENCE_URI, AUTONOMY_ELIGIBILITY_CREATED_BY),
+            ).fetchone()
+        self.assertEqual(eligibility_count, 1)
+        self.assertIsNotNone(eligibility_row)
+        self.assertEqual(eligibility_row[0], evidence_id)
 
     def test_real_work_item_without_eligibility_markers_is_untouched(self) -> None:
         item = self.repo.create_item(
@@ -100,3 +143,33 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertEqual(result["claimed_done_ids"], [])
         self.assertEqual(result["verified_done_ids"], [])
         self.assertEqual(result["evidence_ids"], [])
+
+    def test_mark_item_autonomy_eligible_is_idempotent(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Direct work item",
+            source="telegram/direct",
+            source_session="2026-05-07-direct-work",
+            actor="test",
+        )
+
+        first = mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="first eligibility marker",
+            actor="operator",
+        )
+        second = mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="duplicate eligibility marker",
+            actor="operator",
+        )
+
+        self.assertEqual(first, second)
+        with connect(self.db_path) as connection:
+            eligibility_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                (item.id, AUTONOMY_ELIGIBILITY_EVIDENCE_URI, AUTONOMY_ELIGIBILITY_CREATED_BY),
+            ).fetchone()[0]
+        self.assertEqual(eligibility_count, 1)

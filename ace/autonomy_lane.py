@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .repository import ItemRepository
-from .storage import DB_PATH, utc_now
+from .storage import DB_PATH, connect, utc_now
 
 
 AUTONOMY_ITEM_TYPE = "machine_verifiable_work"
@@ -12,22 +12,76 @@ AUTONOMY_ACTOR = "ace.autonomy_lane"
 AUTONOMY_SOURCE = "ace/autonomy_lane.py"
 AUTONOMY_EVIDENCE_URI = "ace://autonomy/machine-verifiable-closeout"
 AUTONOMY_ELIGIBLE_WORK_SOURCE = "telegram/direct"
-AUTONOMY_WORK_KEYWORDS = (
-    "autonomy proof",
-    "bounded autonomy proof",
-)
+AUTONOMY_ELIGIBILITY_EVIDENCE_URI = "ace://autonomy/eligible-direct-work"
+AUTONOMY_ELIGIBILITY_CREATED_BY = "ace.autonomy_lane"
 
 
-def _is_autonomy_eligible(item: Any) -> bool:
+def mark_item_autonomy_eligible(
+    db_path: Path | str = DB_PATH,
+    item_id: str | None = None,
+    *,
+    reason: str,
+    actor: str | None = None,
+) -> str:
+    repo = ItemRepository(db_path)
+    if item_id is None or not item_id.strip():
+        raise ValueError("item_id is required")
+    item = repo.get_item(item_id)
+    if item is None:
+        raise KeyError(f"unknown item_id: {item_id}")
+    if item.item_type != "work":
+        raise ValueError("only work items may be marked autonomy-eligible")
+    if item.source != AUTONOMY_ELIGIBLE_WORK_SOURCE:
+        raise ValueError("only telegram/direct work items may be marked autonomy-eligible")
+
+    normalized_reason = reason.strip()
+    if not normalized_reason:
+        raise ValueError("reason must not be empty or whitespace-only")
+
+    existing = _eligibility_evidence_id(db_path, item.id)
+    if existing is not None:
+        return existing
+
+    evidence_text = (
+        "ACE governed autonomy eligibility marker for direct work. "
+        f"Reason: {normalized_reason}"
+    )
+    return repo.add_evidence(
+        item.id,
+        evidence_text=evidence_text,
+        evidence_uri=AUTONOMY_ELIGIBILITY_EVIDENCE_URI,
+        created_by=AUTONOMY_ELIGIBILITY_CREATED_BY,
+        actor=actor,
+    )
+
+
+def _eligibility_evidence_id(db_path: Path | str, item_id: str) -> str | None:
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id
+            FROM evidence
+            WHERE item_id = ?
+              AND evidence_uri = ?
+              AND created_by = ?
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+            """,
+            (item_id, AUTONOMY_ELIGIBILITY_EVIDENCE_URI, AUTONOMY_ELIGIBILITY_CREATED_BY),
+        ).fetchone()
+    return row[0] if row is not None else None
+
+
+def _is_autonomy_eligible(item: Any, *, repo: ItemRepository | None = None) -> bool:
     if item.item_type == AUTONOMY_ITEM_TYPE:
         return True
     if item.item_type != "work":
         return False
     if item.source != AUTONOMY_ELIGIBLE_WORK_SOURCE:
         return False
-    fields = [item.title or "", item.description or "", item.source_session or ""]
-    normalized = "\n".join(fields).lower()
-    return any(keyword in normalized for keyword in AUTONOMY_WORK_KEYWORDS)
+    if repo is None:
+        raise ValueError("repo is required for real-work autonomy eligibility checks")
+    return _eligibility_evidence_id(repo.db_path, item.id) is not None
 
 
 def _approval_reason(item: Any) -> str:
@@ -81,7 +135,7 @@ def run_autonomy_lane(
 
     items = repo.list_items()
     for item in items:
-        if not _is_autonomy_eligible(item):
+        if not _is_autonomy_eligible(item, repo=repo):
             continue
 
         if item.state == "TRIAGE":
