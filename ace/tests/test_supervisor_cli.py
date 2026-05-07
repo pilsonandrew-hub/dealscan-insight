@@ -147,6 +147,54 @@ class SupervisorCliTests(unittest.TestCase):
             self.assertIn("auto_stopped=false", output)
             self.assertIn("runtime_status=stopped", output)
 
+    def test_supervisor_shutdown_requests_current_runtime_when_not_explicitly_provided(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            result_holder: dict[str, tuple[int, str]] = {}
+
+            def _target() -> None:
+                result_holder["result"] = self.run_cli(
+                    "--db",
+                    str(db_path),
+                    "supervisor-run",
+                    "--run-until-shutdown",
+                    "--heartbeat-interval-seconds",
+                    "0.01",
+                )
+
+            thread = threading.Thread(target=_target)
+            thread.start()
+
+            deadline = time.time() + 5
+            saw_live = False
+            while time.time() < deadline:
+                code, status_output = self.run_cli("--db", str(db_path), "supervisor-status")
+                if code == 0 and "current_runtime_present=true" in status_output:
+                    saw_live = True
+                    break
+                time.sleep(0.01)
+
+            self.assertTrue(saw_live)
+
+            code, shutdown_output = self.run_cli("--db", str(db_path), "supervisor-shutdown")
+            self.assertEqual(code, 0, shutdown_output)
+            self.assertIn("runtime_instance_id=runtime_", shutdown_output)
+            self.assertIn("shutdown_status=requested", shutdown_output)
+
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            code, output = result_holder["result"]
+            self.assertEqual(code, 0, output)
+            self.assertIn("runtime_status=stopped", output)
+            self.assertIn("auto_stopped=false", output)
+
+    def test_supervisor_shutdown_fails_without_active_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            code, output = self.run_cli("--db", str(db_path), "supervisor-shutdown")
+            self.assertEqual(code, 1, output)
+            self.assertIn("error=no_active_supervisor_runtime", output)
+
     def test_supervisor_status_reports_recovery_history_for_failed_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

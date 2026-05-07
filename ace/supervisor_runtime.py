@@ -125,10 +125,24 @@ def start_supervisor_runtime(
             (normalized_runtime_family, STATUS_STARTING, STATUS_LIVE, STATUS_STALE),
         ).fetchone()
         if existing is not None:
-            result = _row_to_runtime(existing)
-            result["created"] = False
-            result["duplicate_start"] = True
-            return result
+            if (
+                existing["status"] == STATUS_STALE
+                and existing["shutdown_status"] == SHUTDOWN_STATUS_REQUESTED
+            ):
+                _terminalize_runtime(
+                    db_path,
+                    runtime_instance_id=existing["runtime_instance_id"],
+                    target_status=STATUS_STOPPED,
+                    failure_code=None,
+                    failure_summary=None,
+                    failure_phase=None,
+                )
+                existing = None
+            else:
+                result = _row_to_runtime(existing)
+                result["created"] = False
+                result["duplicate_start"] = True
+                return result
 
         now = utc_now()
         runtime_instance_id = new_id("runtime")

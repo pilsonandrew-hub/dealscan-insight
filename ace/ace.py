@@ -13,6 +13,7 @@ from ace.governed_run_runtime import get_governed_cycle_run_status
 from ace.supervisor_runtime import (
     RUNTIME_FAMILY_SINGLE_TENANT,
     get_supervisor_runtime_status,
+    request_supervisor_shutdown,
     run_supervisor_runtime,
 )
 from ace.storage import DB_PATH, bootstrap_db
@@ -111,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
         "supervisor-status",
         help="Show current active and last terminal resident supervisor runtime",
     )
+    supervisor_shutdown = subparsers.add_parser(
+        "supervisor-shutdown",
+        help="Request shutdown for the current live/stale resident supervisor runtime",
+    )
+    supervisor_shutdown.add_argument("--runtime-instance-id")
     subparsers.add_parser(
         "gate4-inspection",
         help="Show bounded operator-facing Gate 4 inspection artifacts already governed on disk",
@@ -397,6 +403,14 @@ def _print_gate4_inspection_surface() -> int:
     return 0
 
 
+def _print_supervisor_shutdown_result(result: dict[str, object]) -> None:
+    print(f"runtime_instance_id={result['runtime_instance_id']}")
+    print(f"runtime_status={result['status']}")
+    print(f"shutdown_status={result['shutdown_status']}")
+    if result.get("shutdown_requested_at") is not None:
+        print(f"shutdown_requested_at={result['shutdown_requested_at']}")
+
+
 def _print_evidence_added(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} evidence_id={evidence_id}")
 
@@ -541,6 +555,22 @@ def main(argv: list[str] | None = None) -> int:
         if command == "supervisor-status":
             result = get_supervisor_runtime_status(db_path)
             _print_supervisor_runtime_status(result)
+            return 0
+
+        if command == "supervisor-shutdown":
+            runtime_instance_id = _normalize_optional_text(
+                args.runtime_instance_id,
+                field_name="runtime_instance_id",
+            )
+            if runtime_instance_id is None:
+                status = get_supervisor_runtime_status(db_path)
+                current_runtime = status.get("current_runtime")
+                if not isinstance(current_runtime, dict):
+                    print("error=no_active_supervisor_runtime")
+                    return 1
+                runtime_instance_id = current_runtime["runtime_instance_id"]
+            result = request_supervisor_shutdown(db_path, runtime_instance_id)
+            _print_supervisor_shutdown_result(result)
             return 0
 
         if command == "gate4-inspection":

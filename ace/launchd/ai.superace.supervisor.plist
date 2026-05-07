@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.superace.supervisor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/andrewpilson/.openclaw/workspace/ace/launchd/run-ace-supervisor.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/andrewpilson/.openclaw/workspace</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ACE_DB_PATH</key>
+    <string>/Users/andrewpilson/.openclaw/workspace/ace/state/ace.db</string>
+    <key>ACE_HOST_IDENTITY</key>
+    <string>mac-hq</string>
+    <key>ACE_SUPERVISOR_STALE_AFTER_SECONDS</key>
+    <string>120</string>
+    <key>ACE_SUPERVISOR_HEARTBEAT_INTERVAL_SECONDS</key>
+    <string>5</string>
+    <key>ACE_SUPERVISOR_RUNTIME_FAMILY</key>
+    <string>single_tenant_local_supervisor</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/andrewpilson/.openclaw/logs/ace-supervisor.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/andrewpilson/.openclaw/logs/ace-supervisor.err.log</string>
+</dict>
+</plist>

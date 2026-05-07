@@ -333,6 +333,31 @@ class SupervisorRuntimeTests(unittest.TestCase):
         self.assertEqual(status["runtime_transition_history"][0]["event_type"], "ace.supervisor.started")
         self.assertEqual(status["runtime_transition_history"][-1]["event_type"], "ace.supervisor.stopped")
 
+    def test_start_reconciles_stale_runtime_with_requested_shutdown_before_duplicate_start(self) -> None:
+        runtime = start_supervisor_runtime(self.db_path, runtime_family=RUNTIME_FAMILY_SINGLE_TENANT)
+        mark_supervisor_runtime_live(self.db_path, runtime["runtime_instance_id"])
+        request_supervisor_shutdown(self.db_path, runtime["runtime_instance_id"])
+
+        with connect(self.db_path) as connection:
+            connection.execute(
+                "UPDATE runtime_instances SET status = ?, updated_at = ? WHERE runtime_instance_id = ?",
+                (STATUS_STALE, "2026-05-07T06:59:38.749701Z", runtime["runtime_instance_id"]),
+            )
+            connection.commit()
+
+        restarted = start_supervisor_runtime(self.db_path, runtime_family=RUNTIME_FAMILY_SINGLE_TENANT)
+        self.assertTrue(restarted["created"])
+        self.assertFalse(restarted["duplicate_start"])
+        self.assertNotEqual(restarted["runtime_instance_id"], runtime["runtime_instance_id"])
+
+        status = get_supervisor_runtime_status(self.db_path)
+        self.assertIsNotNone(status["current_runtime"])
+        self.assertEqual(status["current_runtime"]["runtime_instance_id"], restarted["runtime_instance_id"])
+        self.assertIsNotNone(status["last_terminal_runtime"])
+        self.assertEqual(status["last_terminal_runtime"]["runtime_instance_id"], runtime["runtime_instance_id"])
+        self.assertEqual(status["last_terminal_runtime"]["status"], STATUS_STOPPED)
+        self.assertEqual(status["last_terminal_runtime"]["shutdown_status"], SHUTDOWN_STATUS_COMPLETED)
+
 
 if __name__ == "__main__":
     unittest.main()
