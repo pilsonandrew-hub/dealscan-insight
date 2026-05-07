@@ -30,6 +30,8 @@ During any active work session, write key decisions, commitments, and actions to
 
 This ensures nothing is lost if conversation history gets compacted mid-session.
 
+**Daily memory safety rule:** never use overwrite-style writes when the intent is to append to `memory/YYYY-MM-DD.md`. Read the file first and use an append-safe edit path, or explicit read-modify-write only after verifying the full existing file content. A bad overwrite can destroy the session log.
+
 - **Daily notes:** `memory/YYYY-MM-DD.md` (create `memory/` if needed) — raw logs of what happened
 - **Long-term:** `MEMORY.md` — your curated memories, like a human's long-term memory
 

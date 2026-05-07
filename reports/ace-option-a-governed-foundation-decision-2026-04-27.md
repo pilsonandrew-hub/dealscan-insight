@@ -1,5 +1,17 @@
 # ACE Decision — Option A (Governed Foundation)
 
+> **Canonical decision artifact**
+> This remains a governing status artifact.
+>
+> Canonical status:
+> **Super A.C.E. is a governed foundation / Phase 0 continuity substrate with multiple narrow local-only proven seams. It is not V1.**
+>
+> Use together with:
+> - `ace/README.md`
+> - `reports/ace-governance-v1-hard-gate-and-gap-register-2026-04-26.md`
+> - `reports/ace-enterprise-status-verdict-2026-05-05.md`
+> - `reports/ace-phase-truth-matrix-2026-05-05.md`
+
 Date: 2026-04-27
 Status: selected / frozen
 

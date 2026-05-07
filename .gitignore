@@ -27,9 +27,13 @@ chat-history.txt
 
 # Generated recall residue and ephemeral logs
 memory/.dreams/
+memory/dreaming/
+memory/hot/
 memory/phase-execution.log
+DREAMS.md
 
 # Local scratch / temporary probes
+tmp/
 tmp_*.js
 
 # Nested local caches and support dirs
@@ -59,6 +63,7 @@ FRESH_EYES_*.md
 MASTER_ROADMAP.md
 SCRAPER_AGENT_REPORT_*.md
 SWEEP_REPORT_*.md
+backups/
 reports/
 scripts/codex-warmstart.sh
 scripts/promote-routing-governor-v2.py
