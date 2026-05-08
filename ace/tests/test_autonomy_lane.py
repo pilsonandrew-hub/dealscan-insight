@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from ace.autonomy_lane import (
+    AUTONOMY_DIRECT_WORK_EVIDENCE_URI,
     AUTONOMY_EVIDENCE_URI,
     AUTONOMY_ELIGIBILITY_CREATED_BY,
     AUTONOMY_ELIGIBILITY_EVIDENCE_URI,
@@ -122,7 +123,7 @@ class AutonomyLaneTests(unittest.TestCase):
             ).fetchone()
             autonomy_row = connection.execute(
                 "SELECT evidence_text FROM evidence WHERE item_id = ? AND evidence_uri = ?",
-                (item.id, AUTONOMY_EVIDENCE_URI),
+                (item.id, AUTONOMY_DIRECT_WORK_EVIDENCE_URI),
             ).fetchone()
         self.assertEqual(eligibility_count, 1)
         self.assertIsNotNone(eligibility_row)
@@ -207,8 +208,8 @@ class AutonomyLaneTests(unittest.TestCase):
                 (item.id,),
             ).fetchone()
             evidence_row = connection.execute(
-                "SELECT evidence_text FROM evidence WHERE item_id = ? AND evidence_uri = ? ORDER BY created_at DESC, id DESC LIMIT 1",
-                (item.id, AUTONOMY_EVIDENCE_URI),
+                "SELECT evidence_text, evidence_uri FROM evidence WHERE item_id = ? AND evidence_uri = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (item.id, AUTONOMY_DIRECT_WORK_EVIDENCE_URI),
             ).fetchone()
 
         serialized = "\n".join(row[0] for row in state_change_rows)
@@ -219,3 +220,34 @@ class AutonomyLaneTests(unittest.TestCase):
         assert evidence_row is not None
         self.assertIn("explicit governed eligibility evidence", evidence_row[0])
         self.assertNotIn("machine-verifiable eligibility rules", evidence_row[0])
+        self.assertEqual(evidence_row[1], AUTONOMY_DIRECT_WORK_EVIDENCE_URI)
+
+    def test_explicit_real_work_uses_distinct_closeout_evidence_uri(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Explicit direct work item uri check",
+            source="telegram/direct",
+            source_session="2026-05-07-direct-work-uri-check",
+            actor="test",
+        )
+        mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="uri separation proof",
+            actor="operator",
+        )
+
+        run_autonomy_lane(self.db_path, actor="launchd", source_session="run_test")
+
+        with connect(self.db_path) as connection:
+            uris = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT evidence_uri FROM evidence WHERE item_id = ? ORDER BY created_at ASC, id ASC",
+                    (item.id,),
+                ).fetchall()
+            ]
+
+        self.assertIn(AUTONOMY_ELIGIBILITY_EVIDENCE_URI, uris)
+        self.assertIn(AUTONOMY_DIRECT_WORK_EVIDENCE_URI, uris)
+        self.assertNotIn(AUTONOMY_EVIDENCE_URI, uris)

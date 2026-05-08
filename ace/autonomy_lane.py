@@ -11,6 +11,7 @@ AUTONOMY_ITEM_TYPE = "machine_verifiable_work"
 AUTONOMY_ACTOR = "ace.autonomy_lane"
 AUTONOMY_SOURCE = "ace/autonomy_lane.py"
 AUTONOMY_EVIDENCE_URI = "ace://autonomy/machine-verifiable-closeout"
+AUTONOMY_DIRECT_WORK_EVIDENCE_URI = "ace://autonomy/explicit-direct-work-closeout"
 AUTONOMY_ELIGIBLE_WORK_SOURCE = "telegram/direct"
 AUTONOMY_ELIGIBILITY_EVIDENCE_URI = "ace://autonomy/eligible-direct-work"
 AUTONOMY_ELIGIBILITY_CREATED_BY = "ace.autonomy_lane"
@@ -102,6 +103,12 @@ def _resolve_reason(item: Any) -> str:
     return "governed real-work autonomy lane closeout verified from explicit eligibility evidence"
 
 
+def _evidence_uri(item: Any) -> str:
+    if item.item_type == AUTONOMY_ITEM_TYPE:
+        return AUTONOMY_EVIDENCE_URI
+    return AUTONOMY_DIRECT_WORK_EVIDENCE_URI
+
+
 def _evidence_text(item: Any) -> str:
     if item.item_type == AUTONOMY_ITEM_TYPE:
         return (
@@ -153,7 +160,7 @@ def run_autonomy_lane(
             evidence_id = repo.add_evidence(
                 item.id,
                 evidence_text=_evidence_text(item),
-                evidence_uri=AUTONOMY_EVIDENCE_URI,
+                evidence_uri=_evidence_uri(item),
                 created_by=acting_actor,
                 actor=acting_actor,
             )
