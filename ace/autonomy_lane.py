@@ -17,6 +17,62 @@ AUTONOMY_ELIGIBILITY_EVIDENCE_URI = "ace://autonomy/eligible-direct-work"
 AUTONOMY_ELIGIBILITY_CREATED_BY = "ace.autonomy_lane"
 
 
+def intake_autonomy_eligible_direct_work(
+    db_path: Path | str = DB_PATH,
+    *,
+    title: str,
+    reason: str,
+    source_session: str,
+    description: str | None = None,
+    priority_hint: str | None = None,
+    owner: str | None = None,
+    actor: str | None = None,
+) -> tuple[Any, str]:
+    repo = ItemRepository(db_path)
+
+    normalized_title = title.strip()
+    if not normalized_title:
+        raise ValueError("title is required")
+
+    normalized_source_session = source_session.strip()
+    if not normalized_source_session:
+        raise ValueError("source_session is required")
+
+    existing = repo.get_item_by_source_and_session(
+        AUTONOMY_ELIGIBLE_WORK_SOURCE,
+        normalized_source_session,
+    )
+    if existing is not None:
+        if existing.item_type != "work":
+            raise ValueError("existing sourced item is not a work item")
+        evidence_id = mark_item_autonomy_eligible(
+            db_path,
+            existing.id,
+            reason=reason,
+            actor=actor,
+        )
+        return existing, evidence_id
+
+    item = repo.create_item(
+        item_type="work",
+        title=normalized_title,
+        description=description,
+        state="TRIAGE",
+        priority_hint=priority_hint,
+        source=AUTONOMY_ELIGIBLE_WORK_SOURCE,
+        source_session=normalized_source_session,
+        owner=owner,
+        actor=actor,
+    )
+    evidence_id = mark_item_autonomy_eligible(
+        db_path,
+        item.id,
+        reason=reason,
+        actor=actor,
+    )
+    return item, evidence_id
+
+
 def mark_item_autonomy_eligible(
     db_path: Path | str = DB_PATH,
     item_id: str | None = None,

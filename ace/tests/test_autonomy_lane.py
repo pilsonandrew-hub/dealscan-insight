@@ -10,6 +10,7 @@ from ace.autonomy_lane import (
     AUTONOMY_ELIGIBILITY_CREATED_BY,
     AUTONOMY_ELIGIBILITY_EVIDENCE_URI,
     AUTONOMY_ITEM_TYPE,
+    intake_autonomy_eligible_direct_work,
     mark_item_autonomy_eligible,
     run_autonomy_lane,
 )
@@ -251,3 +252,61 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertIn(AUTONOMY_ELIGIBILITY_EVIDENCE_URI, uris)
         self.assertIn(AUTONOMY_DIRECT_WORK_EVIDENCE_URI, uris)
         self.assertNotIn(AUTONOMY_EVIDENCE_URI, uris)
+
+    def test_intake_autonomy_eligible_direct_work_creates_governed_seed(self) -> None:
+        item, evidence_id = intake_autonomy_eligible_direct_work(
+            self.db_path,
+            title="Governed direct work",
+            reason="governed production-path seed",
+            source_session="2026-05-08-governed-direct-work",
+            description="Created through first-class governed intake.",
+            actor="operator",
+        )
+
+        self.assertEqual(item.item_type, "work")
+        self.assertEqual(item.source, "telegram/direct")
+        self.assertEqual(item.source_session, "2026-05-08-governed-direct-work")
+        self.assertEqual(item.state, "TRIAGE")
+
+        with connect(self.db_path) as connection:
+            evidence_row = connection.execute(
+                "SELECT id, evidence_uri, created_by FROM evidence WHERE id = ?",
+                (evidence_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(evidence_row)
+        self.assertEqual(evidence_row[0], evidence_id)
+        self.assertEqual(evidence_row[1], AUTONOMY_ELIGIBILITY_EVIDENCE_URI)
+        self.assertEqual(evidence_row[2], AUTONOMY_ELIGIBILITY_CREATED_BY)
+
+    def test_intake_autonomy_eligible_direct_work_is_idempotent_by_source_session(self) -> None:
+        first_item, first_evidence_id = intake_autonomy_eligible_direct_work(
+            self.db_path,
+            title="Governed direct work",
+            reason="first seed",
+            source_session="2026-05-08-governed-direct-work-idempotent",
+            actor="operator",
+        )
+        second_item, second_evidence_id = intake_autonomy_eligible_direct_work(
+            self.db_path,
+            title="Different title should not duplicate",
+            reason="second seed",
+            source_session="2026-05-08-governed-direct-work-idempotent",
+            actor="operator",
+        )
+
+        self.assertEqual(first_item.id, second_item.id)
+        self.assertEqual(first_evidence_id, second_evidence_id)
+
+        with connect(self.db_path) as connection:
+            item_count = connection.execute(
+                "SELECT COUNT(*) FROM items WHERE source = ? AND source_session = ?",
+                ("telegram/direct", "2026-05-08-governed-direct-work-idempotent"),
+            ).fetchone()[0]
+            evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                (first_item.id, AUTONOMY_ELIGIBILITY_EVIDENCE_URI, AUTONOMY_ELIGIBILITY_CREATED_BY),
+            ).fetchone()[0]
+
+        self.assertEqual(item_count, 1)
+        self.assertEqual(evidence_count, 1)

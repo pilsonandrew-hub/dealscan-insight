@@ -10,7 +10,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ace.repository import ItemRepository, ValidationError
-from ace.autonomy_lane import mark_item_autonomy_eligible
+from ace.autonomy_lane import intake_autonomy_eligible_direct_work, mark_item_autonomy_eligible
 from ace.governed_run_runtime import get_governed_cycle_run_status
 from ace.governed_run_runtime import correct_governed_run_trigger_kind
 from ace.supervisor_runtime import (
@@ -165,6 +165,18 @@ def build_parser() -> argparse.ArgumentParser:
     autonomy_eligible.add_argument("item_id")
     autonomy_eligible.add_argument("--reason", required=True)
     autonomy_eligible.add_argument("--actor")
+
+    intake_direct_work = subparsers.add_parser(
+        "intake-direct-work",
+        help="Create a governed direct-work item already marked eligible for autonomy",
+    )
+    intake_direct_work.add_argument("title")
+    intake_direct_work.add_argument("--reason", required=True)
+    intake_direct_work.add_argument("--session", required=True)
+    intake_direct_work.add_argument("--description")
+    intake_direct_work.add_argument("--priority-hint")
+    intake_direct_work.add_argument("--owner")
+    intake_direct_work.add_argument("--actor")
 
     obligation = subparsers.add_parser("add-obligation", help="Add an obligation for an item")
     obligation.add_argument("item_id")
@@ -461,6 +473,11 @@ def _print_autonomy_eligibility_marked(*, item_id: str, evidence_id: str) -> Non
     print(f"item_id={item_id} autonomy_eligibility_evidence_id={evidence_id}")
 
 
+def _print_direct_work_intake(*, item, evidence_id: str) -> None:
+    _print_item(item)
+    print(f"autonomy_eligibility_evidence_id={evidence_id}")
+
+
 def _print_obligation_added(*, item_id: str, obligation_id: str) -> None:
     print(f"item_id={item_id} obligation_id={obligation_id}")
 
@@ -667,6 +684,20 @@ def main(argv: list[str] | None = None) -> int:
                 actor=_normalize_optional_text(args.actor, field_name="actor"),
             )
             _print_autonomy_eligibility_marked(item_id=args.item_id, evidence_id=evidence_id)
+            return 0
+
+        if command == "intake-direct-work":
+            item, evidence_id = intake_autonomy_eligible_direct_work(
+                db_path,
+                title=_normalize_required_text(args.title, field_name="title"),
+                reason=_normalize_required_text(args.reason, field_name="reason"),
+                source_session=_normalize_required_text(args.session, field_name="source_session"),
+                description=_normalize_optional_text(args.description, field_name="description"),
+                priority_hint=_normalize_optional_text(args.priority_hint, field_name="priority_hint"),
+                owner=_normalize_optional_text(args.owner, field_name="owner"),
+                actor=_normalize_optional_text(args.actor, field_name="actor"),
+            )
+            _print_direct_work_intake(item=item, evidence_id=evidence_id)
             return 0
 
         if command == "add-obligation":

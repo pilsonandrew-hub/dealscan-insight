@@ -219,6 +219,57 @@ class AceCliTests(unittest.TestCase):
                 ).fetchone()[0]
             self.assertEqual(count, 1)
 
+    def test_intake_direct_work_creates_governed_item_and_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake-direct-work",
+                "Governed direct work",
+                "--reason",
+                "production-path governed seed",
+                "--session",
+                "2026-05-08-cli-governed-direct-work",
+                "--description",
+                "Created through first-class governed intake.",
+                "--actor",
+                "operator",
+            )
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+            evidence_id = output.split("autonomy_eligibility_evidence_id=")[1].split()[0]
+            self.assertIn("source=telegram/direct", output)
+            self.assertIn("state=TRIAGE", output)
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake-direct-work",
+                "Different title should not duplicate",
+                "--reason",
+                "repeat governed seed",
+                "--session",
+                "2026-05-08-cli-governed-direct-work",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn(item_id, output)
+            self.assertIn(evidence_id, output)
+
+            with self.connect_db(db_path) as connection:
+                item_count = connection.execute(
+                    "SELECT COUNT(*) FROM items WHERE source = ? AND source_session = ?",
+                    ("telegram/direct", "2026-05-08-cli-governed-direct-work"),
+                ).fetchone()[0]
+                evidence_count = connection.execute(
+                    "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ? AND created_by = ?",
+                    (item_id, "ace://autonomy/eligible-direct-work", "ace.autonomy_lane"),
+                ).fetchone()[0]
+
+            self.assertEqual(item_count, 1)
+            self.assertEqual(evidence_count, 1)
+
     def test_show_trimmed_event_type_with_limit_one_preserves_malformed_latest_matching_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
