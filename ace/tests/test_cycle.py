@@ -160,8 +160,14 @@ class AceCycleTests(unittest.TestCase):
             "sender_name": "Andrew Pilson",
         }
 
-        with patch("ace.cycle.fetch_unprocessed_telegram_messages", return_value=[message]):
+        with patch("ace.cycle.fetch_unprocessed_telegram_messages", return_value=[message]), patch("ace.cycle.mark_telegram_message_processed") as mark_processed:
             result = run_cycle(self.db_path, actor="launchd", briefing_path=self.briefing_path)
+
+        mark_processed.assert_called_once_with(
+            chat_id="7529788084",
+            message_id="msg-200",
+            processed_at="2026-05-08T16:50:00Z",
+        )
 
         self.assertTrue(result["governed_run"]["status"], "completed")
         self.assertEqual(len(result["ingested_messages"]), 1)

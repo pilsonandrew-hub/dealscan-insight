@@ -7,7 +7,7 @@ from .action_runtime import NotificationSender, send_operator_notification
 from .autonomy_lane import run_autonomy_lane
 from .briefing import generate_briefing, render_briefing_text
 from .telegram_intake import intake_inbound_telegram_work
-from .telegram_runtime import fetch_unprocessed_telegram_messages
+from .telegram_runtime import fetch_unprocessed_telegram_messages, mark_telegram_message_processed
 from .governed_run_runtime import (
     TRIGGER_KIND_OPERATOR,
     complete_governed_run,
@@ -59,6 +59,11 @@ def run_cycle(
                 actor="ace.telegram_intake",
             )
             ingested_messages.append(intake_result)
+            mark_telegram_message_processed(
+                chat_id=str(message["chat_id"]),
+                message_id=str(message["message_id"]),
+                processed_at=str(message["received_at"]),
+            )
 
         autonomy_result = run_autonomy_lane(
             db_path,
