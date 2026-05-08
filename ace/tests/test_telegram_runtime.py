@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from ace import telegram_runtime
 
@@ -77,6 +77,87 @@ class TelegramRuntimeTests(unittest.TestCase):
             second = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         self.assertEqual(second, [])
+
+    def test_fetch_reads_real_telegram_updates_when_bot_token_configured(self) -> None:
+        payload = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 1,
+                    "message": {
+                        "message_id": 42,
+                        "date": 1746720000,
+                        "text": "Can you check this now?",
+                        "chat": {"id": 7529788084},
+                        "from": {"id": 7529788084, "first_name": "Andrew", "last_name": "Pilson"},
+                    },
+                }
+            ],
+        }
+
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with patch.dict(os.environ, {
+            "ACE_TELEGRAM_BOT_TOKEN": "bot-token",
+            "ACE_TELEGRAM_CHAT_ID": "7529788084",
+        }, clear=False), \
+             patch.object(telegram_runtime, "STATE_DIR", self.state_dir), \
+             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db), \
+             patch("ace.telegram_runtime.request.urlopen", return_value=fake_context) as mocked_urlopen:
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        mocked_urlopen.assert_called_once()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["chat_id"], "7529788084")
+        self.assertEqual(messages[0]["message_id"], "42")
+        self.assertEqual(messages[0]["text"], "Can you check this now?")
+        self.assertEqual(messages[0]["sender_id"], "7529788084")
+        self.assertEqual(messages[0]["sender_name"], "Andrew Pilson")
+        self.assertTrue(messages[0]["received_at"].endswith("Z"))
+
+    def test_fetch_real_telegram_updates_filters_non_text_and_non_message_updates(self) -> None:
+        payload = {
+            "ok": True,
+            "result": [
+                {"update_id": 1, "edited_message": {"message_id": 7}},
+                {
+                    "update_id": 2,
+                    "message": {
+                        "message_id": 8,
+                        "date": 1746720000,
+                        "text": "   ",
+                        "chat": {"id": 7529788084},
+                    },
+                },
+                {
+                    "update_id": 3,
+                    "message": {
+                        "message_id": 9,
+                        "date": 1746720001,
+                        "text": "Please review this",
+                        "chat": {"id": 7529788084},
+                    },
+                },
+            ],
+        }
+
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False), \
+             patch.object(telegram_runtime, "STATE_DIR", self.state_dir), \
+             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db), \
+             patch("ace.telegram_runtime.request.urlopen", return_value=fake_context):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual([message["message_id"] for message in messages], ["9"])
 
 
 if __name__ == "__main__":
