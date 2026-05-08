@@ -6,6 +6,8 @@ from typing import Any
 from .action_runtime import NotificationSender, send_operator_notification
 from .autonomy_lane import run_autonomy_lane
 from .briefing import generate_briefing, render_briefing_text
+from .telegram_intake import intake_inbound_telegram_work
+from .telegram_runtime import fetch_unprocessed_telegram_messages
 from .governed_run_runtime import (
     TRIGGER_KIND_OPERATOR,
     complete_governed_run,
@@ -39,10 +41,24 @@ def run_cycle(
     governed_run = create_governed_cycle_run(db_path, trigger_kind=trigger_kind)
     briefing_file = Path(briefing_path)
     notification_results: list[dict[str, Any]] = []
+    ingested_messages: list[dict[str, Any]] = []
 
     try:
         start_governed_run(db_path, governed_run["run_id"])
         mark_governed_run_running(db_path, governed_run["run_id"])
+
+        for message in fetch_unprocessed_telegram_messages():
+            intake_result = intake_inbound_telegram_work(
+                db_path,
+                chat_id=str(message["chat_id"]),
+                message_id=str(message["message_id"]),
+                text=str(message["text"]),
+                received_at=str(message["received_at"]),
+                sender_id=str(message["sender_id"]) if message.get("sender_id") is not None else None,
+                sender_name=str(message["sender_name"]) if message.get("sender_name") is not None else None,
+                actor="ace.telegram_intake",
+            )
+            ingested_messages.append(intake_result)
 
         autonomy_result = run_autonomy_lane(
             db_path,
@@ -89,6 +105,7 @@ def run_cycle(
 
         return {
             "governed_run": completed_run,
+            "ingested_messages": ingested_messages,
             "autonomy": autonomy_result,
             "sweep": sweep_result,
             "briefing": briefing,

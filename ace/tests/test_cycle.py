@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -148,6 +149,45 @@ class AceCycleTests(unittest.TestCase):
         status = get_governed_cycle_run_status(self.db_path)
         self.assertIsNotNone(status["last_terminal_run"])
         self.assertEqual(status["last_terminal_run"]["trigger_kind"], "launchd")
+
+    def test_cycle_ingests_actionable_telegram_message_before_autonomy(self) -> None:
+        message = {
+            "chat_id": "7529788084",
+            "message_id": "msg-200",
+            "text": "Can you check whether ACE closes parser-created Telegram work end to end?",
+            "received_at": "2026-05-08T16:50:00Z",
+            "sender_id": "7529788084",
+            "sender_name": "Andrew Pilson",
+        }
+
+        with patch("ace.cycle.fetch_unprocessed_telegram_messages", return_value=[message]):
+            result = run_cycle(self.db_path, actor="launchd", briefing_path=self.briefing_path)
+
+        self.assertTrue(result["governed_run"]["status"], "completed")
+        self.assertEqual(len(result["ingested_messages"]), 1)
+        self.assertTrue(result["ingested_messages"][0]["actionable"])
+
+        source_session = "telegram:7529788084:msg-200"
+        item = self.repo.get_item_by_source_and_session("telegram/direct", source_session)
+        self.assertIsNotNone(item)
+        assert item is not None
+        self.assertEqual(item.source, "telegram/direct")
+        self.assertEqual(item.source_session, source_session)
+        self.assertEqual(item.state, "VERIFIED_DONE")
+
+        created_event = self.repo.list_item_events(item.id, event_type="item.created", limit=1)[0]
+        payload = json.loads(created_event.payload_json or "{}")
+        self.assertEqual(payload["source_message_text"], message["text"])
+        self.assertEqual(payload["source_message_id"], "msg-200")
+        self.assertEqual(payload["source_chat_id"], "7529788084")
+        self.assertEqual(payload["source_received_at"], "2026-05-08T16:50:00Z")
+        self.assertEqual(payload["parser_rule"], "bounded_direct_work_rule")
+
+        event_types = [event.event_type for event in self.repo.list_item_events(item.id)]
+        self.assertIn("item.created", event_types)
+        self.assertIn("item.evidence_added", event_types)
+        self.assertIn("item.closeout_attempted", event_types)
+        self.assertIn("item.state_changed", event_types)
 
     def test_governed_run_trigger_correction_is_audited(self) -> None:
         result = run_cycle(
