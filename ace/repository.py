@@ -180,6 +180,7 @@ class ItemRepository:
         deadline_at: str | None = None,
         owner: str | None = None,
         actor: str | None = None,
+        created_payload_extra: dict[str, object] | None = None,
     ) -> Item:
         normalized_item_type = item_type.strip()
         if not normalized_item_type:
@@ -227,6 +228,8 @@ class ItemRepository:
             "deadline_at": deadline_at,
             "owner": normalized_owner,
         }
+        if created_payload_extra:
+            event_payload.update(created_payload_extra)
 
         with connect(self.db_path) as connection:
             connection.execute(
