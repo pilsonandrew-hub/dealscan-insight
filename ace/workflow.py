@@ -59,6 +59,13 @@ VALID_NEW_CONTRADICTION_STATUSES = {
     "open",
 }
 
+VALID_CONFIDENCE_TIERS = (
+    "hypothesis",
+    "locally_validated_only",
+    "live_improved_but_pending",
+    "live_confirmed",
+)
+
 
 class AceError(Exception):
     """Base class for ACE workflow failures."""
@@ -82,6 +89,10 @@ class InvalidContradictionStatusError(AceError):
 
 class InvalidNewContradictionStatusError(AceError):
     """Raised when a new contradiction is created in an illegal initial state."""
+
+
+class InvalidConfidenceTierError(AceError):
+    """Raised when a confidence tier is outside the explicit ACE contract."""
 
 
 def normalize_state(state: str) -> str:
@@ -141,6 +152,16 @@ def is_terminal_obligation_status(status: str | None) -> bool:
 
 def is_terminal_contradiction_status(status: str | None) -> bool:
     return (status or "").strip().lower() in OPEN_CONTRADICTION_TERMINAL_STATUSES
+
+
+def normalize_confidence_tier(tier: str) -> str:
+    normalized = tier.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized not in VALID_CONFIDENCE_TIERS:
+        legal = ", ".join(VALID_CONFIDENCE_TIERS)
+        raise InvalidConfidenceTierError(
+            f"invalid confidence tier: {tier} (legal tiers: {legal})"
+        )
+    return normalized
 
 
 def closeout_gate(

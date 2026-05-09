@@ -5,6 +5,7 @@ import unittest
 from ace.workflow import (
     CloseoutGateError,
     IllegalTransitionError,
+    InvalidConfidenceTierError,
     InvalidContradictionStatusError,
     InvalidNewContradictionStatusError,
     UnknownStateError,
@@ -14,6 +15,7 @@ from ace.workflow import (
     is_terminal_obligation_status,
     next_state,
     normalize_action,
+    normalize_confidence_tier,
     normalize_contradiction_status,
     normalize_new_contradiction_status,
     normalize_state,
@@ -75,6 +77,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(normalize_new_contradiction_status("open"), "open")
         with self.assertRaises(InvalidNewContradictionStatusError):
             normalize_new_contradiction_status("resolved")
+
+    def test_normalize_confidence_tier_accepts_canonical_values_and_aliases(self) -> None:
+        self.assertEqual(normalize_confidence_tier("hypothesis"), "hypothesis")
+        self.assertEqual(normalize_confidence_tier("locally validated only"), "locally_validated_only")
+        self.assertEqual(normalize_confidence_tier("live-improved-but-pending"), "live_improved_but_pending")
+        self.assertEqual(normalize_confidence_tier(" LIVE CONFIRMED "), "live_confirmed")
+
+    def test_normalize_confidence_tier_rejects_invalid_values(self) -> None:
+        with self.assertRaises(InvalidConfidenceTierError):
+            normalize_confidence_tier("probably_true")
 
     def test_terminal_obligation_status_helper(self) -> None:
         self.assertTrue(is_terminal_obligation_status(" Resolved "))
