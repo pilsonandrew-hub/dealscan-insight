@@ -193,6 +193,15 @@ def build_parser() -> argparse.ArgumentParser:
     contradiction.add_argument("--reason")
     contradiction.add_argument("--actor")
 
+    record_correction = subparsers.add_parser(
+        "record-correction",
+        help="Record that one item corrects another without rewriting original truth",
+    )
+    record_correction.add_argument("item_id", help="The original item being corrected")
+    record_correction.add_argument("corrected_item_id", help="The correcting item")
+    record_correction.add_argument("--reason", required=True)
+    record_correction.add_argument("--actor")
+
     resolve_contradiction = subparsers.add_parser(
         "resolve-contradiction",
         help="Resolve an existing contradiction",
@@ -490,6 +499,14 @@ def _print_contradiction_resolved(*, contradiction_id: str, item_id: str, status
     print(f"contradiction_id={contradiction_id} item_id={item_id} status={status}")
 
 
+def _print_correction_recorded(
+    *, item_id: str, corrected_item_id: str, contradiction_id: str
+) -> None:
+    print(
+        f"item_id={item_id} corrected_item_id={corrected_item_id} contradiction_id={contradiction_id}"
+    )
+
+
 def _print_obligation_resolved(*, obligation_id: str, item_id: str, status: str) -> None:
     print(f"obligation_id={obligation_id} item_id={item_id} status={status}")
 
@@ -733,6 +750,20 @@ def main(argv: list[str] | None = None) -> int:
                 contradiction_id=result["contradiction_id"],
                 item_id=result["item_id"],
                 status=result["status"],
+            )
+            return 0
+
+        if command == "record-correction":
+            result = repo.record_correction(
+                args.item_id,
+                corrected_item_id=args.corrected_item_id,
+                reason=_normalize_required_text(args.reason, field_name="reason") if args.reason is not None else None,
+                actor=args.actor,
+            )
+            _print_correction_recorded(
+                item_id=result["item_id"],
+                corrected_item_id=result["corrected_item_id"],
+                contradiction_id=result["contradiction_id"],
             )
             return 0
 

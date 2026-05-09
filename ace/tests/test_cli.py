@@ -14701,6 +14701,46 @@ class AceCliTests(unittest.TestCase):
             self.assertIsNotNone(contradiction_events)
             self.assertEqual(contradiction_events["count"], 0)
 
+    def test_record_correction_outputs_linkage_identifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake",
+                "note",
+                "Original claim",
+            )
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake",
+                "note",
+                "Corrected claim",
+            )
+            self.assertEqual(code, 0, output)
+            corrected_item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "record-correction",
+                item_id,
+                corrected_item_id,
+                "--reason",
+                "new evidence supersedes the original claim",
+                "--actor",
+                "cli",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn(f"item_id={item_id}", output)
+            self.assertIn(f"corrected_item_id={corrected_item_id}", output)
+            self.assertIn("contradiction_id=contradiction_", output)
+
     def test_add_contradiction_rejects_resolved_status_at_creation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

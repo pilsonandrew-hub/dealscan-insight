@@ -501,6 +501,77 @@ class ItemRepository:
             connection.commit()
         return contradiction_id
 
+    def record_correction(
+        self,
+        item_id: str,
+        *,
+        corrected_item_id: str,
+        reason: str | None = None,
+        actor: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_reason = _normalize_required_human_text(reason, field_name="reason")
+
+        if item_id == corrected_item_id:
+            raise ValidationError("corrected_item_id must differ from item_id")
+
+        contradiction_id = self.add_contradiction(
+            item_id,
+            source_item_id=corrected_item_id,
+            reason=normalized_reason,
+            actor=actor,
+        )
+
+        created_at = utc_now()
+        with connect(self.db_path) as connection:
+            original_row = connection.execute(
+                "SELECT id FROM items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+            corrected_row = connection.execute(
+                "SELECT id FROM items WHERE id = ?",
+                (corrected_item_id,),
+            ).fetchone()
+
+            if original_row is None:
+                raise KeyError(f"unknown item_id: {item_id}")
+            if corrected_row is None:
+                raise KeyError(f"unknown corrected_item_id: {corrected_item_id}")
+
+            append_event(
+                connection,
+                event_type="item.correction_recorded",
+                payload={
+                    "item_id": item_id,
+                    "corrected_item_id": corrected_item_id,
+                    "contradiction_id": contradiction_id,
+                    "reason": normalized_reason,
+                },
+                item_id=item_id,
+                actor=actor,
+                created_at=created_at,
+            )
+            append_event(
+                connection,
+                event_type="item.correction_linked",
+                payload={
+                    "item_id": corrected_item_id,
+                    "supersedes_item_id": item_id,
+                    "contradiction_id": contradiction_id,
+                    "reason": normalized_reason,
+                },
+                item_id=corrected_item_id,
+                actor=actor,
+                created_at=created_at,
+            )
+            connection.commit()
+
+        return {
+            "item_id": item_id,
+            "corrected_item_id": corrected_item_id,
+            "contradiction_id": contradiction_id,
+            "reason": normalized_reason,
+        }
+
     def resolve_contradiction(
         self,
         contradiction_id: str,

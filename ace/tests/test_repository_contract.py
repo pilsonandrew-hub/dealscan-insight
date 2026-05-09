@@ -118,6 +118,57 @@ class ItemRepositoryContractTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.repo.resolve_contradiction(contradiction_id, reason="   ", actor="test")
 
+    def test_record_correction_preserves_original_truth_and_links_corrected_item(self) -> None:
+        original = self.repo.create_item(item_type="task", title="Original claim", actor="test")
+        corrected = self.repo.create_item(item_type="task", title="Corrected claim", actor="test")
+
+        result = self.repo.record_correction(
+            original.id,
+            corrected_item_id=corrected.id,
+            reason="new evidence supersedes the original claim",
+            actor="auditor",
+        )
+
+        self.assertEqual(result["item_id"], original.id)
+        self.assertEqual(result["corrected_item_id"], corrected.id)
+        self.assertIsNotNone(result["contradiction_id"])
+
+        original_current = self.repo.get_item(original.id)
+        corrected_current = self.repo.get_item(corrected.id)
+        self.assertIsNotNone(original_current)
+        self.assertIsNotNone(corrected_current)
+        self.assertEqual(original_current.state, "TRIAGE")
+        self.assertEqual(corrected_current.state, "TRIAGE")
+
+        original_events = self.repo.list_item_events(original.id)
+        corrected_events = self.repo.list_item_events(corrected.id)
+
+        self.assertIn("item.contradiction_added", [event.event_type for event in original_events])
+        self.assertIn("item.correction_recorded", [event.event_type for event in original_events])
+        self.assertIn("item.correction_linked", [event.event_type for event in corrected_events])
+
+        correction_payload = next(
+            event.payload_json for event in original_events if event.event_type == "item.correction_recorded"
+        )
+        self.assertIn(f'"corrected_item_id":"{corrected.id}"', correction_payload or "")
+        self.assertIn('"reason":"new evidence supersedes the original claim"', correction_payload or "")
+
+        linked_payload = next(
+            event.payload_json for event in corrected_events if event.event_type == "item.correction_linked"
+        )
+        self.assertIn(f'"supersedes_item_id":"{original.id}"', linked_payload or "")
+
+    def test_record_correction_rejects_self_correction(self) -> None:
+        item = self.repo.create_item(item_type="task", title="Self correction", actor="test")
+
+        with self.assertRaises(ValidationError):
+            self.repo.record_correction(
+                item.id,
+                corrected_item_id=item.id,
+                reason="cannot correct itself",
+                actor="auditor",
+            )
+
     def test_list_item_events_returns_chronological_order_with_latest_matching_selection(self) -> None:
         item = self.repo.create_item(item_type="task", title="Event target", actor="test")
         self.repo.add_evidence(item.id, evidence_text="first", actor="test")
