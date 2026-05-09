@@ -19,6 +19,20 @@ class ItemRepositoryContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
+    def test_create_item_persists_normalized_confidence_tier(self) -> None:
+        item = self.repo.create_item(
+            item_type="continuity_open_loop",
+            title="Item with confidence tier",
+            confidence_tier="Live Confirmed",
+            actor="test",
+        )
+
+        stored = self.repo.get_item(item.id)
+
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.confidence_tier, "live_confirmed")
+
     def test_get_item_by_source_and_session_reuses_single_matching_item(self) -> None:
         item = self.repo.create_item(
             item_type="continuity_open_loop",

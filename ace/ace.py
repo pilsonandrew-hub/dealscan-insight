@@ -56,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     intake.add_argument("title")
     intake.add_argument("--description")
     intake.add_argument("--priority-hint")
+    intake.add_argument("--confidence-tier")
     intake.add_argument("--source")
     intake.add_argument("--session")
     intake.add_argument("--deadline")
@@ -242,6 +243,8 @@ def _print_item(item) -> None:
         print(f"description={item.description}")
     if item.priority_hint:
         print(f"priority_hint={item.priority_hint}")
+    if item.confidence_tier:
+        print(f"confidence_tier={item.confidence_tier}")
     if item.source:
         print(f"source={item.source}")
     if item.source_session:
@@ -531,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
                 title=_normalize_required_text(args.title, field_name="title"),
                 description=_normalize_optional_text(args.description, field_name="description"),
                 priority_hint=_normalize_optional_text(args.priority_hint, field_name="priority_hint"),
+                confidence_tier=_normalize_optional_text(args.confidence_tier, field_name="confidence_tier"),
                 source=_normalize_optional_text(args.source, field_name="source"),
                 source_session=_normalize_optional_text(args.session, field_name="source_session"),
                 deadline_at=args.deadline,

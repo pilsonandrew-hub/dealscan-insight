@@ -14078,6 +14078,27 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(obligation_payload["item_id"], item_id)
             self.assertEqual(obligation_payload["obligation_id"], obligation_id)
 
+    def test_cli_intake_and_show_surface_normalized_confidence_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake",
+                "note",
+                "Confidence tier item",
+                "--confidence-tier",
+                "Live Confirmed",
+            )
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+            self.assertIn("confidence_tier=live_confirmed", output)
+
+            code, output = self.run_cli("--db", str(db_path), "show", item_id)
+            self.assertEqual(code, 0, output)
+            self.assertIn("confidence_tier=live_confirmed", output)
+
     def test_cli_rejects_whitespace_only_intake_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
@@ -14087,6 +14108,7 @@ class AceCliTests(unittest.TestCase):
                 (["intake", "note", "   "], "title must not be empty or whitespace-only"),
                 (["intake", "note", "Title", "--description", "   "], "description must not be empty or whitespace-only"),
                 (["intake", "note", "Title", "--priority", "   "], "priority_hint must not be empty or whitespace-only"),
+                (["intake", "note", "Title", "--confidence-tier", "   "], "confidence_tier must not be empty or whitespace-only"),
                 (["intake", "note", "Title", "--source", "   "], "source must not be empty or whitespace-only"),
                 (["intake", "note", "Title", "--session", "   "], "source_session must not be empty or whitespace-only"),
                 (["intake", "note", "Title", "--owner", "   "], "owner must not be empty or whitespace-only"),

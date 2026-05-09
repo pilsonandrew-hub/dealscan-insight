@@ -27,6 +27,7 @@ SCHEMA_STATEMENTS = (
         description TEXT,
         state TEXT NOT NULL,
         priority_hint TEXT,
+        confidence_tier TEXT,
         source TEXT,
         source_session TEXT,
         deadline_at TEXT,
@@ -275,6 +276,13 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
 
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+
+        item_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(items)").fetchall()
+        }
+        if item_columns and "confidence_tier" not in item_columns:
+            connection.execute("ALTER TABLE items ADD COLUMN confidence_tier TEXT")
 
         contradiction_columns = {
             row["name"]
