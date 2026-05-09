@@ -14741,6 +14741,87 @@ class AceCliTests(unittest.TestCase):
             self.assertIn(f"corrected_item_id={corrected_item_id}", output)
             self.assertIn("contradiction_id=contradiction_", output)
 
+    def test_show_exposes_append_only_correction_lineage_on_both_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake",
+                "note",
+                "Original claim",
+                "--source",
+                "telegram/direct",
+                "--session",
+                "telegram:7529788084:orig-claim",
+            )
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "intake",
+                "note",
+                "Corrected claim",
+                "--source",
+                "telegram/direct",
+                "--session",
+                "telegram:7529788084:corrected-claim",
+            )
+            self.assertEqual(code, 0, output)
+            corrected_item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "record-correction",
+                item_id,
+                corrected_item_id,
+                "--reason",
+                "new evidence supersedes the original claim",
+                "--actor",
+                "cli",
+            )
+            self.assertEqual(code, 0, output)
+            contradiction_id = output.split("contradiction_id=")[1].split()[0]
+
+            code, original_show = self.run_cli(
+                "--db",
+                str(db_path),
+                "show",
+                item_id,
+                "--event-limit",
+                "10",
+            )
+            self.assertEqual(code, 0, original_show)
+            self.assertIn(f"item_id={item_id}", original_show)
+            self.assertIn("event_count=3", original_show)
+            self.assertIn("type=item.created", original_show)
+            self.assertIn("type=item.contradiction_added", original_show)
+            self.assertIn("type=item.correction_recorded", original_show)
+            self.assertIn(f'"contradiction_id":"{contradiction_id}"', original_show)
+            self.assertIn(f'"corrected_item_id":"{corrected_item_id}"', original_show)
+            self.assertIn('"reason":"new evidence supersedes the original claim"', original_show)
+
+            code, corrected_show = self.run_cli(
+                "--db",
+                str(db_path),
+                "show",
+                corrected_item_id,
+                "--event-limit",
+                "10",
+            )
+            self.assertEqual(code, 0, corrected_show)
+            self.assertIn(f"item_id={corrected_item_id}", corrected_show)
+            self.assertIn("event_count=2", corrected_show)
+            self.assertIn("type=item.created", corrected_show)
+            self.assertIn("type=item.correction_linked", corrected_show)
+            self.assertIn(f'"supersedes_item_id":"{item_id}"', corrected_show)
+            self.assertIn(f'"contradiction_id":"{contradiction_id}"', corrected_show)
+            self.assertIn('"reason":"new evidence supersedes the original claim"', corrected_show)
+
     def test_add_contradiction_rejects_resolved_status_at_creation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
