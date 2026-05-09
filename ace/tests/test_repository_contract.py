@@ -33,6 +33,20 @@ class ItemRepositoryContractTests(unittest.TestCase):
         assert stored is not None
         self.assertEqual(stored.confidence_tier, "live_confirmed")
 
+    def test_create_item_persists_normalized_verdict(self) -> None:
+        item = self.repo.create_item(
+            item_type="continuity_open_loop",
+            title="Item with verdict",
+            verdict=" PASS ",
+            actor="test",
+        )
+
+        stored = self.repo.get_item(item.id)
+
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.verdict, "pass")
+
     def test_get_item_by_source_and_session_reuses_single_matching_item(self) -> None:
         item = self.repo.create_item(
             item_type="continuity_open_loop",

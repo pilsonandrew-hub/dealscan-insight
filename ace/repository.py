@@ -17,6 +17,7 @@ from .workflow import (
     normalize_confidence_tier,
     normalize_new_contradiction_status,
     normalize_state,
+    normalize_verdict,
 )
 
 
@@ -33,6 +34,7 @@ class Item:
     state: str
     priority_hint: str | None
     confidence_tier: str | None
+    verdict: str | None
     source: str | None
     source_session: str | None
     deadline_at: str | None
@@ -178,6 +180,7 @@ class ItemRepository:
         state: str = "TRIAGE",
         priority_hint: str | None = None,
         confidence_tier: str | None = None,
+        verdict: str | None = None,
         source: str | None = None,
         source_session: str | None = None,
         deadline_at: str | None = None,
@@ -204,6 +207,9 @@ class ItemRepository:
         normalized_confidence_tier = None
         if confidence_tier is not None:
             normalized_confidence_tier = normalize_confidence_tier(confidence_tier)
+        normalized_verdict = None
+        if verdict is not None:
+            normalized_verdict = normalize_verdict(verdict)
         normalized_source = None
         if source is not None:
             normalized_source = source.strip()
@@ -230,6 +236,7 @@ class ItemRepository:
             "state": normalized_state,
             "priority_hint": normalized_priority_hint,
             "confidence_tier": normalized_confidence_tier,
+            "verdict": normalized_verdict,
             "source": normalized_source,
             "source_session": normalized_source_session,
             "deadline_at": deadline_at,
@@ -243,9 +250,9 @@ class ItemRepository:
                 """
                 INSERT INTO items (
                     id, item_type, title, description, state, priority_hint,
-                    confidence_tier, source, source_session, deadline_at, owner,
-                    created_at, updated_at, last_event_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    confidence_tier, verdict, source, source_session, deadline_at,
+                    owner, created_at, updated_at, last_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_id,
@@ -255,6 +262,7 @@ class ItemRepository:
                     normalized_state,
                     normalized_priority_hint,
                     normalized_confidence_tier,
+                    normalized_verdict,
                     normalized_source,
                     normalized_source_session,
                     deadline_at,
@@ -977,6 +985,7 @@ class ItemRepository:
             state=row["state"],
             priority_hint=row["priority_hint"],
             confidence_tier=row["confidence_tier"],
+            verdict=row["verdict"],
             source=row["source"],
             source_session=row["source_session"],
             deadline_at=row["deadline_at"],
