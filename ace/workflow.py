@@ -66,6 +66,12 @@ VALID_CONFIDENCE_TIERS = (
     "live_confirmed",
 )
 
+VALID_VERDICTS = (
+    "pending",
+    "pass",
+    "fail",
+)
+
 
 class AceError(Exception):
     """Base class for ACE workflow failures."""
@@ -93,6 +99,10 @@ class InvalidNewContradictionStatusError(AceError):
 
 class InvalidConfidenceTierError(AceError):
     """Raised when a confidence tier is outside the explicit ACE contract."""
+
+
+class InvalidVerdictError(AceError):
+    """Raised when a verdict is outside the explicit ACE contract."""
 
 
 def normalize_state(state: str) -> str:
@@ -160,6 +170,16 @@ def normalize_confidence_tier(tier: str) -> str:
         legal = ", ".join(VALID_CONFIDENCE_TIERS)
         raise InvalidConfidenceTierError(
             f"invalid confidence tier: {tier} (legal tiers: {legal})"
+        )
+    return normalized
+
+
+def normalize_verdict(verdict: str) -> str:
+    normalized = verdict.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized not in VALID_VERDICTS:
+        legal = ", ".join(VALID_VERDICTS)
+        raise InvalidVerdictError(
+            f"invalid verdict: {verdict} (legal verdicts: {legal})"
         )
     return normalized
 

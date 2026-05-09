@@ -8,6 +8,7 @@ from ace.workflow import (
     InvalidConfidenceTierError,
     InvalidContradictionStatusError,
     InvalidNewContradictionStatusError,
+    InvalidVerdictError,
     UnknownStateError,
     closeout_gate,
     is_legacy_tolerated_state,
@@ -19,6 +20,7 @@ from ace.workflow import (
     normalize_contradiction_status,
     normalize_new_contradiction_status,
     normalize_state,
+    normalize_verdict,
 )
 
 
@@ -87,6 +89,15 @@ class WorkflowContractTests(unittest.TestCase):
     def test_normalize_confidence_tier_rejects_invalid_values(self) -> None:
         with self.assertRaises(InvalidConfidenceTierError):
             normalize_confidence_tier("probably_true")
+
+    def test_normalize_verdict_accepts_canonical_values_and_aliases(self) -> None:
+        self.assertEqual(normalize_verdict("pass"), "pass")
+        self.assertEqual(normalize_verdict(" FAIL "), "fail")
+        self.assertEqual(normalize_verdict("pending"), "pending")
+
+    def test_normalize_verdict_rejects_invalid_values(self) -> None:
+        with self.assertRaises(InvalidVerdictError):
+            normalize_verdict("live_confirmed")
 
     def test_terminal_obligation_status_helper(self) -> None:
         self.assertTrue(is_terminal_obligation_status(" Resolved "))
