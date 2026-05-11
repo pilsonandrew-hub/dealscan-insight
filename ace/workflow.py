@@ -188,6 +188,7 @@ def closeout_gate(
     evidence_count: int,
     open_obligation_count: int,
     open_contradiction_count: int = 0,
+    verdict: str | None = None,
 ) -> tuple[bool, str | None, str | None]:
     if evidence_count <= 0:
         return False, "missing_evidence", "closeout requires at least one evidence record"
@@ -205,4 +206,9 @@ def closeout_gate(
             "open_obligations",
             f"closeout blocked by {open_obligation_count} open obligation{suffix}",
         )
+    normalized_verdict = verdict.strip().lower() if verdict else None
+    if normalized_verdict == "fail":
+        return False, "verdict_fail", "closeout blocked: item verdict is fail"
+    if normalized_verdict == "pending":
+        return False, "verdict_pending", "closeout blocked: verdict is still pending"
     return True, None, None

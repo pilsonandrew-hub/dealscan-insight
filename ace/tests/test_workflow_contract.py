@@ -151,6 +151,60 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIsNone(code)
         self.assertIsNone(detail)
 
+    def test_closeout_gate_blocks_on_verdict_fail(self) -> None:
+        allowed, code, detail = closeout_gate(
+            evidence_count=2,
+            open_obligation_count=0,
+            open_contradiction_count=0,
+            verdict="fail",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(code, "verdict_fail")
+        self.assertEqual(detail, "closeout blocked: item verdict is fail")
+
+    def test_closeout_gate_blocks_on_verdict_pending(self) -> None:
+        allowed, code, detail = closeout_gate(
+            evidence_count=1,
+            open_obligation_count=0,
+            open_contradiction_count=0,
+            verdict="pending",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(code, "verdict_pending")
+        self.assertEqual(detail, "closeout blocked: verdict is still pending")
+
+    def test_closeout_gate_passes_with_verdict_pass(self) -> None:
+        allowed, code, detail = closeout_gate(
+            evidence_count=2,
+            open_obligation_count=0,
+            open_contradiction_count=0,
+            verdict="pass",
+        )
+        self.assertTrue(allowed)
+        self.assertIsNone(code)
+        self.assertIsNone(detail)
+
+    def test_closeout_gate_passes_with_no_verdict(self) -> None:
+        allowed, code, detail = closeout_gate(
+            evidence_count=2,
+            open_obligation_count=0,
+            open_contradiction_count=0,
+            verdict=None,
+        )
+        self.assertTrue(allowed)
+        self.assertIsNone(code)
+        self.assertIsNone(detail)
+
+    def test_closeout_gate_verdict_fail_blocks_even_with_whitespace(self) -> None:
+        allowed, code, detail = closeout_gate(
+            evidence_count=2,
+            open_obligation_count=0,
+            open_contradiction_count=0,
+            verdict=" FAIL ",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(code, "verdict_fail")
+
 
 if __name__ == "__main__":
     unittest.main()
