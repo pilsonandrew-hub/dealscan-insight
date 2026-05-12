@@ -46,6 +46,13 @@
       "premium": false,
       "use_cases": ["psr_extraction"]
     },
+    "openrouter_qwen_review": {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.6-plus",
+      "max_estimated_cost_usd": 0.03,
+      "premium": false,
+      "use_cases": ["external_review", "general_chat", "code_reasoning", "orchestration"]
+    },
     "local_private_lane": {
       "provider": "local",
       "model": null,
@@ -80,12 +87,16 @@
     "deepseek r1": "openrouter_deepseek_workhorse",
     "kimi": "openrouter_kimi_specialist",
     "kimi k2": "openrouter_kimi_specialist",
-    "moonshot": "openrouter_kimi_specialist"
+    "moonshot": "openrouter_kimi_specialist",
+    "qwen": "openrouter_qwen_review",
+    "qwen 3.6": "openrouter_qwen_review",
+    "qwen plus": "openrouter_qwen_review",
+    "qwen3.6 plus": "openrouter_qwen_review"
   },
   "task_policy": {
     "general_chat": {
-      "primary": "openrouter_gemini_review",
-      "fallback": ["openrouter_gemini_proven"],
+      "primary": "openrouter_gemini_proven",
+      "fallback": ["openrouter_gemini_review", "openrouter_qwen_review"],
       "priority": "low",
       "premium_allowed": false,
       "requires_manual_approval": false
@@ -99,7 +110,7 @@
     },
     "external_review": {
       "primary": "openrouter_gemini_review",
-      "fallback": ["openrouter_gemini_proven"],
+      "fallback": ["openrouter_gemini_proven", "openrouter_qwen_review"],
       "priority": "high",
       "premium_allowed": false,
       "requires_manual_approval": false
@@ -113,7 +124,7 @@
     },
     "code_reasoning": {
       "primary": "openrouter_gemini_proven",
-      "fallback": ["openrouter_gemini_review"],
+      "fallback": ["openrouter_gemini_review", "openrouter_qwen_review"],
       "priority": "medium",
       "premium_allowed": false,
       "requires_manual_approval": false
@@ -210,8 +221,8 @@
       "requires_manual_approval": false
     },
     "orchestration": {
-      "primary": "openrouter_gemini_review",
-      "fallback": ["openrouter_gemini_proven"],
+      "primary": "openrouter_gemini_proven",
+      "fallback": ["openrouter_gemini_review", "openrouter_qwen_review"],
       "priority": "medium",
       "premium_allowed": false,
       "requires_manual_approval": false
@@ -246,14 +257,6 @@
     {
       "model": "minimax/minimax-text-01",
       "reason": "invalid model id in bridge path"
-    },
-    {
-      "model": "qwen/qwen-3.6",
-      "reason": "runtime identity / API id not cleanly validated in current path"
-    },
-    {
-      "model": "qwen/qwen-3.6-plus",
-      "reason": "runtime identity / API id not cleanly validated in current path"
     },
     {
       "model": "qwen/qwen3-235b-a22b",

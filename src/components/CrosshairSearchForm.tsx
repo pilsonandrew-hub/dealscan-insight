@@ -360,7 +360,7 @@ export const CrosshairSearchForm = ({ onSearch, onSaveIntent, isLoading }: Cross
           <div className="flex items-start gap-2 p-3 bg-muted rounded-md">
             <AlertCircle className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
             <div className="text-sm text-muted-foreground">
-              <p><strong>Crosshair</strong> uses dual-mode ingestion: API sources (preferred) + scraping (fallback/augment).</p>
+              <p><strong>Crosshair</strong> searches the normalized listings database. Results come from previously ingested auction data.</p>
               <p className="mt-1">Impossible requests (e.g., 2020 Cybertruck) will auto-pivot to viable years with explanations.</p>
             </div>
           </div>

@@ -1,16 +1,16 @@
-name: DealerScope Scraper Watchdog
+name: DealerScope Watchdog Hunter
 
 on:
   schedule:
-    - cron: '0 */12 * * *'   # every 12 hours (matches scraper schedule)
+    - cron: '*/30 * * * *'   # lightweight 24/7 Watchdog Hunter between 12hr heavy sweeps
   workflow_dispatch:
 
 jobs:
-  watchdog:
+  watchdog-hunter:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check Apify scraper health
+      - name: Watchdog Hunter — monitor scraper health and stale deal flow
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -23,7 +23,9 @@ jobs:
           BOT_TOKEN = os.environ["BOT_TOKEN"]
           CHAT_ID = os.environ["CHAT_ID"]
 
-          # All active actors — ds-hibid intentionally disabled, excluded from monitoring
+          # Watchdog Hunter scope: lightweight health/staleness monitoring only.
+          # Heavy source discovery stays on the 12hr sweeps.
+          # ds-hibid intentionally disabled, excluded from monitoring.
           ACTORS = {
               "ds-govdeals":       "CuKaIAcWyFS0EPrAz",
               "ds-publicsurplus":  "9xxQLlRsROnSgA42i",
@@ -38,7 +40,8 @@ jobs:
 
           ctx = ssl.create_default_context()
           now = datetime.datetime.now(datetime.timezone.utc)
-          cutoff = now - datetime.timedelta(hours=15)  # 12hr schedule + 3hr buffer
+          cutoff = now - datetime.timedelta(hours=15)  # 12hr sweep cadence + 3hr buffer
+          running_cutoff = now - datetime.timedelta(hours=3)  # allow legitimate in-flight runs
           stalled = []
 
           for name, actor_id in ACTORS.items():
@@ -73,8 +76,13 @@ jobs:
                               pass  # silently retrigger
                       except Exception:
                           stalled.append(f"<b>{name}</b>: ABORTED and retrigger failed")
+                  elif status in ("RUNNING", "READY"):
+                      # In-flight / queued is fine unless it has been stuck for too long
+                      if run_time < running_cutoff:
+                          hours_ago = round((now - run_time).total_seconds() / 3600, 1)
+                          stalled.append(f"<b>{name}</b>: still {status} after {hours_ago}h ({started_at[:16]}Z)")
                   elif status != "SUCCEEDED":
-                      # Other failure — alert
+                      # Failed / timed out / unknown terminal state — alert
                       stalled.append(f"<b>{name}</b>: last run status={status} at {started_at[:16]}Z")
                   elif run_time < cutoff:
                       # Succeeded but too long ago
@@ -94,10 +102,10 @@ jobs:
                   with urllib.request.urlopen(req, context=ctx) as r:
                       return json.loads(r.read())
 
-              msg = "⚠️ <b>DealerScope Scraper Alert</b>\n\n" + "\n".join(stalled)
+              msg = "⚠️ <b>DealerScope Watchdog Hunter Alert</b>\n\n" + "\n".join(stalled)
               send_telegram(msg)
               print("Stall detected, alert sent:\n" + "\n".join(stalled))
               sys.exit(0)
           else:
-              print("All scrapers healthy")
+              print("Watchdog Hunter: all monitored scrapers healthy")
           PYEOF

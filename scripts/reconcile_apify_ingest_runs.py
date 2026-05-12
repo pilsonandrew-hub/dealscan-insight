@@ -51,6 +51,10 @@ DB_SAVE_FAILURE_STATUSES = {
     "direct_pg_unavailable",
     "duplicate_unresolved",
 }
+SONAR_MIRROR_FAILURE_STATUSES = {
+    "sonar_error",
+    "sonar_client_unavailable",
+}
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 POSTGREST_PAGE_SIZE = 1000
 _CURL_SSL_FALLBACK_NOTIFIED = False
@@ -808,8 +812,13 @@ def classify_run(
 
         if item_count > 0 and delivery is None:
             issues.append("missing_delivery_log")
+        sonar_channel = ((delivery or {}).get("channels") or {}).get("sonar_mirror", {}) or {}
+        sonar_statuses = sonar_channel.get("statuses") or {}
+        sonar_failed_rows = sum(int(sonar_statuses.get(s) or 0) for s in SONAR_MIRROR_FAILURE_STATUSES)
         if failed_rows > 0:
             issues.append("db_save_failures")
+        if sonar_failed_rows > 0:
+            issues.append("sonar_mirror_failures")
         if item_count > 0 and not db_save_statuses:
             issues.append("missing_db_save_ledger")
         if (
@@ -843,6 +852,9 @@ def infer_likely_cause(
 
     if "webhook_degraded" in issues:
         return "app_received_webhook_but_save_path_degraded: inspect db_save statuses and fallback behavior before replaying."
+
+    if "sonar_mirror_failures" in issues:
+        return "sonar_mirror_write_failures: sonar_listings mirror writes failed. Inspect sonar_mirror channel in ingest_delivery_log for the run."
 
     if "audit_backfilled" in issues:
         return (

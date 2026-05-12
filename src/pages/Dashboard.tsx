@@ -21,6 +21,7 @@ import {
   ThumbsUp, ThumbsDown, Bookmark, LogOut, User, Wifi, WifiOff, ScanSearch, Radar
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { CrosshairDashboard } from '@/components/CrosshairDashboard';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
@@ -664,7 +665,11 @@ const DashboardTab = () => {
   );
 };
 
-// ─── TAB 2: Crosshair ─────────────────────────────────────────────────────────
+// ─── TAB 2: Crosshair (Legacy Quick Filter) ──────────────────────────────────
+// This is a lightweight quick-filter over the opportunities table.
+// The canonical Crosshair experience lives in CrosshairDashboard.tsx,
+// which uses the full crosshair-search edge function, crosshair_jobs,
+// crosshair_intents, and listings_normalized tables.
 const CrosshairTab = () => {
   const [filters, setFilters] = useState({
     make: '', model: '',
@@ -750,8 +755,8 @@ const CrosshairTab = () => {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-white">Crosshair</h2>
-        <p className="text-sm text-gray-400">Filter and find specific deals</p>
+        <h2 className="text-xl font-bold text-white">Crosshair <span className="text-xs font-normal text-gray-500">(Quick Filter)</span></h2>
+        <p className="text-sm text-gray-400">Legacy quick filter over scored opportunities. The canonical Crosshair experience is the mounted Crosshair dashboard tab.</p>
       </div>
 
       {/* Filter panel */}
@@ -799,7 +804,7 @@ const CrosshairTab = () => {
           </div>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-gray-500">Results are pulled from the live `opportunities` table and ranked by DOS score.</p>
+          <p className="text-xs text-gray-500">Quick filter over the scored opportunities table, ranked by DOS score.</p>
           <div className="flex items-center gap-2">
             <button
               onClick={resetFilters}
@@ -2022,7 +2027,7 @@ export default function Dashboard() {
   const renderTab = () => {
     switch (activeTab) {
       case 'dashboard': return <DashboardTab />;
-      case 'crosshair': return <CrosshairTab />;
+      case 'crosshair': return <CrosshairDashboard />;
       case 'sniper': return <SniperScopeDashboard />;
       case 'rover': return <RoverTab />;
       case 'sonar': return <React.Suspense fallback={<div className="flex items-center justify-center py-16 text-gray-500">Loading Sonar...</div>}><SonarTab /></React.Suspense>;

@@ -175,43 +175,17 @@ serve(async (req) => {
 
     console.log(`Found ${localResults?.length || 0} results in local database`);
 
-    // Simulate live source integration (API + scraping)
+    // All results currently come from the local listings_normalized table,
+    // populated by the batch ingestion pipeline. Live per-request fanout to
+    // external APIs or scrapers is not yet implemented.
     const sources_used = [
       {
-        source: 'database_cache',
+        source: 'listings_normalized',
         method: 'local' as const,
         status: 'success' as const,
         results_count: localResults?.length || 0
       }
     ];
-
-    // For demo purposes, simulate some API and scraping results
-    if (search_options?.sites?.includes('gsa')) {
-      sources_used.push({
-        source: 'gsa',
-        method: 'api' as const,
-        status: 'success' as const,
-        results_count: Math.floor(Math.random() * 5)
-      });
-    }
-
-    if (search_options?.sites?.includes('govdeals')) {
-      sources_used.push({
-        source: 'govdeals',
-        method: 'scrape' as const,
-        status: 'success' as const,
-        results_count: Math.floor(Math.random() * 3)
-      });
-    }
-
-    if (search_options?.sites?.includes('publicsurplus')) {
-      sources_used.push({
-        source: 'publicsurplus',
-        method: 'scrape' as const,
-        status: 'partial' as const,
-        results_count: Math.floor(Math.random() * 2)
-      });
-    }
 
     // Transform database results to CanonicalListing format
     const results = (localResults || []).map(listing => ({

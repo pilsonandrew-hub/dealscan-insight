@@ -215,6 +215,47 @@ class RoverAPIService {
     }
   }
 
+  async createIntent(params: { title: string; make?: string; model?: string; year?: number }): Promise<void> {
+    const { token } = await this.getSessionAuth();
+    const filters = {
+      make: params.make,
+      model: params.model,
+      yearMin: params.year,
+      yearMax: params.year,
+    };
+    const resp = await fetch(`${API_BASE}/api/saved-searches`, {
+      method: "POST",
+      headers: this.buildAuthHeaders(token, true),
+      body: JSON.stringify({
+        name: params.title,
+        filters,
+        dos_threshold: 65,
+      }),
+    });
+    if (!resp.ok) throw new Error(`Saved search API error: ${resp.status}`);
+  }
+
+  async getUserIntents(): Promise<any[]> {
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) return [];
+
+      const { data: intents } = await supabase
+        .from('crosshair_intents')
+        .select('*')
+        .eq('user_id', user.user.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      return intents || [];
+    } catch (error) {
+      logger.error('Failed to get user intents', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      return [];
+    }
+  }
 }
 
 export const roverAPI = new RoverAPIService();

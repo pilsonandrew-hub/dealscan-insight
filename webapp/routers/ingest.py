@@ -1053,6 +1053,7 @@ async def _process_webhook_items(
         evaluated = 0
         saved_count = 0
         failed_save_count = 0
+        sonar_write_fail_count = 0
         skipped = 0
         hot_deals = []
         dataset_item_count = len(items)
@@ -1281,10 +1282,58 @@ async def _process_webhook_items(
                 _increment_reason_counter(skip_reasons, "save_exception")
                 continue
             # Write to sonar_listings (unfiltered — every vehicle regardless of DOS/state/mileage)
-            try:
-                _save_to_sonar_listings(vehicle)
-            except Exception as sl_exc:
-                logger.warning(f"[SONAR_LISTINGS] Write failed for {vehicle.get('title', '?')[:50]}: {sl_exc}")
+            _sonar_listing_id = vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or "")
+            if supabase_client is None:
+                sonar_write_fail_count += 1
+                logger.warning(
+                    "[SONAR_WRITE_FAIL] run_id=%s listing_id=%s title=%s reason=%s",
+                    apify_run_id,
+                    vehicle.get("listing_id"),
+                    (vehicle.get("title") or "?")[:50],
+                    "supabase_client_none",
+                )
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=_sonar_listing_id,
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=saved_opportunity_id,
+                    channel="sonar_mirror",
+                    status="sonar_client_unavailable",
+                    error_message="supabase_client_none",
+                    audit_state=audit_state,
+                )
+            else:
+                try:
+                    _save_to_sonar_listings(vehicle)
+                    _record_delivery_log(
+                        run_id=vehicle.get("run_id") or apify_run_id,
+                        listing_id=_sonar_listing_id,
+                        listing_url=vehicle.get("listing_url"),
+                        opportunity_id=saved_opportunity_id,
+                        channel="sonar_mirror",
+                        status="saved_sonar",
+                        error_message=None,
+                        audit_state=audit_state,
+                    )
+                except Exception as sl_exc:
+                    sonar_write_fail_count += 1
+                    logger.warning(
+                        "[SONAR_WRITE_FAIL] run_id=%s listing_id=%s title=%s reason=%s",
+                        apify_run_id,
+                        vehicle.get("listing_id"),
+                        (vehicle.get("title") or "?")[:50],
+                        f"insert_error: {sl_exc}",
+                    )
+                    _record_delivery_log(
+                        run_id=vehicle.get("run_id") or apify_run_id,
+                        listing_id=_sonar_listing_id,
+                        listing_url=vehicle.get("listing_url"),
+                        opportunity_id=saved_opportunity_id,
+                        channel="sonar_mirror",
+                        status="sonar_error",
+                        error_message=f"insert_error: {sl_exc}",
+                        audit_state=audit_state,
+                    )
             save_status = vehicle.get("_save_status", "unknown")
             _increment_reason_counter(save_outcomes, save_status)
             if saved_opportunity_id:
@@ -1370,7 +1419,7 @@ async def _process_webhook_items(
             await send_telegram_alerts(validated_deals)
 
         logger.info(
-            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | inserted=%s | existing=%s | failed_save=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
+            "[INGEST_RUN] complete | run_id=%s | dataset_id=%s | items=%s | evaluated=%s | inserted=%s | existing=%s | failed_save=%s | sonar_write_fail=%s | skipped=%s | duplicates=%s | notion_sync=%s | hot_deals=%s | save_outcomes=%s | skip_reasons=%s",
             apify_run_id,
             dataset_id,
             dataset_item_count,
@@ -1378,6 +1427,7 @@ async def _process_webhook_items(
             saved_count,
             save_outcomes.get("duplicate_existing", 0),
             failed_save_count,
+            sonar_write_fail_count,
             skipped,
             duplicate_count,
             notion_sync_count,
@@ -1392,6 +1442,7 @@ async def _process_webhook_items(
             saved_count=saved_count,
             duplicate_existing=save_outcomes.get("duplicate_existing", 0),
             failed_save_count=failed_save_count,
+            sonar_write_failures=sonar_write_fail_count,
             skipped=skipped,
             duplicate_count=duplicate_count,
             notion_sync_count=notion_sync_count,
@@ -1400,6 +1451,7 @@ async def _process_webhook_items(
         detail_message = (
             None
             if failed_save_count == 0
+            and sonar_write_fail_count == 0
             and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
             else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
         )
@@ -1407,7 +1459,7 @@ async def _process_webhook_items(
 
         update_webhook_log(
             webhook_log_id,
-            "processed" if failed_save_count == 0 else "degraded",
+            "processed" if failed_save_count == 0 and sonar_write_fail_count == 0 else "error",
             item_count=dataset_item_count,
             error_message=_merge_audit_error_message(
                 combined_message,
@@ -3006,6 +3058,7 @@ def _format_ingest_run_summary(
     saved_count: int,
     duplicate_existing: int,
     failed_save_count: int,
+    sonar_write_failures: int = 0,
     skipped: int,
     duplicate_count: int,
     notion_sync_count: int,
@@ -3018,6 +3071,7 @@ def _format_ingest_run_summary(
         f"saved:{saved_count},"
         f"existing:{duplicate_existing},"
         f"failed:{failed_save_count},"
+        f"sonar_write_failures:{sonar_write_failures},"
         f"skipped:{skipped},"
         f"duplicates:{duplicate_count},"
         f"notion_sync:{notion_sync_count},"

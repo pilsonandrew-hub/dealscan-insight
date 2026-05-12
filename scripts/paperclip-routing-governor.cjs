@@ -305,6 +305,7 @@ function buildBridgeRequest(input, options = {}) {
       reason: decision.reason,
       requires_manual_approval: decision.requires_manual_approval,
       correlation_id: decision.correlation_id,
+      fallback_chain: decision.fallback_chain,
     },
   };
 

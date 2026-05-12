@@ -6,7 +6,7 @@ const { routeRoutingRequest, buildBridgeRequest, buildClaudeCompactContract } = 
 
 const CONFIG_PATH = path.join(__dirname, '..', 'reports', 'paperclip-routing-governor-config-v2-2026-04-16.json');
 
-test('routes external_review to Gemini 2.5 Flash with Gemini 2.0 fallback', () => {
+test('routes external_review to Gemini 2.5 Flash with Gemini 2.0 and Qwen fallback', () => {
   const decision = routeRoutingRequest(
     { task_class: 'external_review' },
     { configPath: CONFIG_PATH }
@@ -19,6 +19,7 @@ test('routes external_review to Gemini 2.5 Flash with Gemini 2.0 fallback', () =
   assert.equal(decision.selected_lane, 'openrouter_gemini_review');
   assert.deepEqual(decision.fallback_chain, [
     { provider: 'openrouter', model: 'google/gemini-2.0-flash-001', lane: 'openrouter_gemini_proven' },
+    { provider: 'openrouter', model: 'qwen/qwen3.6-plus', lane: 'openrouter_qwen_review' },
   ]);
   assert.equal(decision.budget_approved, true);
   assert.equal(decision.policy_version, '2026-04-17.v5');
@@ -174,6 +175,10 @@ test('buildBridgeRequest converts a RoutingDecision into bridge input', () => {
   assert.equal(bridgeRequest.model, 'google/gemini-2.5-flash');
   assert.equal(bridgeRequest.routing.task_class, 'external_review');
   assert.equal(bridgeRequest.routing.policy_version, '2026-04-17.v5');
+  assert.deepEqual(bridgeRequest.routing.fallback_chain, [
+    { provider: 'openrouter', model: 'google/gemini-2.0-flash-001', lane: 'openrouter_gemini_proven' },
+    { provider: 'openrouter', model: 'qwen/qwen3.6-plus', lane: 'openrouter_qwen_review' },
+  ]);
   assert.equal(bridgeRequest.contract, undefined);
 });
 
