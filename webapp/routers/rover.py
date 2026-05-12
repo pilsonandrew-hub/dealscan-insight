@@ -225,7 +225,7 @@ def _write_rover_event(user_id: str, event_type: str, item_data: dict[str, Any],
 def _record_sale_intent(opportunity_id: str, user_id: str) -> None:
     """Record a BUY intent in dealer_sales with outcome=pending.
 
-    Idempotent: skips if a row already exists with outcome 'sold' or 'passed'.
+    Idempotent: skips if a row already exists with a terminal outcome (won/lost/passed/sold).
     Only inserts/updates when no row exists or the existing row is still 'pending'.
     """
     if not _write_supabase_client:
@@ -243,7 +243,7 @@ def _record_sale_intent(opportunity_id: str, user_id: str) -> None:
         )
         if existing.data:
             current_outcome = (existing.data[0].get("outcome") or "").lower()
-            if current_outcome in ("sold", "passed"):
+            if current_outcome in ("won", "lost", "passed", "sold"):
                 logger.debug(
                     "[ROVER] dealer_sales skip: opportunity=%s already %s",
                     opportunity_id[:8], current_outcome,

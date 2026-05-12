@@ -6,10 +6,13 @@ const { buildBridgeRequest } = require('./paperclip-routing-governor.cjs');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const GEMINI_API_KEY = normalizeString(process.env.GEMINI_API_KEY);
 const OPENROUTER_LEGACY_DEFAULTS_ENABLED = false;
 const OPENROUTER_LEGACY_DEFAULT_LANE = normalizeString(process.env.OPENROUTER_LEGACY_DEFAULT_LANE);
 const OPENROUTER_LEGACY_DEFAULT_MODEL = normalizeString(process.env.OPENROUTER_LEGACY_DEFAULT_MODEL);
 const ROUTING_GOVERNOR_CONFIG_PATH = normalizeString(process.env.PAPERCLIP_ROUTING_GOVERNOR_CONFIG_PATH) || path.join(__dirname, '..', 'reports', 'paperclip-routing-governor-config-v2-2026-04-16.json');
+const RUN_FAILOVER_ATTEMPT_TIMEOUT_MS = Number(process.env.PAPERCLIP_RUN_FAILOVER_ATTEMPT_TIMEOUT_MS || 15000);
+const RUN_FAILOVER_BACKOFF_MS = Number(process.env.PAPERCLIP_RUN_FAILOVER_BACKOFF_MS || 250);
 
 const OPENROUTER_LANES = Object.freeze({
   openrouter_claude_premium: Object.freeze({
@@ -71,6 +74,13 @@ const OPENROUTER_LANES = Object.freeze({
       'moonshotai/kimi-k2',
     ]),
   }),
+  openrouter_qwen_review: Object.freeze({
+    provider: 'openrouter',
+    defaultModel: 'qwen/qwen3.6-plus',
+    allowedModels: Object.freeze([
+      'qwen/qwen3.6-plus',
+    ]),
+  }),
 });
 
 validateLaneCatalog();
@@ -84,6 +94,7 @@ function normalizeString(value) {
 }
 
 function normalizeFlag(value) {
+  if (value === true) return true;
   return normalizeString(value).toLowerCase() === 'true';
 }
 
@@ -713,6 +724,255 @@ async function requestOpenRouterChat({ model, systemPrompt, userPrompt, maxToken
   return { upstream, data };
 }
 
+function isRetryableUpstreamStatus(status) {
+  return [408, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+function isRetryableRequestError(error) {
+  if (!error) return false;
+  const code = normalizeString(error.code).toUpperCase();
+  return [
+    'ETIMEDOUT',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'EAI_AGAIN',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+  ].includes(code);
+}
+
+function buildRunPayload(model, runPrompt) {
+  return {
+    model,
+    messages: [
+      { role: 'system', content: runPrompt.systemPrompt },
+      { role: 'user', content: runPrompt.userPrompt },
+    ],
+    max_tokens: runPrompt.maxTokens,
+    ...(runPrompt.responseFormat ? { response_format: runPrompt.responseFormat } : {}),
+    ...(model.startsWith('google/gemini')
+      ? { reasoning: { exclude: true } }
+      : {}),
+  };
+}
+
+function mapOpenRouterGeminiModelToDirect(model) {
+  const normalized = normalizeString(model).replace(/^google\//, '');
+  if (normalized === 'gemini-2.0-flash-001') return 'gemini-2.5-flash-lite';
+  return normalized || 'gemini-2.5-flash-lite';
+}
+
+function buildGeminiDirectPayload(runPrompt) {
+  const text = [runPrompt.systemPrompt, runPrompt.userPrompt].map(normalizeString).filter(Boolean).join('\n\n');
+  return {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text }],
+      },
+    ],
+    generationConfig: {
+      maxOutputTokens: runPrompt.maxTokens,
+    },
+  };
+}
+
+function normalizeGeminiDirectResponse(data, model) {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  const content = Array.isArray(parts)
+    ? parts.map((part) => normalizeString(part?.text)).filter(Boolean).join('\n').trim()
+    : '';
+  return {
+    choices: [
+      {
+        message: {
+          content: content || 'No response content.',
+        },
+      },
+    ],
+    usage: data?.usageMetadata
+      ? {
+          prompt_tokens: data.usageMetadata.promptTokenCount || 0,
+          completion_tokens: data.usageMetadata.candidatesTokenCount || 0,
+          total_tokens: data.usageMetadata.totalTokenCount || 0,
+        }
+      : null,
+    provider: 'Google AI Studio',
+    model,
+  };
+}
+
+async function requestGeminiDirect({ model, runPrompt, fetchImpl = fetch }) {
+  if (!GEMINI_API_KEY) {
+    throw Object.assign(new Error('GEMINI_API_KEY is not configured'), { code: 'MISSING_GEMINI_API_KEY' });
+  }
+  const directModel = mapOpenRouterGeminiModelToDirect(model);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(directModel)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+  const upstream = await fetchWithTimeout(fetchImpl, url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildGeminiDirectPayload(runPrompt)),
+  }, RUN_FAILOVER_ATTEMPT_TIMEOUT_MS);
+  const data = await upstream.json();
+  return {
+    upstream,
+    data: upstream.ok ? normalizeGeminiDirectResponse(data, `google/${directModel}`) : data,
+    directModel,
+  };
+}
+
+function shouldInjectCanaryRetryableFailure({ candidate, body }) {
+  if (!normalizeFlag(process.env.PAPERCLIP_ENABLE_CANARY_FAILOVER_TESTS)) {
+    return false;
+  }
+  const canaryEnabled = normalizeFlag(body?.context?.canary_failover_test) || normalizeFlag(body?.canary_failover_test);
+  const targetLane = normalizeLaneName(body?.context?.canary_fail_lane || body?.canary_fail_lane);
+  return canaryEnabled && targetLane && candidate?.lane === targetLane;
+}
+
+function getCanaryFailureMode(body) {
+  const mode = normalizeString(body?.context?.canary_fail_mode || body?.canary_fail_mode).toLowerCase();
+  return mode || 'retryable_503';
+}
+
+function buildRunAttemptCandidates({ lane, model, routing }) {
+  const candidates = [];
+  const seen = new Set();
+
+  const addCandidate = (laneName, modelName) => {
+    const normalizedLane = normalizeLaneName(laneName);
+    const normalizedModel = normalizeString(modelName);
+    if (!normalizedLane || !normalizedModel || seen.has(normalizedLane)) return;
+    const laneConfig = OPENROUTER_LANES[normalizedLane];
+    if (!laneConfig) return;
+    if (!laneConfig.allowedModels.includes(normalizedModel)) return;
+    seen.add(normalizedLane);
+    candidates.push({ lane: normalizedLane, model: normalizedModel, laneConfig });
+  };
+
+  addCandidate(lane, model);
+
+  const fallbackChain = Array.isArray(routing?.fallback_chain) ? routing.fallback_chain : [];
+  for (const fallback of fallbackChain) {
+    addCandidate(fallback?.lane, fallback?.model);
+  }
+
+  return candidates;
+}
+
+function delay(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function executeRunWithFailover({ candidates, runPrompt, fetchImpl = fetch, body = {} }) {
+  const attempts = [];
+  let lastFailure = null;
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    try {
+      if (shouldInjectCanaryRetryableFailure({ candidate, body })) {
+        const mode = getCanaryFailureMode(body);
+        if (mode === 'timeout') {
+          const error = new Error('Injected canary timeout');
+          error.code = 'ETIMEDOUT';
+          attempts.push({ lane: candidate.lane, model: candidate.model, status: null, ok: false, injected_canary_failure: true, injected_mode: 'timeout', error_code: 'ETIMEDOUT' });
+          lastFailure = { type: 'request_error', candidate, error };
+          if (index < candidates.length - 1) {
+            await delay(RUN_FAILOVER_BACKOFF_MS);
+          }
+          continue;
+        }
+        attempts.push({ lane: candidate.lane, model: candidate.model, status: 503, ok: false, injected_canary_failure: true });
+        lastFailure = { type: 'upstream', candidate, status: 503, data: { error: 'injected_canary_retryable_failure' } };
+        if (index < candidates.length - 1) {
+          await delay(RUN_FAILOVER_BACKOFF_MS);
+        }
+        continue;
+      }
+
+      const openRouterResponse = await fetchWithTimeout(fetchImpl, 'https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'http://127.0.0.1:3100',
+          'X-Title': 'Paperclip OpenRouter Bridge',
+        },
+        body: JSON.stringify(buildRunPayload(candidate.model, runPrompt)),
+      }, RUN_FAILOVER_ATTEMPT_TIMEOUT_MS);
+      const openRouterData = await openRouterResponse.json();
+
+      attempts.push({
+        lane: candidate.lane,
+        model: candidate.model,
+        status: openRouterResponse.status,
+        ok: openRouterResponse.ok,
+        provider: 'openrouter',
+      });
+
+      if (openRouterResponse.ok) {
+        return { ok: true, winner: candidate, data: openRouterData, attempts };
+      }
+
+      const canUseGeminiDirectFallback = GEMINI_API_KEY && candidate.model.startsWith('google/gemini');
+      if (canUseGeminiDirectFallback) {
+        const { upstream: geminiDirectResponse, data: geminiDirectData, directModel } = await requestGeminiDirect({ model: candidate.model, runPrompt, fetchImpl });
+        attempts.push({
+          lane: candidate.lane,
+          model: candidate.model,
+          status: geminiDirectResponse.status,
+          ok: geminiDirectResponse.ok,
+          provider: 'google_ai_studio',
+          direct_model: directModel,
+          fallback_for_status: openRouterResponse.status,
+        });
+        if (geminiDirectResponse.ok) {
+          return { ok: true, winner: { ...candidate, model: `google/${directModel}` }, data: geminiDirectData, attempts };
+        }
+        lastFailure = { type: 'upstream', candidate, status: geminiDirectResponse.status, data: geminiDirectData };
+        if (!isRetryableUpstreamStatus(openRouterResponse.status) && !isRetryableUpstreamStatus(geminiDirectResponse.status)) {
+          return { ok: false, terminal: true, failure: lastFailure, attempts };
+        }
+      } else {
+        lastFailure = { type: 'upstream', candidate, status: openRouterResponse.status, data: openRouterData };
+        if (!isRetryableUpstreamStatus(openRouterResponse.status)) {
+          return { ok: false, terminal: true, failure: lastFailure, attempts };
+        }
+      }
+      if (index < candidates.length - 1) {
+        await delay(RUN_FAILOVER_BACKOFF_MS);
+      }
+    } catch (error) {
+      attempts.push({ lane: candidate.lane, model: candidate.model, status: null, ok: false, error_code: normalizeString(error?.code) || 'request_error' });
+      lastFailure = { type: 'request_error', candidate, error };
+      if (!isRetryableRequestError(error)) {
+        return { ok: false, terminal: true, failure: lastFailure, attempts };
+      }
+      if (index < candidates.length - 1) {
+        await delay(RUN_FAILOVER_BACKOFF_MS);
+      }
+    }
+  }
+
+  return { ok: false, terminal: false, failure: lastFailure, attempts };
+}
+
 function enforceExternalReviewOutput(rawContent, routingMetadata) {
   const schema = getExternalReviewResultSchema();
   const parsed = parseJsonCandidate(rawContent);
@@ -1030,53 +1290,52 @@ const server = http.createServer(async (req, res) => {
     const { lane, model, laneConfig, legacyDefaultsUsed, compatibilityDefaultsUsed, taskClass, routing, contract, routingSource, agentHint } = resolveLaneAndModel(body);
     const runPrompt = buildRunPrompt(body, contract);
 
-    const upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'http://127.0.0.1:3100',
-        'X-Title': 'Paperclip OpenRouter Bridge',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: runPrompt.systemPrompt },
-          { role: 'user', content: runPrompt.userPrompt },
-        ],
-        max_tokens: runPrompt.maxTokens,
-        ...(runPrompt.responseFormat ? { response_format: runPrompt.responseFormat } : {}),
-        ...(model.startsWith('google/gemini')
-          ? { reasoning: { exclude: true } }
-          : {}),
-      }),
-    });
+    const candidates = buildRunAttemptCandidates({ lane, model, routing });
+    const runResult = await executeRunWithFailover({ candidates, runPrompt, body });
 
-    const data = await upstream.json();
-    if (!upstream.ok) {
+    if (!runResult.ok) {
+      const attempted_lanes = runResult.attempts.map((attempt) => attempt.lane);
+      const failure = runResult.failure || {};
+      if (failure.type === 'upstream') {
+        return sendJson(res, 502, {
+          ok: false,
+          error: 'openrouter_request_failed',
+          lane: failure.candidate?.lane || lane,
+          model: failure.candidate?.model || model,
+          attempted_lanes,
+          attempts: runResult.attempts,
+          details: failure.data,
+        });
+      }
       return sendJson(res, 502, {
         ok: false,
         error: 'openrouter_request_failed',
-        lane,
-        model,
-        details: data,
+        lane: failure.candidate?.lane || lane,
+        model: failure.candidate?.model || model,
+        attempted_lanes,
+        attempts: runResult.attempts,
+        message: failure.error instanceof Error ? failure.error.message : 'request_error',
       });
     }
+
+    const { winner, data, attempts } = runResult;
 
     const content = extractOpenRouterContent(data) || 'No response content.';
     return sendJson(res, 200, {
       ok: true,
-      lane,
-      model,
-      summary: `OpenRouter ${model}`,
+      lane: winner.lane,
+      model: winner.model,
+      summary: `OpenRouter ${winner.model}`,
       content,
       usage: data?.usage || null,
-      provider: data?.provider || laneConfig.provider,
+      provider: data?.provider || winner.laneConfig.provider,
       legacy_defaults_used: legacyDefaultsUsed,
       compatibility_defaults_used: compatibilityDefaultsUsed,
       task_class: taskClass,
       routing_source: routingSource,
       agent_hint: agentHint || null,
+      attempted_lanes: attempts.map((attempt) => attempt.lane),
+      attempts,
       routing,
       contract_applied: Boolean(contract),
       contract,
@@ -1092,6 +1351,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`paperclip-openrouter-bridge listening on http://127.0.0.1:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`paperclip-openrouter-bridge listening on http://127.0.0.1:${PORT}`);
+  });
+}
+
+module.exports = {
+  isRetryableUpstreamStatus,
+  isRetryableRequestError,
+  buildRunAttemptCandidates,
+  executeRunWithFailover,
+  fetchWithTimeout,
+  server,
+};

@@ -50,14 +50,14 @@
       "scheduleId": "uJyfnyv7p5UmTzPmn",
       "webhookId": "lcQSaKEq2yb3EfoZb",
       "status": "enabled",
-      "notes": "Sandhills Cloud platform \u2014 ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Schedule: every 3hr."
+      "notes": "Sandhills Cloud platform \u2014 ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Schedule: every 12hr."
     },
     "ds-usgovbid": {
       "id": "6XO9La81aEmtsCT3g",
       "scheduleId": "PZRUZq76opvUAxTzV",
       "webhookId": "QhPfZWcztslsbKDlm",
       "status": "enabled",
-      "schedule": "0 */3 * * *",
+      "schedule": "0 */12 * * *",
       "notes": "USGovBid (usgovbid.com) impound/surplus vehicle auctions. WordPress Events Calendar REST API + Maxanet platform (bid.usgovbid.com). Playwright required for AJAX lot loading."
     },
     "ds-jjkane": {
@@ -65,14 +65,14 @@
       "scheduleId": "5eIHHDPO1Wp52hr4X",
       "webhookId": "vZW5IhQw7uTpXeFG2",
       "status": "enabled",
-      "schedule": "0 */3 * * *",
+      "schedule": "0 */12 * * *",
       "notes": "JJ Kane Government Surplus (jjkane.com) \u2014 Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
     },
     "ds-hibid-v2": {
       "id": "7s9e0eATTt1kuGGfE",
       "scheduleId": "1tLdDDBUL2Kb6cBzl",
       "status": "enabled",
-      "schedule": "0 */3 * * *",
+      "schedule": "0 */12 * * *",
       "notes": "HiBid GraphQL API (pure fetch, no Playwright). Replaces lexis-solutions rented actor. Category 700006 = Cars & Vehicles. US-only via countryName filter. 24 vehicle make keywords. Test run confirmed working."
     },
     "ds-bidspotter": {
@@ -80,7 +80,7 @@
       "scheduleId": "Vol9X7tsYEHKLSdIK",
       "webhookId": "N699FBbtfzjjhHshJ",
       "status": "enabled",
-      "schedule": "0 */3 * * *",
+      "schedule": "0 */12 * * *",
       "notes": "BidSpotter.com \u2014 3-level Playwright crawler (catalogue list \u2192 catalogue \u2192 lot). AWS WAF protected, uses Apify browser fingerprinting. US-only filter applied. Build 1.0.16."
     },
     "ds-hibid": {
@@ -100,7 +100,7 @@
     }
   },
   "webhookUrl": "https://dealscan-insight-production.up.railway.app/api/ingest/apify",
-  "scheduleInterval": "0 */3 * * *",
+  "scheduleInterval": "0 */12 * * *",
   "deployedAt": "2026-03-14T11:10:00.000Z",
   "lastAudit": "2026-03-21"
 }

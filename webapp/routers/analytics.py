@@ -693,7 +693,7 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
                     continue
 
             normalized_outcome = str(row.get("outcome") or "").strip().lower()
-            if normalized_outcome not in {"won", "sold"}:
+            if normalized_outcome != "won":
                 continue
 
             source = row.get("source") or "unknown"

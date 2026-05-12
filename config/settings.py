@@ -103,7 +103,6 @@ class Settings(BaseSettings):
 
     # External APIs
     manheim_api_key: Optional[str] = None
-    openai_api_key: Optional[str] = None
     geocoding_api_key: Optional[str] = None
     sentry_dsn: Optional[str] = None
 

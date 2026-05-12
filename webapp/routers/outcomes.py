@@ -271,17 +271,11 @@ async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
         counts = {"pending": 0, "won": 0, "lost": 0, "passed": 0}
         gross_margin_total = 0.0
         roi_values: list[float] = []
-        outcome_aliases = {
-            "sold": "won",
-            "won": "won",
-            "lost": "lost",
-            "passed": "passed",
-            "pending": "pending",
-        }
 
         for row in rows:
             raw_outcome = (row.get("outcome") or "pending").strip().lower()
-            outcome = outcome_aliases.get(raw_outcome, "pending")
+            outcome = "won" if raw_outcome == "sold" else raw_outcome
+            outcome = outcome if outcome in counts else "pending"
             counts[outcome] = counts.get(outcome, 0) + 1
             margin = _safe_float(row.get("gross_margin"))
             if margin is not None:

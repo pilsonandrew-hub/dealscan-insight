@@ -268,6 +268,54 @@ def test_score_deal_uses_premium_lane_defaults_for_recent_vehicle():
     assert result["ceiling_pass"] is True
 
 
+def test_score_deal_hard_rejects_older_high_rust_state_even_with_strong_economics():
+    result = score_deal(
+        bid=10000,
+        mmr_ca=20000,
+        state="OH",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 3,
+        mileage=30000,
+        title_status="clean",
+        description="clean vehicle",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["vehicle_tier"] == "rejected"
+    assert result["investment_grade"] == "Rejected"
+    assert result["ceiling_pass"] is False
+    assert result["dos_score"] == 0.0
+    assert result["score"] == 0.0
+    assert result["ceiling_reason"] == "high_rust_state_rejected"
+    assert result["bid_ceiling_pct"] is None
+    assert result["min_margin_target"] is None
+    assert "rust_state_source" in result["risk_flags"]
+
+
+def test_score_deal_allows_high_rust_state_new_vehicle_exception():
+    result = score_deal(
+        bid=10000,
+        mmr_ca=20000,
+        state="OH",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 2,
+        mileage=20000,
+        title_status="clean",
+        description="clean vehicle",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["vehicle_tier"] == "premium"
+    assert result["investment_grade"] != "Rejected"
+    assert result["ceiling_reason"] == "score_deal_v3_two_lane"
+    assert result["ceiling_pass"] is True
+    assert "rust_state_source" in result["risk_flags"]
+
+
 def test_determine_vehicle_tier_enforces_age_and_mileage_hard_stops():
     assert determine_vehicle_tier(CURRENT_YEAR - 4, 50000) == "premium"
     assert determine_vehicle_tier(CURRENT_YEAR - 4, 50001) == "rejected"

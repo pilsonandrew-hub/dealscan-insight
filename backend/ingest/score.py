@@ -80,6 +80,20 @@ def _parse_datetime(value: object) -> Optional[datetime]:
         return None
 
 
+def is_high_rust_state_rejected(state: object, year: object) -> bool:
+    """Return True when rust-state origin is a hard business-rule rejection.
+
+    DealerScope allows only the explicit new-vehicle exception for high-rust states:
+    model year >= current_year - 2. Missing/unparseable year is not eligible for the
+    exception because we cannot prove the vehicle is new enough.
+    """
+    normalized_state = str(state or "").upper().strip()
+    if normalized_state not in HIGH_RUST_STATES:
+        return False
+    model_year = _coerce_year(year)
+    return model_year is None or model_year < _current_year() - 2
+
+
 def determine_vehicle_tier(year, mileage) -> str:
     current_year = _current_year()
     # Two-lane system:
@@ -783,11 +797,17 @@ def score_deal(
 
     risk_flags = compute_risk_flags(vehicle_proxy, vehicle_tier)
     vehicle_proxy["risk_flags"] = risk_flags
+    rust_state_rejected = is_high_rust_state_rejected(state, year)
+    if rust_state_rejected:
+        vehicle_tier = "rejected"
 
     dos_premium = score_deal_premium(vehicle_proxy)
     dos_standard = score_deal_standard(vehicle_proxy)
 
-    selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard if vehicle_tier == "standard" else max(dos_premium, dos_standard)
+    if rust_state_rejected:
+        selected_dos = 0.0
+    else:
+        selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard if vehicle_tier == "standard" else max(dos_premium, dos_standard)
 
     buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
     buyer_premium_amount = round((bid_value or 0) * buyer_premium_pct_value, 2) if bid_value and bid_value > 0 else 0.0
@@ -808,8 +828,8 @@ def score_deal(
 
     trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
 
-    bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88
-    max_bid = _compute_max_bid_v2(
+    bid_ceiling_pct = None if vehicle_tier == "rejected" else 0.80 if vehicle_tier == "standard" else 0.88
+    max_bid = 0.0 if vehicle_tier == "rejected" else _compute_max_bid_v2(
         mmr,
         bid=bid_value,
         state=state,
@@ -818,8 +838,8 @@ def score_deal(
         tier=vehicle_tier,
     )
     bid_headroom = max_bid - bid_value
-    min_margin_target = 2500.0 if vehicle_tier == "standard" else 1500.0
-    ceiling_pass = bid_value <= max_bid and gross_margin >= min_margin_target and vehicle_tier != "rejected"
+    min_margin_target = None if vehicle_tier == "rejected" else 2500.0 if vehicle_tier == "standard" else 1500.0
+    ceiling_pass = False if vehicle_tier == "rejected" else bid_value <= max_bid and gross_margin >= min_margin_target
 
     all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount + transport + recon_reserve
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
@@ -879,8 +899,7 @@ def score_deal(
         and "frame_damage" not in risk_flags
     )
     ceiling_pass = ceiling_pass and (
-        vehicle_tier == "rejected"
-        or ai_confidence_score >= ai_conf_threshold
+        ai_confidence_score >= ai_conf_threshold
         or _strong_structural
     )
 
@@ -936,7 +955,7 @@ def score_deal(
         "max_bid": max_bid,
         "bid_headroom": bid_headroom,
         "min_margin_target": min_margin_target,
-        "ceiling_reason": "score_deal_v3_two_lane",
+        "ceiling_reason": "high_rust_state_rejected" if rust_state_rejected else "score_deal_v3_two_lane",
         "ceiling_pass": ceiling_pass,
         "designated_lane": vehicle_tier,
         "vehicle_tier": vehicle_tier,

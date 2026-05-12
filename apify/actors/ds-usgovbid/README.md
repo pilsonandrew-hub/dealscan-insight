@@ -54,7 +54,7 @@ USGovBid uses a two-layer architecture:
 | Resource | ID |
 |----------|-----|
 | Actor | `6XO9La81aEmtsCT3g` |
-| Schedule | `PZRUZq76opvUAxTzV` (every 3hr: `0 */3 * * *`) |
+| Schedule | `PZRUZq76opvUAxTzV` (every 12hr: `0 */12 * * *`) |
 | Webhook | `QhPfZWcztslsbKDlm` → Railway ingest endpoint |
 
 ## Site Notes

@@ -142,6 +142,38 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_flags_sonar_mirror_failures(self):
+        issues = reconcile.classify_run(
+            run_id="run-sonar-fail",
+            apify_run={"run_id": "run-sonar-fail", "status": "SUCCEEDED", "item_count": 3},
+            webhook={"latest_status": "error", "latest_error": "sonar_write_failures:2"},
+            opportunities={"opportunity_rows": 3},
+            delivery={
+                "channels": {
+                    "db_save": {"statuses": {"saved_supabase": 3}},
+                    "sonar_mirror": {"statuses": {"saved_sonar": 1, "sonar_error": 2}},
+                }
+            },
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertIn("webhook_error", issues)
+        self.assertIn("sonar_mirror_failures", issues)
+        self.assertNotIn("db_save_failures", issues)
+
+    def test_infer_likely_cause_flags_sonar_mirror_failures(self):
+        likely_cause = reconcile.infer_likely_cause(
+            apify_run={"run_id": "run-sonar-fail", "status": "SUCCEEDED"},
+            webhook={"latest_status": "error"},
+            opportunities={"opportunity_rows": 3},
+            delivery={"channels": {"sonar_mirror": {"statuses": {"sonar_error": 2}}}},
+            issues=["sonar_mirror_failures"],
+        )
+
+        self.assertIn("sonar_mirror_write_failures", likely_cause)
+        self.assertIn("sonar_mirror", likely_cause)
+
     def test_classify_run_flags_audit_backfilled_when_webhook_error_marks_fallback(self):
         issues = reconcile.classify_run(
             run_id="run-audit-fallback",
