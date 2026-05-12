@@ -197,6 +197,35 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_treats_vin_dedup_as_existing_success(self):
+        issues = reconcile.classify_run(
+            run_id="run-vin-dedup",
+            apify_run={"run_id": "run-vin-dedup", "status": "SUCCEEDED", "item_count": 2},
+            webhook={"latest_status": "degraded", "latest_error": "failed:1"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"vin_dedup_skipped": 2}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
+    def test_classify_run_does_not_flag_pending_webhook_when_db_landing_is_proven(self):
+        issues = reconcile.classify_run(
+            run_id="run-pending-but-landed",
+            apify_run={"run_id": "run-pending-but-landed", "status": "SUCCEEDED", "item_count": 1},
+            webhook={
+                "latest_status": "pending",
+                "last_received_at": "2026-03-17T00:00:00+00:00",
+            },
+            opportunities={"opportunity_rows": 1},
+            delivery={"channels": {"db_save": {"statuses": {"saved_supabase": 1}}}},
+            now_utc=datetime(2026, 3, 17, 2, 0, tzinfo=timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
     def test_classify_run_flags_sonar_mirror_failures(self):
         issues = reconcile.classify_run(
             run_id="run-sonar-fail",

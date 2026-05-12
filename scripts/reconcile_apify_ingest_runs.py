@@ -35,7 +35,7 @@ WEBHOOK_SUCCESS_STATUSES = {"processed", "ignored_replay"}
 SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
-DB_SAVE_EXISTING_STATUSES = {"duplicate_existing"}
+DB_SAVE_EXISTING_STATUSES = {"duplicate_existing", "vin_dedup_skipped", "vin_dedup_updated"}
 DB_SAVE_SKIPPED_STATUSES = {
     "below_save_threshold",
     "skipped_bronze",
@@ -777,6 +777,9 @@ def classify_run(
     failed_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_FAILURE_STATUSES)
     accounted_rows = inserted_rows + existing_rows + skipped_rows + failed_rows
     opportunity_rows = int((opportunities or {}).get("opportunity_rows") or 0)
+    sonar_channel = ((delivery or {}).get("channels") or {}).get("sonar_mirror", {}) or {}
+    sonar_statuses = sonar_channel.get("statuses") or {}
+    sonar_failed_rows = sum(int(sonar_statuses.get(s) or 0) for s in SONAR_MIRROR_FAILURE_STATUSES)
     latest_webhook_status = str((webhook or {}).get("latest_status") or "unknown").lower()
     latest_webhook_error = str((webhook or {}).get("latest_error") or "")
     has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or existing_rows > 0
@@ -807,10 +810,16 @@ def classify_run(
             issues.append("missing_webhook")
         else:
             if latest_webhook_status in WEBHOOK_BAD_STATUSES:
-                issues.append(f"webhook_{latest_webhook_status}")
+                if not has_successful_db_landing or failed_rows > 0 or sonar_failed_rows > 0:
+                    issues.append(f"webhook_{latest_webhook_status}")
             elif latest_webhook_status == "pending":
                 last_seen = parse_datetime(webhook.get("last_received_at")) or apify_run.get("finished_at") or apify_run.get("started_at")
-                if last_seen and (now_utc - last_seen) > timedelta(minutes=pending_grace_minutes):
+                if (
+                    last_seen
+                    and (now_utc - last_seen) > timedelta(minutes=pending_grace_minutes)
+                    and not has_successful_db_landing
+                    and failed_rows == 0
+                ):
                     issues.append("webhook_pending_stale")
             if AUDIT_FALLBACK_MARKER in latest_webhook_error:
                 issues.append("audit_backfilled")
@@ -821,9 +830,6 @@ def classify_run(
 
         if item_count > 0 and delivery is None:
             issues.append("missing_delivery_log")
-        sonar_channel = ((delivery or {}).get("channels") or {}).get("sonar_mirror", {}) or {}
-        sonar_statuses = sonar_channel.get("statuses") or {}
-        sonar_failed_rows = sum(int(sonar_statuses.get(s) or 0) for s in SONAR_MIRROR_FAILURE_STATUSES)
         if failed_rows > 0:
             issues.append("db_save_failures")
         if sonar_failed_rows > 0:

@@ -1366,9 +1366,9 @@ async def _process_webhook_items(
                 "saved_direct_pg",
                 "saved_direct_pg_duplicate",
             }
-            existing_success = save_status == "duplicate_existing"
+            existing_success = save_status in {"duplicate_existing", "vin_dedup_skipped", "vin_dedup_updated"}
             save_succeeded = inserted_success or existing_success
-            is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved"} or is_dup
+            is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved", "vin_dedup_skipped", "vin_dedup_updated"} or is_dup
             if save_succeeded:
                 processed += 1
                 if inserted_success:
