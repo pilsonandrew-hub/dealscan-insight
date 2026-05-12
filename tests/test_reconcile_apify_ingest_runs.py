@@ -1,3 +1,4 @@
+import json
 import ssl
 import subprocess
 import sys
@@ -19,6 +20,47 @@ import reconcile_apify_ingest_runs as reconcile
 class ReconcileApifyIngestRunsTests(unittest.TestCase):
     def setUp(self):
         reconcile._CURL_SSL_FALLBACK_NOTIFIED = False
+
+    def test_load_actor_registry_defaults_to_enabled_sources_only(self):
+        manifest = json.dumps(
+            {
+                "actors": {
+                    "ds-active": {"id": "actor-active", "status": "enabled"},
+                    "ds-disabled": {"id": "actor-disabled", "status": "DISABLED"},
+                    "ds-retired": {"id": "actor-retired", "status": "RETIRED"},
+                }
+            }
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False) as fh:
+            fh.write(manifest)
+            manifest_path = Path(fh.name)
+        try:
+            with patch.object(reconcile, "DEPLOYMENT_PATH", manifest_path):
+                registry = reconcile.load_actor_registry([])
+        finally:
+            manifest_path.unlink(missing_ok=True)
+
+        self.assertEqual(registry, {"ds-active": "actor-active"})
+
+    def test_load_actor_registry_explicit_filter_can_select_disabled_source(self):
+        manifest = json.dumps(
+            {
+                "actors": {
+                    "ds-active": {"id": "actor-active", "status": "enabled"},
+                    "ds-disabled": {"id": "actor-disabled", "status": "DISABLED"},
+                }
+            }
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False) as fh:
+            fh.write(manifest)
+            manifest_path = Path(fh.name)
+        try:
+            with patch.object(reconcile, "DEPLOYMENT_PATH", manifest_path):
+                registry = reconcile.load_actor_registry(["ds-disabled"])
+        finally:
+            manifest_path.unlink(missing_ok=True)
+
+        self.assertEqual(registry, {"ds-disabled": "actor-disabled"})
 
     def test_apify_get_json_uses_curl_on_python_ssl_verify_failure(self):
         ssl_error = urllib_error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))

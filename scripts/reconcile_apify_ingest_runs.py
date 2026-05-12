@@ -134,9 +134,18 @@ def format_datetime(dt: Optional[datetime]) -> str:
 def load_actor_registry(actor_filters: list[str]) -> dict[str, str]:
     data = json.loads(DEPLOYMENT_PATH.read_text(encoding="utf-8"))
     actors = data.get("actors") or {}
-    registry = {name: details["id"] for name, details in actors.items() if isinstance(details, dict) and details.get("id")}
+    registry = {
+        name: details["id"]
+        for name, details in actors.items()
+        if isinstance(details, dict) and details.get("id")
+    }
+    active_registry = {
+        name: actor_id
+        for name, actor_id in registry.items()
+        if str((actors.get(name) or {}).get("status") or "").lower() == "enabled"
+    }
     if not actor_filters:
-        return registry
+        return active_registry
 
     selected: dict[str, str] = {}
     unresolved: list[str] = []
