@@ -2892,6 +2892,37 @@ async def send_telegram_alerts(hot_deals: list) -> None:
         await send_telegram_alert(deal)
 
 
+def _alert_validation_mmr_estimate(deal: dict) -> Any:
+    breakdown = deal.get("score_breakdown") if isinstance(deal.get("score_breakdown"), dict) else {}
+    for value in (
+        deal.get("mmr_estimated"),
+        breakdown.get("mmr_estimated"),
+        deal.get("estimated_sale_price"),
+        breakdown.get("estimated_sale_price"),
+        deal.get("manheim_mmr_mid"),
+        breakdown.get("manheim_mmr_mid"),
+        deal.get("mmr_mid"),
+        breakdown.get("mmr_mid"),
+    ):
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _build_alert_validation_prompt(deal: dict) -> str:
+    mmr_estimated = _alert_validation_mmr_estimate(deal)
+    return (
+        "You are a conservative vehicle arbitrage expert validating whether a DealerScope "
+        "hot-deal alert is safe to send. In DealerScope, a higher DOS score is better "
+        "(80+ means high-priority arbitrage candidate), not a damage score. Validate this deal: "
+        f"{deal.get('title')}, Year: {deal.get('year')}, Make: {deal.get('make')}, "
+        f"Model: {deal.get('model')}, Current bid: ${deal.get('current_bid')}, "
+        f"MMR estimate: ${mmr_estimated}, DOS score: {deal.get('dos_score')}, "
+        f"Location: {deal.get('state')}. Is this a genuine arbitrage opportunity? "
+        "Reply with VALID or INVALID and one sentence reason."
+    )
+
+
 async def ai_validate_hot_deals(deals: list) -> list:
     """Validate hot deals with OpenRouter DeepSeek R1 before alerting."""
     if not deals:
@@ -2932,17 +2963,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
                 )
                 continue
 
-            mmr_estimated = deal.get("mmr_estimated")
-            if mmr_estimated is None:
-                mmr_estimated = (deal.get("score_breakdown") or {}).get("mmr_estimated")
-            prompt = (
-                "You are a vehicle arbitrage expert. Validate this deal: "
-                f"{deal.get('title')}, Year: {deal.get('year')}, Make: {deal.get('make')}, "
-                f"Model: {deal.get('model')}, Current bid: ${deal.get('current_bid')}, "
-                f"MMR estimate: ${mmr_estimated}, DOS score: {deal.get('dos_score')}, "
-                f"Location: {deal.get('state')}. Is this a genuine arbitrage opportunity? "
-                "Reply with VALID or INVALID and one sentence reason."
-            )
+            prompt = _build_alert_validation_prompt(deal)
 
             payload = {
                 "model": model,
