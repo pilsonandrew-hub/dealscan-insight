@@ -24,7 +24,14 @@ except Exception as e:
 
 
 def expire_stale_deals(max_age_days: int = 7) -> dict:
-    """Mark deals older than max_age_days as expired in Supabase."""
+    """Deactivate deals older than max_age_days in Supabase.
+
+    The live opportunities table uses ``is_active`` as the lifecycle surface.
+    Do not write a synthetic ``status='expired'`` value here: the production
+    schema does not expose an opportunities.status column, and historical
+    migrations that mention it used deal-quality values rather than lifecycle
+    states.
+    """
     if _supabase_client is None:
         logger.warning("[LIFECYCLE] Supabase client not available — skipping expiration")
         return {"expired": 0, "error": "supabase_unavailable"}
@@ -33,15 +40,13 @@ def expire_stale_deals(max_age_days: int = 7) -> dict:
     try:
         result = (
             _supabase_client.table("opportunities")
-            .update({"status": "expired"})
+            .update({"is_active": False})
             .lt("ingested_at", cutoff)
-            .neq("status", "expired")
-            .neq("status", "archived")
-            .neq("status", "passed")
+            .eq("is_active", True)
             .execute()
         )
         count = len(result.data) if result.data else 0
-        logger.info(f"[LIFECYCLE] Expired {count} deals older than {max_age_days} days")
+        logger.info(f"[LIFECYCLE] Deactivated {count} deals older than {max_age_days} days")
         return {"expired": count, "cutoff": cutoff}
     except Exception as e:
         logger.error(f"[LIFECYCLE] expire_stale_deals failed: {e}")
