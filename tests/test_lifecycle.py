@@ -48,6 +48,7 @@ class LifecycleTests(unittest.TestCase):
 
         self.assertEqual(result["expired"], 2)
         self.assertEqual(client.query.updated, {"is_active": False})
+        self.assertIn(("lt", "created_at", unittest.mock.ANY), client.query.calls)
         self.assertIn(("eq", "is_active", True), client.query.calls)
         self.assertNotIn(("neq", "status", "expired"), client.query.calls)
 
