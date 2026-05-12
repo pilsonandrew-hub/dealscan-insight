@@ -1,5 +1,8 @@
 # Ingest Closeout Checklist — Steps 6-10
 
+> Historical closeout-step snapshot only.
+> This document reflects an earlier ingest closeout checklist and must not be treated as current ingest operational authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 Use this only after Step 5 baseline live validation is green on the currently deployed build.
 
 This checklist is intentionally strict. If any gate fails, stop the sequence, record the failure, and return to reconciliation before touching pager mode or declaring closeout.

@@ -1,6 +1,8 @@
 /**
- * Centralized configuration management
- * Inspired by the config.py in the bootstrap script
+ * Centralized runtime settings.
+ *
+ * This module is live and high-impact. It must not infer deployment identity
+ * from stale defaults beyond explicit local-development fallbacks.
  */
 
 import { createLogger } from '@/utils/productionLogger';
@@ -81,14 +83,14 @@ export interface AppSettings {
 }
 
 // Default configuration
-const browserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+const resolvedEnvironment = ((import.meta.env.VITE_APP_ENV || import.meta.env.MODE || 'development') as 'development' | 'staging' | 'production');
 const browserWebSocketOrigin = typeof window !== 'undefined'
   ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
   : '';
 
 const defaultSettings: AppSettings = {
-  environment: import.meta.env.MODE as 'development' | 'staging' | 'production' || 'development',
-  debug: import.meta.env.MODE === 'development',
+  environment: resolvedEnvironment,
+  debug: resolvedEnvironment === 'development',
   
   api: {
     baseUrl: import.meta.env.VITE_API_URL || '/api',
@@ -99,7 +101,7 @@ const defaultSettings: AppSettings = {
   },
   
   database: {
-    url: import.meta.env.VITE_DATABASE_URL || 'sqlite://dealerscope.db',
+    url: import.meta.env.VITE_DATABASE_URL || '',
     poolSize: 10,
     maxOverflow: 20,
     timeout: 30000
@@ -129,9 +131,9 @@ const defaultSettings: AppSettings = {
   
   features: {
     realTimeUpdates: true,
-    advancedMetrics: import.meta.env.MODE !== 'development',
+    advancedMetrics: resolvedEnvironment !== 'development',
     backgroundSync: true,
-    experimentalFeatures: import.meta.env.MODE === 'development'
+    experimentalFeatures: resolvedEnvironment === 'development'
   },
   
   websocket: {
@@ -230,8 +232,8 @@ export const environmentInfo = {
   isDevelopment: settings.environment === 'development',
   isStaging: settings.environment === 'staging',
   isProduction: settings.environment === 'production',
-  version: import.meta.env.VITE_APP_VERSION || '5.0.0',
-  buildTime: import.meta.env.VITE_BUILD_TIME || new Date().toISOString(),
+  version: import.meta.env.VITE_APP_VERSION || 'unknown',
+  buildTime: import.meta.env.VITE_BUILD_TIME || '',
   gitCommit: import.meta.env.VITE_GIT_COMMIT || 'unknown'
 };
 

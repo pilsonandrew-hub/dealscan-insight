@@ -25,7 +25,7 @@ jobs:
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           DIFF=$(git diff "$BASE_SHA".."$HEAD_SHA" -- '*.py' '*.ts' '*.tsx' '*.js' '*.sql' | head -c 60000)
           if [ -z "$DIFF" ]; then echo "No code changes to review."; exit 0; fi
-          PAYLOAD=$(jq -n --arg diff "$DIFF" '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"system","content":"You are a senior code reviewer for DealerScope. Flag: 1) Auth/security issues 2) Business rule violations (bid ceiling 0.88/0.80, margins, age, mileage, rust states) 3) Silent failures 4) Data integrity 5) UX/consumer trust issues. Be concise."},{"role":"user","content":$diff}]}')
+          PAYLOAD=$(jq -n --arg diff "$DIFF" '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"system","content":"You are a senior code reviewer for DealerScope. Flag: 1) Auth/security issues 2) Business rule violations (Premium lane: max age 4yr, max mileage 50k, bid ceiling 0.88; Standard lane: max age 10yr, max mileage 100k plus mileage-per-year constraint, bid ceiling 0.80; rust states; margin rules) 3) Silent failures 4) Data integrity 5) UX/consumer trust issues. Be concise."},{"role":"user","content":$diff}]}')
           RESPONSE=$(curl -s -X POST https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
           REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"' 2>/dev/null || echo "Review unavailable")
           echo "## 🤖 Cursor AI Review" >> $GITHUB_STEP_SUMMARY
@@ -42,7 +42,7 @@ jobs:
           if [ -z "$PARENT" ]; then echo "First commit, skipping."; exit 0; fi
           DIFF=$(git diff "$PARENT".."$HEAD" -- '*.py' '*.ts' '*.tsx' '*.js' '*.sql' | head -c 60000)
           if [ -z "$DIFF" ]; then echo "No code changes."; exit 0; fi
-          PAYLOAD=$(jq -n --arg diff "$DIFF" '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"system","content":"You are a senior code reviewer for DealerScope. Flag: 1) Auth/security issues 2) Business rule violations (bid ceiling 0.88/0.80, margins, age, mileage, rust states) 3) Silent failures 4) Data integrity 5) UX/consumer trust issues. Be concise."},{"role":"user","content":$diff}]}')
+          PAYLOAD=$(jq -n --arg diff "$DIFF" '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"system","content":"You are a senior code reviewer for DealerScope. Flag: 1) Auth/security issues 2) Business rule violations (Premium lane: max age 4yr, max mileage 50k, bid ceiling 0.88; Standard lane: max age 10yr, max mileage 100k plus mileage-per-year constraint, bid ceiling 0.80; rust states; margin rules) 3) Silent failures 4) Data integrity 5) UX/consumer trust issues. Be concise."},{"role":"user","content":$diff}]}')
           RESPONSE=$(curl -s -X POST https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
           REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "No review returned"' 2>/dev/null || echo "Review unavailable")
           echo "## 🤖 Cursor AI Review (push)" >> $GITHUB_STEP_SUMMARY

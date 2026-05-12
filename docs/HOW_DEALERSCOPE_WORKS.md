@@ -1,137 +1,232 @@
 # How DealerScope Works
 
-## Mission
+## Purpose
 
-DealerScope is a wholesale vehicle arbitrage intelligence platform. Its purpose is to identify underpriced vehicles at public auto auctions and calculate the exact margin available before a single bid is placed.
+DealerScope is a vehicle arbitrage intelligence system focused on identifying profitable opportunities from government and public-surplus style auction inventory, then scoring and surfacing them through the current hybrid backend/frontend stack.
 
----
-
-## The Theory: The MMR Gap
-
-Public auction sellers — private owners, small dealers, fleet liquidators — price vehicles without access to Manheim Market Report (MMR) data. MMR is the wholesale benchmark used by professional buyers. When a seller doesn't know their car is worth $18,000 wholesale, they may start it at $13,500. That $4,500 gap is the arbitrage opportunity.
-
-DealerScope automates the detection of this gap at scale across multiple auction sources simultaneously.
+This document describes the **current verified model** at a high level. It does not treat older route families, old evaluation harnesses, or deprecated architecture assumptions as system truth.
 
 ---
 
-## The Flow
+## Current system shape
 
-```
-Apify Scraper
-     |
-     v
-Five-Layer Filter
-     |
-     v
-DOS Score Calculation
-     |
-     v
-Alert (fire / strong buy / watch)
-     |
-     v
-Buy at Auction
-     |
-     v
-Sell Wholesale / Retail
-```
+DealerScope is not a single neat stack.
+It is a hybrid live system built from:
+- FastAPI backend entrypoint: `backend/main.py`
+- current operational routers in `webapp/routers/`
+- frontend in `src/`
+- Supabase-backed data access and migrations
+- Railway-hosted backend APIs
+- supporting scripts, workflows, and local-only legacy harnesses
 
-1. **Apify scrapes** auction listings from IAAI, Copart, Manheim, and regional platforms
-2. **Five-Layer Filter** eliminates bad deals immediately
-3. **DOS Score** quantifies the opportunity on a 0–100 scale
-4. **Alert** is fired based on score threshold
-5. **Buyer acts** — places bid with known all-in cost
-6. **Sell** at MMR or retail depending on condition and market timing
+For current truth, prefer:
+1. live code
+2. live migrations/schema
+3. frontend/backend integration points
+4. workflow/control-plane files
+5. historical docs and parked reports
 
 ---
 
-## The Formula
+## Current product flow
 
-### All-In Cost
+At the current system level, the main DealerScope flow is:
 
-```
-All-In Cost = Bid Price + Buyer Premium + Auction Fees + Transport + Recon
-```
-
-| Component      | Typical Range     |
-|----------------|-------------------|
-| Buyer Premium  | 5–10% of bid      |
-| Auction Fees   | $150–$500         |
-| Transport      | $200–$900         |
-| Recon          | $0–$2,500         |
-
-### Margin
-
-```
-Margin = MMR - All-In Cost
+```text
+Auction/source ingest
+  -> normalize
+  -> gate / reject
+  -> score
+  -> persist qualifying rows
+  -> expose current opportunity surfaces
+  -> analytics / rover / sniper / saved-search / recon / sonar follow-on behavior
 ```
 
-A positive margin means the deal is viable. DealerScope only surfaces deals where Margin > configurable floor (default: $1,500).
+The canonical ingest/scoring path is centered on:
+- `webapp/routers/ingest.py`
+- `backend/ingest/score.py`
+- `backend/ingest/condition.py`
 
 ---
 
-## The Three Modules
+## Current route authority
 
-### 1. Crosshair (Active Search)
+### Main backend entrypoint
+- `backend/main.py`
 
-The buyer knows what they want. Crosshair lets them define a precise vehicle spec — year range, make/model, mileage cap, target states — and immediately surfaces live matching opportunities with DOS scores and margin estimates.
+### Current mounted route families
+- `ingest`
+- `rover`
+- `outcomes`
+- `analytics`
+- `sniper`
+- `saved_searches`
+- `vin`
+- `recon`
+- `sonar`
+- `lifecycle`
+- `telegram` (callback router still mounted via separate import/include path)
+- `pipeline` (legacy endpoints still present in `backend/main.py`)
 
-**Use case:** "I want a 2019–2021 F-150 XLT 4WD under 60k miles from TX, OK, or AZ."
+### Explicit retained alias
+- `POST /api/opportunities/{opportunity_id}/pass`
 
-### 2. SniperScope (Bid Execution)
+### Live health routes
+- `GET /health`
+- `GET /healthz`
 
-Once a target is identified, SniperScope calculates the maximum defensible bid. It takes the MMR, subtracts all-in costs, and returns the bid ceiling that preserves the target margin.
+### Not current mounted authority anymore
+The older mounted SQLAlchemy/auth router family was removed from the main backend entrypoint because it was absent from verified production route surface and had become false authority:
+- `auth`
+- `vehicles`
+- `upload`
+- `ml`
+- `opportunities`
 
-**Formula:**
-```
-Max Bid = MMR - Buyer Premium - Fees - Transport - Recon - Target Margin
-```
+Important distinction:
+- `telegram` is still mounted in the current main backend entrypoint
+- `pipeline` legacy endpoints are still present in `backend/main.py`
 
-### 3. Rover (Passive AI)
-
-Rover runs in the background. It learns from saved intents and bidding behavior, then proactively surfaces opportunities that match your pattern — even ones you didn't search for. It refreshes every 5 minutes and fires alerts when high-score deals appear.
-
-**Use case:** Set a minimum DOS score of 75 and go about your day. Rover alerts you when something fires.
-
----
-
-## Five-Layer Filter
-
-All listings pass through five gates before receiving a DOS score. Failing any gate removes the listing.
-
-| Gate | Name             | Description                                                  |
-|------|------------------|--------------------------------------------------------------|
-| 1    | Title Check      | Clean title only. Salvage, rebuilt, or flood titles rejected |
-| 2    | Mileage Gate     | Over 120,000 miles rejected by default                       |
-| 3    | Margin Floor     | Calculated margin must exceed minimum threshold              |
-| 4    | Rust/Region Gate | High-rust states (MI, OH, PA, NY, IL) flagged or excluded   |
-| 5    | Damage Filter    | Structural, frame, or airbag damage triggers rejection       |
-
----
-
-## DOS Score Thresholds
-
-| Score Range | Rating      | Action                            |
-|-------------|-------------|-----------------------------------|
-| 90–100      | Fire        | Immediate alert, bid aggressively |
-| 80–89       | Strong Buy  | High priority, act same day       |
-| 65–79       | Watch       | Monitor, verify condition         |
-| Under 65    | Pass        | Not surfaced to user              |
+Legacy code for some of those areas may still exist in the repo, but they are not mounted from the current main backend entrypoint.
 
 ---
 
-## Target Vehicles
+## Current ingest path
 
-DealerScope is tuned for the highest-liquidity wholesale segments:
+The primary ingest surface is:
+- `webapp/routers/ingest.py`
 
-- **Trucks:** F-150, Silverado 1500, Ram 1500, Tacoma, Tundra
-- **Mid-SUVs:** Explorer, Equinox, CR-V, RAV4, Traverse
-- **CPO-eligible:** Under 5 years old, under 60k miles, clean title
-- **Low-rust states preferred:** TX, AZ, NM, NV, FL, CA, CO
+That surface is responsible for:
+- webhook ingest
+- normalization
+- gating
+- score invocation
+- save behavior
+- delivery log / reconciliation hooks
+- opportunity pass handling
 
-Luxury, exotic, and high-salvage vehicles are outside the primary target set.
+The current system is therefore not best understood as “frontend calls generic opportunities CRUD.”
+It is better understood as a scored ingest/persistence system with specialized operational surfaces layered on top.
 
 ---
 
-## Summary
+## Current scoring model
 
-DealerScope exists to answer one question before every auction: **"Is this vehicle priced below what the wholesale market will pay for it?"** Every feature in the platform — Crosshair, SniperScope, Rover, the Five-Layer Filter, the DOS score — serves that single question.
+Current scoring truth lives in:
+- `backend/ingest/score.py`
+
+### Two-lane vehicle model
+DealerScope currently uses a **two-lane vehicle eligibility model**.
+
+#### Premium lane
+- max age: 4 years
+- max mileage: 50,000
+- bid ceiling: 0.88
+
+#### Standard lane
+- max age: 10 years
+- max mileage: 100,000
+- reject mileage-per-year over 18,000
+- bid ceiling: 0.80
+
+### Rust-state behavior
+Rust-state handling is part of the current scoring/gating rule set and must be interpreted from current code/workflow truth, not older simplified docs.
+
+### Condition path
+Condition scoring is handled through:
+- `backend/ingest/condition.py`
+
+---
+
+## Current frontend/API behavior
+
+Frontend code should use:
+- `src/config/settings.ts`
+- `settings.api.baseUrl`
+
+That central config is the current frontend API authority.
+The active frontend service/component tier was cleaned to remove direct hardcoded Railway production-origin fallbacks.
+
+Frontend opportunity reads are largely Supabase-first, while specialized backend route families handle operational and scoring-related behavior.
+
+---
+
+## Current verified production surface
+
+Verified live production checks established the following:
+
+### Present in production
+- `/health`
+- `/healthz`
+- `/api/ingest/opportunities/{opportunity_id}/pass`
+- `/api/opportunities/{opportunity_id}/pass`
+
+### Absent in production
+- `/api/opportunities` list/detail/save/ignore/rescore routes
+- `/api/vehicles/*`
+- `/api/auth/*`
+- `/api/upload/*`
+- `/api/ml/*`
+- `/api/health`
+- `/api/metrics`
+- `/api/ready`
+- `/api/live`
+- `/api/ingest/ingest-vehicle`
+
+Any doc, script, or evaluation harness that assumes those absent routes are current production truth should be treated as stale unless re-verified.
+
+---
+
+## Current analytics / rover / sniper / sonar / recon role
+
+### Analytics
+Current analytics/trust surface:
+- `webapp/routers/analytics.py`
+
+### Rover
+Current Rover surface:
+- `webapp/routers/rover.py`
+
+### Sniper
+Current sniper surface:
+- `webapp/routers/sniper.py`
+
+### Sonar
+Current sonar surface:
+- `webapp/routers/sonar.py`
+
+### Recon
+Current recon surface:
+- `webapp/routers/recon.py`
+
+These are part of the current operational system and should outrank older generic route-family assumptions.
+
+---
+
+## What this document explicitly does not claim anymore
+
+This document does **not** claim that DealerScope currently works like:
+- an IAAI/Copart/Manheim-centered route story
+- a generic old `/api/opportunities` CRUD product surface
+- a live `/api/auth`, `/api/vehicles`, `/api/ml`, or `/api/upload` backend family
+- a single-stack Docker/Celery/Postgres app as current deployed truth
+
+Those older models may still appear in historical files, but they are not current verified truth.
+
+---
+
+## Practical rule for future remediation
+
+When fixing DealerScope, start from:
+- `backend/main.py`
+- current mounted routers
+- `src/config/settings.ts`
+- current frontend service usage
+- `supabase/migrations/`
+- live route checks
+
+Do not start from:
+- deprecated route families
+- synthetic validation harnesses
+- legacy export/evaluation helpers
+- historical docs that were written against older architecture assumptions

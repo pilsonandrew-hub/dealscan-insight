@@ -2,7 +2,8 @@
 
 /**
  * Codex Sync Validation Script
- * Validates that the correct production-ready version is available for Codex analysis.
+ * Legacy repository-shape validator for Codex analysis context.
+ * Do not treat its checklist score as authoritative production readiness evidence.
  */
 
 import fs from 'node:fs';
@@ -131,7 +132,7 @@ class CodexSyncValidator {
   }
 
   validateProductionFeatures() {
-    this.log('\n🚀 Validating production features...', 'info');
+    this.log('\n🚀 Validating legacy packaging/features checklist...', 'info');
     
     const productionFiles = [
       'Dockerfile.prod',
@@ -172,11 +173,11 @@ class CodexSyncValidator {
     const percentage = Math.round((score / total) * 100);
     
     if (percentage >= 80) {
-      this.log(`Production readiness: ${score}/${total} (${percentage}%) - EXCELLENT`, 'success');
+      this.log(`Legacy packaging score: ${score}/${total} (${percentage}%) - HIGH`, 'success');
     } else if (percentage >= 60) {
-      this.log(`Production readiness: ${score}/${total} (${percentage}%) - GOOD`, 'warning');
+      this.log(`Legacy packaging score: ${score}/${total} (${percentage}%) - MEDIUM`, 'warning');
     } else {
-      this.log(`Production readiness: ${score}/${total} (${percentage}%) - NEEDS WORK`, 'error');
+      this.log(`Legacy packaging score: ${score}/${total} (${percentage}%) - LOW`, 'error');
     }
     
     return percentage;
@@ -265,7 +266,7 @@ class CodexSyncValidator {
     
     if (report.codex_analysis_ready) {
       this.log('✅ READY FOR CODEX ANALYSIS', 'success');
-      this.log('This appears to be a complete, production-ready application', 'success');
+      this.log('This appears to be a fuller legacy code/package shape for Codex analysis, not production proof', 'success');
     } else {
       this.log('❌ NOT READY FOR CODEX ANALYSIS', 'error');
       this.log(`Found ${this.errors.length} critical errors and ${this.warnings.length} warnings`, 'warning');

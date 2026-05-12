@@ -1,5 +1,9 @@
 # DealerScope Red Team Audit — 2026-03-11
 
+> Historical snapshot only.
+> This audit reflects a 2026-03-11 repo/runtime view and must not be treated as current production authority without re-validation against current code, current mounted routes, current migrations, and live route checks.
+> Current truth surfaces should be taken from `backend/main.py`, current mounted routers, `src/config/settings.ts`, `supabase/migrations/`, and live production route verification.
+
 **Scope:** Full codebase — backend, frontend, scrapers, infrastructure
 **Auditor:** Claude Sonnet 4.6 (automated deep review)
 **Overall Risk Score: 7.5 / 10**

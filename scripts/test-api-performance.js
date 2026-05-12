@@ -8,9 +8,11 @@
 const http = require('http');
 const https = require('https');
 
+const baseUrl = process.env.API_BASE || 'http://localhost:8000';
+
 const testEndpoints = [
-  'http://localhost:4173',
-  'http://localhost:4173/api/health'
+  `${baseUrl}`,
+  `${baseUrl}/health`
 ];
 
 async function makeRequest(url) {

@@ -5,6 +5,7 @@ Tests chaos engineering, circuit breakers, and graceful degradation
 """
 
 import json
+import os
 import time
 import random
 import threading
@@ -23,7 +24,7 @@ class ResilienceValidator:
             "summary": {"passed": 0, "failed": 0, "warnings": 0}
         }
         
-        self.base_url = "http://localhost:4173"
+        self.base_url = os.getenv("BASE_URL", "http://localhost:8000")
         self.api_url = "http://localhost:8080"
         
         # Configure logging

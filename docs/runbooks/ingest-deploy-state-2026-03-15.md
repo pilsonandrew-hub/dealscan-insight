@@ -1,5 +1,8 @@
 # Ingest Deploy-State Snapshot — 2026-03-15
 
+> Historical snapshot only.
+> This runbook records a March 15, 2026 deploy-state view and must not be treated as current ingest deployment authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 Snapshot taken: 2026-03-15 late evening PT
 
 ## Summary

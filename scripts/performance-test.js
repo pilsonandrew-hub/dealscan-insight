@@ -19,7 +19,7 @@ export let options = {
   },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:4173';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 
 export default function() {
   // Test homepage

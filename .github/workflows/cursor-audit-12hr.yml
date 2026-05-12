@@ -77,12 +77,18 @@ jobs:
             FAILED=1
           fi
 
-          # 8. No localhost in frontend services
-          if grep -rn "localhost" src/services/ --include="*.ts" 2>/dev/null; then
-            echo "❌ FAIL: localhost found in frontend services"
+          # 8. No unapproved localhost in active frontend runtime surfaces
+          if grep -RIn "localhost" src/services src/components src/hooks src/utils src/config \
+            --include="*.ts" --include="*.tsx" 2>/dev/null \
+            | grep -v "\.bak:" \
+            | grep -v "urlSecurity\.ts:" \
+            | grep -v "inputSanitizer\.ts:" \
+            | grep -v "system-tester\.ts:" \
+            | grep -v "useWebSocket\.ts:"; then
+            echo "❌ FAIL: unapproved localhost found in active frontend runtime surfaces"
             FAILED=1
           else
-            echo "✅ No localhost in frontend"
+            echo "✅ No unapproved localhost in active frontend runtime surfaces"
           fi
 
           echo ""
@@ -107,7 +113,7 @@ jobs:
           PAYLOAD=$(jq -n --arg diff "$DIFF" '{
             "model": "deepseek/deepseek-v3.2",
             "messages": [
-              {"role": "system", "content": "You are a senior code reviewer for DealerScope, a vehicle arbitrage platform. Review the diff and flag: 1) Auth/security issues, 2) Business rule violations (bid ceiling 0.88/0.80, min margin $1500/$2500, max age 4yr, max mileage 50k, rust state filter), 3) Silent failures, 4) Data integrity issues. Be concise and actionable."},
+              {"role": "system", "content": "You are a senior code reviewer for DealerScope, a vehicle arbitrage platform. Review the diff and flag: 1) Auth/security issues, 2) Business rule violations (Premium lane: max age 4yr, max mileage 50k, bid ceiling 0.88; Standard lane: max age 10yr, max mileage 100k plus mileage-per-year constraint, bid ceiling 0.80; rust state filter; min margin $1500/$2500), 3) Silent failures, 4) Data integrity issues. Be concise and actionable."},
               {"role": "user", "content": $diff}
             ]
           }')
@@ -155,7 +161,7 @@ jobs:
               pass
 
           prompt = f"""Quick RED TEAM audit of DealerScope backend files.
-          Business rules: bid ceiling Premium=0.88 Standard=0.80, min margin $1500/$2500, max age=4yr, max mileage=50k, rust states rejected.
+          Business rules: Premium lane max age=4yr, max mileage=50k, bid ceiling=0.88. Standard lane max age=10yr, max mileage=100k, reject mileage-per-year >18000, bid ceiling=0.80. Rust states rejected.
           Report only CRITICAL and HIGH issues found. Format: SEVERITY | FILE | ISSUE | FIX
           Be concise — top 10 issues max.
           CODE:{code_bundle[:50000]}"""

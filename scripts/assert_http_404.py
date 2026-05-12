@@ -5,12 +5,13 @@ HTTP 404 Test Script
 Tests that invalid routes return proper 404 responses
 """
 
+import os
 import requests
 import sys
 from urllib.parse import urljoin
 
 def test_404_responses():
-    base_url = "http://localhost:4173"
+    base_url = os.getenv("BASE_URL", "http://localhost:8000")
     invalid_routes = [
         "/non-existent-page",
         "/api/invalid-endpoint",

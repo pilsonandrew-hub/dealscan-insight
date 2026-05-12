@@ -11,7 +11,6 @@ import { performanceMonitor } from "@/utils/performance-monitor";
 import { rateLimiter } from "@/utils/rate-limiter";
 import { auditLogger } from "@/utils/audit-logger";
 import { dataValidator } from "@/utils/data-validator";
-import { batchUtils } from "@/utils/batch-processor";
 import { settings } from "@/config/settings";
 import { uploadHardening } from "@/security/uploadHardening";
 import { inputSanitizer } from "@/utils/inputSanitizer";
@@ -169,7 +168,27 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     }
   };
 
-  const processFile = async (file: File): Promise<void> => {
+  const updateFile = useCallback((fileId: string, updater: (file: UploadFile) => UploadFile) => {
+    setFiles(prev => prev.map(f => (f.id === fileId ? updater(f) : f)));
+  }, []);
+
+  const markFileError = useCallback((fileId: string, error: string) => {
+    updateFile(fileId, (file) => ({ ...file, status: "error", progress: 0, error }));
+  }, [updateFile]);
+
+  const finishUploadProgress = useCallback((progressInterval: ReturnType<typeof setInterval>, timer: { end: (success?: boolean) => void }, success: boolean) => {
+    clearInterval(progressInterval);
+    timer.end(success);
+  }, []);
+
+  const showUploadToast = useCallback((title: string, description: string, variant?: "default" | "destructive") => {
+    toast({ title, description, ...(variant ? { variant } : {}) });
+  }, [toast]);
+
+  const processFile = async (
+    file: File,
+    precomputedSecurityCheck?: { isSecure: boolean; issues: string[]; riskLevel: 'low' | 'medium' | 'high' }
+  ): Promise<void> => {
     const fileId = Math.random().toString(36).substr(2, 9);
     const timer = performanceMonitor.startTimer('file_upload_process');
     
@@ -189,40 +208,29 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
     // Progress simulation
     const progressInterval = setInterval(() => {
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
-          ? { ...f, progress: Math.min(f.progress + Math.random() * 20, 90) }
-          : f
-      ));
+      updateFile(fileId, (file) => ({
+        ...file,
+        progress: Math.min(file.progress + Math.random() * 20, 90)
+      }));
     }, 500);
 
     try {
         // Enhanced security validation with configuration
-        const securityCheck = await performSecurityCheck(file);
+        const securityCheck = precomputedSecurityCheck ?? await performSecurityCheck(file);
         
         if (!securityCheck.isSecure) {
-          clearInterval(progressInterval);
-          timer.end(false);
+          finishUploadProgress(progressInterval, timer, false);
           
           const riskColor = securityCheck.riskLevel === 'high' ? 'destructive' : 
                            securityCheck.riskLevel === 'medium' ? 'default' : 'secondary';
           
-          setFiles(prev => prev.map(f => 
-            f.id === fileId 
-              ? { 
-                  ...f, 
-                  status: "error", 
-                  progress: 0, 
-                  error: `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}` 
-                }
-              : f
-          ));
+          markFileError(fileId, `Security ${securityCheck.riskLevel} risk: ${securityCheck.issues.slice(0, 2).join(', ')}${securityCheck.issues.length > 2 ? '...' : ''}`);
           
-          toast({
-            title: `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
-            description: `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
-            variant: riskColor as any
-          });
+          showUploadToast(
+            `Security ${securityCheck.riskLevel.toUpperCase()} Risk`,
+            `File rejected due to security concerns: ${securityCheck.issues.join(', ')}`,
+            riskColor === 'secondary' ? 'default' : (riskColor as 'default' | 'destructive')
+          );
           return;
         }
 
@@ -235,17 +243,15 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
             { filename: file.name, issues: securityCheck.issues }
           );
           
-          toast({
-            title: "Security Notice",
-            description: "File flagged for review but proceeding with upload",
-            variant: "default"
-          });
+          showUploadToast(
+            "Security Notice",
+            "File flagged for review but proceeding with upload",
+            "default"
+          );
         }
 
         // Data validation phase
-        setFiles(prev => prev.map(f => 
-          f.id === fileId ? { ...f, status: "validating", progress: 50 } : f
-        ));
+        updateFile(fileId, (file) => ({ ...file, status: "validating", progress: 50 }));
 
         // Parse and validate CSV data if it's a CSV file
         if (file.name.toLowerCase().endsWith('.csv')) {
@@ -281,24 +287,20 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
               );
 
               // Update file status with validation results
-              setFiles(prev => prev.map(f => 
-                f.id === fileId 
-                  ? { 
-                      ...f, 
-                      validationReport,
-                      validRecords: validationReport.validRecords,
-                      warnings: validationReport.warnings.length
-                    }
-                  : f
-              ));
+              updateFile(fileId, (file) => ({
+                ...file,
+                validationReport,
+                validRecords: validationReport.validRecords,
+                warnings: validationReport.warnings.length
+              }));
 
               // Show validation warnings if any
               if (validationReport.warnings.length > 0) {
-                toast({
-                  title: "Data Quality Notice",
-                  description: `${validationReport.warnings.length} data quality warnings found`,
-                  variant: "default"
-                });
+                showUploadToast(
+                  "Data Quality Notice",
+                  `${validationReport.warnings.length} data quality warnings found`,
+                  "default"
+                );
               }
             }
           } catch (error) {
@@ -312,24 +314,19 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
         const result = await apiService.uploadCSV(file);
         apiTimer.end(result.status === "success");
         
-        clearInterval(progressInterval);
-        timer.end(result.status === "success");
+        finishUploadProgress(progressInterval, timer, result.status === "success");
 
         if (result.status === "success") {
           // Log successful upload
           auditLogger.logUpload(file.name, file.size, true);
           auditLogger.logDataAccess('opportunities', 'write');
           
-          setFiles(prev => prev.map(f => 
-            f.id === fileId 
-              ? { ...f, status: "success", progress: 100, records: result.rows_processed }
-              : f
-          ));
+          updateFile(fileId, (file) => ({ ...file, status: "success", progress: 100, records: result.rows_processed }));
           
-          toast({
-            title: "Upload Successful",
-            description: `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`,
-          });
+          showUploadToast(
+            "Upload Successful",
+            `Processed ${result.rows_processed.toLocaleString()} records from ${file.name}${result.opportunities_generated ? `. Generated ${result.opportunities_generated} opportunities.` : ''}`
+          );
           
           // Call success callback
           onUploadSuccess?.(result);
@@ -341,86 +338,58 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
             { filename: file.name, errors: result.errors }
           );
           
-          setFiles(prev => prev.map(f => 
-            f.id === fileId 
-              ? { 
-                  ...f, 
-                  status: "error", 
-                  progress: 0, 
-                  error: result.errors?.join(', ') || "Failed to process file" 
-                }
-              : f
-          ));
+          markFileError(fileId, result.errors?.join(', ') || "Failed to process file");
           
-          toast({
-            title: "Upload Failed",
-            description: `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
-            variant: "destructive"
-          });
+          showUploadToast(
+            "Upload Failed",
+            `Failed to process ${file.name}. ${result.errors?.join(', ') || ''}`,
+            "destructive"
+          );
         }
     } catch (error) {
-      clearInterval(progressInterval);
-      timer.end(false);
+      finishUploadProgress(progressInterval, timer, false);
       
       const errorMessage = error instanceof Error ? error.message : "Network error occurred";
       
       auditLogger.logError(error as Error, 'file_upload');
       
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
-          ? { ...f, status: "error", progress: 0, error: errorMessage }
-          : f
-      ));
+      markFileError(fileId, errorMessage);
       
-      toast({
-        title: "Upload Error",
-        description: errorMessage,
-        variant: "destructive"
-      });
+      showUploadToast("Upload Error", errorMessage, "destructive");
     }
   };
+
+  const handleSelectedFiles = useCallback(async (selectedFiles: File[]) => {
+    for (const file of selectedFiles) {
+      const securityCheck = await performSecurityCheck(file);
+      if (!securityCheck.isSecure) {
+        showUploadToast(
+          "Security Validation Failed",
+          `${file.name}: ${securityCheck.issues.join(', ')}`,
+          securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
+        );
+        continue;
+      }
+
+      await processFile(file, securityCheck);
+    }
+  }, [showUploadToast]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
 
     const droppedFiles = Array.from(e.dataTransfer.files);
-    
-    for (const file of droppedFiles) {
-      const securityCheck = await performSecurityCheck(file);
-      if (!securityCheck.isSecure) {
-        toast({
-          title: "Security Validation Failed",
-          description: `${file.name}: ${securityCheck.issues.join(', ')}`,
-          variant: securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
-        });
-        continue;
-      }
-      
-      await processFile(file);
-    }
-  }, [toast]);
+    await handleSelectedFiles(droppedFiles);
+  }, [handleSelectedFiles]);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
-    
-    for (const file of selectedFiles) {
-      const securityCheck = await performSecurityCheck(file);
-      if (!securityCheck.isSecure) {
-        toast({
-          title: "Security Validation Failed",
-          description: `${file.name}: ${securityCheck.issues.join(', ')}`,
-          variant: securityCheck.riskLevel === 'high' ? 'destructive' : 'default'
-        });
-        continue;
-      }
-      
-      await processFile(file);
-    }
-    
+    await handleSelectedFiles(selectedFiles);
+
     // Clear input
     e.target.value = '';
-  }, [toast]);
+  }, [handleSelectedFiles]);
 
   const removeFile = (fileId: string) => {
     setFiles(prev => prev.filter(f => f.id !== fileId));

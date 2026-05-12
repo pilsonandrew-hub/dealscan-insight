@@ -1,6 +1,9 @@
 # DealerScope Production Readiness Action Plan
 
-## P0 - Critical (Must Complete Before Production) 🔴
+> Historical/legacy action-plan snapshot only.
+> This document captures an earlier readiness planning model with older architecture assumptions, speculative ownership/budgeting, and unverified file targets. It must not be treated as the current production action plan without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
+## P0 - Critical (Historical Snapshot) 🔴
 
 ### 1. SSRF Protection & Security Hardening
 **Problem**: Scraper vulnerable to SSRF attacks, can access internal networks  
@@ -42,7 +45,7 @@
 **Owner**: DevOps Team  
 **ETA**: 3 days  
 
-## P1 - Major (First 2 Sprints) 🟡
+## P1 - Major (Historical Snapshot) 🟡
 
 ### 6. Comprehensive Scraper Orchestration
 **Problem**: Current scraper lacks proper job management, retry logic  
@@ -84,7 +87,7 @@
 **Owner**: Security Team  
 **ETA**: 3 days  
 
-## P2 - Important (Later Sprints) 🔵
+## P2 - Important (Historical Snapshot) 🔵
 
 ### 11. Advanced Monitoring & SLOs
 **Problem**: Basic monitoring insufficient for production operations  
@@ -126,7 +129,7 @@
 **Owner**: Data Engineering Team  
 **ETA**: 3 weeks  
 
-## Rollout Plan
+## Historical Rollout Plan
 
 ### Phase 1: Security & Stability (Week 1-2)
 - SSRF protection
@@ -166,7 +169,7 @@
 - **Backend**: Container rollback with health checks
 - **Configuration**: Version-controlled config rollback
 
-## Success Metrics
+## Historical Success Metrics
 
 ### Technical Metrics
 - **Uptime**: 99.9% availability
@@ -180,7 +183,7 @@
 - **Operational**: <1hr mean time to recovery
 - **Compliance**: 100% audit compliance
 
-## Resource Requirements
+## Historical Resource Requirements
 
 ### Team Allocation
 - **1x Security Engineer** (4 weeks)
@@ -195,7 +198,7 @@
 - **Testing**: ~$150/month (load testing tools)
 - **Backups**: ~$50/month (automated backups)
 
-## Risk Mitigation
+## Historical Risk Mitigation
 
 ### High-Risk Items
 1. **Database migrations** - Staged rollout with rollback plans

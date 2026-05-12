@@ -92,30 +92,12 @@ class PerformanceTestHandler(http.server.BaseHTTPRequestHandler):
             }
             self.wfile.write(json.dumps(response).encode())
             
-        elif parsed_path.path == '/api/vehicles':
-            self.send_response(200)
+        elif parsed_path.path == '/api/ingest/opportunities/1/pass':
+            self.send_response(401)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             response = {
-                "vehicles": [
-                    {"id": i, "make": "Toyota", "model": "Camry", "year": 2020 + (i % 3)}
-                    for i in range(50)
-                ],
-                "total": 50,
-                "response_time": delay
-            }
-            self.wfile.write(json.dumps(response).encode())
-            
-        elif parsed_path.path == '/api/opportunities':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            response = {
-                "opportunities": [
-                    {"id": i, "profit": random.randint(1000, 5000), "confidence": random.uniform(0.7, 0.95)}
-                    for i in range(20)
-                ],
-                "total": 20,
+                "detail": "Authorization required",
                 "response_time": delay
             }
             self.wfile.write(json.dumps(response).encode())
@@ -224,7 +206,7 @@ while [ \$(date +%s) -lt \$end_time ]; do
     requests=\$((requests + 1))
     
     # Test different endpoints
-    endpoints=("/health" "/api/vehicles" "/api/opportunities")
+    endpoints=("/health" "/api/ingest/opportunities/1/pass")
     endpoint=\${endpoints[\$((RANDOM % 3))]}
     
     if curl -sf "\$server_url\$endpoint" >/dev/null 2>&1; then

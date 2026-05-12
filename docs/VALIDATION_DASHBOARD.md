@@ -2,7 +2,8 @@
 
 ## Overview
 
-The DealerScope Validation Dashboard provides real-time access to comprehensive production readiness reports through GitHub Pages.
+Historical/legacy validation dashboard description only.
+This document describes a legacy GitHub Pages validation/reporting concept tied to synthetic and partially simulated validation tooling. It must not be treated as authoritative evidence of current DealerScope production readiness.
 
 ## 🔗 Access Links
 
@@ -65,7 +66,7 @@ The validation dashboard automatically updates:
 ## 📊 Dashboard Features
 
 ### Main Report (`index.html`)
-- Overall production readiness score
+- Legacy validation score output
 - Component-wise validation status
 - Critical issues and recommendations
 - Historical trends and improvements
@@ -127,8 +128,8 @@ The validation dashboard is optimized for:
 
 The dashboard tracks:
 
-### Production Readiness Score
-- Overall system health (0-100)
+### Legacy Validation Score
+- Legacy system-health style score (0-100)
 - Component-specific scores
 - Historical trend analysis
 - Improvement recommendations
@@ -172,10 +173,10 @@ The dashboard tracks:
 
 ### Support
 
-For validation dashboard issues:
+For legacy validation dashboard issues:
 1. Check the [GitHub Actions logs](../../actions)
 2. Review validation suite output
-3. Open an issue with specific error details
+3. Confirm the underlying scripts are still intended for local/historical use before treating any output as meaningful
 
 ## 🎯 Best Practices
 
@@ -196,4 +197,4 @@ For validation dashboard issues:
 
 ---
 
-*The DealerScope Validation Dashboard provides continuous insight into production readiness, ensuring consistent quality and reliability standards.*
+*This validation dashboard description is historical context only. It does not provide authoritative current production-readiness evidence without fresh verification of every underlying script and report source.*

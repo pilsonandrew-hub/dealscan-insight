@@ -79,6 +79,11 @@ The suite can evaluate your application against multiple AI models:
 
 ## 📊 Scoring System
 
+This evaluation stack is legacy and partially synthetic.
+Its scores and completeness labels are not authoritative evidence of current
+DealerScope production readiness unless each underlying test/harness is first
+mapped to verified live surfaces.
+
 The evaluation uses a weighted scoring system:
 
 - **Functionality (30%)** - Core features and user interactions
@@ -91,11 +96,11 @@ The evaluation uses a weighted scoring system:
 
 | Score | Level | Description |
 |-------|-------|-------------|
-| 90%+ | Production Ready | Fully complete and production-ready |
-| 75-89% | Near Complete | Minor issues, mostly ready |
-| 60-74% | Functional | Core functionality works |
-| 40-59% | Basic Implementation | Basic features present |
-| <40% | Incomplete | Significant work needed |
+| 90%+ | Legacy High Score | Legacy scoring only; not authoritative production proof |
+| 75-89% | Legacy Medium Score | Legacy scoring only; not authoritative production proof |
+| 60-74% | Legacy Functional Score | Legacy scoring only; not authoritative production proof |
+| 40-59% | Legacy Basic Score | Legacy scoring only; not authoritative production proof |
+| <40% | Legacy Incomplete Score | Legacy scoring only; not authoritative production proof |
 
 ## 📁 Report Output
 
@@ -175,7 +180,7 @@ node scripts/ai-evaluation-suite.js --model gpt-5-2025-08-07
 
 🎉 Evaluation Complete!
 Overall Score: 85%
-Completeness: Near Complete
+Legacy completeness label: Legacy Medium Score
 ```
 
 ## 🔍 Troubleshooting

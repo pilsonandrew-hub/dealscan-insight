@@ -31,35 +31,6 @@ vi.mock('@/integrations/supabase/client', () => ({
   }
 }));
 
-// Mock global error handler
-vi.mock('@/utils/globalErrorHandler', () => ({
-  globalErrorHandler: {
-    handleError: vi.fn(),
-    wrapAsync: vi.fn((fn) => fn()),
-    wrapSync: vi.fn((fn) => fn()),
-    getMetrics: vi.fn(() => ({ errorCounts: {}, recentErrors: [], totalErrors: 0 })),
-  },
-  handleError: vi.fn(),
-  wrapAsync: vi.fn((fn) => fn()),
-  wrapSync: vi.fn((fn) => fn()),
-}));
-
-// Mock logger
-vi.mock('@/utils/secureLogger', () => ({
-  logger: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    scope: vi.fn(() => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    })),
-  }
-}));
-
 // Mock IntersectionObserver
 global.IntersectionObserver = class IntersectionObserver {
   root = null;

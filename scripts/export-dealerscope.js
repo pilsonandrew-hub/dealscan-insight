@@ -321,8 +321,8 @@ VITE_SUPABASE_PROJECT_ID=your_project_id
 
 ---
 
-**DealerScope 4.8** - Production-ready vehicle arbitrage platform
-Built with ❤️ for efficient dealer operations
+**DealerScope 4.8** - Legacy export package
+Built as an export artifact, not authoritative proof of current production readiness
 `;
 
     fs.writeFileSync(path.join(this.exportPath, 'DEVELOPER_SETUP.md'), setupGuide);
@@ -356,11 +356,11 @@ VITE_SENTRY_DSN=your_sentry_dsn_here
   generateDeploymentScript() {
     const deployScript = `#!/bin/bash
 
-# DealerScope 4.8 - One-Click Deployment Script
+# DealerScope 4.8 - Legacy Export Deployment Helper
 
 set -e
 
-echo "🚀 DealerScope 4.8 Deployment Starting..."
+echo "🚀 DealerScope 4.8 legacy export deployment helper starting..."
 
 # Check requirements
 command -v node >/dev/null 2>&1 || { echo "❌ Node.js required but not installed"; exit 1; }
@@ -386,8 +386,8 @@ if [ -f "supabase/config.toml" ]; then
   npx supabase functions deploy vehicle-scraper
 fi
 
-echo "✅ Deployment completed successfully!"
-echo "🌍 Your application is ready to use"
+echo "✅ Legacy export deployment helper completed"
+echo "🌍 Review environment and live route assumptions before treating this export as deployable"
 
 # Optional: Open in browser
 if command -v xdg-open >/dev/null 2>&1; then
@@ -412,7 +412,7 @@ fi
     const packageInfo = {
       name: "dealerscope-4.8",
       version: "4.8.0",
-      description: "Production-ready vehicle arbitrage platform with advanced scraping and analysis capabilities",
+      description: "Legacy export package for DealerScope code and assets; not authoritative production-readiness evidence",
       author: "DealerScope Team",
       license: "Proprietary",
       exportDate: new Date().toISOString(),
@@ -422,7 +422,7 @@ fi
         "Advanced profit analysis",
         "WebSocket real-time updates",
         "Comprehensive security features",
-        "Production-ready deployment"
+        "Legacy export deployment helper"
       ],
       technologies: {
         frontend: ["React 18", "TypeScript", "Tailwind CSS", "shadcn/ui"],

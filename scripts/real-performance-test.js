@@ -157,9 +157,9 @@ class RealPerformanceTester {
     console.log('⏱️ Testing individual response times...');
     
     const endpoints = [
+      '/health',
       '/healthz',
-      '/api/health',  // If it exists
-      '/',            // Root endpoint
+      '/',
     ];
 
     const results = {};

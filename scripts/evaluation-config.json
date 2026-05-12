@@ -134,10 +134,10 @@
       "description": "Health check endpoint"
     },
     {
-      "path": "/api/opportunities",
-      "method": "GET",
-      "expected_status": 200,
-      "description": "Deal opportunities API"
+      "path": "/api/opportunities/1/pass",
+      "method": "POST",
+      "expected_status": 401,
+      "description": "Opportunity pass alias exists and is auth-protected"
     },
     {
       "path": "/manifest.json",

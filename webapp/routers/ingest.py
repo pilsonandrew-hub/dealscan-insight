@@ -112,6 +112,7 @@ _supabase_url = (
 _supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 _supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
 _environment = os.getenv("ENVIRONMENT", "production")
+_APP_PUBLIC_URL = (os.getenv("APP_PUBLIC_URL") or "https://dealscan-insight-production.up.railway.app").strip()
 
 if _supabase_service_role_key:
     _supabase_key = _supabase_service_role_key
@@ -1098,31 +1099,64 @@ async def _process_webhook_items(
             source_site = _canonical_source_site(vehicle.get("source_site") or vehicle.get("source")) or None
             vehicle["source_site"] = source_site  # persist normalized value (source and source_site are kept in sync via build_opportunity_row)
             if source_site == "govdeals-sold":
-                if supabase_client is None:
-                    logger.error("[INGEST] dealer_sales write skipped — supabase_client is None")
-                    skipped += 1
-                    continue
+                sold_row = {
+                    "vin": vehicle.get("vin"),
+                    "make": vehicle.get("make") or "Unknown",
+                    "model": vehicle.get("model") or "Unknown",
+                    "year": int(vehicle.get("year") or 0) or None,
+                    "mileage": vehicle.get("mileage"),
+                    "sale_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
+                    "sold_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
+                    "state": vehicle.get("state"),
+                    "source_type": "govdeals_sold",
+                    "source": "govdeals_sold",
+                    "metadata": {"listing_url": vehicle.get("listing_url"), "run_id": apify_run_id},
+                }
+                dealer_sales_status = "unknown"
                 try:
-                    sold_row = {
-                        "vin": vehicle.get("vin"),
-                        "make": vehicle.get("make") or "Unknown",
-                        "model": vehicle.get("model") or "Unknown",
-                        "year": int(vehicle.get("year") or 0) or None,
-                        "mileage": vehicle.get("mileage"),
-                        "sale_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
-                        "sold_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
-                        "state": vehicle.get("state"),
-                        "source_type": "govdeals_sold",
-                        "source": "govdeals_sold",
-                        "metadata": {"listing_url": vehicle.get("listing_url"), "run_id": apify_run_id},
-                    }
-                    supabase_client.table("dealer_sales").insert(sold_row).execute()
+                    if supabase_client is not None:
+                        supabase_client.table("dealer_sales").insert(sold_row).execute()
+                        dealer_sales_status = "saved_supabase"
+                    else:
+                        saved_direct_pg, dealer_sales_status = _save_dealer_sale_direct_pg(sold_row)
+                        if not saved_direct_pg:
+                            raise RuntimeError(dealer_sales_status)
                     processed += 1
                     saved_count += 1
-                    logger.info(f"[DEALER_SALES] Saved: {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')} @ ${sold_row['sold_price']:,.0f}")
+                    logger.info(
+                        "[DEALER_SALES] Saved (%s): %s %s %s @ $%s",
+                        dealer_sales_status,
+                        vehicle.get("year"),
+                        vehicle.get("make"),
+                        vehicle.get("model"),
+                        f"{float(sold_row['sold_price']):,.0f}",
+                    )
+                    _record_delivery_log(
+                        run_id=vehicle.get("run_id") or apify_run_id,
+                        listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                        listing_url=vehicle.get("listing_url"),
+                        opportunity_id=None,
+                        channel="db_save",
+                        status=dealer_sales_status,
+                        error_message=None,
+                        require_durable=True,
+                        audit_state=audit_state,
+                    )
                 except Exception as exc:
                     logger.warning(f"[DEALER_SALES] Insert failed: {exc}")
                     failed_save_count += 1
+                    _increment_reason_counter(skip_reasons, f"dealer_sales:{dealer_sales_status if dealer_sales_status != 'unknown' else 'error'}")
+                    _record_delivery_log(
+                        run_id=vehicle.get("run_id") or apify_run_id,
+                        listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                        listing_url=vehicle.get("listing_url"),
+                        opportunity_id=None,
+                        channel="db_save",
+                        status="failed",
+                        error_message=str(exc),
+                        require_durable=True,
+                        audit_state=audit_state,
+                    )
                 continue
 
             gate_result = passes_basic_gates(vehicle)
@@ -1143,7 +1177,29 @@ async def _process_webhook_items(
                 )
                 continue
 
-            score_result = score_vehicle(vehicle)
+            try:
+                score_result = score_vehicle(vehicle)
+            except Exception as score_err:
+                logger.error(
+                    "[SCORE] item %s scoring failed: %s",
+                    item_index,
+                    score_err,
+                )
+                skipped += 1
+                _increment_reason_counter(skip_reasons, "score_exception")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_score",
+                    error_message=str(score_err),
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+                continue
+
             vehicle["dos_score"] = score_result["dos_score"]
             vehicle["score_breakdown"] = score_result
             vehicle["ingested_at"] = datetime.now(timezone.utc).isoformat()
@@ -2237,8 +2293,8 @@ def score_vehicle(vehicle: dict) -> dict:
         return result
 
     except Exception as e:
-        logger.error(f"[SCORE] Real DOS formula failed, using fallback: {e}")
-        return _fallback_score(vehicle)
+        logger.error(f"[SCORE] Real DOS formula failed, rejecting item: {e}")
+        raise RuntimeError(f"score_vehicle_failed: {e}") from e
 
 
 def _fallback_score(vehicle: dict) -> dict:
@@ -2849,7 +2905,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://dealscan-insight-production.up.railway.app",
+        "HTTP-Referer": _APP_PUBLIC_URL,
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -3426,21 +3482,48 @@ def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Option
         return None
 
 
-def _insert_opportunity_direct_pg(row: dict) -> Optional[str]:
+def _insert_row_direct_pg(table_name: str, row: dict, *, returning_id: bool = True) -> Optional[str]:
     columns = list(row.keys())
     values = [_prepare_direct_pg_value(row[column]) for column in columns]
     insert_sql = psycopg2_sql.SQL(
-        "INSERT INTO public.opportunities ({fields}) VALUES ({values}) RETURNING id"
+        "INSERT INTO public.{table} ({fields}) VALUES ({values}){returning_clause}"
     ).format(
+        table=psycopg2_sql.Identifier(table_name),
         fields=psycopg2_sql.SQL(", ").join(psycopg2_sql.Identifier(column) for column in columns),
         values=psycopg2_sql.SQL(", ").join(psycopg2_sql.Placeholder() for _ in columns),
+        returning_clause=psycopg2_sql.SQL(" RETURNING id") if returning_id else psycopg2_sql.SQL(""),
     )
 
     with psycopg2.connect(_direct_supabase_db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(insert_sql, values)
+            if not returning_id:
+                return None
             inserted = cur.fetchone()
             return str(inserted[0]) if inserted and inserted[0] else None
+
+
+def _insert_opportunity_direct_pg(row: dict) -> Optional[str]:
+    return _insert_row_direct_pg("opportunities", row, returning_id=True)
+
+
+def _save_dealer_sale_direct_pg(row: dict) -> tuple[bool, str]:
+    if not _direct_supabase_db_url:
+        logger.warning(
+            "[DEALER_SALES] Direct PG fallback unavailable; set SUPABASE_DB_URL or SUPABASE_DB_PASSWORD."
+        )
+        return False, "direct_pg_unavailable"
+
+    try:
+        _insert_row_direct_pg("dealer_sales", row, returning_id=False)
+        return True, "saved_direct_pg"
+    except Exception as pg_err:
+        logger.error(
+            "[DEALER_SALES] Direct PG save FAILED for '%s': %s",
+            f"{row.get('year') or ''} {row.get('make') or ''} {row.get('model') or ''}".strip()[:80] or "unknown",
+            pg_err,
+        )
+        return False, "direct_pg_error"
 
 
 def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:

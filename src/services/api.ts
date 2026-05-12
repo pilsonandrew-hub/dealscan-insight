@@ -1,12 +1,68 @@
 /**
- * Production-ready API service layer
- * Supabase for opportunity data, Railway for ML/rover endpoints
+ * Current API service layer
+ * Supabase for opportunity data, backend API for operational/specialized endpoints
  */
 
 import { Opportunity, PipelineStatus, UploadResult, SourceHealthResponse } from '@/types/dealerscope';
 import { supabase } from '@/integrations/supabase/client';
+import { settings } from '@/config/settings';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://dealscan-insight-production.up.railway.app';
+const API_BASE = settings.api.baseUrl;
+
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
+
+async function fetchWithOptionalAuth(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers || {});
+
+  if (!headers.has('Content-Type') && init.body != null) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  headers.set('Authorization', token ? `Bearer ${token}` : '');
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+}
+
+async function fetchWithRequiredAuth(input: string, init: RequestInit = {}, missingAuthMessage = 'You must be signed in to perform this action.'): Promise<Response> {
+  const token = await getAccessToken();
+  if (!token) throw new Error(missingAuthMessage);
+
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Content-Type') && init.body != null) {
+    headers.set('Content-Type', 'application/json');
+  }
+  headers.set('Authorization', `Bearer ${token}`);
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+}
+
+function requireOk(res: Response, message: string): Response {
+  if (!res.ok) throw new Error(`${message}: ${res.status}`);
+  return res;
+}
+
+async function fetchJsonWithOptionalAuth<T>(input: string, message: string): Promise<T> {
+  return requireOk(await fetchWithOptionalAuth(input), message).json();
+}
+
+async function withQueryFallback<T>(label: string, fallback: T, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(`${label} failed:`, error);
+    return fallback;
+  }
+}
 
 export interface CrosshairSearchFilters {
   make?: string;
@@ -319,7 +375,7 @@ export const api = {
     const pageLimit = limit || 100;
     const offset = (page - 1) * pageLimit;
 
-    try {
+    return withQueryFallback('getOpportunities', { data: [], total: 0, hasMore: false }, async () => {
       let query = buildOpportunityQuery({
         make: filters?.make,
         model: filters?.model,
@@ -331,11 +387,9 @@ export const api = {
         minScore: filters?.minScore
       });
 
-      // Apply filters
       if (filters?.states && filters.states.length > 0) query = query.in('state', filters.states);
       if (filters?.source) query = query.eq('source', filters.source);
 
-      // Sort
       const sortField = filters?.sortBy === 'score' ? 'dos_score'
         : filters?.sortBy === 'profit_margin' ? 'gross_margin'
         : filters?.sortBy === 'auction_end' ? 'auction_end_date'
@@ -345,7 +399,6 @@ export const api = {
       query = query.order(sortField, { ascending, nullsFirst: false });
 
       const { data, error, count } = await query.range(offset, offset + pageLimit - 1);
-
       if (error) throw error;
 
       return {
@@ -353,17 +406,14 @@ export const api = {
         total: count || 0,
         hasMore: (count || 0) > offset + pageLimit
       };
-    } catch (error) {
-      console.error('getOpportunities failed:', error);
-      return { data: [], total: 0, hasMore: false };
-    }
+    });
   },
 
   // Legacy quick-filter helper: queries the scored opportunities table directly.
   // This is NOT the canonical Crosshair engine. The full Crosshair search is
   // handled by the crosshair-search edge function over listings_normalized.
   async searchCrosshairOpportunities(filters: CrosshairSearchFilters): Promise<{ data: Opportunity[]; total: number }> {
-    try {
+    return withQueryFallback('searchCrosshairOpportunities', { data: [], total: 0 }, async () => {
       const limit = filters.limit ?? 50;
       const offset = filters.offset ?? 0;
       const { data, error, count } = await buildOpportunityQuery(filters)
@@ -376,14 +426,11 @@ export const api = {
         data: (data || []).map(transformOpportunity),
         total: count || 0
       };
-    } catch (error) {
-      console.error('searchCrosshairOpportunities failed:', error);
-      return { data: [], total: 0 };
-    }
+    });
   },
 
   async getOpportunityById(id: string): Promise<OpportunityDetail | null> {
-    try {
+    return withQueryFallback('getOpportunityById', null, async () => {
       const { data, error } = await supabase
         .from('opportunities')
         .select('*')
@@ -406,15 +453,12 @@ export const api = {
         buyer_premium: data.buyer_premium ?? 0,
         source: getRowSource(data)
       };
-    } catch (error) {
-      console.error('getOpportunityById failed:', error);
-      return null;
-    }
+    });
   },
 
   // Get hot deals (DOS score >= threshold)
   async getHotDeals(minScore = 80, limit = 50): Promise<Opportunity[]> {
-    try {
+    return withQueryFallback('getHotDeals', [], async () => {
       const { data, error } = await supabase
         .from('opportunities')
         .select('*')
@@ -432,10 +476,7 @@ export const api = {
           return (b.score || 0) - (a.score || 0);
         })
         .slice(0, limit);
-    } catch (error) {
-      console.error('getHotDeals failed:', error);
-      return [];
-    }
+    });
   },
 
   // Get dashboard metrics
@@ -588,83 +629,14 @@ export const api = {
     }
   },
 
-  // Rover recommendations via Railway API
-  async getRoverRecommendations(): Promise<Array<Record<string, unknown>>> {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const userId = session?.user?.id;
-      const res = await fetch(`${API_BASE}/api/rover/recommendations?user_id=${encodeURIComponent(userId || '')}&limit=25`, {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (Array.isArray(json?.items)) return json.items;
-      if (Array.isArray(json?.recommendations)) return json.recommendations;
-      if (Array.isArray(json?.data)) return json.data;
-      return Array.isArray(json) ? json : [];
-    } catch (error) {
-      console.error('getRoverRecommendations failed:', error);
-      return [];
-    }
-  },
-
   // Pass (permanently dismiss) an opportunity for the current user
   async passOpportunity(opportunityId: string): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
-      method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!res.ok) throw new Error(`passOpportunity failed: HTTP ${res.status}`);
-  },
-
-  // Track rover event (view/save/pass)
-  async trackRoverEvent(
-    opportunity: Pick<Opportunity, 'id' | 'make' | 'model' | 'year' | 'source_site' | 'current_bid' | 'state' | 'mileage'>,
-    event: 'view' | 'save' | 'pass'
-  ): Promise<void> {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const userId = session?.user?.id;
-
-      await fetch(`${API_BASE}/api/rover/events`, {
+    requireOk(
+      await fetchWithOptionalAuth(`${API_BASE}/api/ingest/opportunities/${opportunityId}/pass`, {
         method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          event,
-          userId,
-          user_id: userId,
-          item: {
-            deal_id: opportunity.id,
-            id: opportunity.id,
-            make: opportunity.make,
-            model: opportunity.model,
-            year: opportunity.year,
-            source: opportunity.source_site,
-            source_site: opportunity.source_site,
-            price: opportunity.current_bid,
-            current_bid: opportunity.current_bid,
-            state: opportunity.state,
-            mileage: opportunity.mileage ?? null,
-          }
-        })
-      });
-    } catch (error) {
-      console.error('trackRoverEvent failed:', error);
-    }
+      }),
+      'passOpportunity failed'
+    );
   },
 
   // Health check for Railway backend
@@ -779,29 +751,11 @@ export const api = {
     };
     freshness?: AnalyticsFreshness;
   }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/analytics/summary`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
-    if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/analytics/summary`, 'Analytics fetch failed');
   },
 
   async getSourceHealth(): Promise<SourceHealthResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/analytics/source-health`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
-    if (!res.ok) throw new Error(`Source health fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/analytics/source-health`, 'Source health fetch failed');
   },
 
   async getRecentAnalyticsTrustEvents(limit: number = 25): Promise<{
@@ -833,16 +787,7 @@ export const api = {
     limit: number;
     notes: string[];
   }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
-    if (!res.ok) throw new Error(`Recent trust events fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/analytics/recent-trust-events?limit=${limit}`, 'Recent trust events fetch failed');
   },
 
   async getOutcomeSummary(): Promise<{
@@ -850,16 +795,7 @@ export const api = {
     total_gross_margin: number;
     avg_roi: number | null;
   }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/outcomes/summary`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-    });
-    if (!res.ok) throw new Error(`Outcome summary fetch failed: ${res.status}`);
-    return res.json();
+    return fetchJsonWithOptionalAuth(`${API_BASE}/outcomes/summary`, 'Outcome summary fetch failed');
   },
 
   async recordOutcome(payload: {
@@ -867,20 +803,44 @@ export const api = {
     outcome: 'won' | 'lost' | 'passed';
     sold_price?: number;
   }): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-      body: JSON.stringify({
-        outcome: payload.outcome,
-        sold_price: payload.sold_price ?? null,
+    requireOk(
+      await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/${payload.opportunity_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          outcome: payload.outcome,
+          sold_price: payload.sold_price ?? null,
+        }),
       }),
-    });
-    if (!res.ok) throw new Error(`Record outcome failed: ${res.status}`);
+      'Record outcome failed'
+    );
+  },
+
+  async logSaleOutcome(payload: {
+    opportunity_id: string;
+    sale_price: number;
+    sale_date: string;
+    days_to_sale: number;
+    notes?: string | null;
+  }): Promise<void> {
+    const res = await fetchWithRequiredAuth(
+      `${API_BASE}/api/outcomes`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          opportunity_id: payload.opportunity_id,
+          sale_price: payload.sale_price,
+          sale_date: payload.sale_date,
+          days_to_sale: payload.days_to_sale,
+          notes: payload.notes ?? null,
+        }),
+      },
+      'You must be signed in to log a sale outcome.'
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Log sale outcome failed: ${res.status}`);
+    }
   },
 
   // Log a bid/win outcome for an opportunity
@@ -897,17 +857,13 @@ export const api = {
     if (payload.purchase_price != null && !payload.won) {
       throw new Error('Winning purchase price is only valid when the bid was won');
     }
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const res = await fetch(`${API_BASE}/api/outcomes/bid`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`Log bid outcome failed: ${res.status}`);
+    requireOk(
+      await fetchWithOptionalAuth(`${API_BASE}/api/outcomes/bid`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      'Log bid outcome failed'
+    );
   },
 
   // Legacy health check

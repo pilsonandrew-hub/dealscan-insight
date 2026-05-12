@@ -12,21 +12,19 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 
-API_BASE = os.getenv('API_BASE', 'http://localhost:4173')
+API_BASE = os.getenv('API_BASE', 'http://localhost:8000')
 CACHE_HIT_THRESHOLD = float(os.getenv('CACHE_HIT_THRESHOLD', '0.70'))
 WARMUP_REQUESTS = int(os.getenv('WARMUP_REQUESTS', '20'))
 TEST_REQUESTS = int(os.getenv('TEST_REQUESTS', '100'))
+CACHE_TEST_ENDPOINTS = [
+    endpoint.strip() for endpoint in os.getenv('CACHE_TEST_ENDPOINTS', '/health').split(',') if endpoint.strip()
+]
 
 async def measure_cache_performance() -> Dict[str, Any]:
     """Measure cache performance with hit rate analysis"""
     print(f"🚀 Starting cache performance test - hit rate threshold: {CACHE_HIT_THRESHOLD*100}%")
     
-    test_endpoints = [
-        '/api/opportunities?page=1&limit=50',
-        '/api/opportunities?page=2&limit=50',
-        '/api/opportunities?page=1&limit=100',
-        '/api/health'
-    ]
+    test_endpoints = CACHE_TEST_ENDPOINTS
     
     measurements = []
     
@@ -129,6 +127,7 @@ async def measure_cache_performance() -> Dict[str, Any]:
             'timestamp': time.time(),
             'configuration': {
                 'api_base': API_BASE,
+                'cache_test_endpoints': test_endpoints,
                 'cache_hit_threshold': CACHE_HIT_THRESHOLD,
                 'warmup_requests': WARMUP_REQUESTS,
                 'test_requests': TEST_REQUESTS

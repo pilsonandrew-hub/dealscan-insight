@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Legacy local harness / generator.
+# This script builds and runs a self-contained v4.7-style DealerScope environment
+# with its own local /metrics and /dashboard surfaces. It is not authoritative
+# evidence of the current production API surface.
+
 # DealerScope v4.7 Enhanced "handoff" installer
 # Production-grade optimizations: error boundaries, circuit breakers, retry logic,
 # health monitoring, enhanced security, performance optimizations, observability
@@ -1333,14 +1338,14 @@ EOF
 
 # Enhanced README
 write "$ROOT/README.md" <<'EOF'
-# DealerScope v4.7 Enhanced (Production-Ready)
+# DealerScope v4.7 Enhanced (Legacy Local Harness)
 
 ## Overview
 Production-grade vehicle arbitrage platform with comprehensive monitoring, security, and resilience features.
 
 ## Features
 - ✅ **Zero-config local demo** with SQLite
-- ✅ **Production-ready** with Docker + PostgreSQL support
+- ✅ **Legacy local harness** with Docker + PostgreSQL support
 - ✅ **Circuit breakers** for API resilience
 - ✅ **Advanced rate limiting** with progressive penalties
 - ✅ **Comprehensive security** (CSRF, CSP, file validation)
@@ -1609,7 +1614,7 @@ case "${1:-demo}" in
         setup_env
         init_db
         run_tests
-        msg "Production ready - configure reverse proxy and SSL"
+        msg "Legacy local deployment note - configure reverse proxy and SSL if using this harness"
         ;;
     *)
         echo "Usage: $0 [demo|run|pipeline|test|docker|prod]"
@@ -1696,5 +1701,5 @@ msg "✅ Health checks for all system components"
 msg "✅ Structured logging with correlation IDs"
 msg "✅ Background job processing (non-blocking UI)"
 msg "✅ Enhanced error handling and retry logic"
-msg "✅ Production-ready Docker deployment"
+msg "✅ Legacy local Docker deployment helper"
 msg "✅ Connection pooling and performance optimizations"

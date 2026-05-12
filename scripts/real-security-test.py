@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-REAL Security Testing Script - NO FAUX CODE
-Tests actual security vulnerabilities and can FAIL
+Obsolete security harness.
+
+This script targets speculative endpoints that are not part of the current live
+DealerScope API surface. Do not treat its results as current security truth
+without first remapping every probed endpoint to a verified live route.
 """
 
 import requests
@@ -46,7 +49,7 @@ class RealSecurityTester:
                 # Test if the application properly blocks these URLs
                 # This is a REAL test that can FAIL
                 response = requests.get(
-                    f"{self.base_url}/api/scrape",  # Adjust endpoint as needed
+                    f"{self.base_url}/api/scrape",
                     params={"url": url},
                     timeout=5
                 )
@@ -187,7 +190,7 @@ class RealSecurityTester:
             try:
                 # Test input validation on search or similar endpoint
                 response = requests.get(
-                    f"{self.base_url}/api/search",  # Adjust endpoint as needed
+                    f"{self.base_url}/api/search",
                     params={"q": test["payload"]},
                     timeout=5
                 )

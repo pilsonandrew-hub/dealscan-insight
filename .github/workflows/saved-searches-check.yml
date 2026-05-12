@@ -11,6 +11,8 @@ jobs:
     name: Check saved searches for new matches
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    env:
+      BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL || 'https://dealscan-insight-production.up.railway.app' }}
 
     steps:
       - name: Call /api/saved-searches/check
@@ -21,7 +23,7 @@ jobs:
             -X POST \
             -H "Authorization: Bearer ${SAVED_SEARCH_SECRET}" \
             -H "Content-Type: application/json" \
-            https://dealscan-insight-production.up.railway.app/api/saved-searches/check)
+            ${BACKEND_BASE_URL}/api/saved-searches/check)
 
           echo "HTTP status: $STATUS"
 

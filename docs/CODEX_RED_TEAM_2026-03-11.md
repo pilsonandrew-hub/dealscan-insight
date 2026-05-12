@@ -1,5 +1,9 @@
 # DealerScope Red Team Audit
 
+> Historical snapshot only.
+> This audit reflects a 2026-03-11 repo/runtime view and must not be treated as current production authority without re-validation against current code, current mounted routes, current migrations, and live route checks.
+> Current truth surfaces should be taken from `backend/main.py`, current mounted routers, `src/config/settings.ts`, `supabase/migrations/`, and live production route verification.
+
 Date: 2026-03-11
 Auditor: Codex GPT-5
 Scope: requested backend, frontend, infra, and sampled Apify actors (`ds-allsurplus`, `ds-govdeals`, `ds-publicsurplus`), plus adjacent files needed to verify contracts.

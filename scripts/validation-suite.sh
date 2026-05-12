@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# DealerScope Comprehensive Validation Suite
-# Generates all security, performance, resilience, and operational validation artifacts
+# Obsolete synthetic validation/report generator.
+# Generates canned security, performance, resilience, and operational artifacts.
+# Do not treat its outputs as authoritative evidence of current DealerScope production state.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -351,7 +352,7 @@ run_observability_validation() {
     "message": "HTTP request started",
     "request_id": "req_abc123def456",
     "method": "GET",
-    "path": "/api/opportunities",
+    "path": "/api/opportunities/1/pass",
     "user_id": "user_789xyz",
     "ip": "192.168.1.100",
     "user_agent": "Mozilla/5.0"
@@ -404,7 +405,7 @@ EOF
   "trace_id": "trace_xyz789abc123",
   "root_span": {
     "span_id": "span_001",
-    "operation_name": "GET /api/opportunities",
+    "operation_name": "POST /api/opportunities/{id}/pass",
     "start_time": "2024-01-15T10:30:15.123Z",
     "end_time": "2024-01-15T10:30:15.298Z",
     "duration_ms": 175.4,
@@ -758,7 +759,7 @@ generate_summary_report() {
 <body>
     <h1>🚀 DealerScope Validation Report</h1>
     <p><strong>Generated:</strong> 'TIMESTAMP'</p>
-    <p><strong>Overall Status:</strong> <span class="pass">✅ PRODUCTION READY</span></p>
+    <p><strong>Overall Status:</strong> <span class="pass">✅ SYNTHETIC LEGACY VALIDATION OUTPUT</span></p>
     
     <div class="section">
         <h2>🛡️ Security Validation</h2>
@@ -832,7 +833,7 @@ generate_summary_report() {
     <p><strong>Warnings:</strong> <span class="warn">0 ⚠️</span></p>
     
     <h2>🎯 Production Readiness Score: 10/10</h2>
-    <p>DealerScope is fully validated and production-ready for immediate deployment.</p>
+    <p>This report is generated from a mixed live/simulated legacy harness and is not authoritative production-readiness evidence.</p>
 </body>
 </html>
 EOF

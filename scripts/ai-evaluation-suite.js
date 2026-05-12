@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * DealerScope AI Model Evaluation Suite
- * Tests application completeness against multiple AI models
+ * Legacy local AI model evaluation harness.
+ * Uses local frontend/backend assumptions and optional v4.7 harness startup.
+ * Do not treat its scores or completeness labels as authoritative evidence of
+ * current DealerScope production readiness.
  */
 
 import { spawn } from 'child_process';
@@ -68,7 +70,7 @@ class AIEvaluationSuite {
   }
 
   async startDealerScope() {
-    console.log('🔧 Starting DealerScope services...');
+    console.log('🔧 Starting legacy local DealerScope harness services...');
     
     // Start React dev server
     this.frontendProcess = spawn('npm', ['run', 'dev'], {
@@ -114,7 +116,7 @@ class AIEvaluationSuite {
         }
 
         if (frontendOk) {
-          console.log('✅ Services ready!');
+          console.log('✅ Local harness services ready!');
           return { frontend: frontendOk, backend: backendOk };
         }
       } catch (error) {
@@ -452,11 +454,11 @@ class AIEvaluationSuite {
   determineCompletenessLevel(score, possible) {
     const percentage = possible > 0 ? (score / possible) * 100 : 0;
     
-    if (percentage >= 90) return 'Production Ready';
-    if (percentage >= 75) return 'Near Complete';
-    if (percentage >= 60) return 'Functional';
-    if (percentage >= 40) return 'Basic Implementation';
-    return 'Incomplete';
+    if (percentage >= 90) return 'Legacy High Score';
+    if (percentage >= 75) return 'Legacy Medium Score';
+    if (percentage >= 60) return 'Legacy Functional Score';
+    if (percentage >= 40) return 'Legacy Basic Score';
+    return 'Legacy Incomplete Score';
   }
 
   generateRecommendations() {

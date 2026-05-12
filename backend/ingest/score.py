@@ -674,11 +674,11 @@ def score_deal(
 
     transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg) if state else 350.0
     condition_grade = _compute_condition_grade(
-        title=f"{year or ''} {make or ''} {model or ''}".strip(),
-        description="",
+        title=title or f"{year or ''} {make or ''} {model or ''}".strip(),
+        description=description or "",
         mileage=mileage or 0,
         year=year or 0,
-        damage_type="",
+        damage_type=damage_type or "",
     )
     recon_reserve = 650.0
     if is_police_or_fleet:
@@ -854,7 +854,17 @@ def score_deal(
     else:
         investment_grade = "Bronze"
 
-    acquisition_price_basis = _round_price_basis(bid_value)
+    expected_close_metrics = resolve_expected_close_bid(
+        current_bid=bid_value,
+        max_bid=max_bid,
+        current_bid_trust_score=trust_score,
+        auction_stage_hours_remaining=auction_stage_hours_remaining,
+        pricing_maturity=pricing_maturity,
+        confidence_proxy=mmr_confidence_proxy,
+    )
+    expected_close_bid = _coerce_float(expected_close_metrics.get("expected_close_bid")) or bid_value
+    expected_close_source = expected_close_metrics.get("expected_close_source") or "current_bid"
+    acquisition_price_basis = _round_price_basis(expected_close_bid)
     ctm_pct = (bid_value / mmr) if mmr > 0 else None
 
     # Weighted risk penalty: severity-aware rather than uniform 15pts/flag.
@@ -925,12 +935,12 @@ def score_deal(
         "pricing_source": pricing_source or mmr_lookup_basis or "mmr_proxy",
         "pricing_maturity": pricing_maturity,
         "pricing_updated_at": pricing_updated_at,
-        "expected_close_bid": acquisition_price_basis,
-        "expected_close_source": "current_bid",
+        "expected_close_bid": round(expected_close_bid, 2),
+        "expected_close_source": expected_close_source,
         "current_bid_trust_score": trust_score,
         "auction_stage_hours_remaining": auction_stage_hours_remaining,
         "acquisition_price_basis": acquisition_price_basis,
-        "acquisition_basis_source": "current_bid",
+        "acquisition_basis_source": "expected_close",
         "transport": transport,
         "recon_reserve": recon_reserve,
         "condition_grade": condition_grade,

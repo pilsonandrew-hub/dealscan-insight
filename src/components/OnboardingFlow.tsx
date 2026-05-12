@@ -18,8 +18,76 @@ const PRICE_BUCKETS = [
   { label: "$40k+", value: "40k_plus" },
 ];
 
+export const ONBOARDING_COMPLETED_KEY = "onboarding_completed";
+
+export function markOnboardingCompleted(): void {
+  localStorage.setItem(ONBOARDING_COMPLETED_KEY, "true");
+}
+
 interface OnboardingFlowProps {
   onComplete: () => void;
+}
+
+async function trackOnboardingPreferenceSignals(userId: string, makes: string[], states: string[], selectedBucket: string): Promise<void> {
+  const events: Promise<void>[] = [];
+
+  makes.forEach(make => {
+    events.push(
+      roverAPI.trackEvent({
+        userId,
+        event: "save",
+        item: {
+          id: `onboarding-make-${make}`,
+          make,
+          model: "",
+          year: new Date().getFullYear(),
+          price: 0,
+        },
+      })
+    );
+  });
+
+  states.forEach(state => {
+    events.push(
+      roverAPI.trackEvent({
+        userId,
+        event: "save",
+        item: {
+          id: `onboarding-state-${state}`,
+          make: "",
+          model: "",
+          year: new Date().getFullYear(),
+          price: 0,
+          state,
+        },
+      })
+    );
+  });
+
+  if (selectedBucket) {
+    const priceMap: Record<string, number> = {
+      under_10k: 8000,
+      "10k_20k": 15000,
+      "20k_40k": 30000,
+      "40k_plus": 50000,
+    };
+
+    events.push(
+      roverAPI.trackEvent({
+        userId,
+        event: "save",
+        item: {
+          id: `onboarding-bucket-${selectedBucket}`,
+          make: "",
+          model: "",
+          year: new Date().getFullYear(),
+          price: priceMap[selectedBucket] ?? 0,
+        },
+      })
+    );
+  }
+
+  await Promise.allSettled(events);
 }
 
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) => {
@@ -51,68 +119,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
         return;
       }
 
-      const events: Promise<void>[] = [];
-
-      // Fire Rover save events for each preferred make
-      selectedMakes.forEach(make => {
-        events.push(
-          roverAPI.trackEvent({
-            userId,
-            event: "save",
-            item: {
-              id: `onboarding-make-${make}`,
-              make,
-              model: "",
-              year: new Date().getFullYear(),
-              price: 0,
-            },
-          })
-        );
-      });
-
-      // Fire Rover save events for each preferred state
-      selectedStates.forEach(state => {
-        events.push(
-          roverAPI.trackEvent({
-            userId,
-            event: "save",
-            item: {
-              id: `onboarding-state-${state}`,
-              make: "",
-              model: "",
-              year: new Date().getFullYear(),
-              price: 0,
-              state,
-            },
-          })
-        );
-      });
-
-      // Fire a Rover save event encoding the price bucket
-      if (selectedBucket) {
-        const priceMap: Record<string, number> = {
-          under_10k: 8000,
-          "10k_20k": 15000,
-          "20k_40k": 30000,
-          "40k_plus": 50000,
-        };
-        events.push(
-          roverAPI.trackEvent({
-            userId,
-            event: "save",
-            item: {
-              id: `onboarding-bucket-${selectedBucket}`,
-              make: "",
-              model: "",
-              year: new Date().getFullYear(),
-              price: priceMap[selectedBucket] ?? 0,
-            },
-          })
-        );
-      }
-
-      // All events fire-and-forget — don't block on failures
-      await Promise.allSettled(events);
+      await trackOnboardingPreferenceSignals(userId, selectedMakes, selectedStates, selectedBucket);
     } catch {
       // Non-fatal; proceed regardless
     } finally {
@@ -122,7 +129,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   };
 
   const finish = () => {
-    localStorage.setItem("onboarding_completed", "true");
+    markOnboardingCompleted();
     onComplete();
   };
 

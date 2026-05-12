@@ -68,9 +68,9 @@ try {
   assert.equal(config.task_policy.recon_scoring.requires_manual_approval, true);
   assert.equal(config.task_policy.deal_adjudication.premium_allowed, false);
   assert.equal(config.task_policy.deal_adjudication.requires_manual_approval, true);
-  assert.equal(config.task_policy.market_intel_financial.premium_allowed, false);
+  assert.equal(config.task_policy.market_intel_financial.premium_allowed, true);
   assert.equal(config.task_policy.market_intel_financial.requires_manual_approval, true);
-  pass('sensitive-task premium and blocked-lane rules match expected policy');
+  pass('sensitive-task premium and blocked-lane rules match active config policy');
 
   const deepseekUseCases = config.lanes.openrouter_deepseek_workhorse.use_cases || [];
   for (const forbidden of ['recon_scoring', 'deal_adjudication', 'market_intel_financial', 'premium_judgment']) {

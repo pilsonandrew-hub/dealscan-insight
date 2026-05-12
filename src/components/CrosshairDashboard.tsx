@@ -7,13 +7,50 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CrosshairSearchForm } from './CrosshairSearchForm';
 import { CrosshairResults } from './CrosshairResults';
 import { useRealtimeOpportunities } from '@/hooks/useRealtimeOpportunities';
-import { useAdvancedOptimizer } from '@/hooks/useAdvancedOptimizer';
-import { usePerformanceMonitor } from '@/hooks/usePerformanceMonitor';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CanonicalQuery, SearchResponse, CrosshairIntent, CanonicalListing } from '@/types/crosshair';
-import { Zap, AlertTriangle, Activity, TrendingUp, Clock, Search, Crosshair } from 'lucide-react';
+import { Zap, Activity, TrendingUp, Clock, Search, Crosshair } from 'lucide-react';
 import { roverAPI } from '@/services/roverAPI';
+
+async function createListingWatchAlert(listing: CanonicalListing): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return null;
+
+  const { error } = await supabase
+    .from('user_alerts')
+    .insert({
+      id: crypto.randomUUID(),
+      type: 'listing_watch',
+      title: `Watching: ${listing.year} ${listing.make} ${listing.model}`,
+      message: `Price: ${listing.bid_current ? `$${listing.bid_current}` : 'N/A'} - ${listing.source}`,
+      priority: 'medium',
+      opportunity_data: listing as any,
+      user_id: userId,
+    });
+
+  if (error) throw error;
+  return userId;
+}
+
+async function trackWatchedListingSave(listing: CanonicalListing, userId: string): Promise<void> {
+  await roverAPI.trackEvent({
+    userId,
+    event: 'save',
+    item: {
+      id: listing.id,
+      make: listing.make,
+      model: listing.model,
+      year: listing.year,
+      price: listing.bid_current ?? listing.buy_now ?? 0,
+      source: listing.source,
+      source_site: listing.source,
+      state: listing.location.state,
+      mileage: listing.odo_miles,
+    },
+  });
+}
 
 export const CrosshairDashboard = () => {
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
@@ -27,24 +64,27 @@ export const CrosshairDashboard = () => {
     totalResults: 0
   });
 
-  const { measureAsync } = usePerformanceMonitor('CrosshairDashboard');
   const { toast } = useToast();
-  
-  const {
-    virtualizeData,
-    batchProcess,
-    measurePerformance,
-    prefetch,
-    metrics: optimizerMetrics
-  } = useAdvancedOptimizer({
-    enableVirtualization: true,
-    enableBatching: true,
-    enableMemoization: true,
-    enablePrefetching: true
-  });
+
+  const showCrosshairToast = useCallback((
+    title: string,
+    description: string,
+    variant: 'default' | 'destructive' = 'default'
+  ) => {
+    toast({ title, description, variant });
+  }, [toast]);
+
+  const logAndToastError = useCallback((
+    context: string,
+    error: unknown,
+    title: string,
+    description: string
+  ) => {
+    console.error(context, error);
+    showCrosshairToast(title, description, 'destructive');
+  }, [showCrosshairToast]);
 
   const {
-    opportunities: realtimeResults,
     pipelineStatus,
     newOpportunitiesCount,
     connectionStatus,
@@ -52,15 +92,13 @@ export const CrosshairDashboard = () => {
     clearNewCount
   } = useRealtimeOpportunities([]);
 
-  // Real-time updates for crosshair jobs
   useEffect(() => {
     const channel = supabase
       .channel('crosshair-realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'crosshair_jobs' },
-        (payload) => {
-          console.log('Crosshair job update:', payload);
+        () => {
           updateRealtimeStats();
         }
       )
@@ -68,10 +106,9 @@ export const CrosshairDashboard = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'listings_normalized' },
         (payload) => {
-          console.log('New listing:', payload);
           if (payload.eventType === 'INSERT') {
             toast({
-              title: "New Listing Found",
+              title: 'New Listing Found',
               description: `${payload.new.year} ${payload.new.make} ${payload.new.model} - ${payload.new.source}`,
             });
           }
@@ -79,7 +116,6 @@ export const CrosshairDashboard = () => {
       )
       .subscribe();
 
-    // Load saved intents
     loadSavedIntents();
     updateRealtimeStats();
 
@@ -126,8 +162,8 @@ export const CrosshairDashboard = () => {
       const completedJobs = jobs.filter(j => j.status === 'completed');
       const activeJobs = jobs.filter(j => j.status === 'running').length;
       const successRate = jobs.length > 0 ? (completedJobs.length / jobs.length) * 100 : 0;
-      
-      const avgResponseTime = completedJobs.length > 0 
+
+      const avgResponseTime = completedJobs.length > 0
         ? completedJobs.reduce((sum, job) => {
             const start = new Date(job.created_at).getTime();
             const end = new Date(job.completed_at).getTime();
@@ -149,30 +185,24 @@ export const CrosshairDashboard = () => {
   const handleSearch = useCallback(async (query: CanonicalQuery, options: any) => {
     setIsSearching(true);
     clearNewCount();
-    
-    try {
-      console.log('Initiating Crosshair search:', { query, options });
-      
-      const searchResponse = await measureAsync('crosshair-search', async () => {
-        const { data, error } = await supabase.functions.invoke('crosshair-search', {
-          body: { 
-            canonical_query: query, 
-            search_options: options 
-          }
-        });
 
-        if (error) throw error;
-        return data as SearchResponse;
+    try {
+      const { data, error } = await supabase.functions.invoke('crosshair-search', {
+        body: {
+          canonical_query: query,
+          search_options: options
+        }
       });
 
-      const processedResults = await batchProcess(
-        searchResponse.results,
-        async (listing) => ({
+      if (error) throw error;
+      const searchResponse = data as SearchResponse;
+
+      const processedResults = await Promise.all(
+        searchResponse.results.map(async (listing) => ({
           ...listing,
-          // Enhance with additional metadata
           enhanced: true,
           searchedAt: new Date().toISOString()
-        })
+        }))
       );
 
       setSearchResponse({
@@ -180,134 +210,60 @@ export const CrosshairDashboard = () => {
         results: processedResults
       });
 
-      // Prefetch related data for better UX
-      if (processedResults.length > 0) {
-        prefetch(
-          () => loadMarketComps(processedResults[0]),
-          `market-comps-${processedResults[0].make}-${processedResults[0].model}`
-        );
-      }
-
       if (searchResponse.pivots) {
-        toast({
-          title: "Query Adjusted",
-          description: searchResponse.pivots.explanation,
-          variant: "default",
-        });
+        showCrosshairToast('Query Adjusted', searchResponse.pivots.explanation);
       }
 
-      toast({
-        title: "Search Completed",
-        description: `Found ${searchResponse.total_count} results in ${searchResponse.execution_time_ms}ms`,
-      });
-
+      showCrosshairToast(
+        'Search Completed',
+        `Found ${searchResponse.total_count} results in ${searchResponse.execution_time_ms}ms`
+      );
     } catch (error) {
-      console.error('Search failed:', error);
-      toast({
-        title: "Search Failed",
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
-        variant: "destructive"
-      });
+      logAndToastError(
+        'Search failed:',
+        error,
+        'Search Failed',
+        error instanceof Error ? error.message : 'Unknown error occurred'
+      );
     } finally {
       setIsSearching(false);
     }
-  }, [measureAsync, batchProcess, prefetch, clearNewCount, toast]);
-
-  const loadMarketComps = async (listing: CanonicalListing) => {
-    // Mock market comparison data loading
-    return { comparable: true };
-  };
+  }, [clearNewCount, logAndToastError, showCrosshairToast]);
 
   const handleSaveIntent = useCallback(async (query: CanonicalQuery, options: any, title: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke('crosshair-save-intent', {
-        body: {
-          canonical_query: query,
-          search_options: options,
-          title
-        }
+      await roverAPI.saveIntent(query, title, {
+        dos_threshold: options?.dos_threshold,
+        telegram_chat_id: options?.telegram_chat_id,
       });
 
-      if (error) throw error;
-
-      toast({
-        title: "Intent Saved",
-        description: `"${title}" will be monitored for new results`,
-      });
+      showCrosshairToast('Intent Saved', `"${title}" will be monitored for new results`);
 
       loadSavedIntents();
     } catch (error) {
-      console.error('Error saving intent:', error);
-      toast({
-        title: "Save Failed", 
-        description: "Could not save search intent",
-        variant: "destructive"
-      });
+      logAndToastError('Error saving intent:', error, 'Save Failed', 'Could not save search intent');
     }
-  }, [toast, loadSavedIntents]);
+  }, [loadSavedIntents, logAndToastError, showCrosshairToast]);
 
   const handleWatch = async (listing: CanonicalListing) => {
     try {
-      // Create an alert for this specific listing
-      const { data: { session } } = await supabase.auth.getSession();
-      const userId = session?.user?.id;
+      const userId = await createListingWatchAlert(listing);
+      if (!userId) throw new Error('No authenticated user');
 
-      const { error } = await supabase
-        .from('user_alerts')
-        .insert({
-          id: crypto.randomUUID(),
-          type: 'listing_watch',
-          title: `Watching: ${listing.year} ${listing.make} ${listing.model}`,
-          message: `Price: ${listing.bid_current ? `$${listing.bid_current}` : 'N/A'} - ${listing.source}`,
-          priority: 'medium',
-          opportunity_data: listing as any,
-          user_id: userId!
-        });
+      await trackWatchedListingSave(listing, userId);
 
-      if (error) throw error;
-
-      // Fire Rover save event (non-blocking)
-      if (userId) {
-        roverAPI.trackEvent({
-          userId,
-          event: 'save',
-          item: {
-            id: listing.id,
-            make: listing.make,
-            model: listing.model,
-            year: listing.year,
-            price: listing.bid_current ?? listing.buy_now ?? 0,
-            source: listing.source,
-            source_site: listing.source,
-            state: listing.location.state,
-            mileage: listing.odo_miles,
-          },
-        });
-      }
-
-      toast({
-        title: "Watching Listing",
-        description: `You'll be notified of updates to this ${listing.year} ${listing.make} ${listing.model}`,
-        variant: "default",
-      });
-      
+      showCrosshairToast(
+        'Watching Listing',
+        `You'll be notified of updates to this ${listing.year} ${listing.make} ${listing.model}`
+      );
     } catch (error) {
-      console.error('Watch listing error:', error);
-      toast({
-        title: "Watch Failed",
-        description: "Failed to set up listing watch",
-        variant: "destructive",
-      });
+      logAndToastError('Watch listing error:', error, 'Watch Failed', 'Failed to set up listing watch');
     }
   };
 
   const handleExport = async (format: 'csv' | 'pdf') => {
     if (!searchResponse?.results.length) {
-      toast({
-        title: "Export Failed",
-        description: "No results to export",
-        variant: "destructive",
-      });
+      showCrosshairToast('Export Failed', 'No results to export', 'destructive');
       return;
     }
 
@@ -321,9 +277,8 @@ export const CrosshairDashboard = () => {
 
       if (error) throw error;
 
-      // Create download link
-      const blob = new Blob([data.content], { 
-        type: format === 'csv' ? 'text/csv' : 'application/pdf' 
+      const blob = new Blob([data.content], {
+        type: format === 'csv' ? 'text/csv' : 'application/pdf'
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -334,36 +289,25 @@ export const CrosshairDashboard = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast({
-        title: "Export Complete",
-        description: `Results exported as ${format.toUpperCase()}`,
-        variant: "default",
-      });
-      
+      showCrosshairToast('Export Complete', `Results exported as ${format.toUpperCase()}`);
     } catch (error) {
-      console.error('Export error:', error);
-      toast({
-        title: "Export Failed",
-        description: `Failed to export results as ${format.toUpperCase()}`,
-        variant: "destructive",
-      });
+      logAndToastError(
+        'Export error:',
+        error,
+        'Export Failed',
+        `Failed to export results as ${format.toUpperCase()}`
+      );
     }
   };
 
   const handlePinQuery = async () => {
     if (!searchResponse) return;
 
-    // This would save the current search as a pinned query
-    toast({
-      title: "Query Pinned",
-      description: "Search criteria saved for quick access",
-      variant: "default",
-    });
+    showCrosshairToast('Query Pinned', 'Search criteria saved for quick access');
   };
 
   return (
     <div className="space-y-6">
-      {/* Real-time Status Header */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4">
@@ -414,18 +358,6 @@ export const CrosshairDashboard = () => {
         </Card>
       </div>
 
-      {/* Performance Alert */}
-      {optimizerMetrics.renderTime > 100 && (
-        <Alert>
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            Performance warning: Render time is {optimizerMetrics.renderTime.toFixed(0)}ms. 
-            Consider reducing result set size.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* New Results Notification */}
       {newOpportunitiesCount > 0 && (
         <Alert>
           <Zap className="h-4 w-4" />
@@ -438,7 +370,6 @@ export const CrosshairDashboard = () => {
         </Alert>
       )}
 
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -473,10 +404,10 @@ export const CrosshairDashboard = () => {
         </TabsList>
 
         <TabsContent value="search" className="space-y-4">
-          <CrosshairSearchForm 
-            onSearch={handleSearch} 
+          <CrosshairSearchForm
+            onSearch={handleSearch}
             onSaveIntent={handleSaveIntent}
-            isLoading={isSearching} 
+            isLoading={isSearching}
           />
           {searchResponse && (
             <CrosshairResults
@@ -545,10 +476,6 @@ export const CrosshairDashboard = () => {
                     <span>Success Rate:</span>
                     <span>{realtimeStats.successRate.toFixed(1)}%</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Cache Hit Rate:</span>
-                    <span>{optimizerMetrics.cacheHitRate.toFixed(1)}%</span>
-                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -582,39 +509,12 @@ export const CrosshairDashboard = () => {
         <TabsContent value="performance" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Real-time Performance Metrics</CardTitle>
+              <CardTitle>Operational Notes</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h4 className="text-sm font-medium mb-2">Render Performance</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Current Render Time</span>
-                      <span className="text-sm font-medium">{optimizerMetrics.renderTime.toFixed(1)}ms</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Frame Rate</span>
-                      <span className="text-sm font-medium">{optimizerMetrics.frameRate.toFixed(0)} fps</span>
-                    </div>
-                  </div>
-                </div>
-                
-                <div>
-                  <h4 className="text-sm font-medium mb-2">Memory & Cache</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Memory Usage</span>
-                      <span className="text-sm font-medium">
-                        {(optimizerMetrics.memoryUsage / 1024 / 1024).toFixed(1)} MB
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Cache Hit Rate</span>
-                      <span className="text-sm font-medium">{optimizerMetrics.cacheHitRate.toFixed(1)}%</span>
-                    </div>
-                  </div>
-                </div>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>Crosshair performance is currently tracked through live job completion timing.</p>
+                <p>Search latency and success rate shown here come from actual job records, not synthetic client-side optimizer estimates.</p>
               </div>
             </CardContent>
           </Card>

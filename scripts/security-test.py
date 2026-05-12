@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Real security testing script for SSRF, XSS, and other vulnerabilities
+Obsolete security harness.
+
+This script targets speculative endpoints that are not part of the current live
+DealerScope API surface. Do not treat its results as current security truth
+without first remapping every probed endpoint to a verified live route.
 """
 import requests
 import json
@@ -10,7 +14,7 @@ import time
 from urllib.parse import urljoin
 
 class SecurityTester:
-    def __init__(self, base_url="http://localhost:4173"):
+    def __init__(self, base_url="http://localhost:8000"):
         self.base_url = base_url
         self.results = {
             "ssrf_tests": [],
@@ -173,7 +177,7 @@ class SecurityTester:
 
 def main():
     import os
-    base_url = os.getenv("BASE_URL", "http://localhost:4173")
+    base_url = os.getenv("BASE_URL", "http://localhost:8000")
     
     tester = SecurityTester(base_url)
     

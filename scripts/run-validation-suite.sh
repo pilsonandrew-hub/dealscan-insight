@@ -1,6 +1,7 @@
 #!/bin/bash
-# DealerScope Master Validation Runner
-# Production-Ready Multi-Layer Validation Suite
+# Obsolete mixed validation/report harness.
+# This runner blends live checks with simulated metrics and generated artifacts.
+# Do not treat its outputs as authoritative evidence of current DealerScope production state.
 # Version: 4.0 - Forensic Audit Hardened
 set -euo pipefail
 

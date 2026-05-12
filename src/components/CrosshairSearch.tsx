@@ -10,7 +10,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { roverAPI } from "@/services/roverAPI";
 import { api } from "@/services/api";
-import { supabase } from "@/integrations/supabase/client";
 import { Search, Target, Plus, X, Settings, Bell } from "lucide-react";
 import { SniperButton } from "@/components/SniperButton";
 
@@ -171,23 +170,10 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
     }
     setSaving(true);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "https://dealscan-insight-production.up.railway.app";
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const resp = await fetch(`${apiUrl}/api/saved-searches`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-        body: JSON.stringify({
-          name,
-          filters: criteria,
-          dos_threshold: parseInt(saveDosThreshold) || 65,
-          telegram_chat_id: saveTelegramChatId.trim() || undefined,
-        }),
+      await roverAPI.saveIntent(criteria, name, {
+        dosThreshold: parseInt(saveDosThreshold) || 65,
+        telegramChatId: saveTelegramChatId,
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       toast({ title: "Search saved", description: `"${name}" will alert you when new matches arrive.` });
       setSaveModalOpen(false);
       setSaveSearchName("");

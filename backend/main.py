@@ -52,7 +52,7 @@ except Exception as e:
 # Routers — import each independently so one failure doesn't kill everything
 import importlib
 _routers = {}
-for _rname in ["auth", "vehicles", "opportunities", "upload", "ml", "admin", "ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin", "recon", "sonar", "lifecycle"]:
+for _rname in ["ingest", "rover", "outcomes", "analytics", "sniper", "saved_searches", "vin", "recon", "sonar", "lifecycle"]:
     try:
         _routers[_rname] = importlib.import_module(f"webapp.routers.{_rname}")
         logging.info(f"Router loaded: {_rname}")
@@ -251,14 +251,14 @@ app.add_middleware(
 
 # ---------------------------------------------------------------------------
 # Register webapp routers — only those that loaded successfully
+#
+# NOTE: auth / vehicles / opportunities / upload / ml belong to an older
+# SQLAlchemy-auth router family. Current production authority is centered on
+# ingest/rover/analytics/outcomes/saved-searches/sonar style surfaces, and live
+# product reads are often Supabase-first. Do not treat those older mounted
+# prefixes as primary production truth without live route evidence.
 # ---------------------------------------------------------------------------
 _prefix_map = {
-    "auth": "/api/auth",
-    "vehicles": "/api/vehicles",
-    "opportunities": "/api/opportunities",
-    "upload": "/api/upload",
-    "ml": "/api/ml",
-    "admin": "/api/admin",
     "ingest": "",
     "telegram": "/api/telegram",  # Telegram callback webhooks
     "rover": "",
@@ -294,12 +294,8 @@ except Exception as _e:
 @app.post("/api/opportunities/{opportunity_id}/pass")
 async def pass_opportunity_alias(opportunity_id: str, request: Request, background_tasks: BackgroundTasks):
     """Alias so frontend /api/opportunities/{id}/pass hits the ingest handler."""
-    try:
-        from webapp.routers.ingest import pass_opportunity
-        return await pass_opportunity(opportunity_id, request, background_tasks)
-    except Exception as e:
-        logger.warning(f"[PASS] handler error: {e}")
-        return {"status": "passed", "opportunity_id": opportunity_id}
+    from webapp.routers.ingest import pass_opportunity
+    return await pass_opportunity(opportunity_id, request, background_tasks)
 
 # ---------------------------------------------------------------------------
 # Pipeline endpoints

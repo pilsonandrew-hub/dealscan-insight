@@ -25,7 +25,7 @@ import { CrosshairDashboard } from '@/components/CrosshairDashboard';
 import SniperScopeDashboard from '@/components/SniperScopeDashboard';
 import { ReconPanel } from '@/components/ReconPanel';
 import { roverAPI } from '@/services/roverAPI';
-import { OnboardingFlow } from '@/components/OnboardingFlow';
+import { OnboardingFlow, ONBOARDING_COMPLETED_KEY } from '@/components/OnboardingFlow';
 import LaneBadge from '@/components/LaneBadge';
 const SonarTab = React.lazy(() => import('@/components/SonarTab').then(m => ({ default: m.SonarTab })));
 const AnalyticsOpenTrustCasesPanel = React.lazy(() => import('@/components/AnalyticsOpenTrustCasesPanel'));
@@ -124,6 +124,37 @@ function fmt$(n: number | null | undefined): string {
 function fmtPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return `${n.toFixed(1)}%`;
+}
+
+async function trackRoverActionForDeal(
+  deal: Opportunity,
+  action: 'view' | 'save' | 'pass'
+): Promise<boolean> {
+  if (!deal.id) return false;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return false;
+
+  await roverAPI.trackEvent({
+    userId,
+    event: action,
+    item: {
+      id: deal.id,
+      make: deal.make,
+      model: deal.model,
+      year: deal.year,
+      price: deal.current_bid ?? 0,
+      current_bid: deal.current_bid ?? 0,
+      source: deal.source_site,
+      source_site: deal.source_site,
+      state: deal.state,
+      mileage: deal.mileage,
+      vin: deal.vin,
+    },
+  });
+
+  return true;
 }
 
 function fmtConfidence(n: number | null | undefined): string {
@@ -715,25 +746,7 @@ const CrosshairTab = () => {
 
   const handleCrosshairAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
     if (action === 'pass' || action === 'view') return;
-    // Fire Rover save event (non-blocking)
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id;
-    if (!userId) return;
-    roverAPI.trackEvent({
-      userId,
-      event: 'save',
-      item: {
-        id: deal.id || '',
-        make: deal.make,
-        model: deal.model,
-        year: deal.year,
-        price: deal.current_bid ?? 0,
-        source: deal.source_site,
-        source_site: deal.source_site,
-        state: deal.state,
-        mileage: deal.mileage,
-      },
-    });
+    void trackRoverActionForDeal(deal, 'save');
   };
 
   const inputCls = "w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500";
@@ -893,9 +906,6 @@ const RoverTab = () => {
   const [isFallback, setIsFallback] = useState(false);
   const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
   const [roverDebug, setRoverDebug] = useState<string>('');
-  const [roverMode, setRoverMode] = useState<'ai' | 'manual'>(() =>
-    (localStorage.getItem('rover_mode') as 'ai' | 'manual') || 'ai'
-  );
 
   const load = useCallback(async () => {
     const token = session?.access_token;
@@ -903,158 +913,40 @@ const RoverTab = () => {
     setLoading(true);
     setIsFallback(false);
 
-    // ── Manual mode: skip AI, query Supabase directly ────────────────────────
-    if (roverMode === 'manual') {
-      try {
-        const { data: manualDeals } = await supabase
-          .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
-          .gte('dos_score', 65)
-          .order('dos_score', { ascending: false })
-          .limit(25);
-        if (manualDeals && manualDeals.length > 0) {
-          const mapped: RoverRecommendation[] = manualDeals.map((d: any) => ({
-            id: d.id, make: d.make, model: d.model, year: d.year, mileage: d.mileage,
-            current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
-            score: d.dos_score, dos_score: d.dos_score, gross_margin: d.gross_margin,
-            potential_profit: d.potential_profit, profit_margin: d.profit_margin,
-            state: d.state, source_site: d.source_site, auction_end: d.auction_end,
-            listing_url: d.listing_url, vin: d.vin, total_cost: d.total_cost,
-            risk_score: d.risk_score, transportation_cost: d.transportation_cost,
-            fees_cost: d.fees_cost, roi: d.roi, roi_percentage: d.roi_percentage,
-            confidence_score: d.confidence_score, roi_per_day: d.roi_per_day,
-            retail_ctm_pct: d.retail_ctm_pct, estimated_days_to_sale: d.estimated_days_to_sale,
-            max_bid: d.max_bid, pricing_source: d.pricing_source,
-            manheim_mmr_mid: d.manheim_mmr_mid, manheim_mmr_low: d.manheim_mmr_low,
-            manheim_mmr_high: d.manheim_mmr_high, pricing_updated_at: d.pricing_updated_at,
-            investment_grade: d.investment_grade, designated_lane: d.designated_lane,
-          }));
-          setRecs(mapped);
-        } else {
-          setRecs([]);
-        }
-      } catch (e) {
-        console.error('RoverTab manual load error:', e);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    // ── AI mode ──────────────────────────────────────────────────────────────
     setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     try {
       const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
       const items = result?.items ?? [];
       setRoverDebug((result as any)._debug || `API returned ${items.length} items`);
 
-      if (items.length > 0) {
-        // Map DealItem → RoverRecommendation; preserve why_signals from backend
-        const mapped: RoverRecommendation[] = items.map((item: any) => ({
-          id: item.id,
-          make: item.make,
-          model: item.model,
-          year: item.year,
-          mileage: item.mileage,
-          current_bid: item.current_bid ?? item.price,
-          estimated_sale_price: item.estimated_sale_price ?? item.price,
-          score: item._score != null ? (item._score <= 1 ? item._score * 100 : item._score) : item.arbitrage_score,
-          dos_score: item.dos_score ?? item.arbitrage_score,
-          potential_profit: item.potential_profit,
-          roi_percentage: item.roi_percentage,
-          investment_grade: item.investment_grade,
-          state: item.state,
-          source_site: item.source_site ?? item.source,
-          vin: item.vin,
-          why_signals: item.why_signals ?? [],
-        }));
-        setRecs(mapped);
-      } else {
-        // Cold-start fallback: query Supabase for top DOS score deals
-        const { data: fallbackDeals } = await supabase
-          .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
-          .gte('dos_score', 65)
-          .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
-          .order('dos_score', { ascending: false })
-          .limit(25);
-
-        if (fallbackDeals && fallbackDeals.length > 0) {
-          const mapped: RoverRecommendation[] = fallbackDeals.map((d: any) => ({
-            id: d.id,
-            make: d.make,
-            model: d.model,
-            year: d.year,
-            mileage: d.mileage,
-            current_bid: d.current_bid,
-            estimated_sale_price: d.estimated_sale_price,
-            score: d.dos_score,
-            dos_score: d.dos_score,
-            gross_margin: d.gross_margin,
-            potential_profit: d.potential_profit,
-            profit_margin: d.profit_margin,
-            state: d.state,
-            source_site: d.source_site,
-            auction_end: d.auction_end,
-            listing_url: d.listing_url,
-            vin: d.vin,
-            total_cost: d.total_cost,
-            risk_score: d.risk_score,
-            transportation_cost: d.transportation_cost,
-            fees_cost: d.fees_cost,
-            roi: d.roi,
-            roi_percentage: d.roi_percentage,
-            confidence_score: d.confidence_score,
-            roi_per_day: d.roi_per_day,
-            retail_ctm_pct: d.retail_ctm_pct,
-            estimated_days_to_sale: d.estimated_days_to_sale,
-            max_bid: d.max_bid,
-            pricing_source: d.pricing_source,
-            manheim_mmr_mid: d.manheim_mmr_mid,
-            manheim_mmr_low: d.manheim_mmr_low,
-            manheim_mmr_high: d.manheim_mmr_high,
-            pricing_updated_at: d.pricing_updated_at,
-            investment_grade: d.investment_grade, designated_lane: d.designated_lane,
-          }));
-          setRecs(mapped);
-          setIsFallback(true);
-        } else {
-          setRecs([]);
-        }
-      }
+      const mapped: RoverRecommendation[] = items.map((item: any) => ({
+        id: item.id,
+        make: item.make,
+        model: item.model,
+        year: item.year,
+        mileage: item.mileage,
+        current_bid: item.current_bid ?? item.price,
+        estimated_sale_price: item.estimated_sale_price ?? item.price,
+        score: item._score != null ? (item._score <= 1 ? item._score * 100 : item._score) : item.arbitrage_score,
+        dos_score: item.dos_score ?? item.arbitrage_score,
+        potential_profit: item.potential_profit,
+        roi_percentage: item.roi_percentage,
+        investment_grade: item.investment_grade,
+        state: item.state,
+        source_site: item.source_site ?? item.source,
+        vin: item.vin,
+        why_signals: item.why_signals ?? [],
+        match_pct: item.match_pct,
+      }));
+      setRecs(mapped);
+      setIsFallback(result.source === 'fallback' && mapped.length > 0);
     } catch (e) {
       console.error('RoverTab load error:', e);
-      // On error, still try the Supabase fallback
-      try {
-        const { data: fallbackDeals } = await supabase
-          .from('opportunities')
-          .select('id,make,model,year,mileage,current_bid,estimated_sale_price,dos_score,gross_margin,potential_profit,profit_margin,state,source_site,auction_end:auction_end_date,vin,total_cost,risk_score,transportation_cost,fees_cost,roi,roi_percentage,confidence_score,roi_per_day,retail_ctm_pct,estimated_days_to_sale,max_bid,pricing_source,manheim_mmr_mid,manheim_mmr_low,manheim_mmr_high,pricing_updated_at,investment_grade,listing_url,designated_lane')
-          .gte('dos_score', 65)
-          .or(`auction_end_date.gt.${new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()},auction_end_date.is.null`)
-          .order('dos_score', { ascending: false })
-          .limit(25);
-        if (fallbackDeals && fallbackDeals.length > 0) {
-          const mapped: RoverRecommendation[] = fallbackDeals.map((d: any) => ({
-            id: d.id, make: d.make, model: d.model, year: d.year, mileage: d.mileage,
-            current_bid: d.current_bid, estimated_sale_price: d.estimated_sale_price,
-            score: d.dos_score, dos_score: d.dos_score, potential_profit: d.potential_profit,
-            state: d.state, source_site: d.source_site, vin: d.vin,
-            roi_per_day: d.roi_per_day, retail_ctm_pct: d.retail_ctm_pct,
-            estimated_days_to_sale: d.estimated_days_to_sale, max_bid: d.max_bid,
-            pricing_source: d.pricing_source, manheim_mmr_mid: d.manheim_mmr_mid,
-            manheim_mmr_low: d.manheim_mmr_low, manheim_mmr_high: d.manheim_mmr_high,
-            pricing_updated_at: d.pricing_updated_at, investment_grade: d.investment_grade, designated_lane: d.designated_lane,
-          }));
-          setRecs(mapped);
-          setIsFallback(true);
-        }
-      } catch (fallbackErr) {
-        console.error('RoverTab fallback also failed:', fallbackErr);
-      }
+      setRecs([]);
     } finally {
       setLoading(false);
     }
-  }, [user, session, authLoading, roverMode]);
+  }, [user, session, authLoading]);
 
   // Only fire after auth has fully initialized
   useEffect(() => {
@@ -1062,17 +954,13 @@ const RoverTab = () => {
   }, [load, authLoading]);
 
   const handleAction = async (deal: Opportunity, action: 'view' | 'save' | 'pass') => {
-    await api.trackRoverEvent(deal, action);
+    const tracked = await trackRoverActionForDeal(deal, action);
+    if (!tracked) return;
+
     setActionedIds(prev => new Set([...prev, `${deal.id}-${action}`]));
-    // Refresh recommendations after save or pass so the ranking reflects the new signal
     if (action === 'save' || action === 'pass') {
       load();
     }
-  };
-
-  const handleModeChange = (mode: 'ai' | 'manual') => {
-    localStorage.setItem('rover_mode', mode);
-    setRoverMode(mode);
   };
 
   return (
@@ -1081,10 +969,8 @@ const RoverTab = () => {
         <div>
           <h2 className="text-xl font-bold text-white">Rover</h2>
           <p className="text-sm text-gray-400">
-            {roverMode === 'manual'
-              ? 'Sorted by DOS Score'
-              : isFallback
-              ? 'Top Deals — Training Rover — interact with deals to personalize'
+            {isFallback
+              ? 'Top deals while Rover learns from your activity'
               : 'Personalized recommendations based on your activity'}
           </p>
         </div>
@@ -1093,31 +979,7 @@ const RoverTab = () => {
         </button>
       </div>
 
-      {/* Mode toggle */}
-      <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
-        <button
-          onClick={() => handleModeChange('ai')}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            roverMode === 'ai'
-              ? 'bg-emerald-600 text-white'
-              : 'text-gray-400 hover:text-white'
-          }`}
-        >
-          🤖 AI Personalized
-        </button>
-        <button
-          onClick={() => handleModeChange('manual')}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            roverMode === 'manual'
-              ? 'bg-emerald-600 text-white'
-              : 'text-gray-400 hover:text-white'
-          }`}
-        >
-          📊 Manual (DOS Sorted)
-        </button>
-      </div>
-
-      {roverMode === 'ai' && isFallback && (
+      {isFallback && (
         <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
           <Navigation className="h-4 w-4 flex-shrink-0" />
           <span>Training Rover — interact with deals to personalize your recommendations over time.</span>
@@ -1175,25 +1037,6 @@ const RoverTab = () => {
             vehicle: { make: rec.make || '', model: rec.model || '', year: rec.year || 0, vin: rec.vin || '', mileage: rec.mileage || 0 },
           });
 
-          // Manual mode: flat grid sorted by DOS score, no why-signals
-          if (roverMode === 'manual') {
-            return (
-              <div className="space-y-4">
-                <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">📊 Sorted by DOS Score</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {recs.map(rec => {
-                    const id = rec.id || rec.opportunity_id || Math.random().toString();
-                    return (
-                      <div key={id}>
-                        <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          }
-
           // Infer body type from model name for cold-start categorization
           const inferType = (model = ''): 'truck' | 'suv' | 'other' => {
             const m = model.toLowerCase();
@@ -1223,12 +1066,7 @@ const RoverTab = () => {
                         const id = rec.id || rec.opportunity_id || Math.random().toString();
                         return (
                           <div key={id} className="relative">
-                            {rec.match_pct != null && (
-                              <div className="absolute -top-2 -right-2 z-10 bg-emerald-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                {rec.match_pct}% match
-                              </div>
-                            )}
-                            <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} whySignals={rec.why_signals} />
+                            <DealCard deal={{ ...recToDeal(rec), id }} onAction={handleAction} />
                           </div>
                         );
                       })}
@@ -2144,7 +1982,7 @@ const SettingsTab = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-white">Supabase</p>
-              <p className="text-xs text-gray-500">lbnxzvqppccajllsqaaw.supabase.co</p>
+              <p className="text-xs text-gray-500">Configured via environment</p>
             </div>
             <div className="text-right">
               <StatusBadge status={supabaseStatus?.status} />
@@ -2177,7 +2015,7 @@ export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = parseTab(searchParams.get('tab'));
   const [showOnboarding, setShowOnboarding] = useState(
-    !localStorage.getItem('onboarding_completed')
+    !localStorage.getItem(ONBOARDING_COMPLETED_KEY)
   );
 
   const navigateToTab = (tab: Tab) => {

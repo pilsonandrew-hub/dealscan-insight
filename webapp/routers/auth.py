@@ -1,5 +1,10 @@
 """
 Authentication router with JWT and TOTP support
+
+Transitional router, not primary production authority.
+Current product auth flows are not proven to depend on this mounted /api/auth
+surface in production, so do not use this file as first truth without live route
+verification.
 """
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta

@@ -142,6 +142,19 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_allows_skipped_score_rows_when_ledger_accounts_for_them(self):
+        issues = reconcile.classify_run(
+            run_id="run-skip-score",
+            apify_run={"run_id": "run-skip-score", "status": "SUCCEEDED", "item_count": 2},
+            webhook={"latest_status": "processed"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"skipped_score": 2}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
     def test_classify_run_flags_sonar_mirror_failures(self):
         issues = reconcile.classify_run(
             run_id="run-sonar-fail",

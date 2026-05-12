@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import api, { type OpportunityDetail } from '@/services/api';
+import { sniperAPI } from '@/services/sniperAPI';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SniperInputs {
@@ -94,7 +95,18 @@ const AUCTION_SOURCES: { value: string; label: string; premium: number; noTax?: 
 ];
 
 const STORAGE_KEY = 'dealerscope_sniper_targets';
-const API_BASE = (typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_API_URL : '') || 'https://dealscan-insight-production.up.railway.app';
+
+function readSavedTargets(): SavedTarget[] {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedTargets(targets: SavedTarget[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(targets));
+}
 
 // ─── Active DB Sniper Targets ─────────────────────────────────────────────────
 interface LiveTarget {
@@ -139,13 +151,7 @@ function ActiveSniperTargets() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) { setLoading(false); return; }
-      const resp = await fetch(`${API_BASE}/api/sniper/targets`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (!resp.ok) return;
-      const json = await resp.json();
+      const json = await sniperAPI.listTargets<LiveTarget>();
       setTargets(json.targets || []);
     } catch { /* non-fatal */ }
     finally { setLoading(false); }
@@ -263,13 +269,7 @@ export default function SniperScopeDashboard() {
     notes: '',
   });
 
-  const [saved, setSaved] = useState<SavedTarget[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [saved, setSaved] = useState<SavedTarget[]>(() => readSavedTargets());
 
   // ─── Live calculation ──────────────────────────────────────────────────────
   const calc = useMemo(() => {
@@ -425,13 +425,13 @@ export default function SniperScopeDashboard() {
     };
     const next = [entry, ...saved];
     setSaved(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeSavedTargets(next);
   };
 
   const deleteTarget = (id: string) => {
     const next = saved.filter(t => t.id !== id);
     setSaved(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeSavedTargets(next);
   };
 
   const loadTarget = (t: SavedTarget) => {
@@ -478,32 +478,13 @@ export default function SniperScopeDashboard() {
     setSavingOutcome(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-
-      if (!token) {
-        throw new Error('You must be signed in to log a sale outcome.');
-      }
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/outcomes`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          opportunity_id: opportunityId,
-          sale_price: parseFloat(outcomeForm.salePrice),
-          sale_date: outcomeForm.saleDate,
-          days_to_sale: parseInt(outcomeForm.daysToSale, 10),
-          notes: outcomeForm.notes.trim() || null,
-        }),
+      await api.logSaleOutcome({
+        opportunity_id: opportunityId,
+        sale_price: parseFloat(outcomeForm.salePrice),
+        sale_date: outcomeForm.saleDate,
+        days_to_sale: parseInt(outcomeForm.daysToSale, 10),
+        notes: outcomeForm.notes.trim() || null,
       });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.detail || `Request failed with status ${response.status}`);
-      }
 
       setOutcomeForm(prev => ({
         ...prev,

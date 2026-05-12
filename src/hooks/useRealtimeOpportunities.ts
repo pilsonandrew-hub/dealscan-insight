@@ -4,9 +4,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { logger } from '@/core/UnifiedLogger';
+import { logger } from '@/lib/logger';
 import { Opportunity } from '@/types/dealerscope';
-import { WebSocketStatus } from './useWebSocket';
+
+type RealtimeConnectionStatus = 'CONNECTED' | 'DISCONNECTED';
 
 interface PipelineStatus {
   status: 'running' | 'paused' | 'stopped';
@@ -22,14 +23,14 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
     processedCount: 0
   });
   const [newOpportunitiesCount, setNewOpportunitiesCount] = useState(0);
-  const [connectionStatus, setConnectionStatus] = useState<WebSocketStatus>(WebSocketStatus.CONNECTED);
+  const [connectionStatus, setConnectionStatus] = useState<RealtimeConnectionStatus>('CONNECTED');
   const [isConnected, setIsConnected] = useState(true);
 
   // Initialize with provided data
   useEffect(() => {
     if (initialData && initialData.length > 0) {
       setOpportunities(initialData);
-      logger.setContext('system').info('Initialized opportunities', { count: initialData.length });
+      logger.info('Initialized opportunities', { count: initialData.length, context: 'system' });
     }
   }, [initialData]);
 
@@ -39,24 +40,24 @@ export function useRealtimeOpportunities(initialData: Opportunity[] = []) {
 
   const pausePipeline = useCallback(() => {
     setPipelineStatus(prev => ({ ...prev, status: 'paused' }));
-    logger.setContext('system').info('Pipeline paused');
+    logger.info('Pipeline paused', { context: 'system' });
   }, []);
 
   const resumePipeline = useCallback(() => {
     setPipelineStatus(prev => ({ ...prev, status: 'running' }));
-    logger.setContext('system').info('Pipeline resumed');
+    logger.info('Pipeline resumed', { context: 'system' });
   }, []);
 
   const connect = useCallback(() => {
-    setConnectionStatus(WebSocketStatus.CONNECTED);
+    setConnectionStatus('CONNECTED');
     setIsConnected(true);
-    logger.setContext('system').info('Connection established');
+    logger.info('Connection established', { context: 'system' });
   }, []);
 
   const disconnect = useCallback(() => {
-    setConnectionStatus(WebSocketStatus.DISCONNECTED);
+    setConnectionStatus('DISCONNECTED');
     setIsConnected(false);
-    logger.setContext('system').info('Connection disconnected');
+    logger.info('Connection disconnected', { context: 'system' });
   }, []);
 
   return {

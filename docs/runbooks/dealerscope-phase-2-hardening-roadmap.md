@@ -1,5 +1,8 @@
 # DealerScope Phase 2 Hardening Roadmap
 
+> Historical roadmap snapshot only.
+> This document reflects an earlier hardening roadmap and must not be treated as current operational authority without re-validation against current code, current mounted routes, current migrations, current workflows, and live route checks.
+
 This is the Phase 2 hardening plan after the March 15-16 ingest recovery, red-team audit, and closeout.
 
 The immediate incident fixes are in place. That is not the same thing as a hardened system.

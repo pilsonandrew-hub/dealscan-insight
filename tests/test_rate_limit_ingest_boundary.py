@@ -185,7 +185,7 @@ class RateLimitIngestBoundaryTests(unittest.TestCase):
         redis_client = _FakeRedisClient(ping_error=RuntimeError("redis down"))
         rate_limit.redis.from_url = lambda *args, **kwargs: redis_client
         middleware = rate_limit.RateLimitMiddleware(app=None)
-        request = _Request("/api/vehicles", client_host="127.0.0.1")
+        request = _Request("/api/generic-boundary-check", client_host="127.0.0.1")
 
         async def call_next(_request):
             return "next"
@@ -208,7 +208,7 @@ class RateLimitIngestBoundaryTests(unittest.TestCase):
 
         rate_limit.redis.from_url = lambda *args, **kwargs: _FakeRedisClient(pipeline_incr_count=11)
         generic_middleware = rate_limit.RateLimitMiddleware(app=None)
-        generic_request = _Request("/api/vehicles", client_host="127.0.0.1")
+        generic_request = _Request("/api/generic-boundary-check", client_host="127.0.0.1")
         generic_response = asyncio.run(generic_middleware.dispatch(generic_request, call_next))
 
         self.assertEqual(generic_response, "next")

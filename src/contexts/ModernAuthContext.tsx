@@ -1,5 +1,5 @@
 /**
- * Updated Authentication Context using UnifiedStateManager
+ * Updated authentication context
  * Replaces multiple auth contexts with a single, robust implementation
  */
 

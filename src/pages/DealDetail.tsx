@@ -49,6 +49,27 @@ function gradeColor(grade: string | undefined) {
   }
 }
 
+async function trackDealRoverEvent(
+  deal: Deal,
+  userId: string,
+  event: 'click' | 'save'
+): Promise<void> {
+  await roverAPI.trackEvent({
+    event,
+    userId,
+    item: {
+      id: deal.id,
+      make: deal.make ?? '',
+      model: deal.model ?? '',
+      year: deal.year ?? 0,
+      price: deal.current_bid ?? 0,
+      current_bid: deal.current_bid,
+      state: deal.state,
+      source_site: deal.source_site ?? deal.source,
+    },
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const DealDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -93,20 +114,7 @@ const DealDetail: React.FC = () => {
         setUserId(uid);
 
         if (uid) {
-          roverAPI.trackEvent({
-            event: 'click',
-            userId: uid,
-            item: {
-              id: data.id,
-              make: data.make ?? '',
-              model: data.model ?? '',
-              year: data.year ?? 0,
-              price: data.current_bid ?? 0,
-              current_bid: data.current_bid,
-              state: data.state,
-              source_site: data.source_site ?? data.source,
-            },
-          });
+          void trackDealRoverEvent(data, uid, 'click');
         }
       } catch (e) {
         setError('Failed to load deal.');
@@ -141,20 +149,7 @@ const DealDetail: React.FC = () => {
     if (!deal) return;
     if (!userId) return;
     setSaveFired(true);
-    roverAPI.trackEvent({
-      event: 'save',
-      userId,
-      item: {
-        id: deal.id,
-        make: deal.make ?? '',
-        model: deal.model ?? '',
-        year: deal.year ?? 0,
-        price: deal.current_bid ?? 0,
-        current_bid: deal.current_bid,
-        state: deal.state,
-        source_site: deal.source_site ?? deal.source,
-      },
-    });
+    await trackDealRoverEvent(deal, userId, 'save');
   };
 
   // ── Loading / error states ───────────────────────────────────────────────────
