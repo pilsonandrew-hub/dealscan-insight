@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -97,7 +98,7 @@ class TelegramRuntimeTests(unittest.TestCase):
             messages = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         self.assertEqual(messages, [])
-        with sqlite3.connect(self.runtime_db) as connection:
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
             rows = connection.execute(
                 "SELECT source_session FROM processed_telegram_messages ORDER BY source_session"
             ).fetchall()
@@ -164,6 +165,8 @@ class TelegramRuntimeTests(unittest.TestCase):
             messages = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         mocked_urlopen.assert_called_once()
+        self.assertIn("timeout=30", mocked_urlopen.call_args.args[0])
+        self.assertNotIn("offset=", mocked_urlopen.call_args.args[0])
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["chat_id"], "7529788084")
         self.assertEqual(messages[0]["message_id"], "42")
@@ -171,7 +174,7 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.assertEqual(messages[0]["sender_id"], "7529788084")
         self.assertEqual(messages[0]["sender_name"], "Andrew Pilson")
         self.assertTrue(messages[0]["received_at"].endswith("Z"))
-        with sqlite3.connect(self.runtime_db) as connection:
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
             attempt = connection.execute(
                 "SELECT transport, status, message_count, error_type FROM telegram_transport_attempts"
             ).fetchone()
@@ -210,15 +213,19 @@ class TelegramRuntimeTests(unittest.TestCase):
         fake_context.__exit__.return_value = False
 
         with (
-            patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False),
+            patch.dict(os.environ, {
+                "ACE_TELEGRAM_BOT_TOKEN": "bot-token",
+                "ACE_TELEGRAM_UPDATE_OFFSET": "123",
+            }, clear=False),
             patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
-            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context) as mocked_urlopen,
             patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
         ):
             messages = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         self.assertEqual([message["message_id"] for message in messages], ["9"])
+        self.assertIn("offset=123", mocked_urlopen.call_args.args[0])
 
     def test_fetch_real_telegram_updates_returns_empty_on_ssl_failure(self) -> None:
         with (
@@ -231,7 +238,7 @@ class TelegramRuntimeTests(unittest.TestCase):
             messages = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         self.assertEqual(messages, [])
-        with sqlite3.connect(self.runtime_db) as connection:
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
             attempt = connection.execute(
                 "SELECT transport, status, message_count, error_type, error_summary FROM telegram_transport_attempts"
             ).fetchone()
@@ -258,7 +265,7 @@ class TelegramRuntimeTests(unittest.TestCase):
             messages = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         self.assertEqual(messages, [])
-        with sqlite3.connect(self.runtime_db) as connection:
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
             attempt = connection.execute(
                 "SELECT status, error_type FROM telegram_transport_attempts"
             ).fetchone()

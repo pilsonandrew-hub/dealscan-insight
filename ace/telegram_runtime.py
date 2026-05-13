@@ -316,7 +316,11 @@ def _telegram_ssl_context() -> ssl.SSLContext:
 
 def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
     timeout_seconds = str(os.environ.get("ACE_TELEGRAM_GET_UPDATES_TIMEOUT", "30")).strip() or "30"
-    encoded = parse.urlencode({"timeout": timeout_seconds})
+    query: dict[str, str] = {"timeout": timeout_seconds}
+    checkpoint_offset = os.environ.get("ACE_TELEGRAM_UPDATE_OFFSET", "").strip()
+    if checkpoint_offset:
+        query["offset"] = checkpoint_offset
+    encoded = parse.urlencode(query)
     url = f"https://api.telegram.org/bot{token}/getUpdates?{encoded}"
     try:
         with request.urlopen(url, timeout=45, context=_telegram_ssl_context()) as response:
