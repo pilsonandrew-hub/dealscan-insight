@@ -160,8 +160,38 @@ jobs:
             except FileNotFoundError:
               pass
 
+          bid_ceiling_proof = []
+          try:
+            from backend.ingest.score import CURRENT_YEAR, score_deal
+            proof_cases = [
+              ("premium_over_88", dict(year=CURRENT_YEAR - 1, mileage=20000, bid=9000, mmr_ca=10000, state="CA", make="Toyota", model="RAV4", title_status="clean", photos=["x"])),
+              ("standard_over_80", dict(year=CURRENT_YEAR - 5, mileage=60000, bid=8100, mmr_ca=10000, state="CA", make="Toyota", model="Camry", title_status="clean", photos=["x"])),
+            ]
+            for name, kwargs in proof_cases:
+              result = score_deal(**kwargs)
+              passed = (
+                result.get("ceiling_pass") is False
+                and result.get("ceiling_reason") == "bid_ceiling_exceeded"
+                and result.get("investment_grade") == "Rejected"
+                and float(result.get("dos_score", 999)) == 0.0
+              )
+              bid_ceiling_proof.append({
+                "case": name,
+                "passed": passed,
+                "bid_ceiling_pct": result.get("bid_ceiling_pct"),
+                "max_bid": result.get("max_bid"),
+                "ceiling_pass": result.get("ceiling_pass"),
+                "ceiling_reason": result.get("ceiling_reason"),
+                "investment_grade": result.get("investment_grade"),
+                "dos_score": result.get("dos_score"),
+              })
+          except Exception as e:
+            bid_ceiling_proof.append({"error": repr(e)})
+
           prompt = f"""Quick RED TEAM audit of DealerScope backend files.
           Business rules: Premium lane max age=4yr, max mileage=50k, bid ceiling=0.88. Standard lane max age=10yr, max mileage=100k, reject mileage-per-year >18000, bid ceiling=0.80. Rust states rejected.
+          Deterministic bid-ceiling proof from score_deal() is below. Do NOT report "Missing Bid Ceiling Rejections" if both proof cases passed; only report it if the proof failed or the code contradicts the proof.
+          BID_CEILING_PROOF:{json.dumps(bid_ceiling_proof, indent=2)}
           Report only CRITICAL and HIGH issues found. Format: SEVERITY | FILE | ISSUE | FIX
           Be concise — top 10 issues max.
           CODE:{code_bundle[:50000]}"""
