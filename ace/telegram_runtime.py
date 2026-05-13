@@ -352,7 +352,40 @@ def _telegram_ssl_context() -> ssl.SSLContext:
     cafile = os.environ.get("ACE_TELEGRAM_CA_BUNDLE", "").strip()
     if cafile:
         return ssl.create_default_context(cafile=cafile)
-    return ssl.create_default_context()
+
+    try:
+        import certifi  # type: ignore[import-not-found]
+    except Exception:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _load_openclaw_telegram_bot_token() -> str:
+    if not _env_flag("ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN"):
+        return ""
+
+    config_path = Path(os.environ.get("ACE_OPENCLAW_CONFIG_PATH", "~/.openclaw/openclaw.json")).expanduser()
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _record_transport_attempt(
+            transport="telegram_bot_api",
+            status="disabled",
+            error_type=exc.__class__.__name__,
+            error_summary=f"OpenClaw Telegram token source unavailable: {config_path}",
+        )
+        return ""
+
+    token = str(((payload.get("channels") or {}).get("telegram") or {}).get("botToken") or "").strip()
+    if not token:
+        _record_transport_attempt(
+            transport="telegram_bot_api",
+            status="disabled",
+            error_type="missing_openclaw_bot_token",
+            error_summary="ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN is enabled but channels.telegram.botToken is not configured.",
+        )
+        return ""
+    return token
 
 
 def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
@@ -425,11 +458,16 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
 
 def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
     session_file = _resolve_openclaw_session_file()
+    bootstrap_existing = _env_flag("ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED")
+    bootstrap_transport = ""
     if session_file is not None:
         messages = _load_inbound_messages_from_openclaw_session(session_file)
+        bootstrap_transport = "openclaw_session"
     else:
-        token = os.environ.get("ACE_TELEGRAM_BOT_TOKEN", "").strip()
+        token = os.environ.get("ACE_TELEGRAM_BOT_TOKEN", "").strip() or _load_openclaw_telegram_bot_token()
         if token:
+            has_explicit_or_stored_offset = bool(os.environ.get("ACE_TELEGRAM_UPDATE_OFFSET", "").strip()) or _stored_transport_offset("telegram_bot_api") is not None
+            bootstrap_transport = "telegram_bot_api" if not has_explicit_or_stored_offset else ""
             messages = _load_inbound_messages_from_telegram(token)
         else:
             inbox_path = os.environ.get("ACE_TELEGRAM_INBOX_PATH", "").strip()
@@ -442,6 +480,7 @@ def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
                 )
                 return []
             messages = _load_inbound_messages_from_file(Path(inbox_path))
+            bootstrap_transport = "inbox_file"
 
     configured_chat_id = os.environ.get("ACE_TELEGRAM_CHAT_ID", "").strip() or os.environ.get("ACE_OPENCLAW_CHAT_ID", "").strip()
     if configured_chat_id:
@@ -451,7 +490,8 @@ def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
     connection = _connect_runtime_db()
     try:
         seen = {row[0] for row in connection.execute("SELECT source_session FROM processed_telegram_messages").fetchall()}
-        if not seen and _env_flag("ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED"):
+        should_bootstrap = bootstrap_existing and (not seen or bootstrap_transport == "telegram_bot_api")
+        if should_bootstrap:
             processed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             for message in messages:
                 connection.execute(

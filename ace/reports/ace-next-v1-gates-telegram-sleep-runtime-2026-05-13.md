@@ -132,4 +132,4 @@ A.C.E. V1 cannot be claimed until at least these are specified and proven:
 
 Do not call A.C.E. V1.
 
-Next best engineering action: run Gate 1 as a controlled raw Telegram polling acceptance proof, but only after explicit token handling is decided and no secret is committed.
+Next best engineering action: run Gate 1 as a controlled raw Telegram polling acceptance proof. A.C.E. now has a governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`) that reads the existing OpenClaw Telegram bot token at runtime without committing the secret. This switch still requires controlled acceptance proof before any raw polling claim is earned.

@@ -519,6 +519,128 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["message_id"], "33550")
 
+    def test_bot_api_bootstrap_runs_when_no_bot_api_offset_even_if_other_checkpoints_exist(self) -> None:
+        payload = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 200,
+                    "message": {
+                        "message_id": 20,
+                        "date": 1746720000,
+                        "text": "Old raw bot backlog",
+                        "chat": {"id": 7529788084},
+                    },
+                }
+            ],
+        }
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with (
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+        ):
+            telegram_runtime.mark_telegram_message_processed(
+                chat_id="7529788084",
+                message_id="openclaw-existing",
+                processed_at="2026-05-13T00:00:00Z",
+            )
+
+        with (
+            patch.dict(os.environ, {
+                "ACE_TELEGRAM_BOT_TOKEN": "bot-token",
+                "ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED": "true",
+            }, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context),
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            processed = [row[0] for row in connection.execute(
+                "SELECT source_session FROM processed_telegram_messages ORDER BY source_session"
+            ).fetchall()]
+            offset = connection.execute(
+                "SELECT next_offset FROM telegram_transport_offsets WHERE transport = ?",
+                ("telegram_bot_api",),
+            ).fetchone()[0]
+        self.assertIn("telegram:7529788084:20", processed)
+        self.assertEqual(offset, 201)
+
+    def test_telegram_ssl_context_prefers_certifi_when_available(self) -> None:
+        fake_certifi = MagicMock()
+        fake_certifi.where.return_value = "/tmp/fake-cacert.pem"
+        with patch.dict("sys.modules", {"certifi": fake_certifi}):
+            with patch("ace.telegram_runtime.ssl.create_default_context") as mocked_context:
+                telegram_runtime._telegram_ssl_context()
+        mocked_context.assert_called_once_with(cafile="/tmp/fake-cacert.pem")
+
+    def test_telegram_ssl_context_explicit_ca_bundle_overrides_certifi(self) -> None:
+        fake_certifi = MagicMock()
+        fake_certifi.where.return_value = "/tmp/fake-cacert.pem"
+        with patch.dict(os.environ, {"ACE_TELEGRAM_CA_BUNDLE": "/tmp/operator-cacert.pem"}, clear=False):
+            with patch.dict("sys.modules", {"certifi": fake_certifi}):
+                with patch("ace.telegram_runtime.ssl.create_default_context") as mocked_context:
+                    telegram_runtime._telegram_ssl_context()
+        mocked_context.assert_called_once_with(cafile="/tmp/operator-cacert.pem")
+
+    def test_fetch_can_use_governed_openclaw_token_source_without_committing_secret(self) -> None:
+        config_path = Path(self.tempdir.name) / "openclaw.json"
+        config_path.write_text(json.dumps({"channels": {"telegram": {"botToken": "bot-token"}}}), encoding="utf-8")
+        payload = {"ok": True, "result": []}
+
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with (
+            patch.dict(os.environ, {
+                "ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN": "true",
+                "ACE_OPENCLAW_CONFIG_PATH": str(config_path),
+            }, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context) as mocked_urlopen,
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        mocked_urlopen.assert_called_once()
+        self.assertIn("botbot-token", mocked_urlopen.call_args.args[0])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, message_count, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("telegram_bot_api", "ok", 0, None))
+
+    def test_governed_openclaw_token_source_records_disabled_when_config_missing(self) -> None:
+        with (
+            patch.dict(os.environ, {
+                "ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN": "true",
+                "ACE_OPENCLAW_CONFIG_PATH": str(Path(self.tempdir.name) / "missing.json"),
+            }, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempts = connection.execute(
+                "SELECT status, error_type FROM telegram_transport_attempts ORDER BY attempted_at"
+            ).fetchall()
+        self.assertIn(("disabled", "FileNotFoundError"), [tuple(row) for row in attempts])
+
 
 if __name__ == "__main__":
     unittest.main()
