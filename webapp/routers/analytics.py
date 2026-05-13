@@ -881,10 +881,13 @@ async def analytics_summary(authorization: Optional[str] = Header(None)):
 
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        # alert_log is a pipeline-delivery ledger, not a user-owned table.
+        # Its launch-safe schema is keyed by opportunity/run/message delivery
+        # fields and intentionally has no user_id column. Keeping this query
+        # scoped to sent_at avoids false trust degradation from schema drift.
         alerts_resp = (
             supa.table("alert_log")
             .select("id", count="exact")
-            .eq("user_id", user_id)
             .gte("sent_at", cutoff)
             .execute()
         )

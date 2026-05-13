@@ -27,6 +27,7 @@ class _TableQuery:
     def __init__(self, table_name: str, payloads: dict[str, dict[str, object]]):
         self.table_name = table_name
         self.payloads = payloads
+        self.filters: list[tuple[str, str, object]] = []
 
     def select(self, *_args, **_kwargs):
         return self
@@ -34,27 +35,37 @@ class _TableQuery:
     def limit(self, *_args, **_kwargs):
         return self
 
-    def eq(self, *_args, **_kwargs):
+    def eq(self, column, value):
+        self.filters.append(("eq", column, value))
         return self
 
     @property
     def not_(self):
         return self
 
-    def is_(self, *_args, **_kwargs):
+    def is_(self, column, value):
+        self.filters.append(("is", column, value))
         return self
 
     def order(self, *_args, **_kwargs):
         return self
 
-    def gte(self, *_args, **_kwargs):
+    def gte(self, column, value):
+        self.filters.append(("gte", column, value))
         return self
 
-    def ilike(self, *_args, **_kwargs):
+    def ilike(self, column, value):
+        self.filters.append(("ilike", column, value))
+        return self
+
+    def or_(self, expression):
+        self.filters.append(("or", "", expression))
         return self
 
     def execute(self):
         payload = self.payloads.get(self.table_name, {})
+        queries = payload.setdefault("queries", [])
+        queries.append(list(self.filters))
         return _QueryResult(data=payload.get("data"), count=payload.get("count"))
 
 
@@ -180,6 +191,40 @@ class AnalyticsTrustModelTests(BaseAnalyticsTrustModelTests):
         self.assertEqual(summary["freshness"]["source_health"]["updated_at"], now.isoformat())
         self.assertEqual(summary["freshness"]["source_health"]["age_seconds"], 0)
         self.assertEqual(summary["freshness"]["source_health"]["status"], "fresh")
+
+
+    def test_alert_metrics_query_matches_pipeline_ledger_schema(self):
+        now = datetime(2026, 4, 15, 18, 0, 0, tzinfo=timezone.utc)
+        analytics.datetime = _FixedDatetime
+
+        async def _fake_source_health(authorization=None):
+            return {
+                "sources": [{"source_site": "govdeals", "last_webhook_at": now.isoformat()}],
+                "generated_at": now.isoformat(),
+            }
+
+        analytics.source_health = _fake_source_health
+        payloads = {
+            "opportunities": {
+                "data": [
+                    {"created_at": now.isoformat(), "dos_score": 88, "source_site": "govdeals", "state": "CA"}
+                ],
+                "count": 1,
+            },
+            "dealer_sales": {"data": [], "count": 0},
+            "alert_log": {"data": [], "count": 2},
+        }
+        analytics.supa = _FakeSupabase(payloads)
+
+        summary = _run(analytics.analytics_summary("Bearer token"))
+
+        self.assertEqual(summary["alerts_sent_last_30d"], 2)
+        self.assertNotIn("Alert metrics degraded", summary["trust"]["notes"])
+        alert_filters = payloads["alert_log"]["queries"][0]
+        self.assertEqual(len(alert_filters), 1)
+        self.assertEqual(alert_filters[0][0], "gte")
+        self.assertEqual(alert_filters[0][1], "sent_at")
+        self.assertNotIn(("eq", "user_id", "user-123"), alert_filters)
 
     def test_recent_trust_events_include_freshness_context(self):
         analytics.supabase_client = _FakeSupabase({
