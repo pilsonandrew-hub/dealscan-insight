@@ -47,6 +47,52 @@ class ItemRepositoryContractTests(unittest.TestCase):
         assert stored is not None
         self.assertEqual(stored.verdict, "pass")
 
+    def test_resolve_enforces_persisted_fail_verdict(self) -> None:
+        item = self.repo.create_item(
+            item_type="task",
+            title="Failed verdict closeout target",
+            verdict="fail",
+            actor="test",
+        )
+        self.repo.add_evidence(item.id, evidence_text="evidence exists", actor="test")
+        self.repo.apply_action(item.id, "approve", actor="test")
+        self.repo.apply_action(item.id, "done", actor="test")
+
+        with self.assertRaises(CloseoutGateError) as raised:
+            self.repo.apply_action(item.id, "resolve", actor="test")
+
+        self.assertIn("verdict_fail", str(raised.exception))
+        stored = self.repo.get_item(item.id)
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.state, "CLAIMED_DONE")
+
+        closeout_event = next(
+            event for event in self.repo.list_item_events(item.id) if event.event_type == "item.closeout_attempted"
+        )
+        self.assertIn('"failure_code":"verdict_fail"', closeout_event.payload_json or "")
+        self.assertIn('"verdict":"fail"', closeout_event.payload_json or "")
+
+    def test_resolve_allows_persisted_pass_verdict(self) -> None:
+        item = self.repo.create_item(
+            item_type="task",
+            title="Pass verdict closeout target",
+            verdict="pass",
+            actor="test",
+        )
+        self.repo.add_evidence(item.id, evidence_text="evidence exists", actor="test")
+        self.repo.apply_action(item.id, "approve", actor="test")
+        self.repo.apply_action(item.id, "done", actor="test")
+
+        resolved = self.repo.apply_action(item.id, "resolve", actor="test")
+
+        self.assertEqual(resolved.state, "VERIFIED_DONE")
+        closeout_event = next(
+            event for event in self.repo.list_item_events(item.id) if event.event_type == "item.closeout_attempted"
+        )
+        self.assertIn('"result":"passed"', closeout_event.payload_json or "")
+        self.assertIn('"verdict":"pass"', closeout_event.payload_json or "")
+
     def test_get_item_by_source_and_session_reuses_single_matching_item(self) -> None:
         item = self.repo.create_item(
             item_type="continuity_open_loop",
