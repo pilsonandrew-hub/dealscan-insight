@@ -8,7 +8,7 @@ This is not a V1/V2/V3 platform promotion. It proves only that A.C.E. now expose
 
 ## Source truth
 
-- Source HEAD at verification refresh: `084ca43` (`ace: keep drift on inspect surface`)
+- Source HEAD at verification refresh: `f745b17` (`ace: tighten claim drift evidence support`)
 - Implementation commits in this V2.3 drift surface:
   - `9cf0bd5` — `ace: add drift dimension inspection`
   - `3185926` — `ace: align drift dimensions with v2.3`
@@ -16,6 +16,9 @@ This is not a V1/V2/V3 platform promotion. It proves only that A.C.E. now expose
   - `8152440` — `ace: add v2.3 drift evidence`
   - `fc7a59f` — `ace: document drift inspection surface`
   - `084ca43` — `ace: keep drift on inspect surface`
+  - `91aaf39` — `ace: refresh v2.3 drift evidence truth`
+  - `52dde5c` — `ace: harden claim drift and sqlite contention`
+  - `f745b17` — `ace: tighten claim drift evidence support`
 - Implemented source and evidence files:
   - `ace/drift.py`
   - `ace/ace.py`
@@ -61,7 +64,7 @@ Computes decision distribution drift from closeout results and verdict events us
 
 ### claim_drift
 
-Flags unsupported pass claims: pass verdicts or passed closeouts without prior evidence in the sampled event window. Evidence-backed pass claims clear the dimension.
+Flags unsupported pass claims: pass verdicts or passed closeouts without prior substantive evidence in the sampled event window. Intake provenance, parser decisions, eligibility markers, notification delivery, and generic autonomy closeout metadata do not clear this dimension; claim-supporting evidence must be more than process/provenance evidence.
 
 ## Gates required for this slice
 
