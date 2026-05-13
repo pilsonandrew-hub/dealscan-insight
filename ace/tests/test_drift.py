@@ -58,7 +58,7 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertEqual(dimension.status, "clear")
         self.assertEqual(dimension.score, 0.0)
 
-    def test_decision_distribution_drift_scores_repeated_blocked_claims(self) -> None:
+    def test_decision_drift_scores_repeated_blocked_claims(self) -> None:
         events = [
             event(index, "item.closeout_attempted", {"result": "blocked", "failure_code": "missing_verdict"})
             for index in range(4)
