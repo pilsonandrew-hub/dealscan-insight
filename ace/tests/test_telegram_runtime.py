@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +82,52 @@ class TelegramRuntimeTests(unittest.TestCase):
 
         self.assertEqual(second, [])
 
+    def test_bootstrap_existing_messages_marks_backlog_processed_without_returning_it(self) -> None:
+        self.inbox_path.write_text(json.dumps([
+            {"chat_id": "7529788084", "message_id": "old-1", "text": "Can you check old backlog?", "received_at": "2026-05-08T17:01:00Z"},
+            {"chat_id": "7529788084", "message_id": "old-2", "text": "Please review old backlog", "received_at": "2026-05-08T17:02:00Z"},
+        ]), encoding="utf-8")
+
+        with patch.dict(os.environ, {
+            "ACE_TELEGRAM_INBOX_PATH": str(self.inbox_path),
+            "ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED": "true",
+        }, clear=False), \
+             patch.object(telegram_runtime, "STATE_DIR", self.state_dir), \
+             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        with sqlite3.connect(self.runtime_db) as connection:
+            rows = connection.execute(
+                "SELECT source_session FROM processed_telegram_messages ORDER BY source_session"
+            ).fetchall()
+        self.assertEqual([row[0] for row in rows], ["telegram:7529788084:old-1", "telegram:7529788084:old-2"])
+
+    def test_bootstrap_existing_messages_only_runs_when_checkpoint_is_empty(self) -> None:
+        self.inbox_path.write_text(json.dumps([
+            {"chat_id": "7529788084", "message_id": "seen-1", "text": "Can you check seen?", "received_at": "2026-05-08T17:01:00Z"},
+            {"chat_id": "7529788084", "message_id": "new-1", "text": "Can you check new?", "received_at": "2026-05-08T17:02:00Z"},
+        ]), encoding="utf-8")
+
+        with patch.dict(os.environ, {"ACE_TELEGRAM_INBOX_PATH": str(self.inbox_path)}, clear=False), \
+             patch.object(telegram_runtime, "STATE_DIR", self.state_dir), \
+             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db):
+            telegram_runtime.mark_telegram_message_processed(
+                chat_id="7529788084",
+                message_id="seen-1",
+                processed_at="2026-05-08T17:01:00Z",
+            )
+
+        with patch.dict(os.environ, {
+            "ACE_TELEGRAM_INBOX_PATH": str(self.inbox_path),
+            "ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED": "true",
+        }, clear=False), \
+             patch.object(telegram_runtime, "STATE_DIR", self.state_dir), \
+             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual([message["message_id"] for message in messages], ["new-1"])
+
     def test_fetch_reads_real_telegram_updates_when_bot_token_configured(self) -> None:
         payload = {
             "ok": True,
@@ -124,6 +171,11 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.assertEqual(messages[0]["sender_id"], "7529788084")
         self.assertEqual(messages[0]["sender_name"], "Andrew Pilson")
         self.assertTrue(messages[0]["received_at"].endswith("Z"))
+        with sqlite3.connect(self.runtime_db) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, message_count, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("telegram_bot_api", "ok", 1, None))
 
     def test_fetch_real_telegram_updates_filters_non_text_and_non_message_updates(self) -> None:
         payload = {
@@ -174,11 +226,43 @@ class TelegramRuntimeTests(unittest.TestCase):
             patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
             patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
             patch("ace.telegram_runtime.request.urlopen", side_effect=error.URLError("ssl failed")),
-            patch("ace.telegram_runtime._telegram_ssl_context", side_effect=ssl.SSLError("bad cert")),
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
         ):
             messages = telegram_runtime.fetch_unprocessed_telegram_messages()
 
         self.assertEqual(messages, [])
+        with sqlite3.connect(self.runtime_db) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, message_count, error_type, error_summary FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(attempt[0], "telegram_bot_api")
+        self.assertEqual(attempt[1], "error")
+        self.assertEqual(attempt[2], 0)
+        self.assertEqual(attempt[3], "URLError")
+        self.assertIn("ssl failed", attempt[4])
+
+    def test_fetch_real_telegram_updates_records_json_failure(self) -> None:
+        fake_response = MagicMock()
+        fake_response.read.return_value = b"not-json"
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with (
+            patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context),
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        with sqlite3.connect(self.runtime_db) as connection:
+            attempt = connection.execute(
+                "SELECT status, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("error", "JSONDecodeError"))
 
     def test_fetch_reads_openclaw_session_stream_for_exact_chat(self) -> None:
         sessions_dir = Path(self.tempdir.name) / "sessions"

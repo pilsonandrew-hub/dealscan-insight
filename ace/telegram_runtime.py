@@ -33,12 +33,72 @@ def _connect_runtime_db() -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_transport_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            attempted_at TEXT NOT NULL,
+            transport TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            error_type TEXT,
+            error_summary TEXT
+        )
+        """
+    )
     connection.commit()
     return connection
 
 
 def _source_session_for(message: dict[str, Any]) -> str:
     return f"telegram:{message['chat_id']}:{message['message_id']}"
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _record_transport_attempt(
+    *,
+    transport: str,
+    status: str,
+    message_count: int = 0,
+    error_type: str | None = None,
+    error_summary: str | None = None,
+) -> None:
+    connection = _connect_runtime_db()
+    try:
+        attempted_at = _utc_now()
+        attempt_id = f"{transport}:{attempted_at}"
+        connection.execute(
+            """
+            INSERT INTO telegram_transport_attempts(
+                attempt_id,
+                attempted_at,
+                transport,
+                status,
+                message_count,
+                error_type,
+                error_summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                attempted_at,
+                transport,
+                status,
+                int(message_count),
+                error_type,
+                error_summary,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _normalize_chat_id(raw: Any) -> str:
@@ -261,16 +321,40 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
     try:
         with request.urlopen(url, timeout=45, context=_telegram_ssl_context()) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (error.URLError, ssl.SSLError):
+    except (error.URLError, ssl.SSLError) as exc:
+        _record_transport_attempt(
+            transport="telegram_bot_api",
+            status="error",
+            error_type=exc.__class__.__name__,
+            error_summary=str(exc),
+        )
         return []
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        _record_transport_attempt(
+            transport="telegram_bot_api",
+            status="error",
+            error_type=exc.__class__.__name__,
+            error_summary=str(exc),
+        )
         return []
 
     if not isinstance(payload, dict) or payload.get("ok") is not True:
+        _record_transport_attempt(
+            transport="telegram_bot_api",
+            status="error",
+            error_type="telegram_api_not_ok",
+            error_summary=str(payload)[:500],
+        )
         return []
 
     results = payload.get("result")
     if not isinstance(results, list):
+        _record_transport_attempt(
+            transport="telegram_bot_api",
+            status="error",
+            error_type="telegram_api_result_not_list",
+            error_summary=str(type(results).__name__),
+        )
         return []
 
     messages: list[dict[str, Any]] = []
@@ -278,6 +362,11 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
         normalized = _normalize_telegram_update(raw)
         if normalized is not None:
             messages.append(normalized)
+    _record_transport_attempt(
+        transport="telegram_bot_api",
+        status="ok",
+        message_count=len(messages),
+    )
     return messages
 
 
@@ -303,6 +392,15 @@ def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
     connection = _connect_runtime_db()
     try:
         seen = {row[0] for row in connection.execute("SELECT source_session FROM processed_telegram_messages").fetchall()}
+        if not seen and _env_flag("ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED"):
+            processed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            for message in messages:
+                connection.execute(
+                    "INSERT OR IGNORE INTO processed_telegram_messages(source_session, processed_at) VALUES (?, ?)",
+                    (_source_session_for(message), processed_at),
+                )
+            connection.commit()
+            return []
     finally:
         connection.close()
 

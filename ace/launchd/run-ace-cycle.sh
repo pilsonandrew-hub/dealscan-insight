@@ -8,6 +8,14 @@ cd "$WORKSPACE"
 : "${ACE_OPERATOR_CHANNEL:?ACE_OPERATOR_CHANNEL is required}"
 : "${ACE_OPERATOR_TARGET:?ACE_OPERATOR_TARGET is required}"
 
+if [[ "${ACE_OPERATOR_CHANNEL}" == "telegram" && -z "${ACE_OPENCLAW_CHAT_ID:-}" ]]; then
+  export ACE_OPENCLAW_CHAT_ID="telegram:${ACE_OPERATOR_TARGET}"
+fi
+
+if [[ -n "${ACE_OPENCLAW_CHAT_ID:-}" && -z "${ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED:-}" ]]; then
+  export ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED="true"
+fi
+
 BRIEFING_PATH="${ACE_BRIEFING_PATH:-/Users/andrewpilson/.openclaw/workspace/ace/state/ace_briefing.md}"
 DB_PATH="${ACE_DB_PATH:-/Users/andrewpilson/.openclaw/workspace/ace/state/ace.db}"
 THREAD_ARG=()
