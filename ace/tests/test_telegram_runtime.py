@@ -337,6 +337,57 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.assertEqual(attempt[3], "URLError")
         self.assertIn("ssl failed", attempt[4])
 
+
+    def test_fetch_real_telegram_updates_records_conflict_without_ingesting(self) -> None:
+        conflict = error.HTTPError(
+            url="https://api.telegram.org/botx/getUpdates",
+            code=409,
+            msg="Conflict",
+            hdrs=None,
+            fp=None,
+        )
+        with (
+            patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", side_effect=conflict),
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, message_count, error_type, error_summary FROM telegram_transport_attempts"
+            ).fetchone()
+            offset_count = connection.execute("SELECT COUNT(*) FROM telegram_transport_offsets").fetchone()[0]
+        self.assertEqual(tuple(attempt[:4]), ("telegram_bot_api", "error", 0, "telegram_conflict"))
+        self.assertIn("another consumer", attempt[4])
+        self.assertEqual(offset_count, 0)
+
+    def test_fetch_real_telegram_updates_can_disable_long_polling_for_proofs(self) -> None:
+        payload = {"ok": True, "result": []}
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with (
+            patch.dict(os.environ, {
+                "ACE_TELEGRAM_BOT_TOKEN": "bot-token",
+                "ACE_TELEGRAM_GET_UPDATES_TIMEOUT": "30",
+                "ACE_TELEGRAM_DISABLE_LONG_POLL": "true",
+            }, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context) as mocked_urlopen,
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            self.assertEqual(telegram_runtime.fetch_unprocessed_telegram_messages(), [])
+
+        self.assertIn("timeout=0", mocked_urlopen.call_args.args[0])
+
     def test_fetch_real_telegram_updates_records_json_failure(self) -> None:
         fake_response = MagicMock()
         fake_response.read.return_value = b"not-json"

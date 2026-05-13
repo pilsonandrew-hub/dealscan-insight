@@ -104,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     cycle.add_argument("--notification-channel")
     cycle.add_argument("--notification-target")
     cycle.add_argument("--notification-thread-id")
+    cycle.add_argument("--disable-notifications", action="store_true")
     cycle.add_argument("--briefing-path", default=str(BRIEFING_PATH))
     cycle.add_argument("--actor")
 
@@ -640,6 +641,7 @@ def main(argv: list[str] | None = None) -> int:
                 notification_target=_normalize_optional_text(args.notification_target, field_name="notification_target"),
                 notification_thread_id=_normalize_optional_text(args.notification_thread_id, field_name="notification_thread_id"),
                 briefing_path=args.briefing_path,
+                disable_notifications=args.disable_notifications,
             )
             _print_cycle_result(result)
             return 0

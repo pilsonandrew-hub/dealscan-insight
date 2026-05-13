@@ -118,6 +118,35 @@ class AceCycleTests(unittest.TestCase):
         self.assertEqual(status["last_terminal_run"]["status"], "interrupted")
         self.assertEqual(status["last_terminal_run"]["failure_code"], "cycle_interrupted")
 
+    def test_cycle_can_disable_notifications_for_controlled_proof(self) -> None:
+        item = self.repo.create_item(item_type="note", title="Old triage item")
+        stale_now = _hours_after(item.created_at, 25)
+
+        result = run_cycle(
+            self.db_path,
+            now=stale_now,
+            briefing_path=self.briefing_path,
+            notification_channel="telegram",
+            notification_target="telegram:7529788084",
+            disable_notifications=True,
+        )
+
+        self.assertEqual(result["actionable_finding_count"], 1)
+        self.assertEqual(result["notification_count"], 0)
+        self.assertTrue(result["notifications_suppressed"])
+        self.assertEqual(result["notifications"], [])
+        self.assertEqual(result["governed_run"]["status"], "completed")
+
+        with connect(self.db_path) as connection:
+            notification_actions = connection.execute(
+                "SELECT COUNT(*) FROM action_queue WHERE action_type = 'send_operator_notification'"
+            ).fetchone()[0]
+            notification_evidence = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE evidence_uri = 'ace://notification/delivery'"
+            ).fetchone()[0]
+        self.assertEqual(notification_actions, 0)
+        self.assertEqual(notification_evidence, 0)
+
     def test_cycle_autonomously_closes_machine_verifiable_work(self) -> None:
         item = self.repo.create_item(
             item_type=AUTONOMY_ITEM_TYPE,

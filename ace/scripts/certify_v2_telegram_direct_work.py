@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
 import sys
@@ -221,11 +222,24 @@ def certify(source_session: str, db_path: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or len(argv) > 3:
-        print("usage: python3 scripts/certify_v2_telegram_direct_work.py <source_session> [db_path]", file=sys.stderr)
-        return 2
-    source_session = argv[1]
-    db_path = Path(argv[2]) if len(argv) == 3 else DEFAULT_DB
+    parser = argparse.ArgumentParser(
+        description="Certify a bounded V2 Telegram direct-work provenance chain."
+    )
+    parser.add_argument("source_session_arg", nargs="?", help="Source session to certify, e.g. telegram:7529788084:33604")
+    parser.add_argument("db_path_arg", nargs="?", help="Optional ACE SQLite DB path")
+    parser.add_argument("--source-session", dest="source_session_flag")
+    parser.add_argument("--db-path", dest="db_path_flag")
+    args = parser.parse_args(argv[1:])
+
+    source_session = args.source_session_flag or args.source_session_arg
+    if not source_session:
+        parser.error("source session is required, either positional or --source-session")
+
+    if args.source_session_flag and args.source_session_arg:
+        parser.error("source session was provided both positionally and via --source-session")
+
+    db_path_text = args.db_path_flag or args.db_path_arg
+    db_path = Path(db_path_text) if db_path_text else DEFAULT_DB
     return certify(source_session, db_path)
 
 

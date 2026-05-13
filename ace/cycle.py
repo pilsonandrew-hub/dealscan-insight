@@ -35,6 +35,7 @@ def run_cycle(
     notification_thread_id: str | None = None,
     briefing_path: Path | str = BRIEFING_PATH,
     sender: NotificationSender | None = None,
+    disable_notifications: bool = False,
 ) -> dict[str, Any]:
     thresholds = thresholds or SweepThresholds()
     trigger_kind = "launchd" if actor == "launchd" else TRIGGER_KIND_OPERATOR
@@ -93,26 +94,30 @@ def run_cycle(
         briefing_file.write_text(rendered_briefing + "\n", encoding="utf-8")
 
         actionable_findings = list(sweep_result.get("findings", []))
-        if actionable_findings and (not notification_channel or not notification_target):
-            raise ValidationError(
-                "notification_channel and notification_target are required when actionable findings exist"
-            )
-
-        for finding in actionable_findings:
-            notification_results.append(
-                send_operator_notification(
-                    db_path,
-                    finding["item_id"],
-                    channel=str(notification_channel),
-                    target=str(notification_target),
-                    reason=str(finding["classification"]),
-                    age_context=_notification_age_context(finding),
-                    deadline_context=None,
-                    thread_id=notification_thread_id,
-                    actor=actor,
-                    sender=sender,
+        notifications_suppressed = False
+        if disable_notifications:
+            notifications_suppressed = bool(actionable_findings)
+        else:
+            if actionable_findings and (not notification_channel or not notification_target):
+                raise ValidationError(
+                    "notification_channel and notification_target are required when actionable findings exist"
                 )
-            )
+
+            for finding in actionable_findings:
+                notification_results.append(
+                    send_operator_notification(
+                        db_path,
+                        finding["item_id"],
+                        channel=str(notification_channel),
+                        target=str(notification_target),
+                        reason=str(finding["classification"]),
+                        age_context=_notification_age_context(finding),
+                        deadline_context=None,
+                        thread_id=notification_thread_id,
+                        actor=actor,
+                        sender=sender,
+                    )
+                )
 
         completed_run = complete_governed_run(
             db_path,
@@ -132,6 +137,7 @@ def run_cycle(
             "rendered_briefing": rendered_briefing,
             "actionable_finding_count": len(actionable_findings),
             "notification_count": len(notification_results),
+            "notifications_suppressed": notifications_suppressed,
             "notifications": notification_results,
         }
     except (KeyboardInterrupt, SystemExit):

@@ -11,6 +11,7 @@ state/ace_briefing.md
 state/supervisor_acceptance.log
 state/supervisor_acceptance.err
 state/supervisor_acceptance.pid
+state/proofs/
 
 # Test/runtime scratch
 .pytest_cache/

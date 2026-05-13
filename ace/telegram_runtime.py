@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 import ssl
+from contextlib import suppress
 from urllib import error, parse, request
 
 STATE_DIR = Path(__file__).resolve().parent / "state"
@@ -390,6 +391,8 @@ def _load_openclaw_telegram_bot_token() -> str:
 
 def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
     timeout_seconds = str(os.environ.get("ACE_TELEGRAM_GET_UPDATES_TIMEOUT", "30")).strip() or "30"
+    if _env_flag("ACE_TELEGRAM_DISABLE_LONG_POLL"):
+        timeout_seconds = "0"
     query: dict[str, str] = {"timeout": timeout_seconds}
     checkpoint_offset = os.environ.get("ACE_TELEGRAM_UPDATE_OFFSET", "").strip()
     if not checkpoint_offset:
@@ -403,6 +406,26 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
     try:
         with request.urlopen(url, timeout=45, context=_telegram_ssl_context()) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        try:
+            if exc.code == 409:
+                _record_transport_attempt(
+                    transport="telegram_bot_api",
+                    status="error",
+                    error_type="telegram_conflict",
+                    error_summary="Telegram getUpdates conflict: another consumer is polling this bot token.",
+                )
+                return []
+            _record_transport_attempt(
+                transport="telegram_bot_api",
+                status="error",
+                error_type=exc.__class__.__name__,
+                error_summary=f"HTTP {exc.code}: {exc.reason}",
+            )
+            return []
+        finally:
+            with suppress(Exception):
+                exc.close()
     except (error.URLError, ssl.SSLError) as exc:
         _record_transport_attempt(
             transport="telegram_bot_api",
