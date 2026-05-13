@@ -434,6 +434,12 @@ def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
         else:
             inbox_path = os.environ.get("ACE_TELEGRAM_INBOX_PATH", "").strip()
             if not inbox_path:
+                _record_transport_attempt(
+                    transport="telegram_bot_api",
+                    status="disabled",
+                    error_type="missing_bot_token",
+                    error_summary="ACE_TELEGRAM_BOT_TOKEN is not configured and no local Telegram inbox source is configured.",
+                )
                 return []
             messages = _load_inbound_messages_from_file(Path(inbox_path))
 

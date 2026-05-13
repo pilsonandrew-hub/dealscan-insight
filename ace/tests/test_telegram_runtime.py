@@ -29,8 +29,20 @@ class TelegramRuntimeTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=False), \
              patch.object(telegram_runtime, "STATE_DIR", self.state_dir), \
              patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db):
+            os.environ.pop("ACE_TELEGRAM_BOT_TOKEN", None)
+            os.environ.pop("ACE_OPENCLAW_CHAT_ID", None)
             os.environ.pop("ACE_TELEGRAM_INBOX_PATH", None)
             self.assertEqual(telegram_runtime.fetch_unprocessed_telegram_messages(), [])
+
+            with closing(sqlite3.connect(self.runtime_db)) as connection:
+                attempt = connection.execute(
+                    "SELECT transport, status, error_type, error_summary FROM telegram_transport_attempts"
+                ).fetchone()
+
+        self.assertEqual(attempt[0], "telegram_bot_api")
+        self.assertEqual(attempt[1], "disabled")
+        self.assertEqual(attempt[2], "missing_bot_token")
+        self.assertIn("ACE_TELEGRAM_BOT_TOKEN", attempt[3])
 
     def test_invalid_messages_are_filtered(self) -> None:
         self.inbox_path.write_text(json.dumps([
