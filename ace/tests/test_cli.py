@@ -167,6 +167,36 @@ class AceCliTests(unittest.TestCase):
             self.assertIn('"evidence_text":"proof two"', output)
             self.assertNotIn('"evidence_text":"proof one"', output)
 
+
+    def test_inspect_surfaces_drift_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Drift inspect item")
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli("--db", str(db_path), "inspect", item_id)
+
+            self.assertEqual(code, 0, output)
+            self.assertIn(f"drift.item_id={item_id}", output)
+            self.assertIn("drift.composite_score=", output)
+            self.assertIn("drift.dimension[0].name=loop_depth", output)
+            self.assertIn("drift.dimension[1].name=decision_distribution", output)
+            self.assertIn("drift.dimension[2].name=state_churn", output)
+
+
+    def test_inspect_rejects_non_positive_drift_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Bad drift window item")
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli("--db", str(db_path), "inspect", item_id, "--drift-window", "0")
+
+            self.assertEqual(code, 1, output)
+            self.assertIn("error=invalid_drift_window drift_window=0", output)
+
     def test_record_verdict_command_appends_verdict_and_show_surface(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

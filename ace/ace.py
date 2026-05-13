@@ -24,6 +24,7 @@ from ace.storage import DB_PATH, bootstrap_db
 from ace.sweep import SweepThresholds, run_sweep
 from ace.briefing import generate_briefing, render_briefing_text
 from ace.cycle import BRIEFING_PATH, run_cycle
+from ace.drift import compute_item_drift
 from ace.workflow import AceError, normalize_state
 
 
@@ -71,6 +72,13 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("item_id")
     show.add_argument("--event-type")
     show.add_argument("--event-limit", type=int)
+    show.add_argument("--drift-window", type=int, default=20)
+
+    inspect = subparsers.add_parser("inspect", help="Inspect one item with drift dimensions")
+    inspect.add_argument("item_id")
+    inspect.add_argument("--event-type")
+    inspect.add_argument("--event-limit", type=int)
+    inspect.add_argument("--drift-window", type=int, default=20)
 
     record_verdict = subparsers.add_parser("record-verdict", help="Record an append-only item verdict")
     record_verdict.add_argument("item_id")
@@ -275,6 +283,17 @@ def _print_item(item) -> None:
         print(f"closed_reason={item.closed_reason}")
     if item.last_event_id:
         print(f"last_event_id={item.last_event_id}")
+
+
+def _print_drift_report(report) -> None:
+    print(f"drift.item_id={report.item_id}")
+    print(f"drift.composite_score={report.composite_score}")
+    for index, dimension in enumerate(report.dimensions):
+        print(f"drift.dimension[{index}].name={dimension.name}")
+        print(f"drift.dimension[{index}].score={dimension.score}")
+        print(f"drift.dimension[{index}].sample_count={dimension.sample_count}")
+        print(f"drift.dimension[{index}].status={dimension.status}")
+        print(f"drift.dimension[{index}].detail={dimension.detail}")
 
 
 def _print_item_events(events: Iterable) -> None:
@@ -567,9 +586,12 @@ def main(argv: list[str] | None = None) -> int:
             _print_items(items)
             return 0
 
-        if command == "show":
+        if command in {"show", "inspect"}:
             if args.event_limit is not None and args.event_limit <= 0:
                 print(f"error=invalid_event_limit event_limit={args.event_limit}")
+                return 1
+            if args.drift_window <= 0:
+                print(f"error=invalid_drift_window drift_window={args.drift_window}")
                 return 1
             normalized_event_type = args.event_type
             if normalized_event_type is not None:
@@ -582,13 +604,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error=unknown_item_id item_id={args.item_id}")
                 return 1
             _print_item(item)
-            _print_item_events(
-                repo.list_item_events(
-                    args.item_id,
-                    event_type=normalized_event_type,
-                    limit=args.event_limit,
-                )
-            )
+            all_events = repo.list_item_events(args.item_id)
+            _print_drift_report(compute_item_drift(args.item_id, all_events, window=args.drift_window))
+            events_to_print = all_events
+            if normalized_event_type is not None:
+                events_to_print = [event for event in events_to_print if event.event_type == normalized_event_type]
+            if args.event_limit is not None:
+                events_to_print = events_to_print[-args.event_limit:]
+            _print_item_events(events_to_print)
             return 0
 
         if command == "record-verdict":
