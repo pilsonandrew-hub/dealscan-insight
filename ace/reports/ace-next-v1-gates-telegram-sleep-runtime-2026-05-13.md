@@ -1,33 +1,38 @@
 # A.C.E. Next V1 Gates — Telegram, Sleep/Network, Runtime Fabric
 
 Date: 2026-05-13
-Current source baseline: `42f86d3`
+Current source baseline: `430b88b`
 
 ## Current verified state
 
 A.C.E. is clean at the governed-foundation gate, not V1.
 
-Verified immediately before this artifact:
+Verified after the latest hardening pass:
 
-- ACE source HEAD: `42f86d3`
+- ACE source HEAD: `430b88b`
 - Event hash chain: `(True, None)`
-- Supervisor runtime: live (`runtime_7dd4a33a52b0458e8d20ab573daf4d9e`)
-- Latest governed run observed: completed, `trigger_kind=launchd`
+- Supervisor runtime: live (`runtime_6cc9ef9fe5f44c5eb3b2203a80ab3d40`)
+- Latest governed run observed: completed, `trigger_kind=operator`
+- Full ACE suite with warnings as errors: `506 tests OK`
 - Telegram runtime DB exists with:
   - `processed_telegram_messages`
   - `telegram_transport_attempts`
   - `telegram_transport_offsets`
 - Missing-token/no-inbox raw Telegram path is observable: records `telegram_transport_attempts(status=disabled,error_type=missing_bot_token)`
+- Governed raw Telegram token source, TLS trust-store handling, Bot API offset persistence, and transport-offset-aware backlog checkpointing are implemented and source-tested.
+- Governed cycle single-flight protection is implemented: concurrent cycle attempts record `status=skipped`, `failure_code=cycle_already_active` instead of executing concurrently.
 
 ## Gate 1 — Raw live Telegram Bot API polling acceptance
 
 ### Current truth
 
-Blocked / unearned.
+Partially proven, still not fully earned.
 
-OpenClaw has a Telegram bot token configured in `~/.openclaw/openclaw.json`, but A.C.E. launchd/runtime does not expose `ACE_TELEGRAM_BOT_TOKEN`.
+OpenClaw has a Telegram bot token configured in `~/.openclaw/openclaw.json`. A.C.E. now supports a governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`) that reads the existing OpenClaw Telegram bot token at runtime without committing the secret.
 
-This is intentionally not auto-wired in this artifact. Wiring a live bot token into A.C.E. changes an external transport boundary and can affect backlog/offset behavior.
+Controlled fetch proof has shown Telegram can be reached, TLS trust-store handling can succeed, first-run Bot API backlog can be checkpointed rather than returned for ingestion, and `telegram_transport_offsets.next_offset` can persist.
+
+The remaining acceptance gap is a full launchd-cycle proof with raw polling enabled and all side effects accounted for.
 
 ### Required before enabling
 
@@ -42,7 +47,7 @@ This is intentionally not auto-wired in this artifact. Wiring a live bot token i
 
 3. Acceptance proof must be controlled.
    - Use a single controlled Telegram message or a known no-message poll window.
-   - Verify `telegram_transport_attempts` records `status=success` or explicit API failure.
+   - Verify `telegram_transport_attempts` records `status=ok` or explicit API failure.
    - Verify offset row persists when update IDs are returned.
    - Verify no backlog flood occurs.
    - Verify event hash chain after cycle.
@@ -132,4 +137,4 @@ A.C.E. V1 cannot be claimed until at least these are specified and proven:
 
 Do not call A.C.E. V1.
 
-Next best engineering action: run Gate 1 as a controlled raw Telegram polling acceptance proof. A.C.E. now has a governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`) that reads the existing OpenClaw Telegram bot token at runtime without committing the secret. This switch still requires controlled acceptance proof before any raw polling claim is earned.
+Next best engineering action: finish Gate 1 with a controlled launchd-cycle raw Telegram acceptance proof. A.C.E. already has the governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`), TLS trust-store handling, Bot API offset persistence, and backlog checkpointing. The remaining bar is launchd-cycle integration without backlog flood, unaccounted notification side effects, stuck governed runs, or hash-chain/test regressions.
