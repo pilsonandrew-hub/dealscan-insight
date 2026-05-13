@@ -156,6 +156,7 @@ _NON_SUPPORTING_EVIDENCE_URIS = {
     "ace://telegram/intake-source",
     "ace://telegram/parser-decision",
     "ace://autonomy/eligible-direct-work",
+    "ace://autonomy/explicit-direct-work-closeout",
     "ace://notification/delivery",
 }
 

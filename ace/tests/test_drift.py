@@ -88,7 +88,7 @@ class DriftDimensionTests(unittest.TestCase):
 
     def test_claim_drift_clears_when_pass_claim_has_evidence(self) -> None:
         events = [
-            event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://autonomy/explicit-direct-work-closeout"}),
+            event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://proof/business-rule-verification"}),
             event(2, "item.verdict_recorded", {"verdict": "pass"}),
             event(3, "item.closeout_attempted", {"result": "passed", "evidence_count": 1}),
         ]
@@ -98,13 +98,14 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertEqual(dimension.status, "clear")
         self.assertEqual(dimension.score, 0.0)
 
-    def test_claim_drift_ignores_intake_and_parser_metadata_as_pass_support(self) -> None:
+    def test_claim_drift_ignores_intake_parser_and_generic_autonomy_metadata_as_pass_support(self) -> None:
         events = [
             event(1, "item.evidence_added", {"evidence_text": "inbound", "evidence_uri": "ace://telegram/intake-source"}),
             event(2, "item.evidence_added", {"evidence_text": "parser", "evidence_uri": "ace://telegram/parser-decision"}),
             event(3, "item.evidence_added", {"evidence_text": "eligible", "evidence_uri": "ace://autonomy/eligible-direct-work"}),
-            event(4, "item.verdict_recorded", {"verdict": "pass"}),
-            event(5, "item.closeout_attempted", {"result": "passed", "evidence_count": 3}),
+            event(4, "item.evidence_added", {"evidence_text": "generic closeout", "evidence_uri": "ace://autonomy/explicit-direct-work-closeout"}),
+            event(5, "item.verdict_recorded", {"verdict": "pass"}),
+            event(6, "item.closeout_attempted", {"result": "passed", "evidence_count": 4}),
         ]
 
         dimension = compute_claim_drift(events)
@@ -115,7 +116,7 @@ class DriftDimensionTests(unittest.TestCase):
 
     def test_compute_item_drift_returns_three_visible_dimensions(self) -> None:
         events = [
-            event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://autonomy/explicit-direct-work-closeout"}),
+            event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://proof/business-rule-verification"}),
             event(2, "item.verdict_recorded", {"verdict": "pass"}),
             event(3, "item.closeout_attempted", {"result": "passed", "failure_code": None, "evidence_count": 1}),
         ]
