@@ -21,6 +21,31 @@ class TelegramParserTests(unittest.TestCase):
         self.assertEqual(result.source_chat_id, "7529788084")
         self.assertEqual(result.source_message_id, "msg-100")
 
+    def test_actionable_audit_command_without_polite_marker(self) -> None:
+        result = parse_telegram_message(
+            "Audit the ACE scheduler collision path.",
+            chat_id="7529788084",
+            message_id="msg-104",
+            received_at="2026-05-08T16:54:00Z",
+        )
+
+        self.assertTrue(result.actionable)
+        self.assertEqual(result.classification, "direct_work")
+        self.assertEqual(result.parser_rule, "bounded_direct_work_rule")
+        self.assertIn("audit", result.parser_reason)
+
+    def test_actionable_imperative_without_prefix_marker(self) -> None:
+        result = parse_telegram_message(
+            "Keep working until the loop control proof is green.",
+            chat_id="7529788084",
+            message_id="msg-105",
+            received_at="2026-05-08T16:55:00Z",
+        )
+
+        self.assertTrue(result.actionable)
+        self.assertEqual(result.classification, "direct_work")
+        self.assertIn("keep working", result.parser_reason)
+
     def test_non_actionable_chatter(self) -> None:
         result = parse_telegram_message(
             "That sunset was incredible tonight.",

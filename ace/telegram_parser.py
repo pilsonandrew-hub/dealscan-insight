@@ -13,6 +13,28 @@ _DIRECT_MARKERS = (
     "make sure",
 )
 
+_DIRECT_PREFIXES = (
+    "audit ",
+    "verify ",
+    "inspect ",
+    "investigate ",
+    "review ",
+    "run ",
+    "fix ",
+    "harden ",
+    "summarize ",
+    "write ",
+    "create ",
+    "update ",
+)
+
+_STRONG_DIRECT_PATTERNS = (
+    "do not ",
+    "don't ",
+    "keep working",
+    "proceed ",
+)
+
 
 @dataclass(frozen=True)
 class TelegramParseResult:
@@ -52,6 +74,10 @@ def parse_telegram_message(
 
     lowered = normalized.lower()
     matched_marker = next((marker for marker in _DIRECT_MARKERS if marker in lowered), None)
+    if matched_marker is None:
+        matched_marker = next((marker for marker in _DIRECT_PREFIXES if lowered.startswith(marker)), None)
+    if matched_marker is None:
+        matched_marker = next((marker for marker in _STRONG_DIRECT_PATTERNS if marker in lowered), None)
     if matched_marker is None:
         return TelegramParseResult(
             actionable=False,
