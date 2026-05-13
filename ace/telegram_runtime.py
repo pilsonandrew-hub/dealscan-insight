@@ -480,18 +480,44 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
 
 
 def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
-    session_file = _resolve_openclaw_session_file()
+    transport_preference = os.environ.get("ACE_TELEGRAM_TRANSPORT", "auto").strip().lower() or "auto"
+    if transport_preference not in {"auto", "openclaw_session", "telegram_bot_api", "inbox_file"}:
+        _record_transport_attempt(
+            transport=transport_preference,
+            status="disabled",
+            error_type="invalid_transport",
+            error_summary="ACE_TELEGRAM_TRANSPORT must be one of: auto, openclaw_session, telegram_bot_api, inbox_file.",
+        )
+        return []
+
+    session_file = _resolve_openclaw_session_file() if transport_preference in {"auto", "openclaw_session"} else None
     bootstrap_existing = _env_flag("ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED")
     bootstrap_transport = ""
     if session_file is not None:
         messages = _load_inbound_messages_from_openclaw_session(session_file)
         bootstrap_transport = "openclaw_session"
+    elif transport_preference == "openclaw_session":
+        _record_transport_attempt(
+            transport="openclaw_session",
+            status="disabled",
+            error_type="missing_openclaw_session",
+            error_summary="ACE_TELEGRAM_TRANSPORT=openclaw_session but no matching OpenClaw session file was found.",
+        )
+        return []
     else:
         token = os.environ.get("ACE_TELEGRAM_BOT_TOKEN", "").strip() or _load_openclaw_telegram_bot_token()
-        if token:
+        if token and transport_preference in {"auto", "telegram_bot_api"}:
             has_explicit_or_stored_offset = bool(os.environ.get("ACE_TELEGRAM_UPDATE_OFFSET", "").strip()) or _stored_transport_offset("telegram_bot_api") is not None
             bootstrap_transport = "telegram_bot_api" if not has_explicit_or_stored_offset else ""
             messages = _load_inbound_messages_from_telegram(token)
+        elif transport_preference == "telegram_bot_api":
+            _record_transport_attempt(
+                transport="telegram_bot_api",
+                status="disabled",
+                error_type="missing_bot_token",
+                error_summary="ACE_TELEGRAM_TRANSPORT=telegram_bot_api but ACE_TELEGRAM_BOT_TOKEN is not configured and the governed OpenClaw token source is unavailable.",
+            )
+            return []
         else:
             inbox_path = os.environ.get("ACE_TELEGRAM_INBOX_PATH", "").strip()
             if not inbox_path:

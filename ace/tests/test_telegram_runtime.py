@@ -674,6 +674,79 @@ class TelegramRuntimeTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(tuple(attempt), ("telegram_bot_api", "ok", 0, None))
 
+    def test_explicit_bot_api_transport_bypasses_openclaw_session_for_launchd_proof(self) -> None:
+        config_path = Path(self.tempdir.name) / "openclaw.json"
+        config_path.write_text(json.dumps({"channels": {"telegram": {"botToken": "bot-token"}}}), encoding="utf-8")
+        session_file = Path(self.tempdir.name) / "session.jsonl"
+        session_file.write_text("", encoding="utf-8")
+        payload = {"ok": True, "result": []}
+
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with (
+            patch.dict(os.environ, {
+                "ACE_TELEGRAM_TRANSPORT": "telegram_bot_api",
+                "ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN": "true",
+                "ACE_OPENCLAW_CONFIG_PATH": str(config_path),
+                "ACE_OPENCLAW_SESSION_FILE": str(session_file),
+            }, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context) as mocked_urlopen,
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        mocked_urlopen.assert_called_once()
+        self.assertIn("getUpdates", mocked_urlopen.call_args.args[0])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, message_count, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("telegram_bot_api", "ok", 0, None))
+
+    def test_explicit_openclaw_session_transport_does_not_fall_back_to_bot_api(self) -> None:
+        with (
+            patch.dict(os.environ, {
+                "ACE_TELEGRAM_TRANSPORT": "openclaw_session",
+                "ACE_OPENCLAW_CHAT_ID": "telegram:7529788084",
+                "ACE_TELEGRAM_BOT_TOKEN": "bot-token",
+            }, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.OPENCLAW_MAIN_SESSIONS_INDEX", Path(self.tempdir.name) / "missing-sessions.json"),
+            patch("ace.telegram_runtime.request.urlopen") as mocked_urlopen,
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        mocked_urlopen.assert_not_called()
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("openclaw_session", "disabled", "missing_openclaw_session"))
+
+    def test_invalid_explicit_telegram_transport_fails_closed(self) -> None:
+        with (
+            patch.dict(os.environ, {"ACE_TELEGRAM_TRANSPORT": "raw-ish"}, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(messages, [])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("raw-ish", "disabled", "invalid_transport"))
+
     def test_governed_openclaw_token_source_records_disabled_when_config_missing(self) -> None:
         with (
             patch.dict(os.environ, {
