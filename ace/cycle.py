@@ -55,6 +55,7 @@ def run_cycle(
             "rendered_briefing": "",
             "actionable_finding_count": 0,
             "notification_count": 0,
+            "notifications_suppressed": False,
             "notifications": notification_results,
         }
 

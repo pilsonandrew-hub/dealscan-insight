@@ -344,6 +344,8 @@ def _print_cycle_result(result: dict[str, object]) -> None:
     print(f"briefing_path={result['briefing_path']}")
     print(f"actionable_finding_count={result['actionable_finding_count']}")
     print(f"notification_count={result['notification_count']}")
+    if "notifications_suppressed" in result:
+        print(f"notifications_suppressed={str(result['notifications_suppressed']).lower()}")
     print("sweep:")
     _print_sweep_result(result["sweep"])
     print("briefing:")

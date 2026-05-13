@@ -258,6 +258,7 @@ class AceCycleTests(unittest.TestCase):
         self.assertEqual(result["governed_run"]["status"], "skipped")
         self.assertEqual(result["governed_run"]["failure_code"], "cycle_already_active")
         self.assertEqual(result["notification_count"], 0)
+        self.assertFalse(result["notifications_suppressed"])
         self.assertEqual(result["ingested_messages"], [])
         self.assertFalse(self.briefing_path.exists())
 
