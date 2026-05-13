@@ -363,6 +363,81 @@ def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
     assert premium["ai_confidence_score"] < 70
 
 
+def test_score_deal_hard_rejects_premium_bid_above_max_bid():
+    result = score_deal(
+        bid=9100,
+        mmr_ca=10000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 2,
+        mileage=20000,
+        title_status="clean",
+        description="clean vehicle",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["vehicle_tier"] == "premium"
+    assert result["bid_ceiling_pct"] == 0.88
+    assert result["max_bid"] < 8800
+    assert result["bid_headroom"] < 0
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "bid_ceiling_exceeded"
+    assert result["investment_grade"] == "Rejected"
+    assert result["dos_score"] == 0.0
+    assert result["score"] == 0.0
+
+
+def test_score_deal_hard_rejects_standard_bid_above_max_bid():
+    result = score_deal(
+        bid=8500,
+        mmr_ca=10000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 5,
+        mileage=30000,
+        title_status="clean",
+        description="clean vehicle",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["vehicle_tier"] == "standard"
+    assert result["bid_ceiling_pct"] == 0.80
+    assert result["max_bid"] < 8000
+    assert result["bid_headroom"] < 0
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "bid_ceiling_exceeded"
+    assert result["investment_grade"] == "Rejected"
+    assert result["dos_score"] == 0.0
+    assert result["score"] == 0.0
+
+
+def test_score_deal_hard_rejects_margin_floor_failure():
+    result = score_deal(
+        bid=7000,
+        mmr_ca=10000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=CURRENT_YEAR - 5,
+        mileage=30000,
+        title_status="clean",
+        description="clean vehicle",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["vehicle_tier"] == "standard"
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "margin_floor_failed"
+    assert result["investment_grade"] == "Rejected"
+    assert result["dos_score"] == 0.0
+    assert result["score"] == 0.0
+
+
 def test_score_deal_keeps_weak_retail_evidence_on_proxy_path():
     result = score_deal(
         bid=10000,

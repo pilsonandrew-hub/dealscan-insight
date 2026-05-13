@@ -839,11 +839,16 @@ def score_deal(
     )
     bid_headroom = max_bid - bid_value
     min_margin_target = None if vehicle_tier == "rejected" else 2500.0 if vehicle_tier == "standard" else 1500.0
-    ceiling_pass = False if vehicle_tier == "rejected" else bid_value <= max_bid and gross_margin >= min_margin_target
+    bid_ceiling_exceeded = vehicle_tier != "rejected" and max_bid > 0 and bid_value > max_bid
+    margin_floor_failed = vehicle_tier != "rejected" and min_margin_target is not None and gross_margin < min_margin_target
+    hard_rejected_by_economics = bid_ceiling_exceeded or margin_floor_failed
+    if hard_rejected_by_economics:
+        selected_dos = 0.0
+    ceiling_pass = False if vehicle_tier == "rejected" or hard_rejected_by_economics else bid_value <= max_bid and gross_margin >= min_margin_target
 
     all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount + transport + recon_reserve
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
-    if vehicle_tier == "rejected":
+    if vehicle_tier == "rejected" or hard_rejected_by_economics:
         investment_grade = "Rejected"
     elif selected_dos >= 80 and roi_pct >= 20 and ceiling_pass:
         investment_grade = "Platinum"
@@ -965,7 +970,15 @@ def score_deal(
         "max_bid": max_bid,
         "bid_headroom": bid_headroom,
         "min_margin_target": min_margin_target,
-        "ceiling_reason": "high_rust_state_rejected" if rust_state_rejected else "score_deal_v3_two_lane",
+        "ceiling_reason": (
+            "high_rust_state_rejected"
+            if rust_state_rejected
+            else "bid_ceiling_exceeded"
+            if bid_ceiling_exceeded
+            else "margin_floor_failed"
+            if margin_floor_failed
+            else "score_deal_v3_two_lane"
+        ),
         "ceiling_pass": ceiling_pass,
         "designated_lane": vehicle_tier,
         "vehicle_tier": vehicle_tier,
