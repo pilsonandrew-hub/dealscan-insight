@@ -218,6 +218,7 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertNotIn("machine-verifiable direct work item", serialized)
         assert closeout_row is not None
         self.assertIn("explicit eligibility evidence", closeout_row[0])
+        self.assertIn('"verdict":"pass"', closeout_row[0])
         assert evidence_row is not None
         self.assertIn("explicit governed eligibility evidence", evidence_row[0])
         self.assertNotIn("machine-verifiable eligibility rules", evidence_row[0])
@@ -252,6 +253,55 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertIn(AUTONOMY_ELIGIBILITY_EVIDENCE_URI, uris)
         self.assertIn(AUTONOMY_DIRECT_WORK_EVIDENCE_URI, uris)
         self.assertNotIn(AUTONOMY_EVIDENCE_URI, uris)
+
+    def test_autonomy_lane_records_pass_verdict_before_closeout(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Explicit direct work item verdict check",
+            source="telegram/direct",
+            source_session="2026-05-12-direct-work-verdict-check",
+            actor="test",
+        )
+        mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="verdict governance proof",
+            actor="operator",
+        )
+
+        run_autonomy_lane(self.db_path, actor="launchd", source_session="run_test")
+
+        final_item = self.repo.get_item(item.id)
+        assert final_item is not None
+        self.assertEqual(final_item.state, "VERIFIED_DONE")
+        self.assertEqual(final_item.verdict, "pass")
+        event_types = [event.event_type for event in self.repo.list_item_events(item.id)]
+        self.assertIn("item.verdict_recorded", event_types)
+        self.assertLess(event_types.index("item.verdict_recorded"), event_types.index("item.closeout_attempted"))
+
+    def test_autonomy_lane_refuses_to_overwrite_existing_fail_verdict(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Explicit direct work item conflicting verdict",
+            verdict="fail",
+            source="telegram/direct",
+            source_session="2026-05-12-direct-work-conflicting-verdict",
+            actor="test",
+        )
+        mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="verdict conflict proof",
+            actor="operator",
+        )
+
+        with self.assertRaisesRegex(ValueError, "refusing to overwrite"):
+            run_autonomy_lane(self.db_path, actor="launchd", source_session="run_test")
+
+        final_item = self.repo.get_item(item.id)
+        assert final_item is not None
+        self.assertEqual(final_item.state, "CLAIMED_DONE")
+        self.assertEqual(final_item.verdict, "fail")
 
     def test_intake_autonomy_eligible_direct_work_creates_governed_seed(self) -> None:
         item, evidence_id = intake_autonomy_eligible_direct_work(

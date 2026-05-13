@@ -232,6 +232,14 @@ def run_autonomy_lane(
             claimed_done_ids.append(item.id)
 
         if item.state == "CLAIMED_DONE":
+            item = repo.record_verdict(
+                item.id,
+                "pass",
+                actor=acting_actor,
+                source=AUTONOMY_SOURCE,
+                source_session=acting_session,
+                reason="governed autonomy lane recorded pass verdict before closeout",
+            )
             item = repo.apply_action(
                 item.id,
                 "resolve",

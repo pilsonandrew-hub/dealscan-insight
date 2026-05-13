@@ -47,6 +47,37 @@ class ItemRepositoryContractTests(unittest.TestCase):
         assert stored is not None
         self.assertEqual(stored.verdict, "pass")
 
+    def test_record_verdict_persists_event_and_refuses_overwrite(self) -> None:
+        item = self.repo.create_item(
+            item_type="task",
+            title="Verdict target",
+            actor="test",
+        )
+
+        updated = self.repo.record_verdict(
+            item.id,
+            " PASS ",
+            actor="auditor",
+            source="test",
+            source_session="run_test",
+            reason="evidence reviewed",
+        )
+
+        self.assertEqual(updated.verdict, "pass")
+        events = self.repo.list_item_events(item.id)
+        verdict_events = [event for event in events if event.event_type == "item.verdict_recorded"]
+        self.assertEqual(len(verdict_events), 1)
+        self.assertIn('"verdict":"pass"', verdict_events[0].payload_json or "")
+        self.assertIn('"reason":"evidence reviewed"', verdict_events[0].payload_json or "")
+
+        idempotent = self.repo.record_verdict(item.id, "pass", actor="auditor")
+        self.assertEqual(idempotent.verdict, "pass")
+        events = self.repo.list_item_events(item.id)
+        self.assertEqual(len([event for event in events if event.event_type == "item.verdict_recorded"]), 1)
+
+        with self.assertRaises(ValidationError):
+            self.repo.record_verdict(item.id, "fail", actor="auditor")
+
     def test_resolve_enforces_persisted_fail_verdict(self) -> None:
         item = self.repo.create_item(
             item_type="task",

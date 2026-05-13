@@ -140,6 +140,21 @@ def _closeout_attempted_payload(
     }
 
 
+def _verdict_recorded_payload(
+    *,
+    item_id: str,
+    previous_verdict: str | None,
+    verdict: str,
+    reason: str | None,
+) -> dict[str, Any]:
+    return {
+        "item_id": item_id,
+        "previous_verdict": previous_verdict,
+        "verdict": verdict,
+        "reason": reason,
+    }
+
+
 def _obligation_resolved_payload(
     *,
     obligation_id: str,
@@ -681,6 +696,63 @@ class ItemRepository:
                 f"duplicate provenance rows for source={normalized_source} source_session={normalized_source_session}"
             )
         return self._row_to_item(rows[0])
+
+    def record_verdict(
+        self,
+        item_id: str,
+        verdict: str,
+        *,
+        actor: str | None = None,
+        source: str | None = None,
+        source_session: str | None = None,
+        reason: str | None = None,
+    ) -> Item:
+        normalized_verdict = normalize_verdict(verdict)
+        normalized_reason = reason.strip() if reason is not None else None
+        if reason is not None and not normalized_reason:
+            raise ValidationError("reason must not be empty or whitespace-only")
+        updated_at = utc_now()
+
+        with connect(self.db_path) as connection:
+            row = connection.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"unknown item_id: {item_id}")
+
+            previous_verdict = row["verdict"]
+            if previous_verdict == normalized_verdict:
+                return self._row_to_item(row)
+            if previous_verdict is not None:
+                raise ValidationError(
+                    f"item already has verdict {previous_verdict}; refusing to overwrite with {normalized_verdict}"
+                )
+
+            event_id = append_event(
+                connection,
+                event_type="item.verdict_recorded",
+                payload=_verdict_recorded_payload(
+                    item_id=item_id,
+                    previous_verdict=previous_verdict,
+                    verdict=normalized_verdict,
+                    reason=normalized_reason,
+                ),
+                item_id=item_id,
+                actor=actor,
+                source=source,
+                session_id=source_session,
+                created_at=updated_at,
+            )
+            connection.execute(
+                """
+                UPDATE items
+                SET verdict = ?, updated_at = ?, last_event_id = ?
+                WHERE id = ?
+                """,
+                (normalized_verdict, updated_at, event_id, item_id),
+            )
+            connection.commit()
+            final_row = connection.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+            assert final_row is not None, "item verdict update failed unexpectedly"
+            return self._row_to_item(final_row)
 
     def list_items(self, *, state: str | None = None) -> list[Item]:
         query = "SELECT * FROM items"
