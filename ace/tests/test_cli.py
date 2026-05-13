@@ -166,6 +166,34 @@ class AceCliTests(unittest.TestCase):
             self.assertIn("event[0].type=item.evidence_added", output)
             self.assertIn('"evidence_text":"proof two"', output)
             self.assertNotIn('"evidence_text":"proof one"', output)
+
+    def test_record_verdict_command_appends_verdict_and_show_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Verdict CLI item")
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "record-verdict",
+                item_id,
+                " PASS ",
+                "--reason",
+                "evidence reviewed",
+                "--actor",
+                "cli",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn("verdict=pass", output)
+
+            code, output = self.run_cli("--db", str(db_path), "show", item_id)
+            self.assertEqual(code, 0, output)
+            self.assertIn("verdict=pass", output)
+            self.assertIn("type=item.verdict_recorded", output)
+            self.assertIn('"reason":"evidence reviewed"', output)
             self.assertNotIn("item.obligation_added", output)
 
     def test_mark_autonomy_eligible_adds_single_governed_evidence_row(self) -> None:
@@ -14448,7 +14476,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0, output)
             self.assertIn("open_contradictions", output)
 
@@ -14532,7 +14560,7 @@ class AceCliTests(unittest.TestCase):
                 code, output = self.run_cli("--db", str(db_path), command, item_id)
                 self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -15849,7 +15877,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_contradictions", output)
 
@@ -15866,7 +15894,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             self.assertIn("status=resolved", output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -15951,7 +15979,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "first attempt")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "first attempt")
             self.assertNotEqual(code, 0)
             self.assertIn("open_contradictions", output)
 
@@ -15961,7 +15989,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "second attempt")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "second attempt")
             self.assertNotEqual(code, 0)
             self.assertIn("open_obligations", output)
 
@@ -15971,7 +15999,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "third attempt")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "third attempt")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -16053,7 +16081,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -16079,7 +16107,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(before_closeout_runs, 1)
             self.assertEqual(before_closeout_events, 1)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "again")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "again")
             self.assertNotEqual(code, 0)
             self.assertEqual(
                 output.strip(),
@@ -16128,7 +16156,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -16267,7 +16295,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_contradictions", output)
 
@@ -16365,7 +16393,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_contradictions", output)
 
@@ -16381,7 +16409,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_obligations", output)
 
@@ -16485,7 +16513,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "done", item_id)
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_contradictions", output)
 
@@ -16501,7 +16529,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_obligations", output)
 
@@ -16518,7 +16546,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             self.assertIn("status=resolved", output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -17280,6 +17308,8 @@ class AceCliTests(unittest.TestCase):
                 str(db_path),
                 "resolve",
                 item_id,
+                "--verdict",
+                "pass",
             )
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
@@ -17662,7 +17692,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", target_item_id)
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", target_item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", target_item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0)
             self.assertIn("open_contradictions", output)
 
@@ -18008,7 +18038,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(done_code, 0, done_output)
 
             first_resolve_code, first_resolve_output = self.run_cli(
-                "--db", str(db_path), "resolve", item_id
+                "--db", str(db_path), "resolve", item_id, "--verdict", "pass"
             )
             self.assertNotEqual(first_resolve_code, 0)
             self.assertIn("open_contradictions", first_resolve_output)
@@ -18027,7 +18057,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(resolve_contradiction_code, 0, resolve_contradiction_output)
 
             second_resolve_code, second_resolve_output = self.run_cli(
-                "--db", str(db_path), "resolve", item_id
+                "--db", str(db_path), "resolve", item_id, "--verdict", "pass"
             )
             self.assertNotEqual(second_resolve_code, 0)
             self.assertIn("open_obligations", second_resolve_output)
@@ -18045,7 +18075,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(resolve_obligation_code, 0, resolve_obligation_output)
 
             final_resolve_code, final_resolve_output = self.run_cli(
-                "--db", str(db_path), "resolve", item_id
+                "--db", str(db_path), "resolve", item_id, "--verdict", "pass"
             )
             self.assertEqual(final_resolve_code, 0, final_resolve_output)
             self.assertIn("state=VERIFIED_DONE", final_resolve_output)
@@ -18137,6 +18167,8 @@ class AceCliTests(unittest.TestCase):
                 str(db_path),
                 "resolve",
                 verified_id,
+                "--verdict",
+                "pass",
                 "--reason",
                 "final close",
             )
@@ -18237,7 +18269,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", verified_id, "--reason", "ready to close")
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--reason", "final close")
+            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--verdict", "pass", "--reason", "final close")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -18305,7 +18337,7 @@ class AceCliTests(unittest.TestCase):
             item_id = output.split("item_id=")[1].split()[0]
             self.assertIn("state=TRIAGE", output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "too early")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "too early")
             self.assertEqual(code, 1, output)
             self.assertEqual(output.strip(), "error=illegal transition: TRIAGE --resolve--> ? (legal actions: approve, block, drop)")
 
@@ -18313,7 +18345,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             self.assertIn("state=APPROVED", output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "still too early")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "still too early")
             self.assertEqual(code, 1, output)
             self.assertEqual(output.strip(), "error=illegal transition: APPROVED --resolve--> ? (legal actions: block, done, drop)")
 
@@ -18325,7 +18357,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 1, output)
             self.assertEqual(output.strip(), "error=illegal transition: BLOCKED --done--> ? (legal actions: drop, resolve)")
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "review complete")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "review complete")
             self.assertEqual(code, 0, output)
             self.assertIn("state=APPROVED", output)
 
@@ -18396,7 +18428,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "block", blocked_resolve_id, "--reason", "needs review")
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", blocked_resolve_id, "--reason", "review complete")
+            code, output = self.run_cli("--db", str(db_path), "resolve", blocked_resolve_id, "--verdict", "pass", "--reason", "review complete")
             self.assertEqual(code, 0, output)
             self.assertIn("state=APPROVED", output)
 
@@ -18409,7 +18441,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", closeout_id, "--reason", "ready to close")
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", closeout_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", closeout_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -18484,7 +18516,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", verified_id, "--reason", "ready")
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -18567,7 +18599,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", closeout_id, "--reason", "ready")
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", closeout_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", closeout_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -18681,7 +18713,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "done", item_id, "--reason", "ready")
             self.assertEqual(code, 0, output)
 
-            code, first_resolve_output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "first try")
+            code, first_resolve_output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "first try")
             self.assertEqual(code, 1, first_resolve_output)
             self.assertIn("open_obligations", first_resolve_output)
 
@@ -18690,7 +18722,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, second_resolve_output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "second try")
+            code, second_resolve_output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "second try")
             self.assertEqual(code, 0, second_resolve_output)
             self.assertIn("state=VERIFIED_DONE", second_resolve_output)
 
@@ -18759,7 +18791,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             code, output = self.run_cli("--db", str(db_path), "done", verified_id, "--reason", "ready")
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -18864,7 +18896,7 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "drop", dropped_id, "--reason", "end dropped")
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--reason", "pass verified")
+            code, output = self.run_cli("--db", str(db_path), "resolve", verified_id, "--verdict", "pass", "--reason", "pass verified")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -19022,7 +19054,7 @@ class AceCliTests(unittest.TestCase):
                 "completed",
             )
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "final close")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "final close")
             self.assertEqual(code, 0, output)
 
             code, show_output = self.run_cli("--db", str(db_path), "show", item_id, "--event-limit", "20")
@@ -19120,10 +19152,10 @@ class AceCliTests(unittest.TestCase):
                 "completed",
             )
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "final close")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "final close")
             self.assertEqual(code, 0, output)
 
-            code, show_output = self.run_cli("--db", str(db_path), "show", item_id, "--event-limit", "4")
+            code, show_output = self.run_cli("--db", str(db_path), "show", item_id, "--event-limit", "5")
             self.assertEqual(code, 0, show_output)
             self.assertIn(f"item_id={item_id}", show_output)
             self.assertIn("state=VERIFIED_DONE", show_output)
@@ -19139,6 +19171,7 @@ class AceCliTests(unittest.TestCase):
             expected_recent_types = [
                 "item.closeout_attempted",
                 "item.obligation_resolved",
+                "item.verdict_recorded",
                 "item.closeout_attempted",
                 "item.state_changed",
             ]
@@ -19147,10 +19180,12 @@ class AceCliTests(unittest.TestCase):
 
             first_closeout_index = show_output.index('type=item.closeout_attempted')
             resolved_index = show_output.index('type=item.obligation_resolved')
+            verdict_index = show_output.index('type=item.verdict_recorded')
             second_closeout_index = show_output.rindex('type=item.closeout_attempted')
             final_state_index = show_output.rindex('type=item.state_changed')
             self.assertLess(first_closeout_index, resolved_index)
-            self.assertLess(resolved_index, second_closeout_index)
+            self.assertLess(resolved_index, verdict_index)
+            self.assertLess(verdict_index, second_closeout_index)
             self.assertLess(second_closeout_index, final_state_index)
 
             self.assertIn('"result":"blocked"', show_output)
@@ -19212,7 +19247,7 @@ class AceCliTests(unittest.TestCase):
                 "completed",
             )
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "final close")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "final close")
             self.assertEqual(code, 0, output)
 
             code, show_output = self.run_cli(
@@ -19305,12 +19340,12 @@ class AceCliTests(unittest.TestCase):
                 "completed",
             )
             self.assertEqual(code, 0, output)
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "final close")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "final close")
             self.assertEqual(code, 0, output)
 
             code, show_output_full = self.run_cli("--db", str(db_path), "show", item_id, "--event-limit", "20")
             self.assertEqual(code, 0, show_output_full)
-            code, show_output_bounded = self.run_cli("--db", str(db_path), "show", item_id, "--event-limit", "4")
+            code, show_output_bounded = self.run_cli("--db", str(db_path), "show", item_id, "--event-limit", "5")
             self.assertEqual(code, 0, show_output_bounded)
             code, show_output_filtered = self.run_cli(
                 "--db",
@@ -19427,7 +19462,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "final close")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "final close")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -19459,6 +19494,7 @@ class AceCliTests(unittest.TestCase):
                 "item.state_changed",
                 "item.closeout_attempted",
                 "item.obligation_resolved",
+                "item.verdict_recorded",
                 "item.closeout_attempted",
                 "item.state_changed",
             ])
@@ -19498,7 +19534,11 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(obligation_resolved_payload["item_id"], item_id)
             self.assertEqual(obligation_resolved_payload["reason"], "completed")
 
-            second_closeout_payload = history[7][1]
+            verdict_payload = history[7][1]
+            self.assertEqual(verdict_payload["verdict"], "pass")
+            self.assertEqual(verdict_payload["reason"], "final close")
+
+            second_closeout_payload = history[8][1]
             self.assertEqual(second_closeout_payload["reason"], "final close")
             self.assertEqual(second_closeout_payload["evidence_count"], 1)
             self.assertEqual(second_closeout_payload["open_obligation_count"], 0)
@@ -19506,14 +19546,14 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(second_closeout_payload["result"], "passed")
             self.assertIsNone(second_closeout_payload["failure_code"])
 
-            final_state_payload = history[8][1]
+            final_state_payload = history[9][1]
             self.assertEqual(final_state_payload["action"], "resolve")
             self.assertEqual(final_state_payload["from_state"], "CLAIMED_DONE")
             self.assertEqual(final_state_payload["to_state"], "VERIFIED_DONE")
             self.assertEqual(final_state_payload["reason"], "final close")
             self.assertEqual(item_row["state"], final_state_payload["to_state"])
             self.assertEqual(second_closeout_payload["item_id"], final_state_payload["item_id"])
-            self.assertEqual(final_state_payload["closeout_event_id"], event_rows[7]["event_id"])
+            self.assertEqual(final_state_payload["closeout_event_id"], event_rows[8]["event_id"])
 
             self.assertEqual(len(closeout_rows), 2)
             self.assertEqual(
@@ -19806,7 +19846,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -19837,6 +19877,7 @@ class AceCliTests(unittest.TestCase):
                     "item.state_changed",
                     "item.state_changed",
                     "item.obligation_resolved",
+                    "item.verdict_recorded",
                     "item.closeout_attempted",
                     "item.state_changed",
                 ],
@@ -19955,6 +19996,8 @@ class AceCliTests(unittest.TestCase):
                 str(db_path),
                 "resolve",
                 item_id,
+                "--verdict",
+                "pass",
                 "--reason",
                 "final close",
                 "--source",
@@ -20140,7 +20183,7 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(code, 0, output)
             self.assertIn("state=BLOCKED", output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "review complete")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "review complete")
             self.assertEqual(code, 0, output)
             self.assertIn("state=APPROVED", output)
 
@@ -20163,7 +20206,7 @@ class AceCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--reason", "close it")
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass", "--reason", "close it")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -20246,7 +20289,7 @@ class AceCliTests(unittest.TestCase):
                 )
                 connection.commit()
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertEqual(code, 0, output)
             self.assertIn("state=VERIFIED_DONE", output)
 
@@ -20284,7 +20327,7 @@ class AceCliTests(unittest.TestCase):
                 code, output = self.run_cli("--db", str(db_path), command, item_id)
                 self.assertEqual(code, 0, output)
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0, output)
             self.assertIn("missing_evidence", output)
 
@@ -20337,7 +20380,7 @@ class AceCliTests(unittest.TestCase):
                 )
                 connection.commit()
 
-            code, output = self.run_cli("--db", str(db_path), "resolve", item_id)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--verdict", "pass")
             self.assertNotEqual(code, 0, output)
             self.assertIn("open_obligations", output)
 

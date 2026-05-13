@@ -72,6 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--event-type")
     show.add_argument("--event-limit", type=int)
 
+    record_verdict = subparsers.add_parser("record-verdict", help="Record an append-only item verdict")
+    record_verdict.add_argument("item_id")
+    record_verdict.add_argument("verdict")
+    record_verdict.add_argument("--reason")
+    record_verdict.add_argument("--actor")
+    record_verdict.add_argument("--source")
+    record_verdict.add_argument("--session")
+
     sweep = subparsers.add_parser("sweep", help="Classify stale bounded work from live ACE state")
     sweep.add_argument("--triage-after-hours", type=int, default=24)
     sweep.add_argument("--approved-after-hours", type=int, default=72)
@@ -227,6 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--actor")
         command.add_argument("--source")
         command.add_argument("--session")
+        if name == "resolve":
+            command.add_argument("--verdict", help="Append a verdict before closeout; must be pass to close")
 
     return parser
 
@@ -578,6 +588,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+        if command == "record-verdict":
+            item = repo.record_verdict(
+                args.item_id,
+                _normalize_required_text(args.verdict, field_name="verdict"),
+                actor=_normalize_optional_text(args.actor, field_name="actor"),
+                source=_normalize_optional_text(args.source, field_name="source"),
+                source_session=_normalize_optional_text(args.session, field_name="source_session"),
+                reason=_normalize_optional_text(args.reason, field_name="reason"),
+            )
+            _print_item(item)
+            return 0
+
         if command == "sweep":
             thresholds = SweepThresholds(
                 triage_after_seconds=args.triage_after_hours * 3600,
@@ -789,6 +811,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if command in {"approve", "block", "done", "resolve", "drop"}:
+            if command == "resolve" and getattr(args, "verdict", None) is not None:
+                repo.record_verdict(
+                    args.item_id,
+                    _normalize_required_text(args.verdict, field_name="verdict"),
+                    actor=_normalize_optional_text(args.actor, field_name="actor"),
+                    source=_normalize_optional_text(args.source, field_name="source"),
+                    source_session=_normalize_optional_text(args.session, field_name="source_session"),
+                    reason=_normalize_optional_text(args.reason, field_name="reason"),
+                )
             item = repo.apply_action(
                 args.item_id,
                 command,

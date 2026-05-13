@@ -104,6 +104,25 @@ class ItemRepositoryContractTests(unittest.TestCase):
         self.assertIn('"failure_code":"verdict_fail"', closeout_event.payload_json or "")
         self.assertIn('"verdict":"fail"', closeout_event.payload_json or "")
 
+    def test_resolve_blocks_missing_verdict(self) -> None:
+        item = self.repo.create_item(
+            item_type="task",
+            title="Missing verdict closeout target",
+            actor="test",
+        )
+        self.repo.add_evidence(item.id, evidence_text="evidence exists", actor="test")
+        self.repo.apply_action(item.id, "approve", actor="test")
+        self.repo.apply_action(item.id, "done", actor="test")
+
+        with self.assertRaises(CloseoutGateError) as raised:
+            self.repo.apply_action(item.id, "resolve", actor="test")
+
+        self.assertIn("missing_verdict", str(raised.exception))
+        stored = self.repo.get_item(item.id)
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.state, "CLAIMED_DONE")
+
     def test_resolve_allows_persisted_pass_verdict(self) -> None:
         item = self.repo.create_item(
             item_type="task",
@@ -332,6 +351,7 @@ class ItemRepositoryContractTests(unittest.TestCase):
         approved = self.repo.apply_action(item.id, "approve", actor="test")
         claimed = self.repo.apply_action(approved.id, "done", actor="test")
         self.repo.add_evidence(claimed.id, evidence_text="proof", actor="test")
+        self.repo.record_verdict(claimed.id, "pass", actor="test", reason="proof reviewed")
 
         verified = self.repo.apply_action(claimed.id, "resolve", actor="test", reason="verified")
         self.assertEqual(verified.state, "VERIFIED_DONE")

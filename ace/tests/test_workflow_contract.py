@@ -141,15 +141,15 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(code, "open_obligations")
         self.assertEqual(detail, "closeout blocked by 1 open obligation")
 
-    def test_closeout_gate_passes_when_requirements_are_met(self) -> None:
+    def test_closeout_gate_blocks_missing_verdict_when_other_requirements_are_met(self) -> None:
         allowed, code, detail = closeout_gate(
             evidence_count=2,
             open_obligation_count=0,
             open_contradiction_count=0,
         )
-        self.assertTrue(allowed)
-        self.assertIsNone(code)
-        self.assertIsNone(detail)
+        self.assertFalse(allowed)
+        self.assertEqual(code, "missing_verdict")
+        self.assertEqual(detail, "closeout requires a recorded pass verdict")
 
     def test_closeout_gate_blocks_on_verdict_fail(self) -> None:
         allowed, code, detail = closeout_gate(
@@ -184,16 +184,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIsNone(code)
         self.assertIsNone(detail)
 
-    def test_closeout_gate_passes_with_no_verdict(self) -> None:
+    def test_closeout_gate_blocks_with_no_verdict(self) -> None:
         allowed, code, detail = closeout_gate(
             evidence_count=2,
             open_obligation_count=0,
             open_contradiction_count=0,
             verdict=None,
         )
-        self.assertTrue(allowed)
-        self.assertIsNone(code)
-        self.assertIsNone(detail)
+        self.assertFalse(allowed)
+        self.assertEqual(code, "missing_verdict")
+        self.assertEqual(detail, "closeout requires a recorded pass verdict")
 
     def test_closeout_gate_verdict_fail_blocks_even_with_whitespace(self) -> None:
         allowed, code, detail = closeout_gate(

@@ -339,6 +339,10 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
     bootstrap_db(db_path)
     previous_event_hash: str | None = None
     with connect(db_path) as connection:
+        # Take a consistent verification snapshot while also backfilling any rows
+        # appended by a still-running pre-hash runtime process.
+        connection.execute("BEGIN IMMEDIATE")
+        _backfill_event_hashes(connection)
         rows = connection.execute(
             """
             SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
@@ -347,6 +351,7 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
             ORDER BY id ASC
             """
         ).fetchall()
+        connection.commit()
 
     for row in rows:
         if row["previous_event_hash"] != previous_event_hash:

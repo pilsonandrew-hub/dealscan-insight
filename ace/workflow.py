@@ -207,6 +207,8 @@ def closeout_gate(
             f"closeout blocked by {open_obligation_count} open obligation{suffix}",
         )
     normalized_verdict = verdict.strip().lower() if verdict else None
+    if normalized_verdict is None:
+        return False, "missing_verdict", "closeout requires a recorded pass verdict"
     if normalized_verdict == "fail":
         return False, "verdict_fail", "closeout blocked: item verdict is fail"
     if normalized_verdict == "pending":
