@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -70,16 +71,19 @@ def create_or_skip_governed_cycle_run(
     db_path: Path | str = DB_PATH,
     *,
     trigger_kind: str = TRIGGER_KIND_OPERATOR,
+    active_run_stale_after_seconds: int = 24 * 60 * 60,
 ) -> dict[str, Any]:
     """Create one governed ACE cycle run, or record a skipped run if one is already active.
 
     This is the single-flight boundary for bounded ACE cycles. It does not kill,
-    steal, or overwrite another run; it records an auditable skipped terminal run
-    when the runtime is already occupied.
+    steal, or overwrite a live run. If an active row is fresh, it records an
+    auditable skipped terminal run. If an active row is stale, it first
+    terminalizes that stale row as interrupted and then creates a new pending run.
     """
 
     bootstrap_db(db_path)
     normalized_trigger_kind = _normalize_required_text(trigger_kind, field_name="trigger_kind")
+    normalized_stale_after_seconds = _normalize_active_run_stale_after_seconds(active_run_stale_after_seconds)
     run_id = new_id("run")
     created_at = utc_now()
 
@@ -87,7 +91,7 @@ def create_or_skip_governed_cycle_run(
         connection.execute("BEGIN IMMEDIATE")
         active_row = connection.execute(
             """
-            SELECT run_id, status
+            SELECT run_id, status, created_at, started_at
             FROM governed_runs
             WHERE run_kind = ? AND status IN (?, ?, ?)
             ORDER BY created_at DESC, run_id DESC
@@ -95,7 +99,11 @@ def create_or_skip_governed_cycle_run(
             """,
             (RUN_KIND_CYCLE, STATUS_PENDING, STATUS_STARTING, STATUS_RUNNING),
         ).fetchone()
-        if active_row is not None:
+        if active_row is not None and not _active_run_is_stale(
+            active_row,
+            now=created_at,
+            stale_after_seconds=normalized_stale_after_seconds,
+        ):
             failure_summary = (
                 "governed ace cycle skipped because another cycle is active: "
                 f"{active_row['run_id']} ({active_row['status']})"
@@ -126,6 +134,27 @@ def create_or_skip_governed_cycle_run(
                 ),
             )
         else:
+            if active_row is not None:
+                failure_summary = (
+                    "stale governed ace cycle reconciled before creating a new cycle: "
+                    f"{active_row['run_id']} ({active_row['status']})"
+                )
+                connection.execute(
+                    """
+                    UPDATE governed_runs
+                    SET status = ?, ended_at = ?, interrupted_at = ?,
+                        failure_code = ?, failure_summary = ?
+                    WHERE run_id = ?
+                    """,
+                    (
+                        STATUS_INTERRUPTED,
+                        created_at,
+                        created_at,
+                        "cycle_stale_active_reconciled",
+                        failure_summary,
+                        active_row["run_id"],
+                    ),
+                )
             connection.execute(
                 """
                 INSERT INTO governed_runs (
@@ -491,3 +520,24 @@ def _normalize_optional_text(value: str | None) -> str | None:
     if not normalized:
         raise ValidationError("optional governed run text must not be empty or whitespace-only")
     return normalized
+
+
+def _normalize_active_run_stale_after_seconds(value: int) -> int:
+    if value <= 0:
+        raise ValidationError("active_run_stale_after_seconds must be greater than zero")
+    return value
+
+
+def _active_run_is_stale(row: Any, *, now: str, stale_after_seconds: int) -> bool:
+    reference = row["started_at"] or row["created_at"]
+    return (_parse_timestamp(now) - _parse_timestamp(reference)).total_seconds() > stale_after_seconds
+
+
+def _parse_timestamp(value: str) -> datetime:
+    normalized = str(value).strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

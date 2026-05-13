@@ -271,6 +271,51 @@ class AceCycleTests(unittest.TestCase):
         self.assertEqual(active_count, 1)
         self.assertEqual(skipped_count, 1)
 
+    def test_cycle_reconciles_stale_active_run_before_starting_new_cycle(self) -> None:
+        with connect(self.db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO governed_runs (
+                    run_id, run_kind, trigger_kind, status, briefing_path,
+                    notification_action_id, delivery_evidence_id,
+                    created_at, started_at, ended_at, interrupted_at,
+                    failure_code, failure_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_stale_active",
+                    "ace_cycle",
+                    "launchd",
+                    "running",
+                    None,
+                    None,
+                    None,
+                    "2026-05-01T00:00:00Z",
+                    "2026-05-01T00:00:00Z",
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            connection.commit()
+
+        result = run_cycle(self.db_path, actor="operator", briefing_path=self.briefing_path)
+
+        self.assertEqual(result["governed_run"]["status"], "completed")
+        with connect(self.db_path) as connection:
+            stale_row = connection.execute(
+                "SELECT status, failure_code, failure_summary FROM governed_runs WHERE run_id = ?",
+                ("run_stale_active",),
+            ).fetchone()
+            active_count = connection.execute(
+                "SELECT COUNT(*) FROM governed_runs WHERE status IN ('pending', 'starting', 'running')"
+            ).fetchone()[0]
+        self.assertEqual(stale_row["status"], "interrupted")
+        self.assertEqual(stale_row["failure_code"], "cycle_stale_active_reconciled")
+        self.assertIn("stale governed ace cycle", stale_row["failure_summary"])
+        self.assertEqual(active_count, 0)
+
     def test_governed_run_trigger_correction_is_audited(self) -> None:
         result = run_cycle(
             self.db_path,
