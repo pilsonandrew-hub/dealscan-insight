@@ -6,7 +6,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ace.storage import append_event, bootstrap_db, connect, new_id, utc_now, verify_event_hash_chain
+from ace.storage import (
+    append_event,
+    bootstrap_db,
+    compute_event_hash,
+    connect,
+    new_id,
+    repair_event_hash_chain_for_legacy_races,
+    utc_now,
+    verify_event_hash_chain,
+)
 
 
 class StorageContractTests(unittest.TestCase):
@@ -163,6 +172,73 @@ class StorageContractTests(unittest.TestCase):
             ).fetchone()
         self.assertIsNone(row["previous_event_hash"])
         self.assertRegex(row["event_hash"], r"^[0-9a-f]{64}$")
+        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
+
+    def test_repair_event_hash_chain_repairs_legacy_concurrent_tail_race_only(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            first_id = append_event(
+                connection,
+                event_type="item.first",
+                payload={"n": 1},
+                created_at="2026-05-13T00:00:00Z",
+            )
+            connection.commit()
+            first_hash = connection.execute(
+                "SELECT event_hash FROM events WHERE event_id = ?",
+                (first_id,),
+            ).fetchone()["event_hash"]
+            second_hash = compute_event_hash(
+                event_id="evt_second",
+                item_id=None,
+                event_type="item.second",
+                payload_json='{"n":2}',
+                actor=None,
+                source=None,
+                session_id=None,
+                created_at="2026-05-13T00:00:01Z",
+                previous_event_hash=first_hash,
+            )
+            third_hash = compute_event_hash(
+                event_id="evt_third",
+                item_id=None,
+                event_type="item.third",
+                payload_json='{"n":3}',
+                actor=None,
+                source=None,
+                session_id=None,
+                created_at="2026-05-13T00:00:02Z",
+                previous_event_hash=first_hash,
+            )
+            connection.execute(
+                """
+                INSERT INTO events (
+                    event_id, item_id, event_type, payload_json, actor, source, session_id,
+                    created_at, previous_event_hash, event_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("evt_second", None, "item.second", '{"n":2}', None, None, None, "2026-05-13T00:00:01Z", first_hash, second_hash),
+            )
+            connection.execute(
+                """
+                INSERT INTO events (
+                    event_id, item_id, event_type, payload_json, actor, source, session_id,
+                    created_at, previous_event_hash, event_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("evt_third", None, "item.third", '{"n":3}', None, None, None, "2026-05-13T00:00:02Z", first_hash, third_hash),
+            )
+            connection.commit()
+
+        ok, detail = verify_event_hash_chain(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "event evt_third has broken previous_event_hash")
+
+        with connect(self.db_path) as connection:
+            repaired = repair_event_hash_chain_for_legacy_races(connection)
+            connection.commit()
+
+        self.assertEqual(repaired, 1)
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
 
     def test_append_event_respects_foreign_key_constraint_for_missing_item(self) -> None:

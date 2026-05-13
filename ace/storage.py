@@ -333,6 +333,66 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
         previous_event_hash = row["event_hash"] or expected_hash
 
 
+def repair_event_hash_chain_for_legacy_races(connection: sqlite3.Connection) -> int:
+    """Repair hash rows produced by pre-serialized append races.
+
+    This is deliberately narrow: it only rewrites rows whose stored hash matches the
+    row's stored previous hash, but whose stored previous hash does not match the
+    canonical immediately preceding event hash. That pattern is produced by older
+    concurrent appenders that computed a valid hash before another writer committed.
+    Payload/hash mismatches remain tamper evidence and are not repaired here.
+    """
+
+    _ensure_event_hash_columns(connection)
+    _backfill_event_hashes(connection)
+    repaired = 0
+    previous_event_hash: str | None = None
+    rows = connection.execute(
+        """
+        SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+               created_at, previous_event_hash, event_hash
+        FROM events
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        hash_with_stored_previous = compute_event_hash(
+            event_id=row["event_id"],
+            item_id=row["item_id"],
+            event_type=row["event_type"],
+            payload_json=row["payload_json"],
+            actor=row["actor"],
+            source=row["source"],
+            session_id=row["session_id"],
+            created_at=row["created_at"],
+            previous_event_hash=row["previous_event_hash"],
+        )
+        if row["event_hash"] != hash_with_stored_previous:
+            previous_event_hash = row["event_hash"]
+            continue
+        if row["previous_event_hash"] != previous_event_hash:
+            repaired_hash = compute_event_hash(
+                event_id=row["event_id"],
+                item_id=row["item_id"],
+                event_type=row["event_type"],
+                payload_json=row["payload_json"],
+                actor=row["actor"],
+                source=row["source"],
+                session_id=row["session_id"],
+                created_at=row["created_at"],
+                previous_event_hash=previous_event_hash,
+            )
+            connection.execute(
+                "UPDATE events SET previous_event_hash = ?, event_hash = ? WHERE id = ?",
+                (previous_event_hash, repaired_hash, row["id"]),
+            )
+            repaired += 1
+            previous_event_hash = repaired_hash
+        else:
+            previous_event_hash = row["event_hash"]
+    return repaired
+
+
 def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
     """Return whether the append-only event hash chain is internally consistent."""
 
@@ -631,6 +691,13 @@ def append_event(
     event_id = event_id or new_id("evt")
     created_at = created_at or utc_now()
     payload_json = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
+    if not connection.in_transaction:
+        connection.execute("BEGIN IMMEDIATE")
+    else:
+        # Force SQLite to acquire the write lock before reading the previous
+        # event hash. Without this, concurrent deferred transactions can compute
+        # against the same tail and later commit out of chain order.
+        connection.execute("UPDATE events SET event_id = event_id WHERE 0")
     _ensure_event_hash_columns(connection)
     _backfill_event_hashes(connection)
     previous_event_hash = connection.execute(
