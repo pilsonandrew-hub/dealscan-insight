@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .storage import DB_PATH, append_event, bootstrap_db, connect, new_id, utc_now
+from .drift import is_claim_supporting_evidence_uri
 from .workflow import (
     CloseoutGateError,
     closeout_gate,
@@ -118,6 +119,7 @@ def _closeout_attempted_payload(
     target_state: str,
     reason: str | None,
     evidence_count: int,
+    supporting_evidence_count: int,
     open_obligation_count: int,
     open_contradiction_count: int,
     verdict: str | None,
@@ -131,6 +133,7 @@ def _closeout_attempted_payload(
         "to_state": target_state,
         "reason": reason,
         "evidence_count": evidence_count,
+        "supporting_evidence_count": supporting_evidence_count,
         "open_obligation_count": open_obligation_count,
         "open_contradiction_count": open_contradiction_count,
         "verdict": verdict,
@@ -839,6 +842,14 @@ class ItemRepository:
             ).fetchall()
         return len(rows)
 
+    def item_supporting_evidence_count(self, item_id: str) -> int:
+        with connect(self.db_path) as connection:
+            rows = connection.execute(
+                "SELECT evidence_uri FROM evidence WHERE item_id = ?",
+                (item_id,),
+            ).fetchall()
+        return sum(1 for row in rows if is_claim_supporting_evidence_uri(row["evidence_uri"]))
+
     def item_open_obligation_count(self, item_id: str) -> int:
         with connect(self.db_path) as connection:
             rows = connection.execute(
@@ -957,6 +968,7 @@ class ItemRepository:
         workflow closeout gate, then emit the final state-change event only on pass.
         """
         evidence_count = self.item_evidence_count(item_id)
+        supporting_evidence_count = self.item_supporting_evidence_count(item_id)
         open_obligation_count = self.item_open_obligation_count(item_id)
         contradiction_count = self.item_open_contradiction_count(item_id)
         verdict_row = connection.execute("SELECT verdict FROM items WHERE id = ?", (item_id,)).fetchone()
@@ -967,6 +979,7 @@ class ItemRepository:
             open_obligation_count,
             contradiction_count,
             verdict=verdict,
+            supporting_evidence_count=supporting_evidence_count,
         )
         run_id = new_id("closeout")
         attempt_event_id = append_event(
@@ -978,6 +991,7 @@ class ItemRepository:
                 target_state=target_state,
                 reason=reason,
                 evidence_count=evidence_count,
+                supporting_evidence_count=supporting_evidence_count,
                 open_obligation_count=open_obligation_count,
                 open_contradiction_count=contradiction_count,
                 verdict=verdict,

@@ -189,9 +189,16 @@ def closeout_gate(
     open_obligation_count: int,
     open_contradiction_count: int = 0,
     verdict: str | None = None,
+    supporting_evidence_count: int | None = None,
 ) -> tuple[bool, str | None, str | None]:
     if evidence_count <= 0:
         return False, "missing_evidence", "closeout requires at least one evidence record"
+    if supporting_evidence_count is not None and supporting_evidence_count <= 0:
+        return (
+            False,
+            "missing_supporting_evidence",
+            "closeout requires at least one claim-supporting evidence record",
+        )
     if open_contradiction_count > 0:
         suffix = "s" if open_contradiction_count != 1 else ""
         return (

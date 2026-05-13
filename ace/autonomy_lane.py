@@ -12,6 +12,7 @@ AUTONOMY_ACTOR = "ace.autonomy_lane"
 AUTONOMY_SOURCE = "ace/autonomy_lane.py"
 AUTONOMY_EVIDENCE_URI = "ace://autonomy/machine-verifiable-closeout"
 AUTONOMY_DIRECT_WORK_EVIDENCE_URI = "ace://autonomy/explicit-direct-work-closeout"
+AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI = "ace://autonomy/direct-work-execution-evidence"
 AUTONOMY_ELIGIBLE_WORK_SOURCE = "telegram/direct"
 AUTONOMY_ELIGIBILITY_EVIDENCE_URI = "ace://autonomy/eligible-direct-work"
 AUTONOMY_ELIGIBILITY_CREATED_BY = "ace.autonomy_lane"
@@ -162,7 +163,7 @@ def _resolve_reason(item: Any) -> str:
 def _evidence_uri(item: Any) -> str:
     if item.item_type == AUTONOMY_ITEM_TYPE:
         return AUTONOMY_EVIDENCE_URI
-    return AUTONOMY_DIRECT_WORK_EVIDENCE_URI
+    return AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI
 
 
 def _evidence_text(item: Any) -> str:

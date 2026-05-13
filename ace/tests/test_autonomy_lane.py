@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ace.autonomy_lane import (
     AUTONOMY_DIRECT_WORK_EVIDENCE_URI,
+    AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI,
     AUTONOMY_EVIDENCE_URI,
     AUTONOMY_ELIGIBILITY_CREATED_BY,
     AUTONOMY_ELIGIBILITY_EVIDENCE_URI,
@@ -124,7 +125,7 @@ class AutonomyLaneTests(unittest.TestCase):
             ).fetchone()
             autonomy_row = connection.execute(
                 "SELECT evidence_text FROM evidence WHERE item_id = ? AND evidence_uri = ?",
-                (item.id, AUTONOMY_DIRECT_WORK_EVIDENCE_URI),
+                (item.id, AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI),
             ).fetchone()
         self.assertEqual(eligibility_count, 1)
         self.assertIsNotNone(eligibility_row)
@@ -210,7 +211,7 @@ class AutonomyLaneTests(unittest.TestCase):
             ).fetchone()
             evidence_row = connection.execute(
                 "SELECT evidence_text, evidence_uri FROM evidence WHERE item_id = ? AND evidence_uri = ? ORDER BY created_at DESC, id DESC LIMIT 1",
-                (item.id, AUTONOMY_DIRECT_WORK_EVIDENCE_URI),
+                (item.id, AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI),
             ).fetchone()
 
         serialized = "\n".join(row[0] for row in state_change_rows)
@@ -222,7 +223,7 @@ class AutonomyLaneTests(unittest.TestCase):
         assert evidence_row is not None
         self.assertIn("explicit governed eligibility evidence", evidence_row[0])
         self.assertNotIn("machine-verifiable eligibility rules", evidence_row[0])
-        self.assertEqual(evidence_row[1], AUTONOMY_DIRECT_WORK_EVIDENCE_URI)
+        self.assertEqual(evidence_row[1], AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI)
 
     def test_explicit_real_work_uses_distinct_closeout_evidence_uri(self) -> None:
         item = self.repo.create_item(
@@ -251,7 +252,8 @@ class AutonomyLaneTests(unittest.TestCase):
             ]
 
         self.assertIn(AUTONOMY_ELIGIBILITY_EVIDENCE_URI, uris)
-        self.assertIn(AUTONOMY_DIRECT_WORK_EVIDENCE_URI, uris)
+        self.assertIn(AUTONOMY_DIRECT_WORK_EXECUTION_EVIDENCE_URI, uris)
+        self.assertNotIn(AUTONOMY_DIRECT_WORK_EVIDENCE_URI, uris)
         self.assertNotIn(AUTONOMY_EVIDENCE_URI, uris)
 
     def test_autonomy_lane_records_pass_verdict_before_closeout(self) -> None:

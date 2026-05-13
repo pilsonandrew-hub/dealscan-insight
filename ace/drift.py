@@ -162,8 +162,12 @@ _NON_SUPPORTING_EVIDENCE_URIS = {
 
 
 def _is_claim_supporting_evidence(payload: Mapping[str, Any]) -> bool:
-    evidence_uri = str(payload.get("evidence_uri") or "").strip()
-    if evidence_uri in _NON_SUPPORTING_EVIDENCE_URIS:
+    return is_claim_supporting_evidence_uri(payload.get("evidence_uri"))
+
+
+def is_claim_supporting_evidence_uri(evidence_uri: Any) -> bool:
+    normalized = str(evidence_uri or "").strip()
+    if normalized in _NON_SUPPORTING_EVIDENCE_URIS:
         return False
     return True
 

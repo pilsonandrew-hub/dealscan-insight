@@ -116,10 +116,23 @@ class WorkflowContractTests(unittest.TestCase):
             evidence_count=0,
             open_obligation_count=5,
             open_contradiction_count=7,
+            supporting_evidence_count=0,
         )
         self.assertFalse(allowed)
         self.assertEqual(code, "missing_evidence")
         self.assertEqual(detail, "closeout requires at least one evidence record")
+
+    def test_closeout_gate_blocks_missing_supporting_evidence_after_evidence_exists(self) -> None:
+        allowed, code, detail = closeout_gate(
+            evidence_count=3,
+            open_obligation_count=0,
+            open_contradiction_count=0,
+            verdict="pass",
+            supporting_evidence_count=0,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(code, "missing_supporting_evidence")
+        self.assertEqual(detail, "closeout requires at least one claim-supporting evidence record")
 
     def test_closeout_gate_blocks_open_contradictions_before_obligations(self) -> None:
         allowed, code, detail = closeout_gate(
@@ -179,6 +192,7 @@ class WorkflowContractTests(unittest.TestCase):
             open_obligation_count=0,
             open_contradiction_count=0,
             verdict="pass",
+            supporting_evidence_count=1,
         )
         self.assertTrue(allowed)
         self.assertIsNone(code)
