@@ -32,6 +32,29 @@ def test_alert_validation_prompt_defines_dos_as_positive_score():
     assert "80+ means high-priority arbitrage candidate" in prompt
 
 
+def test_alert_validation_prompt_does_not_treat_early_current_bid_as_disqualifying():
+    prompt = _build_alert_validation_prompt(
+        {
+            "current_bid": 645,
+            "expected_close_bid": 14_000,
+            "max_bid": 18_000,
+            "mmr_estimated": 22_000,
+            "gross_margin": 3_000,
+            "bid_headroom": 4_000,
+            "pricing_maturity": "retail_comp",
+            "pricing_source": "market_comps",
+            "current_bid_trust_score": 0.82,
+            "manheim_confidence": 78,
+            "dos_score": 90.8,
+        }
+    )
+
+    assert "do not reject solely because current bid is far below MMR" in prompt
+    assert "Expected close bid: $14000" in prompt
+    assert "Max bid: $18000" in prompt
+    assert "Trust score: 0.82" in prompt
+
+
 def test_telegram_error_redaction_removes_bot_token_from_api_url():
     raw_error = (
         "Client error '401 Unauthorized' for url "
