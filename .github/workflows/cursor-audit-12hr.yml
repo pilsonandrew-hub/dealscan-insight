@@ -188,6 +188,44 @@ jobs:
           except Exception as e:
             bid_ceiling_proof.append({"error": repr(e)})
 
+          bid_ceiling_gate_passed = (
+            len(bid_ceiling_proof) == 2
+            and all(row.get("passed") is True for row in bid_ceiling_proof)
+          )
+
+          def suppress_deterministically_false_findings(findings: str) -> str:
+            """Remove findings contradicted by deterministic local proof.
+
+            Model instructions are not a safety boundary. If the local score_deal()
+            proof demonstrates hard bid-ceiling rejection, a model line claiming
+            Missing Bid Ceiling Rejections is stale or hallucinated and must not
+            be forwarded as a critical alert.
+            """
+            if not findings or not bid_ceiling_gate_passed:
+              return findings
+            kept = []
+            suppressed = []
+            for line in findings.splitlines():
+              normalized = line.lower()
+              is_bid_ceiling_false_positive = (
+                "missing bid ceiling rejection" in normalized
+                or "missing bid ceiling rejections" in normalized
+                or ("bid ceiling" in normalized and "not rejected" in normalized)
+                or ("bid ceiling" in normalized and "only receive" in normalized and "lower score" in normalized)
+              )
+              if is_bid_ceiling_false_positive:
+                suppressed.append(line)
+              else:
+                kept.append(line)
+            if suppressed:
+              print("=== SUPPRESSED DETERMINISTIC FALSE FINDINGS ===")
+              for line in suppressed:
+                print(line)
+              kept.append(
+                "INFO | backend/ingest/score.py | Suppressed stale bid-ceiling audit finding | deterministic score_deal proof passed for premium_over_88 and standard_over_80."
+              )
+            return "\n".join(kept).strip()
+
           prompt = f"""Quick RED TEAM audit of DealerScope backend files.
           Business rules: Premium lane max age=4yr, max mileage=50k, bid ceiling=0.88. Standard lane max age=10yr, max mileage=100k, reject mileage-per-year >18000, bid ceiling=0.80. Rust states rejected.
           Deterministic bid-ceiling proof from score_deal() is below. Do NOT report "Missing Bid Ceiling Rejections" if both proof cases passed; only report it if the proof failed or the code contradicts the proof.
@@ -207,12 +245,13 @@ jobs:
           try:
             with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
               data = json.loads(r.read())
-            findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            raw_findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            findings = suppress_deterministically_false_findings(raw_findings)
 
             print("=== GEMINI AUDIT FINDINGS ===")
             print(findings)
 
-            # Send to Telegram if there's anything critical
+            # Send to Telegram if there's anything critical after deterministic suppression.
             if findings and ("CRITICAL" in findings or "HIGH" in findings) and BOT_TOKEN:
               now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
               msg = f"🔍 <b>DealerScope 12hr Audit — {now}</b>\n\n{findings[:3000]}"
