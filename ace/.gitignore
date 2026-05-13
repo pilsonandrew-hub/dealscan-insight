@@ -4,6 +4,7 @@ __pycache__/
 
 # Local runtime state
 state/ace.db
+state/ace.db-*
 state/ace_briefing.md
 state/supervisor_acceptance.log
 state/supervisor_acceptance.err
