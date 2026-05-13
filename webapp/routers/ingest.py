@@ -93,6 +93,17 @@ WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 ANDREW_UUID = "ff8425cd-0596-470b-b2b8-3a7a30ef4e37"
+
+
+def _redact_telegram_bot_token(text: Any) -> str:
+    """Remove Telegram Bot API tokens from loggable error text."""
+    return re.sub(
+        r"bot\d{8,10}:[A-Za-z0-9_-]{20,}",
+        "bot[REDACTED_TELEGRAM_TOKEN]",
+        str(text),
+    )
+
+
 OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
 # DeepSeek direct API (legacy fallback only if explicitly enabled)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -2683,7 +2694,8 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             resp.raise_for_status()
             payload = resp.json()
     except Exception as e:
-        logger.error(f"[TELEGRAM] Alert failed (non-fatal): {e}")
+        safe_error = _redact_telegram_bot_token(e)
+        logger.error("[TELEGRAM] Alert failed (non-fatal): %s", safe_error)
         _record_delivery_log(
             run_id=run_id,
             listing_id=listing_id,
@@ -2691,7 +2703,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             opportunity_id=deal.get("opportunity_id"),
             channel="telegram_alert",
             status="failed",
-            error_message=str(e),
+            error_message=safe_error,
         )
         return None
 

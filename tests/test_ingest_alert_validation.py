@@ -1,4 +1,8 @@
-from webapp.routers.ingest import _alert_validation_mmr_estimate, _build_alert_validation_prompt
+from webapp.routers.ingest import (
+    _alert_validation_mmr_estimate,
+    _build_alert_validation_prompt,
+    _redact_telegram_bot_token,
+)
 
 
 def test_alert_validation_mmr_uses_estimated_sale_price_when_mmr_estimated_missing():
@@ -26,3 +30,15 @@ def test_alert_validation_prompt_defines_dos_as_positive_score():
     assert "higher DOS score is better" in prompt
     assert "not a damage score" in prompt
     assert "80+ means high-priority arbitrage candidate" in prompt
+
+
+def test_telegram_error_redaction_removes_bot_token_from_api_url():
+    raw_error = (
+        "Client error '401 Unauthorized' for url "
+        "'https://api.telegram.org/bot1234567890:ABCdef_ghi-JKLmnopQRSTuvwxYZ/sendMessage'"
+    )
+
+    redacted = _redact_telegram_bot_token(raw_error)
+
+    assert "1234567890:ABCdef" not in redacted
+    assert "bot[REDACTED_TELEGRAM_TOKEN]/sendMessage" in redacted
