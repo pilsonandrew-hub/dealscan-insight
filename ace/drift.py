@@ -152,8 +152,24 @@ def compute_decision_drift(events: Iterable[Any], *, window: int = 20) -> DriftD
     )
 
 
+_NON_SUPPORTING_EVIDENCE_URIS = {
+    "ace://telegram/intake-source",
+    "ace://telegram/parser-decision",
+    "ace://autonomy/eligible-direct-work",
+    "ace://notification/delivery",
+}
+
+
+def _is_claim_supporting_evidence(payload: Mapping[str, Any]) -> bool:
+    evidence_uri = str(payload.get("evidence_uri") or "").strip()
+    if evidence_uri in _NON_SUPPORTING_EVIDENCE_URIS:
+        return False
+    return True
+
+
 def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDimension:
     evidence_seen = 0
+    supporting_evidence_seen = 0
     pass_verdicts_without_evidence = 0
     passed_closeouts_without_evidence = 0
     sampled_claims = 0
@@ -163,17 +179,19 @@ def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDime
         payload = _payload(event)
         if event_type == "item.evidence_added":
             evidence_seen += 1
+            if _is_claim_supporting_evidence(payload):
+                supporting_evidence_seen += 1
             continue
         if event_type == "item.verdict_recorded":
             verdict = str(payload.get("verdict") or "").strip().lower()
             if verdict == "pass":
                 sampled_claims += 1
-                if evidence_seen == 0:
+                if supporting_evidence_seen == 0:
                     pass_verdicts_without_evidence += 1
             continue
         if event_type == "item.closeout_attempted" and payload.get("result") == "passed":
             sampled_claims += 1
-            if int(payload.get("evidence_count") or 0) <= 0 and evidence_seen == 0:
+            if int(payload.get("evidence_count") or 0) <= 0 or supporting_evidence_seen == 0:
                 passed_closeouts_without_evidence += 1
 
     unsupported_claim_count = pass_verdicts_without_evidence + passed_closeouts_without_evidence
@@ -186,6 +204,7 @@ def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDime
         detail=(
             f"pass_verdicts_without_prior_evidence={pass_verdicts_without_evidence}; "
             f"passed_closeouts_without_evidence={passed_closeouts_without_evidence}; "
+            f"supporting_evidence_events_seen={supporting_evidence_seen}; "
             f"evidence_events_seen={evidence_seen}; window={window}"
         ),
     )

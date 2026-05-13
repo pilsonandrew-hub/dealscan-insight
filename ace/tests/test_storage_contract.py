@@ -174,6 +174,13 @@ class StorageContractTests(unittest.TestCase):
         self.assertRegex(row["event_hash"], r"^[0-9a-f]{64}$")
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
 
+    def test_connect_sets_busy_timeout_for_live_supervisor_contention(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            busy_timeout_ms = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+
+        self.assertEqual(busy_timeout_ms, 30000)
+
     def test_repair_event_hash_chain_repairs_legacy_concurrent_tail_race_only(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:

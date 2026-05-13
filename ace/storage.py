@@ -279,9 +279,10 @@ def compute_event_hash(
 
 @contextmanager
 def connect(db_path: Path | str = DB_PATH):
-    connection = sqlite3.connect(str(db_path))
+    connection = sqlite3.connect(str(db_path), timeout=30.0)
     try:
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
         yield connection
     finally:
