@@ -8,16 +8,21 @@ This is not a V1/V2/V3 platform promotion. It proves only that A.C.E. now expose
 
 ## Source truth
 
-- Source HEAD at verification start: `d2eeccf` (`ace: clean drift test naming`)
-- Prior implementation commits:
+- Source HEAD at verification refresh: `084ca43` (`ace: keep drift on inspect surface`)
+- Implementation commits in this V2.3 drift surface:
   - `9cf0bd5` — `ace: add drift dimension inspection`
   - `3185926` — `ace: align drift dimensions with v2.3`
   - `d2eeccf` — `ace: clean drift test naming`
-- Implemented source files:
+  - `8152440` — `ace: add v2.3 drift evidence`
+  - `fc7a59f` — `ace: document drift inspection surface`
+  - `084ca43` — `ace: keep drift on inspect surface`
+- Implemented source and evidence files:
   - `ace/drift.py`
   - `ace/ace.py`
+  - `ace/README.md`
   - `ace/tests/test_drift.py`
   - `ace/tests/test_cli.py`
+  - `ace/reports/ace-v2-3-drift-dimensions-evidence-2026-05-13.md`
 
 ## Approved dimensions
 
@@ -40,7 +45,8 @@ python3 -m ace.ace inspect <item_id> --drift-window <positive-int>
 Acceptance behavior:
 
 - `ace inspect` prints item detail, bounded event history, and drift dimensions.
-- `--drift-window` must be greater than zero.
+- `ace show` remains the lower-noise item detail surface and does not print drift dimensions.
+- `--drift-window` belongs to `inspect` and must be greater than zero.
 - Drift dimensions are computed from repository item events returned in chronological order.
 
 ## Dimension behavior
