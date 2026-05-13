@@ -195,6 +195,53 @@ class AceCycleTests(unittest.TestCase):
         self.assertIn("item.closeout_attempted", event_types)
         self.assertIn("item.state_changed", event_types)
 
+    def test_cycle_skips_when_another_cycle_is_active(self) -> None:
+        with connect(self.db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO governed_runs (
+                    run_id, run_kind, trigger_kind, status, briefing_path,
+                    notification_action_id, delivery_evidence_id,
+                    created_at, started_at, ended_at, interrupted_at,
+                    failure_code, failure_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_existing_active",
+                    "ace_cycle",
+                    "launchd",
+                    "running",
+                    None,
+                    None,
+                    None,
+                    "2026-05-13T12:00:00Z",
+                    "2026-05-13T12:00:00Z",
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            connection.commit()
+
+        result = run_cycle(self.db_path, actor="operator", briefing_path=self.briefing_path)
+
+        self.assertEqual(result["governed_run"]["status"], "skipped")
+        self.assertEqual(result["governed_run"]["failure_code"], "cycle_already_active")
+        self.assertEqual(result["notification_count"], 0)
+        self.assertEqual(result["ingested_messages"], [])
+        self.assertFalse(self.briefing_path.exists())
+
+        with connect(self.db_path) as connection:
+            active_count = connection.execute(
+                "SELECT COUNT(*) FROM governed_runs WHERE status = 'running'"
+            ).fetchone()[0]
+            skipped_count = connection.execute(
+                "SELECT COUNT(*) FROM governed_runs WHERE status = 'skipped'"
+            ).fetchone()[0]
+        self.assertEqual(active_count, 1)
+        self.assertEqual(skipped_count, 1)
+
     def test_governed_run_trigger_correction_is_audited(self) -> None:
         result = run_cycle(
             self.db_path,

@@ -16,11 +16,12 @@ STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_INTERRUPTED = "interrupted"
+STATUS_SKIPPED = "skipped"
 
 TRIGGER_CORRECTION_REASON_HISTORICAL_RECONCILIATION = "historical_trigger_reconciliation"
 
 _ACTIVE_STATUSES = {STATUS_PENDING, STATUS_STARTING, STATUS_RUNNING}
-_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED}
+_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_SKIPPED}
 
 
 def create_governed_cycle_run(
@@ -59,6 +60,97 @@ def create_governed_cycle_run(
                 None,
             ),
         )
+        connection.commit()
+        row = _fetch_run_row(connection, run_id)
+        assert row is not None, "governed run creation failed unexpectedly"
+    return _row_to_governed_run(row)
+
+
+def create_or_skip_governed_cycle_run(
+    db_path: Path | str = DB_PATH,
+    *,
+    trigger_kind: str = TRIGGER_KIND_OPERATOR,
+) -> dict[str, Any]:
+    """Create one governed ACE cycle run, or record a skipped run if one is already active.
+
+    This is the single-flight boundary for bounded ACE cycles. It does not kill,
+    steal, or overwrite another run; it records an auditable skipped terminal run
+    when the runtime is already occupied.
+    """
+
+    bootstrap_db(db_path)
+    normalized_trigger_kind = _normalize_required_text(trigger_kind, field_name="trigger_kind")
+    run_id = new_id("run")
+    created_at = utc_now()
+
+    with connect(db_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        active_row = connection.execute(
+            """
+            SELECT run_id, status
+            FROM governed_runs
+            WHERE run_kind = ? AND status IN (?, ?, ?)
+            ORDER BY created_at DESC, run_id DESC
+            LIMIT 1
+            """,
+            (RUN_KIND_CYCLE, STATUS_PENDING, STATUS_STARTING, STATUS_RUNNING),
+        ).fetchone()
+        if active_row is not None:
+            failure_summary = (
+                "governed ace cycle skipped because another cycle is active: "
+                f"{active_row['run_id']} ({active_row['status']})"
+            )
+            connection.execute(
+                """
+                INSERT INTO governed_runs (
+                    run_id, run_kind, trigger_kind, status, briefing_path,
+                    notification_action_id, delivery_evidence_id,
+                    created_at, started_at, ended_at, interrupted_at,
+                    failure_code, failure_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    RUN_KIND_CYCLE,
+                    normalized_trigger_kind,
+                    STATUS_SKIPPED,
+                    None,
+                    None,
+                    None,
+                    created_at,
+                    None,
+                    created_at,
+                    None,
+                    "cycle_already_active",
+                    failure_summary,
+                ),
+            )
+        else:
+            connection.execute(
+                """
+                INSERT INTO governed_runs (
+                    run_id, run_kind, trigger_kind, status, briefing_path,
+                    notification_action_id, delivery_evidence_id,
+                    created_at, started_at, ended_at, interrupted_at,
+                    failure_code, failure_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    RUN_KIND_CYCLE,
+                    normalized_trigger_kind,
+                    STATUS_PENDING,
+                    None,
+                    None,
+                    None,
+                    created_at,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
         connection.commit()
         row = _fetch_run_row(connection, run_id)
         assert row is not None, "governed run creation failed unexpectedly"
@@ -171,11 +263,11 @@ def get_governed_cycle_run_status(db_path: Path | str = DB_PATH) -> dict[str, An
             """
             SELECT *
             FROM governed_runs
-            WHERE status IN (?, ?, ?)
+            WHERE status IN (?, ?, ?, ?)
             ORDER BY ended_at DESC, created_at DESC, run_id DESC
             LIMIT 1
             """,
-            (STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED),
+            (STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_SKIPPED),
         ).fetchone()
 
     return {

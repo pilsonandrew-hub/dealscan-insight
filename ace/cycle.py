@@ -11,7 +11,7 @@ from .telegram_runtime import fetch_unprocessed_telegram_messages, mark_telegram
 from .governed_run_runtime import (
     TRIGGER_KIND_OPERATOR,
     complete_governed_run,
-    create_governed_cycle_run,
+    create_or_skip_governed_cycle_run,
     fail_governed_run,
     interrupt_governed_run,
     mark_governed_run_running,
@@ -38,10 +38,24 @@ def run_cycle(
 ) -> dict[str, Any]:
     thresholds = thresholds or SweepThresholds()
     trigger_kind = "launchd" if actor == "launchd" else TRIGGER_KIND_OPERATOR
-    governed_run = create_governed_cycle_run(db_path, trigger_kind=trigger_kind)
+    governed_run = create_or_skip_governed_cycle_run(db_path, trigger_kind=trigger_kind)
     briefing_file = Path(briefing_path)
     notification_results: list[dict[str, Any]] = []
     ingested_messages: list[dict[str, Any]] = []
+
+    if governed_run["status"] == "skipped":
+        return {
+            "governed_run": governed_run,
+            "ingested_messages": ingested_messages,
+            "autonomy": {"verified_done_ids": []},
+            "sweep": {"findings": [], "emitted_count": 0, "suppressed_count": 0},
+            "briefing": {"generated_at": None, "items": [], "sections": []},
+            "briefing_path": str(briefing_file),
+            "rendered_briefing": "",
+            "actionable_finding_count": 0,
+            "notification_count": 0,
+            "notifications": notification_results,
+        }
 
     try:
         start_governed_run(db_path, governed_run["run_id"])
