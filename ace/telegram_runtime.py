@@ -46,6 +46,15 @@ def _connect_runtime_db() -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_transport_offsets (
+            transport TEXT PRIMARY KEY,
+            next_offset INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     connection.commit()
     return connection
 
@@ -95,6 +104,38 @@ def _record_transport_attempt(
                 error_type,
                 error_summary,
             ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _stored_transport_offset(transport: str) -> int | None:
+    connection = _connect_runtime_db()
+    try:
+        row = connection.execute(
+            "SELECT next_offset FROM telegram_transport_offsets WHERE transport = ?",
+            (transport,),
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row["next_offset"])
+    finally:
+        connection.close()
+
+
+def _store_transport_offset(*, transport: str, next_offset: int) -> None:
+    connection = _connect_runtime_db()
+    try:
+        connection.execute(
+            """
+            INSERT INTO telegram_transport_offsets(transport, next_offset, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(transport) DO UPDATE SET
+                next_offset = excluded.next_offset,
+                updated_at = excluded.updated_at
+            """,
+            (transport, int(next_offset), _utc_now()),
         )
         connection.commit()
     finally:
@@ -318,6 +359,10 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
     timeout_seconds = str(os.environ.get("ACE_TELEGRAM_GET_UPDATES_TIMEOUT", "30")).strip() or "30"
     query: dict[str, str] = {"timeout": timeout_seconds}
     checkpoint_offset = os.environ.get("ACE_TELEGRAM_UPDATE_OFFSET", "").strip()
+    if not checkpoint_offset:
+        stored_offset = _stored_transport_offset("telegram_bot_api")
+        if stored_offset is not None:
+            checkpoint_offset = str(stored_offset)
     if checkpoint_offset:
         query["offset"] = checkpoint_offset
     encoded = parse.urlencode(query)
@@ -360,6 +405,10 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
             error_summary=str(type(results).__name__),
         )
         return []
+
+    update_ids = [raw.get("update_id") for raw in results if isinstance(raw, dict) and isinstance(raw.get("update_id"), int)]
+    if update_ids:
+        _store_transport_offset(transport="telegram_bot_api", next_offset=max(update_ids) + 1)
 
     messages: list[dict[str, Any]] = []
     for raw in results:

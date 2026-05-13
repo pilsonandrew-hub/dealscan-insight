@@ -227,6 +227,83 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.assertEqual([message["message_id"] for message in messages], ["9"])
         self.assertIn("offset=123", mocked_urlopen.call_args.args[0])
 
+    def test_fetch_real_telegram_updates_persists_next_update_offset(self) -> None:
+        payload = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "message_id": 10,
+                        "date": 1746720000,
+                        "text": "Can you check offset persistence?",
+                        "chat": {"id": 7529788084},
+                    },
+                },
+                {
+                    "update_id": 105,
+                    "message": {
+                        "message_id": 11,
+                        "date": 1746720001,
+                        "text": "Please verify next offset",
+                        "chat": {"id": 7529788084},
+                    },
+                },
+            ],
+        }
+
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(payload).encode("utf-8")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_response
+        fake_context.__exit__.return_value = False
+
+        with (
+            patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", return_value=fake_context),
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual([message["message_id"] for message in messages], ["10", "11"])
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            row = connection.execute(
+                "SELECT next_offset FROM telegram_transport_offsets WHERE transport = ?",
+                ("telegram_bot_api",),
+            ).fetchone()
+        self.assertEqual(row[0], 106)
+
+    def test_fetch_real_telegram_updates_uses_persisted_offset_when_env_offset_absent(self) -> None:
+        first_payload = {"ok": True, "result": [{"update_id": 12, "edited_message": {"message_id": 99}}]}
+        second_payload = {"ok": True, "result": []}
+
+        first_response = MagicMock()
+        first_response.read.return_value = json.dumps(first_payload).encode("utf-8")
+        first_context = MagicMock()
+        first_context.__enter__.return_value = first_response
+        first_context.__exit__.return_value = False
+
+        second_response = MagicMock()
+        second_response.read.return_value = json.dumps(second_payload).encode("utf-8")
+        second_context = MagicMock()
+        second_context.__enter__.return_value = second_response
+        second_context.__exit__.return_value = False
+
+        with (
+            patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+            patch("ace.telegram_runtime.request.urlopen", side_effect=[first_context, second_context]) as mocked_urlopen,
+            patch("ace.telegram_runtime._telegram_ssl_context", return_value=ssl.create_default_context()),
+        ):
+            self.assertEqual(telegram_runtime.fetch_unprocessed_telegram_messages(), [])
+            self.assertEqual(telegram_runtime.fetch_unprocessed_telegram_messages(), [])
+
+        self.assertNotIn("offset=", mocked_urlopen.call_args_list[0].args[0])
+        self.assertIn("offset=13", mocked_urlopen.call_args_list[1].args[0])
+
     def test_fetch_real_telegram_updates_returns_empty_on_ssl_failure(self) -> None:
         with (
             patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "bot-token"}, clear=False),
