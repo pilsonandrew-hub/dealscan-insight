@@ -50,6 +50,8 @@ DB_SAVE_FAILURE_STATUSES = {
     "direct_pg_error",
     "direct_pg_unavailable",
     "duplicate_unresolved",
+    "failed",
+    "save_exception",
 }
 SONAR_MIRROR_FAILURE_STATUSES = {
     "sonar_error",

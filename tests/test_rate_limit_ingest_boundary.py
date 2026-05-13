@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 import os
 import sys
 import types
@@ -132,6 +133,12 @@ sys.modules.setdefault("config.settings", config_settings_module)
 rate_limit = importlib.import_module("webapp.middleware.rate_limit")
 
 
+def _response_json(response):
+    if hasattr(response, "content"):
+        return response.content
+    return json.loads(response.body.decode("utf-8"))
+
+
 class RateLimitIngestBoundaryTests(unittest.TestCase):
     def setUp(self):
         settings_obj.rate_limit_requests = 100
@@ -140,10 +147,18 @@ class RateLimitIngestBoundaryTests(unittest.TestCase):
         settings_obj.rate_limit_ingest_window_seconds = 60
         settings_obj.rate_limit_trust_proxy_headers = False
         settings_obj.rate_limit_trusted_proxy_cidrs = "127.0.0.1/32,::1/128"
+        rate_limit.settings.rate_limit_requests = settings_obj.rate_limit_requests
+        rate_limit.settings.rate_limit_window_seconds = settings_obj.rate_limit_window_seconds
+        rate_limit.settings.rate_limit_ingest_requests = settings_obj.rate_limit_ingest_requests
+        rate_limit.settings.rate_limit_ingest_window_seconds = settings_obj.rate_limit_ingest_window_seconds
+        rate_limit.settings.rate_limit_trust_proxy_headers = settings_obj.rate_limit_trust_proxy_headers
+        rate_limit.settings.rate_limit_trusted_proxy_cidrs = settings_obj.rate_limit_trusted_proxy_cidrs
 
     def test_extract_client_ip_ignores_spoofed_forwarded_headers_from_untrusted_peer(self):
         settings_obj.rate_limit_trust_proxy_headers = True
         settings_obj.rate_limit_trusted_proxy_cidrs = "10.0.0.0/8"
+        rate_limit.settings.rate_limit_trust_proxy_headers = True
+        rate_limit.settings.rate_limit_trusted_proxy_cidrs = "10.0.0.0/8"
         request = _Request(
             "/api/ingest/apify",
             headers={"x-forwarded-for": "198.51.100.10"},
@@ -155,6 +170,8 @@ class RateLimitIngestBoundaryTests(unittest.TestCase):
     def test_extract_client_ip_uses_leftmost_untrusted_hop_from_trusted_proxy_chain(self):
         settings_obj.rate_limit_trust_proxy_headers = True
         settings_obj.rate_limit_trusted_proxy_cidrs = "10.0.0.0/8,203.0.113.5/32"
+        rate_limit.settings.rate_limit_trust_proxy_headers = True
+        rate_limit.settings.rate_limit_trusted_proxy_cidrs = "10.0.0.0/8,203.0.113.5/32"
         request = _Request(
             "/api/ingest/apify",
             headers={"x-forwarded-for": "198.51.100.10, 203.0.113.5"},
@@ -178,7 +195,7 @@ class RateLimitIngestBoundaryTests(unittest.TestCase):
         response = asyncio.run(middleware.dispatch(request, call_next))
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.content["error"], "Ingest rate limit unavailable")
+        self.assertEqual(_response_json(response)["error"], "Ingest rate limit unavailable")
         self.assertFalse(call_next_called)
 
     def test_generic_route_still_fails_open_when_redis_init_fails(self):
@@ -226,7 +243,7 @@ class RateLimitIngestBoundaryTests(unittest.TestCase):
         response = asyncio.run(middleware.dispatch(request, call_next))
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.content["error"], "Ingest rate limit unavailable")
+        self.assertEqual(_response_json(response)["error"], "Ingest rate limit unavailable")
 
 
 if __name__ == "__main__":

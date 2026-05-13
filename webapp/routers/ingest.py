@@ -1290,7 +1290,20 @@ async def _process_webhook_items(
                 saved_opportunity_id = await save_opportunity_to_supabase(vehicle)
             except Exception as exc:
                 logger.error(f"[SAVE ERROR] failed to save vehicle {vehicle.get('title')} with error: {exc}")
+                failed_save_count += 1
                 _increment_reason_counter(skip_reasons, "save_exception")
+                _increment_reason_counter(save_outcomes, "save_exception")
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="save_exception",
+                    error_message=str(exc),
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
                 continue
             # Write to sonar_listings (unfiltered — every vehicle regardless of DOS/state/mileage)
             _sonar_listing_id = vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or "")

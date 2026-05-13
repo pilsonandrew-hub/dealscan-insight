@@ -531,6 +531,82 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertTrue(len(webhook_updates) > 0, "expected at least one webhook_log update")
         self.assertIn("skip_reasons={'normalize_rejected': 1}", webhook_updates[-1][1]["error_message"])
 
+    def test_apify_webhook_counts_save_exception_as_failed_save_with_ledger(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-save-fail", "defaultDatasetId": "dataset-save-fail"},
+        }
+        vehicle = {
+            "run_id": "run-save-fail",
+            "listing_id": "listing-save-fail",
+            "listing_url": "https://example.com/vehicle/save-fail",
+            "title": "2024 Toyota Camry",
+            "year": 2024,
+            "make": "Toyota",
+            "model": "Camry",
+            "current_bid": 10000,
+            "state": "CA",
+            "mileage": 25000,
+            "source_site": "govdeals",
+        }
+        delivery_calls = []
+        webhook_updates = []
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        async def _raise_save_exception(_vehicle):
+            raise RuntimeError("database write exploded")
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", object()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-save-fail"
+        ), patch.object(
+            ingest,
+            "update_webhook_log",
+            lambda *args, **kwargs: webhook_updates.append((args, kwargs)),
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: dict(vehicle)
+        ), patch.object(
+            ingest, "passes_basic_gates", lambda *_args, **_kwargs: {"pass": True, "reason": "ok"}
+        ), patch.object(
+            ingest,
+            "score_vehicle",
+            lambda _vehicle: {
+                "dos_score": 80,
+                "wholesale_margin": 2500,
+                "ceiling_pass": True,
+                "current_bid": 10000,
+                "gross_margin": 2500,
+                "bid_headroom": 2000,
+            },
+        ), patch.object(
+            ingest, "check_and_handle_duplicate", lambda *_args, **_kwargs: {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
+        ), patch.object(
+            ingest, "save_opportunity_to_supabase", _raise_save_exception
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(len(delivery_calls), 1, "expected save-exception db_save ledger row")
+        self.assertEqual(delivery_calls[0]["run_id"], "run-save-fail")
+        self.assertEqual(delivery_calls[0]["listing_id"], "listing-save-fail")
+        self.assertEqual(delivery_calls[0]["channel"], "db_save")
+        self.assertEqual(delivery_calls[0]["status"], "save_exception")
+        self.assertIn("database write exploded", delivery_calls[0]["error_message"])
+        self.assertTrue(len(webhook_updates) > 0, "expected webhook_log update")
+        self.assertEqual(webhook_updates[-1][0][1], "error")
+        self.assertIn("failed:1", webhook_updates[-1][1]["error_message"])
+        self.assertIn("save_outcomes={'save_exception': 1}", webhook_updates[-1][1]["error_message"])
+        self.assertIn("skip_reasons={'save_exception': 1}", webhook_updates[-1][1]["error_message"])
+
 
 if __name__ == "__main__":
     unittest.main()

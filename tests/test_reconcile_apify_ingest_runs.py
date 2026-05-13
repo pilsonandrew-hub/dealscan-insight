@@ -226,6 +226,36 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_flags_save_exception_as_db_save_failure(self):
+        issues = reconcile.classify_run(
+            run_id="run-save-exception",
+            apify_run={"run_id": "run-save-exception", "status": "SUCCEEDED", "item_count": 1},
+            webhook={"latest_status": "error", "latest_error": "failed:1"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"save_exception": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertIn("webhook_error", issues)
+        self.assertIn("db_save_failures", issues)
+        self.assertIn("no_db_landing", issues)
+
+    def test_classify_run_flags_legacy_failed_status_as_db_save_failure(self):
+        issues = reconcile.classify_run(
+            run_id="run-legacy-failed",
+            apify_run={"run_id": "run-legacy-failed", "status": "SUCCEEDED", "item_count": 1},
+            webhook={"latest_status": "error", "latest_error": "failed:1"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"failed": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertIn("webhook_error", issues)
+        self.assertIn("db_save_failures", issues)
+        self.assertIn("no_db_landing", issues)
+
     def test_classify_run_flags_sonar_mirror_failures(self):
         issues = reconcile.classify_run(
             run_id="run-sonar-fail",
