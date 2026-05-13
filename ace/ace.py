@@ -72,7 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("item_id")
     show.add_argument("--event-type")
     show.add_argument("--event-limit", type=int)
-    show.add_argument("--drift-window", type=int, default=20)
 
     inspect = subparsers.add_parser("inspect", help="Inspect one item with drift dimensions")
     inspect.add_argument("item_id")
@@ -590,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.event_limit is not None and args.event_limit <= 0:
                 print(f"error=invalid_event_limit event_limit={args.event_limit}")
                 return 1
-            if args.drift_window <= 0:
+            if command == "inspect" and args.drift_window <= 0:
                 print(f"error=invalid_drift_window drift_window={args.drift_window}")
                 return 1
             normalized_event_type = args.event_type
@@ -605,7 +604,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             _print_item(item)
             all_events = repo.list_item_events(args.item_id)
-            _print_drift_report(compute_item_drift(args.item_id, all_events, window=args.drift_window))
+            if command == "inspect":
+                _print_drift_report(compute_item_drift(args.item_id, all_events, window=args.drift_window))
             events_to_print = all_events
             if normalized_event_type is not None:
                 events_to_print = [event for event in events_to_print if event.event_type == normalized_event_type]

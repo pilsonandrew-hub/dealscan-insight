@@ -168,12 +168,17 @@ class AceCliTests(unittest.TestCase):
             self.assertNotIn('"evidence_text":"proof one"', output)
 
 
-    def test_inspect_surfaces_drift_dimensions(self) -> None:
+    def test_inspect_surfaces_drift_dimensions_without_changing_show_surface(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
             code, output = self.run_cli("--db", str(db_path), "intake", "task", "Drift inspect item")
             self.assertEqual(code, 0, output)
             item_id = output.split("item_id=")[1].split()[0]
+
+            code, show_output = self.run_cli("--db", str(db_path), "show", item_id)
+            self.assertEqual(code, 0, show_output)
+            self.assertNotIn("drift.item_id=", show_output)
+            self.assertNotIn("drift.dimension[", show_output)
 
             code, output = self.run_cli("--db", str(db_path), "inspect", item_id)
 
