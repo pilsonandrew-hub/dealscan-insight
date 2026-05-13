@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -52,6 +53,8 @@ SCHEMA_STATEMENTS = (
         source TEXT,
         session_id TEXT,
         created_at TEXT NOT NULL,
+        previous_event_hash TEXT,
+        event_hash TEXT,
         FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
     )
     """,
@@ -219,6 +222,61 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
+def _event_hash_payload(
+    *,
+    event_id: str,
+    item_id: str | None,
+    event_type: str,
+    payload_json: str,
+    actor: str | None,
+    source: str | None,
+    session_id: str | None,
+    created_at: str,
+    previous_event_hash: str | None,
+) -> dict[str, Any]:
+    return {
+        "event_id": event_id,
+        "item_id": item_id,
+        "event_type": event_type,
+        "payload_json": payload_json,
+        "actor": actor,
+        "source": source,
+        "session_id": session_id,
+        "created_at": created_at,
+        "previous_event_hash": previous_event_hash,
+    }
+
+
+def compute_event_hash(
+    *,
+    event_id: str,
+    item_id: str | None,
+    event_type: str,
+    payload_json: str,
+    actor: str | None,
+    source: str | None,
+    session_id: str | None,
+    created_at: str,
+    previous_event_hash: str | None,
+) -> str:
+    canonical_payload = json.dumps(
+        _event_hash_payload(
+            event_id=event_id,
+            item_id=item_id,
+            event_type=event_type,
+            payload_json=payload_json,
+            actor=actor,
+            source=source,
+            session_id=session_id,
+            created_at=created_at,
+            previous_event_hash=previous_event_hash,
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
 @contextmanager
 def connect(db_path: Path | str = DB_PATH):
     connection = sqlite3.connect(str(db_path))
@@ -228,6 +286,86 @@ def connect(db_path: Path | str = DB_PATH):
         yield connection
     finally:
         connection.close()
+
+
+def _ensure_event_hash_columns(connection: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+    if not columns:
+        return
+    if "previous_event_hash" not in columns:
+        connection.execute("ALTER TABLE events ADD COLUMN previous_event_hash TEXT")
+    if "event_hash" not in columns:
+        connection.execute("ALTER TABLE events ADD COLUMN event_hash TEXT")
+
+
+def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
+    _ensure_event_hash_columns(connection)
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+    if not {"previous_event_hash", "event_hash"}.issubset(columns):
+        return
+
+    previous_event_hash: str | None = None
+    rows = connection.execute(
+        """
+        SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+               created_at, previous_event_hash, event_hash
+        FROM events
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        expected_hash = compute_event_hash(
+            event_id=row["event_id"],
+            item_id=row["item_id"],
+            event_type=row["event_type"],
+            payload_json=row["payload_json"],
+            actor=row["actor"],
+            source=row["source"],
+            session_id=row["session_id"],
+            created_at=row["created_at"],
+            previous_event_hash=previous_event_hash,
+        )
+        if row["previous_event_hash"] is None and row["event_hash"] is None:
+            connection.execute(
+                "UPDATE events SET previous_event_hash = ?, event_hash = ? WHERE id = ?",
+                (previous_event_hash, expected_hash, row["id"]),
+            )
+        previous_event_hash = row["event_hash"] or expected_hash
+
+
+def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Return whether the append-only event hash chain is internally consistent."""
+
+    bootstrap_db(db_path)
+    previous_event_hash: str | None = None
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+                   created_at, previous_event_hash, event_hash
+            FROM events
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    for row in rows:
+        if row["previous_event_hash"] != previous_event_hash:
+            return False, f"event {row['event_id']} has broken previous_event_hash"
+        expected_hash = compute_event_hash(
+            event_id=row["event_id"],
+            item_id=row["item_id"],
+            event_type=row["event_type"],
+            payload_json=row["payload_json"],
+            actor=row["actor"],
+            source=row["source"],
+            session_id=row["session_id"],
+            created_at=row["created_at"],
+            previous_event_hash=previous_event_hash,
+        )
+        if row["event_hash"] != expected_hash:
+            return False, f"event {row['event_id']} hash mismatch"
+        previous_event_hash = row["event_hash"]
+    return True, None
 
 
 def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
@@ -286,6 +424,9 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
             connection.execute("ALTER TABLE items ADD COLUMN confidence_tier TEXT")
         if item_columns and "verdict" not in item_columns:
             connection.execute("ALTER TABLE items ADD COLUMN verdict TEXT")
+
+        _backfill_event_hashes(connection)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(event_hash)")
 
         contradiction_columns = {
             row["name"]
@@ -485,12 +626,41 @@ def append_event(
     event_id = event_id or new_id("evt")
     created_at = created_at or utc_now()
     payload_json = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
+    _ensure_event_hash_columns(connection)
+    _backfill_event_hashes(connection)
+    previous_event_hash = connection.execute(
+        "SELECT event_hash FROM events ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    previous_hash = previous_event_hash["event_hash"] if previous_event_hash else None
+    event_hash = compute_event_hash(
+        event_id=event_id,
+        item_id=item_id,
+        event_type=event_type,
+        payload_json=payload_json,
+        actor=actor,
+        source=source,
+        session_id=session_id,
+        created_at=created_at,
+        previous_event_hash=previous_hash,
+    )
     connection.execute(
         """
         INSERT INTO events (
-            event_id, item_id, event_type, payload_json, actor, source, session_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            event_id, item_id, event_type, payload_json, actor, source, session_id,
+            created_at, previous_event_hash, event_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (event_id, item_id, event_type, payload_json, actor, source, session_id, created_at),
+        (
+            event_id,
+            item_id,
+            event_type,
+            payload_json,
+            actor,
+            source,
+            session_id,
+            created_at,
+            previous_hash,
+            event_hash,
+        ),
     )
     return event_id

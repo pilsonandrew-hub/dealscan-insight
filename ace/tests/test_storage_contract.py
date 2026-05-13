@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ace.storage import append_event, bootstrap_db, connect, new_id, utc_now
+from ace.storage import append_event, bootstrap_db, connect, new_id, utc_now, verify_event_hash_chain
 
 
 class StorageContractTests(unittest.TestCase):
@@ -102,6 +102,68 @@ class StorageContractTests(unittest.TestCase):
             ).fetchone()[0]
 
         self.assertEqual(payload_json, "{}")
+
+    def test_append_event_writes_tamper_evident_hash_chain(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            first_id = append_event(connection, event_type="item.first", payload={"n": 1})
+            second_id = append_event(connection, event_type="item.second", payload={"n": 2})
+            connection.commit()
+
+        with connect(self.db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT event_id, previous_event_hash, event_hash
+                FROM events
+                ORDER BY id ASC
+                """
+            ).fetchall()
+
+        self.assertEqual([row["event_id"] for row in rows], [first_id, second_id])
+        self.assertIsNone(rows[0]["previous_event_hash"])
+        self.assertRegex(rows[0]["event_hash"], r"^[0-9a-f]{64}$")
+        self.assertEqual(rows[1]["previous_event_hash"], rows[0]["event_hash"])
+        self.assertRegex(rows[1]["event_hash"], r"^[0-9a-f]{64}$")
+        self.assertNotEqual(rows[0]["event_hash"], rows[1]["event_hash"])
+        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
+
+    def test_verify_event_hash_chain_detects_payload_tampering(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            event_id = append_event(connection, event_type="item.first", payload={"n": 1})
+            connection.commit()
+            connection.execute(
+                "UPDATE events SET payload_json = ? WHERE event_id = ?",
+                ('{"n":999}', event_id),
+            )
+            connection.commit()
+
+        ok, detail = verify_event_hash_chain(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, f"event {event_id} hash mismatch")
+
+    def test_bootstrap_backfills_legacy_event_hashes_without_claiming_external_provenance(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO events (event_id, item_id, event_type, payload_json, actor, source, session_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("evt_legacy", None, "item.legacy", "{}", None, None, None, "2026-05-13T00:00:00Z"),
+            )
+            connection.commit()
+
+        bootstrap_db(self.db_path)
+
+        with connect(self.db_path) as connection:
+            row = connection.execute(
+                "SELECT previous_event_hash, event_hash FROM events WHERE event_id = ?",
+                ("evt_legacy",),
+            ).fetchone()
+        self.assertIsNone(row["previous_event_hash"])
+        self.assertRegex(row["event_hash"], r"^[0-9a-f]{64}$")
+        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
 
     def test_append_event_respects_foreign_key_constraint_for_missing_item(self) -> None:
         bootstrap_db(self.db_path)
