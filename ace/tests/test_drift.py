@@ -5,10 +5,10 @@ import unittest
 from dataclasses import dataclass
 
 from ace.drift import (
-    compute_decision_distribution_drift,
+    compute_decision_drift,
+    compute_claim_drift,
     compute_item_drift,
     compute_loop_depth_drift,
-    compute_state_churn_drift,
 )
 
 
@@ -64,32 +64,45 @@ class DriftDimensionTests(unittest.TestCase):
             for index in range(4)
         ]
 
-        dimension = compute_decision_distribution_drift(events)
+        dimension = compute_decision_drift(events)
 
-        self.assertEqual(dimension.name, "decision_distribution")
+        self.assertEqual(dimension.name, "decision_drift")
         self.assertEqual(dimension.sample_count, 4)
         self.assertIn(dimension.status, {"review", "block"})
         self.assertGreaterEqual(dimension.score, 0.4)
         self.assertIn("closeout:blocked:missing_verdict=4", dimension.detail)
 
-    def test_state_churn_drift_flags_repeated_target_states(self) -> None:
+    def test_claim_drift_flags_pass_verdict_without_evidence(self) -> None:
         events = [
-            event(1, "item.state_changed", {"from_state": "TRIAGE", "to_state": "APPROVED"}),
-            event(2, "item.state_changed", {"from_state": "APPROVED", "to_state": "BLOCKED"}),
-            event(3, "item.state_changed", {"from_state": "BLOCKED", "to_state": "APPROVED"}),
+            event(1, "item.verdict_recorded", {"verdict": "pass"}),
+            event(2, "item.closeout_attempted", {"result": "passed", "evidence_count": 0}),
         ]
 
-        dimension = compute_state_churn_drift(events)
+        dimension = compute_claim_drift(events)
 
-        self.assertEqual(dimension.name, "state_churn")
-        self.assertEqual(dimension.sample_count, 3)
-        self.assertEqual(dimension.status, "monitor")
-        self.assertIn("repeated_target_state_count=1", dimension.detail)
+        self.assertEqual(dimension.name, "claim_drift")
+        self.assertEqual(dimension.sample_count, 2)
+        self.assertEqual(dimension.status, "block")
+        self.assertIn("pass_verdicts_without_prior_evidence=1", dimension.detail)
+        self.assertIn("passed_closeouts_without_evidence=1", dimension.detail)
+
+    def test_claim_drift_clears_when_pass_claim_has_evidence(self) -> None:
+        events = [
+            event(1, "item.evidence_added", {"evidence_text": "proof"}),
+            event(2, "item.verdict_recorded", {"verdict": "pass"}),
+            event(3, "item.closeout_attempted", {"result": "passed", "evidence_count": 1}),
+        ]
+
+        dimension = compute_claim_drift(events)
+
+        self.assertEqual(dimension.status, "clear")
+        self.assertEqual(dimension.score, 0.0)
 
     def test_compute_item_drift_returns_three_visible_dimensions(self) -> None:
         events = [
-            event(1, "item.verdict_recorded", {"verdict": "pass"}),
-            event(2, "item.closeout_attempted", {"result": "passed", "failure_code": None}),
+            event(1, "item.evidence_added", {"evidence_text": "proof"}),
+            event(2, "item.verdict_recorded", {"verdict": "pass"}),
+            event(3, "item.closeout_attempted", {"result": "passed", "failure_code": None, "evidence_count": 1}),
         ]
 
         report = compute_item_drift("item_123", events)
@@ -97,8 +110,8 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertEqual(report.item_id, "item_123")
         self.assertEqual([dimension.name for dimension in report.dimensions], [
             "loop_depth",
-            "decision_distribution",
-            "state_churn",
+            "decision_drift",
+            "claim_drift",
         ])
         self.assertEqual(report.composite_score, 0.0)
 

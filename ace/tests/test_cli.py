@@ -181,8 +181,8 @@ class AceCliTests(unittest.TestCase):
             self.assertIn(f"drift.item_id={item_id}", output)
             self.assertIn("drift.composite_score=", output)
             self.assertIn("drift.dimension[0].name=loop_depth", output)
-            self.assertIn("drift.dimension[1].name=decision_distribution", output)
-            self.assertIn("drift.dimension[2].name=state_churn", output)
+            self.assertIn("drift.dimension[1].name=decision_drift", output)
+            self.assertIn("drift.dimension[2].name=claim_drift", output)
 
 
     def test_inspect_rejects_non_positive_drift_window(self) -> None:
