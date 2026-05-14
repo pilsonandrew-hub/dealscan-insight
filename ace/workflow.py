@@ -70,6 +70,10 @@ VALID_VERDICTS = (
     "pending",
     "pass",
     "fail",
+    "ship",
+    "monitor",
+    "review",
+    "block",
 )
 
 
@@ -215,9 +219,17 @@ def closeout_gate(
         )
     normalized_verdict = verdict.strip().lower() if verdict else None
     if normalized_verdict is None:
-        return False, "missing_verdict", "closeout requires a recorded pass verdict"
+        return False, "missing_verdict", "closeout requires a recorded verdict"
+    if normalized_verdict == "pass":
+        normalized_verdict = "ship"
+    if normalized_verdict in {"ship", "monitor"}:
+        return True, None, None
+    if normalized_verdict == "review":
+        return False, "verdict_review", "closeout blocked: item verdict requires review"
+    if normalized_verdict == "block":
+        return False, "verdict_block", "closeout blocked: item verdict is block"
     if normalized_verdict == "fail":
         return False, "verdict_fail", "closeout blocked: item verdict is fail"
     if normalized_verdict == "pending":
         return False, "verdict_pending", "closeout blocked: verdict is still pending"
-    return True, None, None
+    return False, "invalid_verdict", f"closeout blocked: invalid verdict {normalized_verdict}"

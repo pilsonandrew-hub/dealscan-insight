@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .drift import compute_item_drift
 from .repository import ItemRepository
+from .verdict import compute_verdict
 from .storage import DB_PATH, connect, utc_now
 
 
@@ -233,13 +235,18 @@ def run_autonomy_lane(
             claimed_done_ids.append(item.id)
 
         if item.state == "CLAIMED_DONE":
+            drift_report = compute_item_drift(item.id, repo.list_item_events(item.id))
+            verdict = compute_verdict(drift_report)
             item = repo.record_verdict(
                 item.id,
-                "pass",
+                verdict,
                 actor=acting_actor,
                 source=AUTONOMY_SOURCE,
                 source_session=acting_session,
-                reason="governed autonomy lane recorded pass verdict before closeout",
+                reason=(
+                    "governed autonomy lane computed verdict from drift composite "
+                    f"{drift_report.composite_score}"
+                ),
             )
             item = repo.apply_action(
                 item.id,

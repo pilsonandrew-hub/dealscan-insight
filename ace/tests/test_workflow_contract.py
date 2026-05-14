@@ -92,6 +92,10 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_normalize_verdict_accepts_canonical_values_and_aliases(self) -> None:
         self.assertEqual(normalize_verdict("pass"), "pass")
+        self.assertEqual(normalize_verdict("ship"), "ship")
+        self.assertEqual(normalize_verdict(" MONITOR "), "monitor")
+        self.assertEqual(normalize_verdict("review"), "review")
+        self.assertEqual(normalize_verdict("block"), "block")
         self.assertEqual(normalize_verdict(" FAIL "), "fail")
         self.assertEqual(normalize_verdict("pending"), "pending")
 
@@ -162,7 +166,7 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertFalse(allowed)
         self.assertEqual(code, "missing_verdict")
-        self.assertEqual(detail, "closeout requires a recorded pass verdict")
+        self.assertEqual(detail, "closeout requires a recorded verdict")
 
     def test_closeout_gate_blocks_on_verdict_fail(self) -> None:
         allowed, code, detail = closeout_gate(
@@ -186,7 +190,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(code, "verdict_pending")
         self.assertEqual(detail, "closeout blocked: verdict is still pending")
 
-    def test_closeout_gate_passes_with_verdict_pass(self) -> None:
+    def test_closeout_gate_passes_with_verdict_pass_as_legacy_ship(self) -> None:
         allowed, code, detail = closeout_gate(
             evidence_count=2,
             open_obligation_count=0,
@@ -198,6 +202,32 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIsNone(code)
         self.assertIsNone(detail)
 
+    def test_closeout_gate_passes_with_ship_and_monitor_verdicts(self) -> None:
+        for verdict in ("ship", "monitor"):
+            allowed, code, detail = closeout_gate(
+                evidence_count=2,
+                open_obligation_count=0,
+                open_contradiction_count=0,
+                verdict=verdict,
+                supporting_evidence_count=1,
+            )
+            self.assertTrue(allowed)
+            self.assertIsNone(code)
+            self.assertIsNone(detail)
+
+    def test_closeout_gate_blocks_with_review_and_block_verdicts(self) -> None:
+        for verdict, expected_code in (("review", "verdict_review"), ("block", "verdict_block")):
+            allowed, code, detail = closeout_gate(
+                evidence_count=2,
+                open_obligation_count=0,
+                open_contradiction_count=0,
+                verdict=verdict,
+                supporting_evidence_count=1,
+            )
+            self.assertFalse(allowed)
+            self.assertEqual(code, expected_code)
+            self.assertIsNotNone(detail)
+
     def test_closeout_gate_blocks_with_no_verdict(self) -> None:
         allowed, code, detail = closeout_gate(
             evidence_count=2,
@@ -207,7 +237,7 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertFalse(allowed)
         self.assertEqual(code, "missing_verdict")
-        self.assertEqual(detail, "closeout requires a recorded pass verdict")
+        self.assertEqual(detail, "closeout requires a recorded verdict")
 
     def test_closeout_gate_verdict_fail_blocks_even_with_whitespace(self) -> None:
         allowed, code, detail = closeout_gate(

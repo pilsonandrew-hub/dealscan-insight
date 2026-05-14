@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from ace.autonomy_lane import (
@@ -219,7 +220,7 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertNotIn("machine-verifiable direct work item", serialized)
         assert closeout_row is not None
         self.assertIn("explicit eligibility evidence", closeout_row[0])
-        self.assertIn('"verdict":"pass"', closeout_row[0])
+        self.assertIn('"verdict":"ship"', closeout_row[0])
         assert evidence_row is not None
         self.assertIn("explicit governed eligibility evidence", evidence_row[0])
         self.assertNotIn("machine-verifiable eligibility rules", evidence_row[0])
@@ -256,7 +257,7 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertNotIn(AUTONOMY_DIRECT_WORK_EVIDENCE_URI, uris)
         self.assertNotIn(AUTONOMY_EVIDENCE_URI, uris)
 
-    def test_autonomy_lane_records_pass_verdict_before_closeout(self) -> None:
+    def test_autonomy_lane_records_computed_ship_verdict_before_closeout(self) -> None:
         item = self.repo.create_item(
             item_type="work",
             title="Explicit direct work item verdict check",
@@ -276,10 +277,51 @@ class AutonomyLaneTests(unittest.TestCase):
         final_item = self.repo.get_item(item.id)
         assert final_item is not None
         self.assertEqual(final_item.state, "VERIFIED_DONE")
-        self.assertEqual(final_item.verdict, "pass")
-        event_types = [event.event_type for event in self.repo.list_item_events(item.id)]
+        self.assertEqual(final_item.verdict, "ship")
+        events = self.repo.list_item_events(item.id)
+        event_types = [event.event_type for event in events]
         self.assertIn("item.verdict_recorded", event_types)
         self.assertLess(event_types.index("item.verdict_recorded"), event_types.index("item.closeout_attempted"))
+        verdict_event = next(event for event in events if event.event_type == "item.verdict_recorded")
+        self.assertIn('"verdict":"ship"', verdict_event.payload_json or "")
+        self.assertIn("computed verdict from drift composite", verdict_event.payload_json or "")
+        closeout_event = next(event for event in events if event.event_type == "item.closeout_attempted")
+        self.assertIn('"verdict":"ship"', closeout_event.payload_json or "")
+
+
+    def test_autonomy_lane_uses_verdict_engine_output_for_recorded_verdict(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Explicit direct work item verdict engine check",
+            source="telegram/direct",
+            source_session="2026-05-14-direct-work-verdict-engine-check",
+            actor="test",
+        )
+        mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="verdict engine governance proof",
+            actor="operator",
+        )
+
+        with patch("ace.autonomy_lane.compute_verdict", return_value="monitor") as verdict_engine:
+            run_autonomy_lane(self.db_path, actor="launchd", source_session="run_test")
+
+        verdict_engine.assert_called_once()
+        drift_report = verdict_engine.call_args.args[0]
+        self.assertEqual(drift_report.item_id, item.id)
+        self.assertEqual(drift_report.composite_score, 0.0)
+        final_item = self.repo.get_item(item.id)
+        assert final_item is not None
+        self.assertEqual(final_item.state, "VERIFIED_DONE")
+        self.assertEqual(final_item.verdict, "monitor")
+        events = self.repo.list_item_events(item.id)
+        verdict_event = next(event for event in events if event.event_type == "item.verdict_recorded")
+        self.assertIn('"verdict":"monitor"', verdict_event.payload_json or "")
+        self.assertIn("computed verdict from drift composite 0.0", verdict_event.payload_json or "")
+        closeout_event = next(event for event in events if event.event_type == "item.closeout_attempted")
+        self.assertIn('"verdict":"monitor"', closeout_event.payload_json or "")
+        self.assertIn('"result":"passed"', closeout_event.payload_json or "")
 
     def test_autonomy_lane_refuses_to_overwrite_existing_fail_verdict(self) -> None:
         item = self.repo.create_item(
