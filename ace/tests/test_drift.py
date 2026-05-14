@@ -72,9 +72,9 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertGreaterEqual(dimension.score, 0.4)
         self.assertIn("closeout:blocked:missing_verdict=4", dimension.detail)
 
-    def test_claim_drift_flags_pass_verdict_without_evidence(self) -> None:
+    def test_claim_drift_flags_ship_verdict_without_evidence(self) -> None:
         events = [
-            event(1, "item.verdict_recorded", {"verdict": "pass"}),
+            event(1, "item.verdict_recorded", {"verdict": "ship"}),
             event(2, "item.closeout_attempted", {"result": "passed", "evidence_count": 0}),
         ]
 
@@ -83,13 +83,13 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertEqual(dimension.name, "claim_drift")
         self.assertEqual(dimension.sample_count, 2)
         self.assertEqual(dimension.status, "block")
-        self.assertIn("pass_verdicts_without_prior_evidence=1", dimension.detail)
+        self.assertIn("unsupported_verdicts_without_prior_evidence=1", dimension.detail)
         self.assertIn("passed_closeouts_without_evidence=1", dimension.detail)
 
-    def test_claim_drift_clears_when_pass_claim_has_evidence(self) -> None:
+    def test_claim_drift_clears_when_ship_claim_has_evidence(self) -> None:
         events = [
             event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://proof/business-rule-verification"}),
-            event(2, "item.verdict_recorded", {"verdict": "pass"}),
+            event(2, "item.verdict_recorded", {"verdict": "ship"}),
             event(3, "item.closeout_attempted", {"result": "passed", "evidence_count": 1}),
         ]
 
@@ -104,7 +104,7 @@ class DriftDimensionTests(unittest.TestCase):
             event(2, "item.evidence_added", {"evidence_text": "parser", "evidence_uri": "ace://telegram/parser-decision"}),
             event(3, "item.evidence_added", {"evidence_text": "eligible", "evidence_uri": "ace://autonomy/eligible-direct-work"}),
             event(4, "item.evidence_added", {"evidence_text": "generic closeout", "evidence_uri": "ace://autonomy/explicit-direct-work-closeout"}),
-            event(5, "item.verdict_recorded", {"verdict": "pass"}),
+            event(5, "item.verdict_recorded", {"verdict": "ship"}),
             event(6, "item.closeout_attempted", {"result": "passed", "evidence_count": 4}),
         ]
 
@@ -117,7 +117,7 @@ class DriftDimensionTests(unittest.TestCase):
     def test_compute_item_drift_returns_three_visible_dimensions(self) -> None:
         events = [
             event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://proof/business-rule-verification"}),
-            event(2, "item.verdict_recorded", {"verdict": "pass"}),
+            event(2, "item.verdict_recorded", {"verdict": "ship"}),
             event(3, "item.closeout_attempted", {"result": "passed", "failure_code": None, "evidence_count": 1}),
         ]
 

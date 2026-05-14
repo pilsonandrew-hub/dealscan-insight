@@ -141,14 +141,14 @@ def compute_decision_drift(events: Iterable[Any], *, window: int = 20) -> DriftD
             continue
         counts[key] = counts.get(key, 0) + 1
 
-    score = _jensen_shannon_distance(counts, {"closeout:passed": 1.0, "verdict:pass": 1.0}) if counts else 0.0
+    score = _jensen_shannon_distance(counts, {"closeout:passed": 1.0, "verdict:ship": 1.0}) if counts else 0.0
     detail_counts = ",".join(f"{key}={counts[key]}" for key in sorted(counts)) or "none"
     return DriftDimension(
         name="decision_drift",
         score=score,
         sample_count=sum(counts.values()),
         status=_status(score),
-        detail=f"observed={detail_counts}; baseline=pass_verdict_and_passed_closeout; window={window}",
+        detail=f"observed={detail_counts}; baseline=ship_verdict_and_passed_closeout; window={window}",
     )
 
 
@@ -175,7 +175,7 @@ def is_claim_supporting_evidence_uri(evidence_uri: Any) -> bool:
 def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDimension:
     evidence_seen = 0
     supporting_evidence_seen = 0
-    pass_verdicts_without_evidence = 0
+    unsupported_verdicts_without_evidence = 0
     passed_closeouts_without_evidence = 0
     sampled_claims = 0
 
@@ -189,17 +189,17 @@ def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDime
             continue
         if event_type == "item.verdict_recorded":
             verdict = str(payload.get("verdict") or "").strip().lower()
-            if verdict == "pass":
+            if verdict in {"pass", "ship", "monitor"}:
                 sampled_claims += 1
                 if supporting_evidence_seen == 0:
-                    pass_verdicts_without_evidence += 1
+                    unsupported_verdicts_without_evidence += 1
             continue
         if event_type == "item.closeout_attempted" and payload.get("result") == "passed":
             sampled_claims += 1
             if int(payload.get("evidence_count") or 0) <= 0 or supporting_evidence_seen == 0:
                 passed_closeouts_without_evidence += 1
 
-    unsupported_claim_count = pass_verdicts_without_evidence + passed_closeouts_without_evidence
+    unsupported_claim_count = unsupported_verdicts_without_evidence + passed_closeouts_without_evidence
     score = round(min(1.0, unsupported_claim_count / max(1, sampled_claims)), 6)
     return DriftDimension(
         name="claim_drift",
@@ -207,7 +207,7 @@ def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDime
         sample_count=sampled_claims,
         status=_status(score),
         detail=(
-            f"pass_verdicts_without_prior_evidence={pass_verdicts_without_evidence}; "
+            f"unsupported_verdicts_without_prior_evidence={unsupported_verdicts_without_evidence}; "
             f"passed_closeouts_without_evidence={passed_closeouts_without_evidence}; "
             f"supporting_evidence_events_seen={supporting_evidence_seen}; "
             f"evidence_events_seen={evidence_seen}; window={window}"
