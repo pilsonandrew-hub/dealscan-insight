@@ -102,6 +102,27 @@ class AceCliTests(unittest.TestCase):
         connection.row_factory = sqlite3.Row
         return self._ManagedConnection(connection)
 
+
+    def test_audit_verify_reports_valid_hash_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Audit verify item")
+            self.assertEqual(code, 0, output)
+
+            code, output = self.run_cli("--db", str(db_path), "audit", "verify")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("audit.verify.event_hash_chain=ok", output)
+            self.assertIn(f"audit.verify.db_path={db_path}", output)
+
+    def test_audit_without_subcommand_exits_via_argparse(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as exc, redirect_stderr(stderr):
+            main(["audit"])
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("audit requires a subcommand: verify", stderr.getvalue())
+
     def test_show_trimmed_event_type_with_limit_one_selects_latest_matching_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

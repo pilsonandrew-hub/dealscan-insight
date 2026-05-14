@@ -20,7 +20,7 @@ from ace.supervisor_runtime import (
     run_supervisor_runtime,
 )
 from ace.supervisor_acceptance_monitor import run_supervisor_acceptance_monitor
-from ace.storage import DB_PATH, bootstrap_db
+from ace.storage import DB_PATH, bootstrap_db, verify_event_hash_chain
 from ace.sweep import SweepThresholds, run_sweep
 from ace.briefing import generate_briefing, render_briefing_text
 from ace.cycle import BRIEFING_PATH, run_cycle
@@ -168,6 +168,10 @@ def build_parser() -> argparse.ArgumentParser:
         "gate4-inspection",
         help="Show bounded operator-facing Gate 4 inspection artifacts already governed on disk",
     )
+
+    audit = subparsers.add_parser("audit", help="Run first-class ACE audit checks")
+    audit_subparsers = audit.add_subparsers(dest="audit_command")
+    audit_subparsers.add_parser("verify", help="Verify append-only event hash chain integrity")
 
     evidence = subparsers.add_parser("add-evidence", help="Add evidence for an item")
     evidence.add_argument("item_id")
@@ -738,6 +742,16 @@ def main(argv: list[str] | None = None) -> int:
 
         if command == "gate4-inspection":
             return _print_gate4_inspection_surface()
+
+        if command == "audit":
+            if args.audit_command == "verify":
+                ok, reason = verify_event_hash_chain(db_path)
+                print("audit.verify.event_hash_chain={}".format("ok" if ok else "failed"))
+                print(f"audit.verify.db_path={db_path}")
+                if reason is not None:
+                    print(f"audit.verify.reason={reason}")
+                return 0 if ok else 1
+            parser.error("audit requires a subcommand: verify")
 
         if command == "add-evidence":
             evidence_id = repo.add_evidence(
