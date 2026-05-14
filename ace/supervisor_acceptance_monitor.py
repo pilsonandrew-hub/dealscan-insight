@@ -88,12 +88,12 @@ def build_acceptance_err_line(*, timestamp: str, iteration: int, launchd_rc: int
 
 
 def run_supervisor_acceptance_monitor(
-    db_path: Path | str = DB_PATH,
+    db_path: Union[Path, str] = DB_PATH,
     *,
     service_target: str,
-    log_path: Path | str,
-    err_path: Path | str,
-    pid_path: Path | str,
+    log_path: Union[Path, str],
+    err_path: Union[Path, str],
+    pid_path: Union[Path, str],
     iterations: int = 65,
     sleep_seconds: float = 60.0,
     append: bool = True,
