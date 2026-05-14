@@ -235,19 +235,34 @@ def run_autonomy_lane(
             claimed_done_ids.append(item.id)
 
         if item.state == "CLAIMED_DONE":
-            drift_report = compute_item_drift(item.id, repo.list_item_events(item.id))
-            verdict = compute_verdict(drift_report)
-            item = repo.record_verdict(
-                item.id,
-                verdict,
-                actor=acting_actor,
-                source=AUTONOMY_SOURCE,
-                source_session=acting_session,
-                reason=(
-                    "governed autonomy lane computed verdict from drift composite "
-                    f"{drift_report.composite_score}"
-                ),
-            )
+            if item.verdict is None:
+                drift_report = compute_item_drift(item.id, repo.list_item_events(item.id))
+                verdict = compute_verdict(drift_report)
+                item = repo.record_verdict(
+                    item.id,
+                    verdict,
+                    actor=acting_actor,
+                    source=AUTONOMY_SOURCE,
+                    source_session=acting_session,
+                    reason=(
+                        "governed autonomy lane computed verdict from drift composite "
+                        f"{drift_report.composite_score}"
+                    ),
+                )
+            elif item.verdict not in {"pass", "ship", "monitor"}:
+                drift_report = compute_item_drift(item.id, repo.list_item_events(item.id))
+                verdict = compute_verdict(drift_report)
+                item = repo.record_verdict(
+                    item.id,
+                    verdict,
+                    actor=acting_actor,
+                    source=AUTONOMY_SOURCE,
+                    source_session=acting_session,
+                    reason=(
+                        "governed autonomy lane computed verdict from drift composite "
+                        f"{drift_report.composite_score}"
+                    ),
+                )
             item = repo.apply_action(
                 item.id,
                 "resolve",

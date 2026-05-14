@@ -12,6 +12,7 @@ from ace.autonomy_lane import (
     AUTONOMY_ELIGIBILITY_CREATED_BY,
     AUTONOMY_ELIGIBILITY_EVIDENCE_URI,
     AUTONOMY_ITEM_TYPE,
+    AUTONOMY_SOURCE,
     intake_autonomy_eligible_direct_work,
     mark_item_autonomy_eligible,
     run_autonomy_lane,
@@ -321,6 +322,57 @@ class AutonomyLaneTests(unittest.TestCase):
         self.assertIn("computed verdict from drift composite 0.0", verdict_event.payload_json or "")
         closeout_event = next(event for event in events if event.event_type == "item.closeout_attempted")
         self.assertIn('"verdict":"monitor"', closeout_event.payload_json or "")
+        self.assertIn('"result":"passed"', closeout_event.payload_json or "")
+
+
+    def test_autonomy_lane_retries_claimed_done_item_with_existing_positive_verdict_without_recomputing(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Explicit direct work item retry with existing verdict",
+            source="telegram/direct",
+            source_session="2026-05-14-direct-work-retry-existing-verdict",
+            actor="test",
+        )
+        mark_item_autonomy_eligible(
+            self.db_path,
+            item.id,
+            reason="verdict retry governance proof",
+            actor="operator",
+        )
+        item = self.repo.apply_action(item.id, "approve", actor="test")
+        self.repo.add_evidence(
+            item.id,
+            evidence_text="supporting proof",
+            evidence_uri="ace://proof/retry-existing-verdict",
+            created_by="test",
+            actor="test",
+        )
+        item = self.repo.apply_action(item.id, "done", actor="test")
+        item = self.repo.record_verdict(
+            item.id,
+            "ship",
+            actor="test",
+            source=AUTONOMY_SOURCE,
+            source_session="interrupted_run",
+            reason="pre-existing verdict from interrupted cycle",
+        )
+        self.assertEqual(item.state, "CLAIMED_DONE")
+        self.assertEqual(item.verdict, "ship")
+
+        with patch("ace.autonomy_lane.compute_verdict", return_value="review") as verdict_engine:
+            result = run_autonomy_lane(self.db_path, actor="launchd", source_session="retry_run")
+
+        verdict_engine.assert_not_called()
+        self.assertEqual(result["verified_done_ids"], [item.id])
+        final_item = self.repo.get_item(item.id)
+        assert final_item is not None
+        self.assertEqual(final_item.state, "VERIFIED_DONE")
+        self.assertEqual(final_item.verdict, "ship")
+        events = self.repo.list_item_events(item.id)
+        verdict_events = [event for event in events if event.event_type == "item.verdict_recorded"]
+        self.assertEqual(len(verdict_events), 1)
+        closeout_event = next(event for event in events if event.event_type == "item.closeout_attempted")
+        self.assertIn('"verdict":"ship"', closeout_event.payload_json or "")
         self.assertIn('"result":"passed"', closeout_event.payload_json or "")
 
     def test_autonomy_lane_refuses_to_overwrite_existing_fail_verdict(self) -> None:
