@@ -225,6 +225,7 @@ class AceCycleTests(unittest.TestCase):
         self.assertIn("item.state_changed", event_types)
 
     def test_cycle_skips_when_another_cycle_is_active(self) -> None:
+        fresh_active_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         with connect(self.db_path) as connection:
             connection.execute(
                 """
@@ -243,8 +244,8 @@ class AceCycleTests(unittest.TestCase):
                     None,
                     None,
                     None,
-                    "2026-05-13T12:00:00Z",
-                    "2026-05-13T12:00:00Z",
+                    fresh_active_at,
+                    fresh_active_at,
                     None,
                     None,
                     None,
