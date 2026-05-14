@@ -6,6 +6,7 @@ from typing import Any
 from .action_runtime import NotificationSender, send_operator_notification
 from .autonomy_lane import run_autonomy_lane
 from .briefing import generate_briefing, render_briefing_text
+from .cost_guardrails import enforce_cost_guardrails
 from .telegram_intake import intake_inbound_telegram_work
 from .telegram_runtime import fetch_unprocessed_telegram_messages, mark_telegram_message_processed
 from .governed_run_runtime import (
@@ -66,6 +67,9 @@ def run_cycle(
     try:
         start_governed_run(db_path, governed_run["run_id"])
         mark_governed_run_running(db_path, governed_run["run_id"])
+        cost_status = enforce_cost_guardrails(db_path)
+        if cost_status.blocked:
+            raise CostGuardrailBlocked(cost_status.reason or "cost_guardrail_blocked")
 
         for message in fetch_unprocessed_telegram_messages():
             intake_result = intake_inbound_telegram_work(
@@ -169,6 +173,10 @@ def run_cycle(
         raise
 
 
+class CostGuardrailBlocked(RuntimeError):
+    pass
+
+
 def _active_run_stale_after_seconds(trigger_kind: str) -> int:
     if trigger_kind == "launchd":
         return 5 * 60
@@ -197,6 +205,8 @@ def _first_notification_evidence_id(notification_results: list[dict[str, Any]]) 
 
 
 def _failure_code_for_exception(exc: Exception) -> str:
+    if isinstance(exc, CostGuardrailBlocked):
+        return str(exc) or "cost_guardrail_blocked"
     if isinstance(exc, ValidationError):
         return "cycle_validation_error"
     return f"cycle_{exc.__class__.__name__.lower()}"

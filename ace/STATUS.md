@@ -1,7 +1,7 @@
 # ACE 1.0 Status
 
 Date: 2026-05-14
-Current commit: `5d0e153 ace: add audit verify cli`
+Current commit: `dc97eab ace: add 1.0 status document`
 
 ACE 1.0 is a local governed resident foundation for turning bounded operator work into auditable item lifecycle records. It runs under launchd, keeps a local SQLite-backed item/event ledger, records append-only event hashes, ingests direct Telegram work through the proven OpenClaw session-stream path, and can move explicitly eligible work through the governed lifecycle to verified completion.
 
@@ -27,7 +27,7 @@ ACE 1.0 does not provide broad natural-language understanding. Telegram direct-w
 
 ACE 1.0 does not use raw Telegram Bot API polling in production. Shared-token Bot API polling conflicts with OpenClaw's Telegram ownership, so production intake uses the OpenClaw session stream.
 
-ACE 1.0 does not have cost guardrails such as token-spend circuit breakers, runaway-session cutoffs, or budget-aware autonomy throttles.
+ACE 1.0 includes a first local cost-guardrail slice: a SQLite-backed usage ledger, deterministic local cost/token/session limits, `ace cost record`, `ace cost status`, and a cycle-level fail-closed circuit breaker. It does not integrate with external billing providers or automatically measure model-provider spend.
 
 ACE 1.0 does not have a cleanly proven full network-loss resilience gate. A network interruption test exposed and led to a stale-cycle recovery fix, but that is not the same as a clean network-loss pass.
 
@@ -38,7 +38,7 @@ ACE 1.0 does not claim broad platform autonomy, broad source authenticity, or ge
 Deferred work includes:
 
 - adding a `retry_rate` drift dimension;
-- adding cost guardrails and runaway-session controls;
+- extending cost guardrails beyond the local ledger into real provider spend attribution and richer runaway-session controls;
 - broadening or replacing the keyword-bounded Telegram parser;
 - completing a clean sleep/wake and network-loss resilience proof;
 - deciding whether future ingestion expansion should use an OpenClaw-mediated queue/webhook or another owned intake surface;

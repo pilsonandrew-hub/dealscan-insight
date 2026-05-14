@@ -123,6 +123,56 @@ class AceCliTests(unittest.TestCase):
         self.assertEqual(exc.exception.code, 2)
         self.assertIn("audit requires a subcommand: verify", stderr.getvalue())
 
+
+    def test_cost_record_and_status_report_local_guardrail_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "cost",
+                "record",
+                "--cost-cents",
+                "25",
+                "--tokens",
+                "300",
+                "--session-count",
+                "1",
+                "--source",
+                "unit-test",
+                "--session",
+                "session-1",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn("cost.record.cost_cents=25", output)
+            self.assertIn("cost.record.tokens=300", output)
+            self.assertIn("cost.record.session_count=1", output)
+            self.assertIn("cost.record.source=unit-test", output)
+            self.assertIn("cost.record.source_session=session-1", output)
+
+            code, output = self.run_cli(
+                "--db",
+                str(db_path),
+                "cost",
+                "status",
+                "--cost-limit-cents",
+                "25",
+            )
+            self.assertEqual(code, 1, output)
+            self.assertIn("cost.status.blocked=true", output)
+            self.assertIn("cost.status.reason=cost_limit_exceeded", output)
+            self.assertIn("cost.status.used_cost_cents=25", output)
+
+    def test_cost_without_subcommand_exits_via_argparse(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as exc, redirect_stderr(stderr):
+            main(["cost"])
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("cost requires a subcommand: status or record", stderr.getvalue())
+
+
     def test_show_trimmed_event_type_with_limit_one_selects_latest_matching_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

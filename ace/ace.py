@@ -26,6 +26,11 @@ from ace.briefing import generate_briefing, render_briefing_text
 from ace.cycle import BRIEFING_PATH, run_cycle
 from ace.drift import compute_item_drift
 from ace.workflow import AceError, normalize_state
+from ace.cost_guardrails import (
+    CostGuardrailPolicy,
+    get_cost_guardrail_status,
+    record_cost_usage,
+)
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -172,6 +177,19 @@ def build_parser() -> argparse.ArgumentParser:
     audit = subparsers.add_parser("audit", help="Run first-class ACE audit checks")
     audit_subparsers = audit.add_subparsers(dest="audit_command")
     audit_subparsers.add_parser("verify", help="Verify append-only event hash chain integrity")
+
+    cost = subparsers.add_parser("cost", help="Inspect and record local ACE cost guardrails")
+    cost_subparsers = cost.add_subparsers(dest="cost_command")
+    cost_status = cost_subparsers.add_parser("status", help="Show local ACE cost guardrail status")
+    cost_status.add_argument("--cost-limit-cents", type=int)
+    cost_status.add_argument("--token-limit", type=int)
+    cost_status.add_argument("--session-count-limit", type=int)
+    cost_record = cost_subparsers.add_parser("record", help="Record local ACE cost usage")
+    cost_record.add_argument("--cost-cents", type=int, default=0)
+    cost_record.add_argument("--tokens", type=int, default=0)
+    cost_record.add_argument("--session-count", type=int, default=0)
+    cost_record.add_argument("--source", default="manual")
+    cost_record.add_argument("--session")
 
     evidence = subparsers.add_parser("add-evidence", help="Add evidence for an item")
     evidence.add_argument("item_id")
@@ -463,6 +481,33 @@ GATE4_OPERATOR_ARTIFACTS: tuple[tuple[str, str], ...] = (
 )
 
 
+
+def _cost_policy_from_args(args: argparse.Namespace) -> CostGuardrailPolicy | None:
+    if (
+        args.cost_limit_cents is None
+        and args.token_limit is None
+        and args.session_count_limit is None
+    ):
+        return None
+    return CostGuardrailPolicy(
+        cost_limit_cents=args.cost_limit_cents or 0,
+        token_limit=args.token_limit or 0,
+        session_count_limit=args.session_count_limit or 0,
+    )
+
+
+def _print_cost_status(status) -> None:
+    print(f"cost.status.blocked={str(status.blocked).lower()}")
+    if status.reason is not None:
+        print(f"cost.status.reason={status.reason}")
+    print(f"cost.status.used_cost_cents={status.used_cost_cents}")
+    print(f"cost.status.cost_limit_cents={status.cost_limit_cents}")
+    print(f"cost.status.used_tokens={status.used_tokens}")
+    print(f"cost.status.token_limit={status.token_limit}")
+    print(f"cost.status.used_session_count={status.used_session_count}")
+    print(f"cost.status.session_count_limit={status.session_count_limit}")
+
+
 def _print_gate4_inspection_surface() -> int:
     workspace_root = Path(__file__).resolve().parent.parent
     missing: list[str] = []
@@ -752,6 +797,31 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"audit.verify.reason={reason}")
                 return 0 if ok else 1
             parser.error("audit requires a subcommand: verify")
+
+        if command == "cost":
+            if args.cost_command == "status":
+                policy = _cost_policy_from_args(args)
+                status = get_cost_guardrail_status(db_path, policy=policy)
+                _print_cost_status(status)
+                return 1 if status.blocked else 0
+            if args.cost_command == "record":
+                record = record_cost_usage(
+                    db_path,
+                    cost_cents=args.cost_cents,
+                    tokens=args.tokens,
+                    session_count=args.session_count,
+                    source=args.source,
+                    source_session=args.session,
+                )
+                print(f"cost.record.recorded_at={record['recorded_at']}")
+                print(f"cost.record.cost_cents={record['cost_cents']}")
+                print(f"cost.record.tokens={record['tokens']}")
+                print(f"cost.record.session_count={record['session_count']}")
+                print(f"cost.record.source={record['source']}")
+                if record["source_session"] is not None:
+                    print(f"cost.record.source_session={record['source_session']}")
+                return 0
+            parser.error("cost requires a subcommand: status or record")
 
         if command == "add-evidence":
             evidence_id = repo.add_evidence(

@@ -174,6 +174,17 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS cost_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_at TEXT NOT NULL,
+        cost_cents INTEGER NOT NULL DEFAULT 0,
+        tokens INTEGER NOT NULL DEFAULT 0,
+        session_count INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL,
+        source_session TEXT
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS runtime_instances (
         runtime_instance_id TEXT PRIMARY KEY,
         runtime_family TEXT NOT NULL,

@@ -179,6 +179,23 @@ class AceCycleTests(unittest.TestCase):
         self.assertIsNotNone(status["last_terminal_run"])
         self.assertEqual(status["last_terminal_run"]["trigger_kind"], "launchd")
 
+
+    def test_cycle_fails_closed_when_cost_guardrail_blocks(self) -> None:
+        self.repo.create_item(item_type="note", title="Cost guardrail blocked item")
+
+        with patch("ace.cycle.enforce_cost_guardrails") as guardrail:
+            guardrail.return_value.blocked = True
+            guardrail.return_value.reason = "token_limit_exceeded"
+            with self.assertRaises(Exception):
+                run_cycle(self.db_path, now="2026-05-05T00:00:00Z", briefing_path=self.briefing_path)
+
+        status = get_governed_cycle_run_status(self.db_path)
+        self.assertIsNone(status["current_run"])
+        self.assertIsNotNone(status["last_terminal_run"])
+        self.assertEqual(status["last_terminal_run"]["status"], "failed")
+        self.assertEqual(status["last_terminal_run"]["failure_code"], "token_limit_exceeded")
+        self.assertIn("token_limit_exceeded", status["last_terminal_run"]["failure_summary"])
+
     def test_cycle_ingests_actionable_telegram_message_before_autonomy(self) -> None:
         message = {
             "chat_id": "7529788084",
