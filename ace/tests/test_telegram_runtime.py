@@ -522,6 +522,11 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.assertEqual(messages[0]["sender_name"], "Andrew Pilson")
         self.assertEqual(messages[0]["text"], "Can you check this session path?")
         self.assertEqual(messages[0]["received_at"], "Fri 2026-05-08 17:21 PDT")
+        with closing(sqlite3.connect(self.runtime_db)) as connection:
+            attempt = connection.execute(
+                "SELECT transport, status, message_count, error_type FROM telegram_transport_attempts"
+            ).fetchone()
+        self.assertEqual(tuple(attempt), ("openclaw_session", "ok", 2, None))
 
     def test_fetch_prefers_explicit_openclaw_session_file(self) -> None:
         session_file = Path(self.tempdir.name) / "explicit.jsonl"

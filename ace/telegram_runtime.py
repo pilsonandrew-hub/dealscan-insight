@@ -496,6 +496,11 @@ def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
     if session_file is not None:
         messages = _load_inbound_messages_from_openclaw_session(session_file)
         bootstrap_transport = "openclaw_session"
+        _record_transport_attempt(
+            transport="openclaw_session",
+            status="ok",
+            message_count=len(messages),
+        )
     elif transport_preference == "openclaw_session":
         _record_transport_attempt(
             transport="openclaw_session",
