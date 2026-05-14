@@ -46,6 +46,18 @@ class TelegramParserTests(unittest.TestCase):
         self.assertEqual(result.classification, "direct_work")
         self.assertIn("keep working", result.parser_reason)
 
+    def test_actionable_continue_and_proceed_command(self) -> None:
+        result = parse_telegram_message(
+            "Continue and proceed",
+            chat_id="7529788084",
+            message_id="msg-106",
+            received_at="2026-05-14T08:30:00Z",
+        )
+
+        self.assertTrue(result.actionable)
+        self.assertEqual(result.classification, "direct_work")
+        self.assertIn("continue", result.parser_reason)
+
     def test_non_actionable_chatter(self) -> None:
         result = parse_telegram_message(
             "That sunset was incredible tonight.",

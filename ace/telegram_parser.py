@@ -32,7 +32,8 @@ _STRONG_DIRECT_PATTERNS = (
     "do not ",
     "don't ",
     "keep working",
-    "proceed ",
+    "continue",
+    "proceed",
 )
 
 
