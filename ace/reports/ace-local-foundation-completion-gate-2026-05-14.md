@@ -110,3 +110,25 @@ Do not claim:
 1. Freeze feature expansion and treat this as the local foundation milestone.
 2. Run a controlled sleep/network resilience proof with pre/post supervisor, cycle, transport, and hash-chain evidence.
 3. Decide the long-term Telegram ownership model only after resilience proof: dedicated ACE bot, OpenClaw-mediated queue/webhook, or continued OpenClaw session-stream dependency.
+
+## Independent reviewer follow-up — 2026-05-14
+
+Andrew asked whether external reviewers had been consulted on the Telegram/runtime blocker. The earlier Gemini/OpenRouter review had already recommended staying on the safe `openclaw_session` path and packaging the local foundation instead of forcing shared-token raw Bot API polling.
+
+A follow-up consult was retried through the local Paperclip/OpenRouter bridge after route/funding conditions improved:
+
+- Claude route: `openrouter_claude_review` / `anthropic/claude-opus-4.7`
+- DeepSeek route: `openrouter_deepseek_workhorse` / `deepseek/deepseek-v3.2`
+
+Reviewer consensus:
+
+- The local governed resident foundation is proven enough to package as a foundation milestone.
+- Gate 1-A on `openclaw_session` is the accepted production Telegram path for this milestone.
+- Raw Bot API polling with the shared OpenClaw bot token should not be pursued further; Telegram single-poller conflict is a real boundary, not an implementation bug to keep rediscovering.
+- A.C.E. must still not be called V1.
+- Sleep/network resilience remains unearned and should be tested separately under a controlled gate.
+- Any future raw Bot API work should be a separate scoped decision: dedicated ACE bot token or OpenClaw-mediated queue/webhook handoff.
+
+Plain-English decision:
+
+Continue with the OpenClaw runtime event on the safe `openclaw_session` path. Freeze feature expansion for this foundation milestone. Do not pivot transport ownership in this slice. Do not claim V1.
