@@ -132,3 +132,38 @@ Reviewer consensus:
 Plain-English decision:
 
 Continue with the OpenClaw runtime event on the safe `openclaw_session` path. Freeze feature expansion for this foundation milestone. Do not pivot transport ownership in this slice. Do not claim V1.
+
+## Contained supervisor restart resilience proof — 2026-05-14
+
+A contained resilience proof was run without machine sleep or network disruption.
+
+Procedure:
+
+1. Re-grounded pre-state: supervisor live under launchd, latest ACE cycle completed, event hash chain valid.
+2. Restarted only the ACE supervisor LaunchAgent with `launchctl kickstart -k gui/$(id -u)/ai.superace.supervisor`.
+3. Verified launchd restarted the supervisor process.
+4. Verified A.C.E. terminalized the prior runtime row as failed with `failure_code=supervisor_process_missing` and created a new live runtime.
+5. Triggered a normal launchd ACE cycle after the restart.
+6. Verified the post-restart cycle completed and direct Telegram work reached `VERIFIED_DONE`.
+7. Verified event hash chain remained valid.
+
+Evidence:
+
+- Pre-restart runtime: `runtime_daff0fdbf9204ef8bca70262438617b9`, `status=live`, process pid `43601`.
+- Restart command: `launchctl kickstart -k gui/$(id -u)/ai.superace.supervisor`.
+- Post-restart runtime: `runtime_fb2b9ff65eeb48bb8602b040aae58e86`, `status=live`, process pid `45193`, `startup_status=completed`.
+- Prior runtime terminalized as: `status=failed`, `failure_code=supervisor_process_missing`.
+- Post-restart launchd cycle: `run_5dbd415ed73648188fc0c618a06e9891`, `trigger_kind=launchd`, `status=completed`, no failure code.
+- Post-restart direct-work items:
+  - `item_f98f308ed0774a1f857e6b3601e71e51`, source `telegram:7529788084:34820`, title `Ok Proceed and Continue`, state `VERIFIED_DONE`, verdict `pass`.
+  - `item_03571507ea854b568c651612cf841202`, source `telegram:7529788084:34823`, title `Ok Proceed and Continue`, state `VERIFIED_DONE`, verdict `pass`.
+  - `item_df0562c0550344a2ae893c533a755243`, source `telegram:7529788084:34828`, title `Ok Proceed and Continue`, state `VERIFIED_DONE`, verdict `pass`.
+- Post-restart transport attempt: `transport=openclaw_session`, `status=ok`, `message_count=26`, attempted at `2026-05-14T19:31:46.570759Z`.
+- Event hash chain after proof: `(True, None)`.
+- Evidence artifacts:
+  - `/tmp/ace-supervisor-resilience-20260514T193025Z.txt`
+  - `/tmp/ace-post-supervisor-restart-cycle-20260514T193129Z.txt`
+
+Scope boundary:
+
+This proves contained supervisor restart recovery on the local launchd-managed seam. It does not prove machine sleep/wake resilience, network-loss resilience, V1, distributed runtime fabric, or raw Bot API acceptance.
