@@ -6,7 +6,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
 from .storage import DB_PATH
 from .supervisor_runtime import get_supervisor_runtime_status
@@ -21,7 +21,7 @@ class AcceptanceMonitorError(RuntimeError):
 
 
 LaunchdCollector = Callable[[str], tuple[int, str]]
-StatusCollector = Callable[[Path | str], dict[str, Any]]
+StatusCollector = Callable[[Union[Path, str]], dict[str, Any]]
 SleepFn = Callable[[float], None]
 NowFn = Callable[[], str]
 
