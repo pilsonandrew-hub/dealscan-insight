@@ -318,6 +318,47 @@ class AceCycleTests(unittest.TestCase):
         self.assertIn("stale governed ace cycle", stale_row["failure_summary"])
         self.assertEqual(active_count, 0)
 
+    def test_launchd_cycle_reconciles_short_stale_active_run_before_starting_new_cycle(self) -> None:
+        stale_active_at = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat().replace("+00:00", "Z")
+        with connect(self.db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO governed_runs (
+                    run_id, run_kind, trigger_kind, status, briefing_path,
+                    notification_action_id, delivery_evidence_id,
+                    created_at, started_at, ended_at, interrupted_at,
+                    failure_code, failure_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_launchd_stale_active",
+                    "ace_cycle",
+                    "launchd",
+                    "running",
+                    None,
+                    None,
+                    None,
+                    stale_active_at,
+                    stale_active_at,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            connection.commit()
+
+        result = run_cycle(self.db_path, actor="launchd", briefing_path=self.briefing_path)
+
+        self.assertEqual(result["governed_run"]["status"], "completed")
+        with connect(self.db_path) as connection:
+            stale_row = connection.execute(
+                "SELECT status, failure_code, failure_summary FROM governed_runs WHERE run_id = ?",
+                ("run_launchd_stale_active",),
+            ).fetchone()
+        self.assertEqual(stale_row["status"], "interrupted")
+        self.assertEqual(stale_row["failure_code"], "cycle_stale_active_reconciled")
+
     def test_governed_run_trigger_correction_is_audited(self) -> None:
         result = run_cycle(
             self.db_path,

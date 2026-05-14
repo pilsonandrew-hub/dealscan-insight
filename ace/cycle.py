@@ -39,7 +39,11 @@ def run_cycle(
 ) -> dict[str, Any]:
     thresholds = thresholds or SweepThresholds()
     trigger_kind = "launchd" if actor == "launchd" else TRIGGER_KIND_OPERATOR
-    governed_run = create_or_skip_governed_cycle_run(db_path, trigger_kind=trigger_kind)
+    governed_run = create_or_skip_governed_cycle_run(
+        db_path,
+        trigger_kind=trigger_kind,
+        active_run_stale_after_seconds=_active_run_stale_after_seconds(trigger_kind),
+    )
     briefing_file = Path(briefing_path)
     notification_results: list[dict[str, Any]] = []
     ingested_messages: list[dict[str, Any]] = []
@@ -163,6 +167,12 @@ def run_cycle(
             delivery_evidence_id=_first_notification_evidence_id(notification_results),
         )
         raise
+
+
+def _active_run_stale_after_seconds(trigger_kind: str) -> int:
+    if trigger_kind == "launchd":
+        return 5 * 60
+    return 24 * 60 * 60
 
 
 def _notification_age_context(finding: dict[str, Any]) -> str:
