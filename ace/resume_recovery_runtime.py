@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# DEPRECATED: 2026-05-14, no active CLI callers found in audit. Slated for review in 1.x.
+
 import json
 from pathlib import Path
 from typing import Any

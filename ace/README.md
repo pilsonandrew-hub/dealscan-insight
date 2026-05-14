@@ -55,6 +55,16 @@ Super A.C.E. is currently best described as a governed foundation / Phase 0 cont
 - install proof: root `pyproject.toml` packages `ace*` as `super-ace-governed-foundation` with no runtime dependencies
 - CI proof: `.github/workflows/ace-ci.yml` installs `coverage`, runs `coverage run -m unittest discover -s ace/tests -t .`, and reports informational coverage on push and pull request changes under `ace/`
 
+## Legacy / Deprecated Modules
+
+Audit date: 2026-05-14. These modules had no active CLI callers in the audit and are slated for review in 1.x. They remain in the repository with tests preserved until a separate removal or archival decision is made.
+
+- `phase1_closed_loop.py` — legacy local-only Phase 1 closed-loop proof; referenced by tests only.
+- `phase1b_closed_loop.py` — legacy local-only Phase 1B closed-loop proof; referenced by tests only.
+- `resume_runtime.py` — legacy Phase 3 resume-runtime proof; referenced by tests only.
+- `resume_recovery_runtime.py` — legacy Phase 3B recovery proof; referenced by tests and `owned_recovery_runtime.py` only.
+- `owned_recovery_runtime.py` — legacy owned-recovery composition proof; referenced by tests only.
+
 ## State
 
 - Database: `ace/state/ace.db`
