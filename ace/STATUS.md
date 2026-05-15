@@ -1,7 +1,7 @@
 # ACE 1.0 Status
 
 Date: 2026-05-15
-Current commit: `9fb349e ace: extend audit verify integrity checks`
+Current commit: `dc9b3d3 ace: track gate4 inspection artifacts`
 
 ACE 1.0 is a local governed resident foundation for turning bounded operator work into auditable item lifecycle records. It runs under launchd, keeps a local SQLite-backed item/event ledger, records append-only event hashes, ingests direct Telegram work through the proven OpenClaw session-stream path, and can move explicitly eligible work through the governed lifecycle to verified completion.
 
@@ -46,6 +46,7 @@ ACE 1.0 does not claim broad platform autonomy, broad source authenticity, distr
 - Item 3 — sleep/wake resilience: PASS. Evidence commit: `b9921fe ace: record item 3 sleep wake proof rerun`; artifact: `/tmp/ace-item3-sleep-wake-proof-20260515T055227Z.json`.
 - Item 4 — bounded Telegram parser breadth: PASS. Evidence commit: `f88cdeb ace: widen bounded telegram parser breadth`.
 - Item 5 — audit verify integrity extension: PASS. Evidence commit: `9fb349e ace: extend audit verify integrity checks`.
+- CI environment parity fix — PASS. Evidence commit: `dc9b3d3 ace: track gate4 inspection artifacts`; GitHub ACE CI run `25904172342` passed on master: https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/25904172342.
 
 ## Deferred to 1.x
 
@@ -60,9 +61,14 @@ Deferred work includes:
 
 ## Current verification posture
 
-As of this status file, the latest committed source is `9fb349e ace: extend audit verify integrity checks`.
+As of this status file, the latest committed source is `dc9b3d3 ace: track gate4 inspection artifacts`.
 
 Latest verification observed:
 
+- Commit hash: `dc9b3d3 ace: track gate4 inspection artifacts`.
+- Git status: ACE source clean after the commit; workspace root may show unrelated long-term `MEMORY.md` promotion changes.
+- Full ACE suite passes: `Ran 564 tests in 43.492s — OK` on the post-CI-fix tree.
 - `python3 -m ace.ace audit verify` reports `event_hash_chain=ok`, `evidence_consistency=ok`, `governed_run_integrity=ok`, and `runtime_instance_integrity=ok`.
-- Full ACE suite passes: `Ran 564 tests ... OK`.
+- CI green: GitHub ACE CI run `25904172342` passed on master: https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/25904172342.
+
+Going forward, ACE clean-commit claims require five pieces of evidence: commit hash, git status, full local test suite, hash/audit verification, and CI status.
