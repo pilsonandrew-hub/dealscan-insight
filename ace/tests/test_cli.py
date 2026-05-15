@@ -103,7 +103,7 @@ class AceCliTests(unittest.TestCase):
         return self._ManagedConnection(connection)
 
 
-    def test_audit_verify_reports_valid_hash_chain(self) -> None:
+    def test_audit_verify_reports_valid_integrity_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
             code, output = self.run_cli("--db", str(db_path), "intake", "task", "Audit verify item")
@@ -113,7 +113,34 @@ class AceCliTests(unittest.TestCase):
 
             self.assertEqual(code, 0, output)
             self.assertIn("audit.verify.event_hash_chain=ok", output)
+            self.assertIn("audit.verify.evidence_consistency=ok", output)
+            self.assertIn("audit.verify.governed_run_integrity=ok", output)
+            self.assertIn("audit.verify.runtime_instance_integrity=ok", output)
             self.assertIn(f"audit.verify.db_path={db_path}", output)
+
+    def test_audit_verify_returns_nonzero_when_integrity_check_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            self.run_cli("--db", str(db_path), "intake", "task", "Audit verify broken evidence")
+            with self.connect_db(db_path) as connection:
+                connection.execute("PRAGMA foreign_keys = OFF")
+                connection.execute(
+                    """
+                    INSERT INTO evidence (id, item_id, evidence_text, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    ("evidence_orphan_item", "missing_item", "orphan proof", "2026-05-15T00:00:00Z"),
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "audit", "verify")
+
+            self.assertEqual(code, 1, output)
+            self.assertIn("audit.verify.event_hash_chain=ok", output)
+            self.assertIn("audit.verify.evidence_consistency=failed", output)
+            self.assertIn("audit.verify.governed_run_integrity=ok", output)
+            self.assertIn("audit.verify.runtime_instance_integrity=ok", output)
+            self.assertIn("audit.verify.reason=evidence evidence_orphan_item references missing item missing_item", output)
 
     def test_audit_without_subcommand_exits_via_argparse(self) -> None:
         stderr = io.StringIO()

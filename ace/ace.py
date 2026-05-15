@@ -20,7 +20,7 @@ from ace.supervisor_runtime import (
     run_supervisor_runtime,
 )
 from ace.supervisor_acceptance_monitor import run_supervisor_acceptance_monitor
-from ace.storage import DB_PATH, bootstrap_db, verify_event_hash_chain
+from ace.storage import DB_PATH, bootstrap_db, verify_audit_integrity
 from ace.sweep import SweepThresholds, run_sweep
 from ace.briefing import generate_briefing, render_briefing_text
 from ace.cycle import BRIEFING_PATH, run_cycle
@@ -807,12 +807,19 @@ def main(argv: list[str] | None = None) -> int:
 
         if command == "audit":
             if args.audit_command == "verify":
-                ok, reason = verify_event_hash_chain(db_path)
-                print("audit.verify.event_hash_chain={}".format("ok" if ok else "failed"))
+                results = verify_audit_integrity(db_path)
+                all_ok = True
+                first_reason: str | None = None
+                for check_name, (ok, reason) in results.items():
+                    print(f"audit.verify.{check_name}={'ok' if ok else 'failed'}")
+                    if not ok:
+                        all_ok = False
+                        if first_reason is None:
+                            first_reason = reason
                 print(f"audit.verify.db_path={db_path}")
-                if reason is not None:
-                    print(f"audit.verify.reason={reason}")
-                return 0 if ok else 1
+                if first_reason is not None:
+                    print(f"audit.verify.reason={first_reason}")
+                return 0 if all_ok else 1
             parser.error("audit requires a subcommand: verify")
 
         if command == "cost":

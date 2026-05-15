@@ -14,7 +14,11 @@ from ace.storage import (
     new_id,
     repair_event_hash_chain_for_legacy_races,
     utc_now,
+    verify_audit_integrity,
+    verify_evidence_consistency,
     verify_event_hash_chain,
+    verify_governed_run_integrity,
+    verify_runtime_instance_integrity,
 )
 
 
@@ -247,6 +251,185 @@ class StorageContractTests(unittest.TestCase):
 
         self.assertEqual(repaired, 1)
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
+
+
+    def test_verify_evidence_consistency_passes_for_valid_evidence(self) -> None:
+        from ace.repository import ItemRepository
+
+        repo = ItemRepository(self.db_path)
+        item = repo.create_item(item_type="task", title="Evidence consistency")
+        repo.add_evidence(item.id, evidence_text="supporting proof")
+
+        self.assertEqual(verify_evidence_consistency(self.db_path), (True, None))
+
+    def test_verify_evidence_consistency_detects_missing_item(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute(
+                """
+                INSERT INTO evidence (id, item_id, evidence_text, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("evidence_orphan_item", "missing_item", "orphan proof", utc_now()),
+            )
+            connection.commit()
+
+        ok, detail = verify_evidence_consistency(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "evidence evidence_orphan_item references missing item missing_item")
+
+    def test_verify_evidence_consistency_detects_missing_event(self) -> None:
+        from ace.repository import ItemRepository
+
+        repo = ItemRepository(self.db_path)
+        item = repo.create_item(item_type="task", title="Evidence event consistency")
+        with connect(self.db_path) as connection:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute(
+                """
+                INSERT INTO evidence (id, item_id, evidence_text, created_at, event_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("evidence_orphan_event", item.id, "orphan event proof", utc_now(), "evt_missing"),
+            )
+            connection.commit()
+
+        ok, detail = verify_evidence_consistency(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "evidence evidence_orphan_event references missing event evt_missing")
+
+    def test_verify_governed_run_integrity_passes_for_empty_database(self) -> None:
+        bootstrap_db(self.db_path)
+
+        self.assertEqual(verify_governed_run_integrity(self.db_path), (True, None))
+
+    def test_verify_governed_run_integrity_detects_invalid_status(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO governed_runs (run_id, run_kind, trigger_kind, status, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("run_invalid_status", "ace_cycle", "operator", "mystery", now),
+            )
+            connection.commit()
+
+        ok, detail = verify_governed_run_integrity(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "governed_run run_invalid_status has invalid status mystery")
+
+    def test_verify_governed_run_integrity_detects_completed_without_ended_at(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO governed_runs (run_id, run_kind, trigger_kind, status, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("run_completed_open", "ace_cycle", "operator", "completed", now),
+            )
+            connection.commit()
+
+        ok, detail = verify_governed_run_integrity(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "governed_run run_completed_open has terminal status completed without ended_at")
+
+    def test_verify_runtime_instance_integrity_passes_for_empty_database(self) -> None:
+        bootstrap_db(self.db_path)
+
+        self.assertEqual(verify_runtime_instance_integrity(self.db_path), (True, None))
+
+    def test_verify_runtime_instance_integrity_detects_invalid_status(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO runtime_instances (
+                    runtime_instance_id, runtime_family, status, metadata_json,
+                    stale_after_seconds, started_at, last_seen_at,
+                    startup_status, shutdown_status, recovery_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "runtime_invalid_status",
+                    "single_tenant_local_supervisor",
+                    "mystery",
+                    "{}",
+                    60,
+                    now,
+                    now,
+                    "starting",
+                    "not_requested",
+                    "not_requested",
+                    now,
+                    now,
+                ),
+            )
+            connection.commit()
+
+        ok, detail = verify_runtime_instance_integrity(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "runtime_instance runtime_invalid_status has invalid status mystery")
+
+    def test_verify_runtime_instance_integrity_detects_completed_shutdown_without_timestamp(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO runtime_instances (
+                    runtime_instance_id, runtime_family, status, metadata_json,
+                    stale_after_seconds, started_at, last_seen_at, ended_at,
+                    startup_status, startup_completed_at,
+                    shutdown_status, shutdown_requested_at, shutdown_completed_at,
+                    recovery_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "runtime_bad_shutdown",
+                    "single_tenant_local_supervisor",
+                    "stopped",
+                    "{}",
+                    60,
+                    now,
+                    now,
+                    now,
+                    "completed",
+                    now,
+                    "completed",
+                    now,
+                    None,
+                    "not_requested",
+                    now,
+                    now,
+                ),
+            )
+            connection.commit()
+
+        ok, detail = verify_runtime_instance_integrity(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "runtime_instance runtime_bad_shutdown has completed shutdown without shutdown_completed_at")
+
+    def test_verify_audit_integrity_returns_all_four_checks(self) -> None:
+        bootstrap_db(self.db_path)
+
+        results = verify_audit_integrity(self.db_path)
+
+        self.assertEqual(
+            set(results),
+            {
+                "event_hash_chain",
+                "evidence_consistency",
+                "governed_run_integrity",
+                "runtime_instance_integrity",
+            },
+        )
+        self.assertTrue(all(ok for ok, _reason in results.values()))
 
     def test_append_event_respects_foreign_key_constraint_for_missing_item(self) -> None:
         bootstrap_db(self.db_path)

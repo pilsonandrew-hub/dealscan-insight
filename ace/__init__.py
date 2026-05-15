@@ -9,7 +9,7 @@ from .action_runtime import (
 )
 from .cycle import BRIEFING_PATH, run_cycle
 from .repository import ItemRepository
-from .storage import DB_PATH, append_event, bootstrap_db, connect, verify_event_hash_chain
+from .storage import DB_PATH, append_event, bootstrap_db, connect, verify_audit_integrity, verify_evidence_consistency, verify_event_hash_chain, verify_governed_run_integrity, verify_runtime_instance_integrity
 from .supervisor_runtime import (
     FAILURE_PHASE_RUNTIME,
     FAILURE_PHASE_SHUTDOWN,
@@ -58,5 +58,9 @@ __all__ = [
     "start_supervisor_runtime",
     "stop_supervisor_runtime",
     "SweepThresholds",
+    "verify_audit_integrity",
+    "verify_evidence_consistency",
     "verify_event_hash_chain",
+    "verify_governed_run_integrity",
+    "verify_runtime_instance_integrity",
 ]

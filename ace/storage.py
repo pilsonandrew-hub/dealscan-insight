@@ -445,6 +445,146 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
     return True, None
 
 
+def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[bool, str | None]]:
+    """Return read-only audit verification results for governed ACE integrity surfaces."""
+
+    return {
+        "event_hash_chain": verify_event_hash_chain(db_path),
+        "evidence_consistency": verify_evidence_consistency(db_path),
+        "governed_run_integrity": verify_governed_run_integrity(db_path),
+        "runtime_instance_integrity": verify_runtime_instance_integrity(db_path),
+    }
+
+
+def verify_evidence_consistency(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Verify evidence rows reference existing items and, when set, existing events."""
+
+    bootstrap_db(db_path)
+    with connect(db_path) as connection:
+        missing_item = connection.execute(
+            """
+            SELECT e.id, e.item_id
+            FROM evidence e
+            LEFT JOIN items i ON i.id = e.item_id
+            WHERE i.id IS NULL
+            ORDER BY e.id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if missing_item is not None:
+            return False, f"evidence {missing_item['id']} references missing item {missing_item['item_id']}"
+
+        missing_event = connection.execute(
+            """
+            SELECT ev.id, ev.event_id
+            FROM evidence ev
+            LEFT JOIN events e ON e.event_id = ev.event_id
+            WHERE ev.event_id IS NOT NULL AND e.event_id IS NULL
+            ORDER BY ev.id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if missing_event is not None:
+            return False, f"evidence {missing_event['id']} references missing event {missing_event['event_id']}"
+
+    return True, None
+
+
+def verify_governed_run_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Verify governed_runs rows use valid statuses and coherent terminal timestamps."""
+
+    bootstrap_db(db_path)
+    valid_statuses = {"pending", "starting", "running", "completed", "failed", "interrupted", "skipped"}
+    terminal_statuses = {"completed", "failed", "interrupted", "skipped"}
+    active_statuses = {"pending", "starting", "running"}
+
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT run_id, status, started_at, ended_at, interrupted_at, failure_code
+            FROM governed_runs
+            ORDER BY created_at ASC, run_id ASC
+            """
+        ).fetchall()
+
+    for row in rows:
+        status = row["status"]
+        run_id = row["run_id"]
+        if status not in valid_statuses:
+            return False, f"governed_run {run_id} has invalid status {status}"
+        if status in terminal_statuses and row["ended_at"] is None:
+            return False, f"governed_run {run_id} has terminal status {status} without ended_at"
+        if status in active_statuses and row["ended_at"] is not None:
+            return False, f"governed_run {run_id} has active status {status} with ended_at"
+        if status == "interrupted" and row["interrupted_at"] is None:
+            return False, f"governed_run {run_id} is interrupted without interrupted_at"
+        if status in {"failed", "interrupted", "skipped"} and row["failure_code"] is None:
+            return False, f"governed_run {run_id} has status {status} without failure_code"
+
+    return True, None
+
+
+def verify_runtime_instance_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Verify runtime_instances rows have coherent lifecycle status combinations."""
+
+    bootstrap_db(db_path)
+    valid_statuses = {"starting", "live", "stale", "stopped", "failed"}
+    valid_startup = {"starting", "completed", "failed"}
+    valid_shutdown = {"not_requested", "requested", "completed", "failed"}
+    valid_recovery = {"not_requested", "requested", "completed", "failed"}
+    terminal_statuses = {"stopped", "failed"}
+    active_statuses = {"starting", "live", "stale"}
+
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT runtime_instance_id, status, ended_at, failure_code,
+                   startup_status, startup_completed_at,
+                   shutdown_status, shutdown_requested_at, shutdown_completed_at,
+                   recovery_status, recovery_last_requested_at,
+                   recovery_last_completed_at, recovery_last_result
+            FROM runtime_instances
+            ORDER BY created_at ASC, runtime_instance_id ASC
+            """
+        ).fetchall()
+
+    for row in rows:
+        runtime_id = row["runtime_instance_id"]
+        status = row["status"]
+        startup_status = row["startup_status"]
+        shutdown_status = row["shutdown_status"]
+        recovery_status = row["recovery_status"]
+
+        if status not in valid_statuses:
+            return False, f"runtime_instance {runtime_id} has invalid status {status}"
+        if startup_status not in valid_startup:
+            return False, f"runtime_instance {runtime_id} has invalid startup_status {startup_status}"
+        if shutdown_status not in valid_shutdown:
+            return False, f"runtime_instance {runtime_id} has invalid shutdown_status {shutdown_status}"
+        if recovery_status not in valid_recovery:
+            return False, f"runtime_instance {runtime_id} has invalid recovery_status {recovery_status}"
+        if status in terminal_statuses and row["ended_at"] is None:
+            return False, f"runtime_instance {runtime_id} has terminal status {status} without ended_at"
+        if status in active_statuses and row["ended_at"] is not None:
+            return False, f"runtime_instance {runtime_id} has active status {status} with ended_at"
+        if status == "failed" and row["failure_code"] is None:
+            return False, f"runtime_instance {runtime_id} is failed without failure_code"
+        if startup_status == "completed" and row["startup_completed_at"] is None:
+            return False, f"runtime_instance {runtime_id} has completed startup without startup_completed_at"
+        if shutdown_status in {"requested", "completed", "failed"} and row["shutdown_requested_at"] is None:
+            return False, f"runtime_instance {runtime_id} has shutdown_status {shutdown_status} without shutdown_requested_at"
+        if shutdown_status == "completed" and row["shutdown_completed_at"] is None:
+            return False, f"runtime_instance {runtime_id} has completed shutdown without shutdown_completed_at"
+        if recovery_status in {"requested", "completed", "failed"} and row["recovery_last_requested_at"] is None:
+            return False, f"runtime_instance {runtime_id} has recovery_status {recovery_status} without recovery_last_requested_at"
+        if recovery_status in {"completed", "failed"} and row["recovery_last_completed_at"] is None:
+            return False, f"runtime_instance {runtime_id} has recovery_status {recovery_status} without recovery_last_completed_at"
+        if recovery_status in {"completed", "failed"} and row["recovery_last_result"] is None:
+            return False, f"runtime_instance {runtime_id} has recovery_status {recovery_status} without recovery_last_result"
+
+    return True, None
+
+
 def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
