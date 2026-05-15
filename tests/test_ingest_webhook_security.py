@@ -294,6 +294,22 @@ class WebhookSecurityTests(unittest.TestCase):
 
         self.assertIsNone(replay)
 
+    def test_find_recent_webhook_replay_blocks_pending_run_claim(self):
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [
+            {"processing_status": "pending", "received_at": now, "id": "claim-row"},
+        ]
+        with patch.object(ingest, "supabase_client", _Supabase(rows)), patch.dict(
+            os.environ,
+            {"APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS": "3600"},
+            clear=False,
+        ):
+            replay = ingest._find_recent_webhook_replay("run-claim")
+
+        self.assertIsNotNone(replay)
+        self.assertEqual(replay["id"], "claim-row")
+        self.assertEqual(replay["processing_status"], "pending")
+
     def test_apify_webhook_ignores_recent_processed_replay(self):
         payload = {
             "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -389,6 +405,70 @@ class WebhookSecurityTests(unittest.TestCase):
             inserted_rows[0]["error_message"],
         )
 
+
+    def test_claim_webhook_log_direct_pg_serializes_pending_claim(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-claim-direct", "defaultDatasetId": "dataset-claim-direct"},
+        }
+        executed = []
+        existing_rows = [
+            {
+                "id": "existing-claim",
+                "run_id": "run-claim-direct",
+                "processing_status": "pending",
+                "received_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": None,
+            }
+        ]
+
+        class _Cursor:
+            def __init__(self):
+                self._inserted = None
+
+            def execute(self, query, params=None):
+                executed.append((query, params))
+                if "insert into public.webhook_log" in query:
+                    self._inserted = {"id": "should-not-insert"}
+
+            def fetchall(self):
+                return existing_rows
+
+            def fetchone(self):
+                return self._inserted
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        class _Connection:
+            def cursor(self, *args, **kwargs):
+                return _Cursor()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        audit_state = {"fallbacks": []}
+        with patch.object(ingest, "_direct_supabase_db_url", "postgresql://example"), patch.object(
+            ingest.psycopg2, "connect", return_value=_Connection()
+        ):
+            webhook_log_id, replay = ingest._claim_webhook_log(
+                payload,
+                require_durable=True,
+                audit_state=audit_state,
+            )
+
+        self.assertIsNone(webhook_log_id)
+        self.assertEqual(replay["id"], "existing-claim")
+        self.assertIn("webhook_log_claim_direct_pg", audit_state["fallbacks"])
+        self.assertTrue(any("pg_advisory_xact_lock" in query for query, _ in executed))
+        self.assertFalse(any("insert into public.webhook_log" in query for query, _ in executed))
+
     def test_apify_webhook_marks_audit_fallback_when_critical_rows_use_direct_pg(self):
         payload = {
             "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -405,12 +485,8 @@ class WebhookSecurityTests(unittest.TestCase):
             ingest, "_direct_supabase_db_url", "postgresql://example"
         ), patch.object(
             ingest,
-            "_find_recent_webhook_replay_direct_pg",
-            lambda *_args, **_kwargs: [],
-        ), patch.object(
-            ingest,
-            "_insert_webhook_log_direct_pg",
-            lambda row: webhook_inserts.append(row) or "log-direct-1",
+            "_claim_webhook_log",
+            lambda payload, **kwargs: (webhook_inserts.append(payload) or "log-direct-1", None),
         ), patch.object(
             ingest,
             "_update_webhook_log_direct_pg",

@@ -833,6 +833,107 @@ def _webhook_max_age_seconds() -> int:
     return max(_env_int("APIFY_WEBHOOK_MAX_AGE_SECONDS", 0), 0)
 
 
+def _claim_webhook_log(
+    payload: dict,
+    *,
+    require_durable: bool = False,
+    audit_state: Optional[dict[str, Any]] = None,
+) -> tuple[Optional[str], Optional[dict]]:
+    """Atomically claim one Apify run for processing.
+
+    The normal replay lookup is intentionally still available for stale/replay
+    bookkeeping, but the processing path needs a single-flight claim: duplicate
+    Apify webhooks can arrive at the same time and both see no processed row.
+    When direct Postgres is available, use a transaction-scoped advisory lock on
+    the Apify run_id to serialize lookup+pending insert.  If direct Postgres is
+    unavailable, fall back to the existing durable insert path plus the stricter
+    pending/processed replay check.
+    """
+    metadata = extract_apify_webhook_metadata(payload)
+    run_id = metadata["run_id"]
+    if _direct_supabase_db_url and run_id:
+        return _claim_webhook_log_direct_pg(payload, audit_state=audit_state)
+
+    recent_replay = _find_recent_webhook_replay(
+        run_id,
+        strict=require_durable,
+        audit_state=audit_state,
+    )
+    if recent_replay:
+        return None, recent_replay
+    return (
+        insert_webhook_log(
+            payload,
+            require_durable=require_durable,
+            audit_state=audit_state,
+        ),
+        None,
+    )
+
+
+def _claim_webhook_log_direct_pg(
+    payload: dict,
+    *,
+    audit_state: Optional[dict[str, Any]] = None,
+) -> tuple[Optional[str], Optional[dict]]:
+    if not _direct_supabase_db_url:
+        raise RuntimeError("direct PG audit fallback unavailable")
+
+    metadata = extract_apify_webhook_metadata(payload)
+    run_id = metadata["run_id"]
+    if not run_id:
+        return insert_webhook_log(payload, require_durable=True, audit_state=audit_state), None
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_webhook_replay_window_seconds())
+    row = {
+        "source": metadata["source"],
+        "actor_id": metadata["actor_id"],
+        "run_id": run_id,
+        "item_count": metadata["item_count"],
+        "raw_payload": payload,
+        "processing_status": "pending",
+        "error_message": None,
+    }
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor(cursor_factory=psycopg2_extras.RealDictCursor) as cur:
+            cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (run_id,))
+            cur.execute(
+                """
+                select id, received_at, processing_status, error_message, run_id
+                from public.webhook_log
+                where run_id = %s
+                  and received_at >= %s
+                order by received_at desc
+                limit 5
+                """,
+                (run_id, cutoff),
+            )
+            recent_replay = _select_recent_replay_row([dict(item) for item in cur.fetchall()])
+            if recent_replay:
+                _record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
+                return None, recent_replay
+            cur.execute(
+                """
+                insert into public.webhook_log
+                  (source, actor_id, run_id, item_count, raw_payload, processing_status, error_message)
+                values (%s, %s, %s, %s, %s, %s, %s)
+                returning id
+                """,
+                (
+                    row.get("source"),
+                    row.get("actor_id"),
+                    row.get("run_id"),
+                    row.get("item_count"),
+                    psycopg2_extras.Json(row.get("raw_payload")),
+                    row.get("processing_status"),
+                    row.get("error_message"),
+                ),
+            )
+            inserted = cur.fetchone()
+            _record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
+            return (str(inserted["id"]) if inserted else None), None
+
+
 def _find_recent_webhook_replay(
     run_id: Optional[str],
     *,
@@ -884,10 +985,12 @@ def _find_recent_webhook_replay(
 def _select_recent_replay_row(rows: list[dict]) -> Optional[dict]:
     for row in rows:
         status = str(row.get("processing_status") or "").lower()
-        # Only block replays if already successfully processed.
-        # 'pending' means received but not yet processed — allow retry.
-        # 'ignored_replay' should not cascade-block future legitimate runs.
-        if status in {"processed"}:
+        # Block duplicate deliveries once a run is already claimed or processed.
+        # Duplicate Apify webhooks can arrive nearly simultaneously; allowing a
+        # second delivery while the first is still "pending" can enqueue the same
+        # run twice before either row reaches "processed".  Error/degraded rows
+        # remain retryable so a genuinely failed run can be replayed.
+        if status in {"pending", "processing", "processed"}:
             return row
     return None
 
@@ -1570,9 +1673,9 @@ async def apify_webhook(
             )
             raise HTTPException(status_code=401, detail="Stale webhook payload")
 
-        recent_replay = _find_recent_webhook_replay(
-            metadata["run_id"],
-            strict=True,
+        webhook_log_id, recent_replay = _claim_webhook_log(
+            payload,
+            require_durable=True,
             audit_state=audit_state,
         )
 
@@ -1598,12 +1701,6 @@ async def apify_webhook(
             }
             _attach_audit_state(response, audit_state)
             return response
-
-        webhook_log_id = insert_webhook_log(
-            payload,
-            require_durable=True,
-            audit_state=audit_state,
-        )
 
         background_tasks.add_task(
             _process_webhook_items,
