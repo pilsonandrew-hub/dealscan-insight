@@ -98,6 +98,48 @@ class TelegramParserTests(unittest.TestCase):
 
         self.assertEqual(first, second)
 
+    def test_item4_parser_breadth_corpus(self) -> None:
+        cases = [
+            ("Could you verify the ACE audit chain after the proof?", True, "could you"),
+            ("when you can, inspect parser breadth", True, "when you can"),
+            ("Rerun the full ACE suite", True, "rerun"),
+            ("Test the sleep wake proof runner", True, "test"),
+            ("Commit the parser breadth evidence", True, "commit"),
+            ("Record the Item 4 proof artifact", True, "record"),
+            ("Document the parser decision table", True, "document"),
+            ("Send back the clean proof summary", True, "send back"),
+            ("Move to Item 4 parser breadth", True, "move to"),
+            ("Fix the closeout metadata gap", True, "fix"),
+            ("Please harden direct work intake", True, "please"),
+            ("Make sure the cycle is green", True, "make sure"),
+            ("Beautiful work on Item 3", False, "no_direct_work_rule_matched"),
+            ("Thanks, that looks right", False, "no_direct_work_rule_matched"),
+            ("lol that was brutal", False, "no_direct_work_rule_matched"),
+            ("Good morning", False, "no_direct_work_rule_matched"),
+            ("Nice", False, "no_direct_work_rule_matched"),
+            ("The proof passed", False, "no_direct_work_rule_matched"),
+            ("Parser breadth matters", False, "no_direct_work_rule_matched"),
+            ("Item 4 is next", False, "no_direct_work_rule_matched"),
+        ]
+
+        for index, (text, expected_actionable, expected_reason_fragment) in enumerate(cases, start=1):
+            with self.subTest(index=index, text=text):
+                result = parse_telegram_message(
+                    text,
+                    chat_id="7529788084",
+                    message_id=f"item4-{index}",
+                    received_at="2026-05-15T06:00:00Z",
+                )
+
+                self.assertEqual(result.actionable, expected_actionable)
+                if expected_actionable:
+                    self.assertEqual(result.classification, "direct_work")
+                    self.assertEqual(result.parser_rule, "bounded_direct_work_rule")
+                    self.assertIn(expected_reason_fragment, result.parser_reason)
+                else:
+                    self.assertEqual(result.classification, "ignore")
+                    self.assertEqual(result.parser_rule, expected_reason_fragment)
+
 
 if __name__ == "__main__":
     unittest.main()

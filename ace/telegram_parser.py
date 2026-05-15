@@ -5,12 +5,14 @@ from dataclasses import dataclass
 
 _DIRECT_MARKERS = (
     "can you ",
+    "could you ",
     "please ",
     "check ",
     "follow up",
     "look into",
     "remind me",
     "make sure",
+    "when you can",
 )
 
 _DIRECT_PREFIXES = (
@@ -20,12 +22,17 @@ _DIRECT_PREFIXES = (
     "investigate ",
     "review ",
     "run ",
+    "rerun ",
+    "test ",
     "fix ",
     "harden ",
     "summarize ",
     "write ",
     "create ",
     "update ",
+    "commit ",
+    "record ",
+    "document ",
 )
 
 _STRONG_DIRECT_PATTERNS = (
@@ -34,6 +41,8 @@ _STRONG_DIRECT_PATTERNS = (
     "keep working",
     "continue",
     "proceed",
+    "send back",
+    "move to ",
 )
 
 
