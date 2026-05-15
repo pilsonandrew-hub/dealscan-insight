@@ -501,6 +501,12 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
             connection.execute("ALTER TABLE items ADD COLUMN confidence_tier TEXT")
         if item_columns and "verdict" not in item_columns:
             connection.execute("ALTER TABLE items ADD COLUMN verdict TEXT")
+        if item_columns and "closed_at" not in item_columns:
+            connection.execute("ALTER TABLE items ADD COLUMN closed_at TEXT")
+        if item_columns and "closed_by" not in item_columns:
+            connection.execute("ALTER TABLE items ADD COLUMN closed_by TEXT")
+        if item_columns and "closed_reason" not in item_columns:
+            connection.execute("ALTER TABLE items ADD COLUMN closed_reason TEXT")
 
         _backfill_event_hashes(connection)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(event_hash)")

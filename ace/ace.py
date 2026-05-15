@@ -242,6 +242,23 @@ def build_parser() -> argparse.ArgumentParser:
     record_correction.add_argument("--reason", required=True)
     record_correction.add_argument("--actor")
 
+
+    correction_submit = subparsers.add_parser(
+        "correction",
+        help="Submit audited ACE state corrections",
+    )
+    correction_subparsers = correction_submit.add_subparsers(dest="correction_command")
+    closeout_correction = correction_subparsers.add_parser(
+        "submit",
+        help="Submit an audited closeout metadata correction",
+    )
+    closeout_correction.add_argument("item_id")
+    closeout_correction.add_argument("--closed-at", required=True)
+    closeout_correction.add_argument("--closed-by", required=True)
+    closeout_correction.add_argument("--closed-reason", required=True)
+    closeout_correction.add_argument("--reason", required=True)
+    closeout_correction.add_argument("--actor")
+
     resolve_contradiction = subparsers.add_parser(
         "resolve-contradiction",
         help="Resolve an existing contradiction",
@@ -880,6 +897,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_contradiction_added(item_id=args.item_id, contradiction_id=contradiction_id)
             return 0
+
+
+        if command == "correction":
+            if args.correction_command == "submit":
+                result = repo.submit_closeout_metadata_correction(
+                    args.item_id,
+                    closed_at=args.closed_at,
+                    closed_by=args.closed_by,
+                    closed_reason=args.closed_reason,
+                    reason=args.reason,
+                    actor=args.actor,
+                )
+                print(
+                    f"item_id={result['item_id']} event_id={result['event_id']} "
+                    f"closed_at={result['closed_at']} closed_by={result['closed_by']}"
+                )
+                return 0
+            raise ValidationError("correction subcommand is required")
 
         if command == "resolve-contradiction":
             result = repo.resolve_contradiction(

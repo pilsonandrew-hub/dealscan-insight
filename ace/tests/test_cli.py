@@ -14879,6 +14879,43 @@ class AceCliTests(unittest.TestCase):
             self.assertIsNotNone(contradiction_events)
             self.assertEqual(contradiction_events["count"], 0)
 
+
+    def test_correction_submit_updates_closeout_metadata_with_audit_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Correct via CLI")
+            self.assertEqual(code, 0, output)
+            item_id = output.split("item_id=")[1].split()[0]
+            for action in ("approve", "done"):
+                code, output = self.run_cli("--db", str(db_path), action, item_id, "--actor", "cli")
+                self.assertEqual(code, 0, output)
+            code, output = self.run_cli("--db", str(db_path), "add-evidence", item_id, "proof", "--actor", "cli")
+            self.assertEqual(code, 0, output)
+            code, output = self.run_cli("--db", str(db_path), "record-verdict", item_id, "pass", "--actor", "cli", "--reason", "proof")
+            self.assertEqual(code, 0, output)
+            code, output = self.run_cli("--db", str(db_path), "resolve", item_id, "--actor", "cli", "--reason", "verified")
+            self.assertEqual(code, 0, output)
+
+            code, output = self.run_cli(
+                "--db", str(db_path),
+                "correction", "submit", item_id,
+                "--closed-at", "2026-05-15T00:00:00Z",
+                "--closed-by", "audit-corrector",
+                "--closed-reason", "pass: corrected from audit event",
+                "--reason", "repair denormalized closeout metadata",
+                "--actor", "cli",
+            )
+            self.assertEqual(code, 0, output)
+            self.assertIn("event_id=", output)
+
+            with closing(self.connect_db(db_path)) as connection:
+                item = connection.execute("SELECT closed_at, closed_by, closed_reason, last_event_id FROM items WHERE id=?", (item_id,)).fetchone()
+                event = connection.execute("SELECT event_type FROM events WHERE event_id=?", (item["last_event_id"],)).fetchone()
+            self.assertEqual(item["closed_at"], "2026-05-15T00:00:00Z")
+            self.assertEqual(item["closed_by"], "audit-corrector")
+            self.assertEqual(item["closed_reason"], "pass: corrected from audit event")
+            self.assertEqual(event["event_type"], "item.closeout_metadata_corrected")
+
     def test_record_correction_outputs_linkage_identifiers(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
@@ -17433,6 +17470,43 @@ class AceCliTests(unittest.TestCase):
             self.assertEqual(latest_closeout["result"], "passed")
             self.assertIsNone(latest_closeout["failure_code"])
             self.assertEqual(latest_closeout["open_contradiction_count"], 0)
+
+
+    def test_bootstrap_adds_closeout_metadata_columns_to_existing_items_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute(
+                    "CREATE TABLE items ("
+                    "id TEXT PRIMARY KEY, "
+                    "item_type TEXT NOT NULL, "
+                    "title TEXT NOT NULL, "
+                    "description TEXT, "
+                    "state TEXT NOT NULL, "
+                    "priority_hint TEXT, "
+                    "source TEXT, "
+                    "source_session TEXT, "
+                    "deadline_at TEXT, "
+                    "owner TEXT, "
+                    "created_at TEXT NOT NULL, "
+                    "updated_at TEXT NOT NULL, "
+                    "last_event_id TEXT"
+                    ")"
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            code, output = self.run_cli("--db", str(db_path), "list")
+            self.assertEqual(code, 0, output)
+
+            with closing(self.connect_db(db_path)) as connection:
+                columns = {row["name"] for row in connection.execute("PRAGMA table_info(items)").fetchall()}
+
+            self.assertIn("closed_at", columns)
+            self.assertIn("closed_by", columns)
+            self.assertIn("closed_reason", columns)
 
     def test_bootstrap_repairs_missing_contradiction_indexes_on_existing_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

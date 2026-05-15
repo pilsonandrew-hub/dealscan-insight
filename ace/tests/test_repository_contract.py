@@ -242,6 +242,33 @@ class ItemRepositoryContractTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.repo.resolve_contradiction(contradiction_id, reason="   ", actor="test")
 
+
+    def test_submit_closeout_metadata_correction_updates_item_through_audit_event(self) -> None:
+        item = self.repo.create_item(item_type="task", title="Correct metadata", actor="test")
+        approved = self.repo.apply_action(item.id, "approve", actor="test")
+        claimed = self.repo.apply_action(approved.id, "done", actor="test")
+        self.repo.add_evidence(claimed.id, evidence_text="proof", actor="test")
+        self.repo.record_verdict(claimed.id, "pass", actor="test", reason="proof reviewed")
+        verified = self.repo.apply_action(claimed.id, "resolve", actor="test", reason="verified")
+
+        result = self.repo.submit_closeout_metadata_correction(
+            verified.id,
+            closed_at="2026-05-15T00:00:00Z",
+            closed_by="audit-corrector",
+            closed_reason="pass: historical closeout event correction",
+            reason="repair denormalized closeout metadata from audit log",
+            actor="test",
+        )
+
+        corrected = self.repo.get_item(verified.id)
+        self.assertEqual(corrected.closed_at, "2026-05-15T00:00:00Z")
+        self.assertEqual(corrected.closed_by, "audit-corrector")
+        self.assertEqual(corrected.closed_reason, "pass: historical closeout event correction")
+        self.assertEqual(corrected.last_event_id, result["event_id"])
+        events = self.repo.list_item_events(verified.id, event_type="item.closeout_metadata_corrected")
+        self.assertEqual(len(events), 1)
+        self.assertIn('"reason":"repair denormalized closeout metadata from audit log"', events[0].payload_json or "")
+
     def test_record_correction_preserves_original_truth_and_links_corrected_item(self) -> None:
         original = self.repo.create_item(item_type="task", title="Original claim", actor="test")
         corrected = self.repo.create_item(item_type="task", title="Corrected claim", actor="test")
@@ -377,12 +404,29 @@ class ItemRepositoryContractTests(unittest.TestCase):
 
         verified = self.repo.apply_action(claimed.id, "resolve", actor="test", reason="verified")
         self.assertEqual(verified.state, "VERIFIED_DONE")
+        self.assertEqual(verified.closed_at, verified.updated_at)
+        self.assertEqual(verified.closed_by, "test")
+        self.assertEqual(verified.closed_reason, "verified")
 
         events = self.repo.list_item_events(verified.id, event_type="item.state_changed")
         self.assertGreaterEqual(len(events), 2)
         final_payload = events[-1].payload_json or ""
         self.assertIn('"closeout_run_id":', final_payload)
         self.assertIn('"closeout_event_id":', final_payload)
+
+    def test_finalize_closeout_defaults_metadata_when_actor_or_reason_missing(self) -> None:
+        item = self.repo.create_item(item_type="task", title="Default closeout metadata", actor="test")
+        approved = self.repo.apply_action(item.id, "approve", actor="test")
+        claimed = self.repo.apply_action(approved.id, "done", actor="test")
+        self.repo.add_evidence(claimed.id, evidence_text="proof", actor="test")
+        self.repo.record_verdict(claimed.id, "pass", actor="test", reason="proof reviewed")
+
+        verified = self.repo.apply_action(claimed.id, "resolve")
+
+        self.assertEqual(verified.state, "VERIFIED_DONE")
+        self.assertEqual(verified.closed_at, verified.updated_at)
+        self.assertEqual(verified.closed_by, "ace.closeout")
+        self.assertEqual(verified.closed_reason, "closeout verified")
 
 
 if __name__ == "__main__":

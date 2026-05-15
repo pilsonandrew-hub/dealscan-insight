@@ -537,6 +537,78 @@ class ItemRepository:
             connection.commit()
         return contradiction_id
 
+
+    def submit_closeout_metadata_correction(
+        self,
+        item_id: str,
+        *,
+        closed_at: str,
+        closed_by: str,
+        closed_reason: str,
+        reason: str | None = None,
+        actor: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_reason = _normalize_required_human_text(reason, field_name="reason")
+        normalized_closed_at = _normalize_required_human_text(closed_at, field_name="closed_at")
+        normalized_closed_by = _normalize_required_human_text(closed_by, field_name="closed_by")
+        normalized_closed_reason = _normalize_required_human_text(closed_reason, field_name="closed_reason")
+        created_at = utc_now()
+        with connect(self.db_path) as connection:
+            row = connection.execute(
+                "SELECT id, state, closed_at, closed_by, closed_reason FROM items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown item_id: {item_id}")
+            if row["state"] != "VERIFIED_DONE":
+                raise ValidationError("closeout metadata correction requires state=VERIFIED_DONE")
+
+            event_id = append_event(
+                connection,
+                event_type="item.closeout_metadata_corrected",
+                payload={
+                    "item_id": item_id,
+                    "previous": {
+                        "closed_at": row["closed_at"],
+                        "closed_by": row["closed_by"],
+                        "closed_reason": row["closed_reason"],
+                    },
+                    "corrected": {
+                        "closed_at": normalized_closed_at,
+                        "closed_by": normalized_closed_by,
+                        "closed_reason": normalized_closed_reason,
+                    },
+                    "reason": normalized_reason,
+                },
+                item_id=item_id,
+                actor=actor,
+                created_at=created_at,
+            )
+            connection.execute(
+                """
+                UPDATE items
+                SET closed_at = ?, closed_by = ?, closed_reason = ?, updated_at = ?, last_event_id = ?
+                WHERE id = ?
+                """,
+                (
+                    normalized_closed_at,
+                    normalized_closed_by,
+                    normalized_closed_reason,
+                    created_at,
+                    event_id,
+                    item_id,
+                ),
+            )
+            connection.commit()
+        return {
+            "item_id": item_id,
+            "event_id": event_id,
+            "closed_at": normalized_closed_at,
+            "closed_by": normalized_closed_by,
+            "closed_reason": normalized_closed_reason,
+            "reason": normalized_reason,
+        }
+
     def record_correction(
         self,
         item_id: str,
@@ -1049,13 +1121,15 @@ class ItemRepository:
             session_id=source_session,
             created_at=updated_at,
         )
+        closeout_actor = actor or "ace.closeout"
+        closeout_reason = reason or "closeout verified"
         connection.execute(
             """
             UPDATE items
-            SET state = ?, updated_at = ?, last_event_id = ?
+            SET state = ?, updated_at = ?, closed_at = ?, closed_by = ?, closed_reason = ?, last_event_id = ?
             WHERE id = ?
             """,
-            (target_state, updated_at, state_event_id, item_id),
+            (target_state, updated_at, updated_at, closeout_actor, closeout_reason, state_event_id, item_id),
         )
         connection.execute(
             "UPDATE closeout_runs SET result = ?, completed_at = ? WHERE id = ?",
