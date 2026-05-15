@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from typing import Any, Optional
 import hmac
 import hashlib
+import html
 import re
 import os
 import logging
@@ -102,6 +103,17 @@ def _redact_telegram_bot_token(text: Any) -> str:
         "bot[REDACTED_TELEGRAM_TOKEN]",
         str(text),
     )
+
+
+def _telegram_html_escape(value: Any) -> str:
+    """Escape text for Telegram HTML parse mode."""
+    return html.escape(str(value or ""), quote=False)
+
+
+def _telegram_link(url: str, label: str) -> str:
+    safe_url = html.escape(str(url or ""), quote=True)
+    safe_label = _telegram_html_escape(label)
+    return f'<a href="{safe_url}">{safe_label}</a>'
 
 
 OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
@@ -2649,14 +2661,16 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         truth_note = ""
         if pricing_maturity == "proxy":
             truth_note = (
-                f"Proxy-priced: expected close and basis are synthetic ({mmr_lookup_basis})\n"
+                "Proxy-priced: expected close and basis are synthetic "
+                f"({_telegram_html_escape(mmr_lookup_basis)})\n"
             )
         elif retail_comp_count is not None:
             truth_note = (
                 "Retail evidence: "
                 f"count={int(float(retail_comp_count))}, "
-                f"conf={retail_comp_confidence if retail_comp_confidence is not None else 'n/a'}\n"
+                f"conf={_telegram_html_escape(retail_comp_confidence if retail_comp_confidence is not None else 'n/a')}\n"
             )
+        deal_url = f"https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}"
         reply_markup = {
             "inline_keyboard": [[
                 {"text": "🔥 BUY", "callback_data": f"buy_{callback_id}"},
@@ -2667,31 +2681,31 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
 
         if is_platinum:
             msg = (
-                f"💎 *PLATINUM ALERT*\n"
-                f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
-                f"Grade: *{investment_grade}* | Score: *{deal['dos_score']}*\n"
+                f"💎 <b>PLATINUM ALERT</b>\n"
+                f"{_telegram_html_escape(deal.get('year'))} {_telegram_html_escape(deal.get('make'))} {_telegram_html_escape(deal.get('model'))}\n"
+                f"Grade: <b>{_telegram_html_escape(investment_grade)}</b> | Score: <b>{deal['dos_score']}</b>\n"
                 f"ROI/Day: ${roi_per_day:,.0f} | Headroom: ${headroom:,.0f}\n"
                 f"Bid: ${deal.get('current_bid', 0):,.0f} | Max Bid: ${score_breakdown.get('max_bid', 0):,.0f}\n"
-                f"Pricing: {pricing_maturity} via {pricing_source} | Trust: {trust_score if trust_score is not None else 'n/a'} | Conf: {confidence if confidence is not None else 'n/a'}\n"
-                f"Expected Close: {expected_close_source}\n"
-                f"Basis: {acquisition_basis_source}\n"
+                f"Pricing: {_telegram_html_escape(pricing_maturity)} via {_telegram_html_escape(pricing_source)} | Trust: {_telegram_html_escape(trust_score if trust_score is not None else 'n/a')} | Conf: {_telegram_html_escape(confidence if confidence is not None else 'n/a')}\n"
+                f"Expected Close: {_telegram_html_escape(expected_close_source)}\n"
+                f"Basis: {_telegram_html_escape(acquisition_basis_source)}\n"
                 f"{truth_note}"
-                f"State: {deal.get('state', '?')}\n"
-                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({listing_url})"
+                f"State: {_telegram_html_escape(deal.get('state', '?'))}\n"
+                f"{_telegram_link(deal_url, 'View Deal')} | {_telegram_link(listing_url, 'Bid Direct →')}"
             )
         else:
             msg = (
-                f"🔥 *HOT DEAL ALERT*\n"
-                f"{deal.get('year')} {deal.get('make')} {deal.get('model')}\n"
-                f"Grade: *{investment_grade}* | Score: *{deal['dos_score']}*\n"
+                f"🔥 <b>HOT DEAL ALERT</b>\n"
+                f"{_telegram_html_escape(deal.get('year'))} {_telegram_html_escape(deal.get('make'))} {_telegram_html_escape(deal.get('model'))}\n"
+                f"Grade: <b>{_telegram_html_escape(investment_grade)}</b> | Score: <b>{deal['dos_score']}</b>\n"
                 f"Bid: ${deal.get('current_bid', 0):,.0f}\n"
-                f"Pricing: {pricing_maturity} via {pricing_source} | Trust: {trust_score if trust_score is not None else 'n/a'} | Conf: {confidence if confidence is not None else 'n/a'}\n"
-                f"Expected Close: {expected_close_source}\n"
-                f"Basis: {acquisition_basis_source}\n"
+                f"Pricing: {_telegram_html_escape(pricing_maturity)} via {_telegram_html_escape(pricing_source)} | Trust: {_telegram_html_escape(trust_score if trust_score is not None else 'n/a')} | Conf: {_telegram_html_escape(confidence if confidence is not None else 'n/a')}\n"
+                f"Expected Close: {_telegram_html_escape(expected_close_source)}\n"
+                f"Basis: {_telegram_html_escape(acquisition_basis_source)}\n"
                 f"{truth_note}"
-                f"State: {deal.get('state', '?')}\n"
+                f"State: {_telegram_html_escape(deal.get('state', '?'))}\n"
                 f"Gross: ${score_breakdown.get('gross_margin', 0):,.0f}\n"
-                f"[View Deal](https://dealscan-insight.vercel.app/deal/{deal.get('opportunity_id', '')}) | [Bid Direct →]({listing_url})"
+                f"{_telegram_link(deal_url, 'View Deal')} | {_telegram_link(listing_url, 'Bid Direct →')}"
             )
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -2699,7 +2713,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
                 json={
                     "chat_id": TELEGRAM_CHAT_ID,
                     "text": msg,
-                    "parse_mode": "Markdown",
+                    "parse_mode": "HTML",
                     "link_preview_options": {"is_disabled": True},
                     "reply_markup": reply_markup,
                 },
