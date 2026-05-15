@@ -7,76 +7,72 @@ Current source baseline: `430b88b`
 
 A.C.E. is clean at the governed-foundation gate, not V1.
 
-Verified after the latest hardening pass:
+This report was originally written against source baseline `430b88b`. Later hardening and CI reconciliation supersede several operational details below. Current tracked truth as of `f32ea73 ace: record ci-green verification posture`:
 
-- ACE source HEAD: `430b88b`
-- Event hash chain: `(True, None)`
-- Supervisor runtime: live (`runtime_6cc9ef9fe5f44c5eb3b2203a80ab3d40`)
-- Latest governed run observed: completed, `trigger_kind=operator`
-- Full ACE suite with warnings as errors: `506 tests OK`
-- Telegram runtime DB exists with:
-  - `processed_telegram_messages`
-  - `telegram_transport_attempts`
-  - `telegram_transport_offsets`
-- Missing-token/no-inbox raw Telegram path is observable: records `telegram_transport_attempts(status=disabled,error_type=missing_bot_token)`
-- Governed raw Telegram token source, TLS trust-store handling, Bot API offset persistence, and transport-offset-aware backlog checkpointing are implemented and source-tested.
+- ACE Items 1–5 are PASS at the governed-foundation level.
+- ACE CI is green on master for `f32ea73`: https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/25916758062.
+- Full ACE suite passes locally: `Ran 564 tests ... OK`.
+- `ace audit verify` reports `event_hash_chain=ok`, `evidence_consistency=ok`, `governed_run_integrity=ok`, and `runtime_instance_integrity=ok`.
+- Item 3 sleep/wake resilience proof passed on the accepted bounded path with artifact `/tmp/ace-item3-sleep-wake-proof-20260515T055227Z.json`.
+- Item 4 parser breadth passed for operator-directive Telegram messages only.
+- Shared-token raw Telegram Bot API polling is blocked by Telegram `getUpdates` single-consumer ownership conflict with OpenClaw. See `ace/reports/ace-raw-telegram-shared-token-conflict-2026-05-14.md`.
 - Governed cycle single-flight protection is implemented: concurrent cycle attempts record `status=skipped`, `failure_code=cycle_already_active` instead of executing concurrently.
 
-## Gate 1 — Raw live Telegram Bot API polling acceptance
+## Gate 1 — Telegram transport ownership acceptance
 
 ### Current truth
 
-Partially proven, still not fully earned.
+Raw live Telegram Bot API polling with the shared OpenClaw Telegram bot token is blocked and must not be treated as a near-term pass/fail V1 gate.
 
-OpenClaw has a Telegram bot token configured in `~/.openclaw/openclaw.json`. A.C.E. now supports a governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`) that reads the existing OpenClaw Telegram bot token at runtime without committing the secret.
+OpenClaw has a Telegram bot token configured in `~/.openclaw/openclaw.json`. A.C.E. supports a governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`) that can read that token without committing the secret. Controlled probing proved Telegram can be reached and raw Bot API attempts are durably recorded.
 
-Controlled fetch proof has shown Telegram can be reached, TLS trust-store handling can succeed, first-run Bot API backlog can be checkpointed rather than returned for ingestion, and `telegram_transport_offsets.next_offset` can persist.
+The decisive later proof showed the shared token cannot be safely long-polled by A.C.E.: Telegram returns a `telegram_conflict` because OpenClaw already owns polling for that bot token. Production intake therefore remains on the OpenClaw session-stream path.
 
-The remaining acceptance gap is a full launchd-cycle proof with raw polling enabled and all side effects accounted for.
+### Valid future options
 
-### Required before enabling
+Before raw polling can be an acceptance target, choose one ownership model:
 
-1. Token source must be explicit and governed.
-   - Either an A.C.E.-specific token env var is installed into launchd, or an audited adapter intentionally reads the OpenClaw Telegram token.
-   - No secret should be committed to git.
+1. Dedicated A.C.E. Telegram bot/token.
+   - A.C.E. owns `getUpdates` for its own bot.
+   - OpenClaw keeps ownership of the current Telegram bot/session stream.
 
-2. Backlog safety must be proven before first live poll.
-   - `ACE_TELEGRAM_BOOTSTRAP_EXISTING_AS_PROCESSED=true` must be active on first runtime poll.
-   - `processed_telegram_messages` must be preserved.
-   - `telegram_transport_offsets` must be used after successful Bot API fetches.
+2. OpenClaw-mediated handoff / queue / webhook.
+   - OpenClaw remains Telegram owner.
+   - A.C.E. receives governed handoff events with explicit provenance.
 
-3. Acceptance proof must be controlled.
-   - Use a single controlled Telegram message or a known no-message poll window.
-   - Verify `telegram_transport_attempts` records `status=ok` or explicit API failure.
-   - Verify offset row persists when update IDs are returned.
-   - Verify no backlog flood occurs.
-   - Verify event hash chain after cycle.
+3. Explicitly keep A.C.E. on OpenClaw session-stream intake.
+   - Raw Bot API polling with the shared token is removed from the V1 acceptance path.
+   - Future proof focuses on session-stream ingestion, backlog safety, cycle closure, and explicit degradation.
 
-### Pass criteria
+### Pass criteria for any future transport gate
 
-- Live launchd cycle runs with `ACE_TELEGRAM_BOT_TOKEN` present.
-- Bot API transport attempt is recorded durably.
-- If updates exist, only new eligible messages are ingested; existing backlog is checkpointed or ignored safely.
-- `telegram_transport_offsets.next_offset` persists after successful updates.
-- A controlled direct-work message reaches `VERIFIED_DONE`, or a controlled no-message poll records a successful no-update attempt without side effects.
-- Full ACE test suite passes under `PYTHONWARNINGS=error` after the live proof.
-- Event hash chain remains `(True, None)`.
+- Transport ownership is explicit and non-conflicting.
+- No secret is committed to git.
+- Transport attempts and failures are durably recorded.
+- No backlog flood occurs.
+- A controlled direct-work message reaches `VERIFIED_DONE`, or a controlled no-message/no-work interval records a successful no-side-effect attempt.
+- Full ACE suite passes after the live proof.
+- `ace audit verify` remains green.
+- GitHub ACE CI is green for the committed change.
 
 ### Fail criteria
 
-- Any silent return when raw Bot API is expected.
+- Any silent return when transport work is expected.
+- Shared-token `getUpdates` conflict.
 - Backlog ingestion without explicit consent.
 - Missing durable attempt row.
-- Offset not persisted after update IDs.
+- Offset/handoff state not persisted when applicable.
 - Notification side effects not accounted for.
 
 ## Gate 2 — Sleep/network resilience proof
 
 ### Current truth
 
-Unearned.
+Partially earned at the bounded governed-foundation level, not broadly earned.
 
-No live sleep/wake or network interruption acceptance run has been executed and proven.
+Item 3 sleep/wake resilience passed on the accepted bounded path. That proof accepts either same-runtime sleep survival with advancing heartbeat or prior-runtime failure/replacement, and verifies supervisor continuity, hash-chain integrity, cycle integrity, state integrity, post-wake cycle execution, and the full ACE test suite.
+
+Item 2 bounded network-loss proof passed on the current OpenClaw session-stream path. This is not a raw Bot API or broad platform-network claim.
 
 ### Required proof
 
@@ -137,4 +133,6 @@ A.C.E. V1 cannot be claimed until at least these are specified and proven:
 
 Do not call A.C.E. V1.
 
-Next best engineering action: finish Gate 1 with a controlled launchd-cycle raw Telegram acceptance proof. A.C.E. already has the governed no-secret token source switch (`ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN=true`), TLS trust-store handling, Bot API offset persistence, and backlog checkpointing. The remaining bar is launchd-cycle integration without backlog flood, unaccounted notification side effects, stuck governed runs, or hash-chain/test regressions.
+Do not pursue shared-token raw Telegram Bot API polling as a near-term gate. The next valid transport decision is one of: dedicated A.C.E. bot/token, OpenClaw-mediated handoff, or explicitly keeping the OpenClaw session-stream path as the governed transport boundary.
+
+For any future ACE clean-commit or gate claim, require five pieces of evidence: commit hash, git status, full local ACE suite, `ace audit verify`, and green GitHub ACE CI.
