@@ -74,6 +74,7 @@ from backend.ingest.canonical_identity import (
     normalize_make_for_identity as _normalize_make,
     normalize_model_for_identity as _normalize_model,
 )
+from backend.ingest.pre_save_skip import build_pre_save_skip_delivery_log_kwargs
 from backend.ingest.openrouter_routing import (
     DEFAULT_OPENROUTER_LANE_MODEL_PAIRS,
     legacy_deepseek_fallback_enabled,
@@ -710,16 +711,14 @@ def _record_pre_save_skip(
     error_message: Optional[str],
     audit_state: Optional[dict[str, Any]] = None,
 ) -> None:
-    listing_id, listing_url = _raw_item_identity(item, run_id, item_index)
     _record_delivery_log(
-        run_id=run_id,
-        listing_id=listing_id,
-        listing_url=listing_url,
-        opportunity_id=None,
-        channel="db_save",
-        status=status,
-        error_message=error_message,
-        require_durable=True,
+        **build_pre_save_skip_delivery_log_kwargs(
+            item=item,
+            run_id=run_id,
+            item_index=item_index,
+            status=status,
+            error_message=error_message,
+        ),
         audit_state=audit_state,
     )
 
