@@ -57,6 +57,11 @@ from backend.ingest.alert_validation import (
     alert_validation_mmr_estimate,
     build_alert_validation_prompt,
 )
+from backend.ingest.delivery_log import (
+    build_delivery_log_insert_row,
+    build_delivery_log_row,
+    build_delivery_log_update_row,
+)
 from backend.ingest.direct_pg import prepare_direct_pg_value
 from backend.ingest.canonical_identity import (
     MAKE_ALIASES,
@@ -2587,34 +2592,31 @@ def _record_delivery_log(
                 "critical ingest_delivery_log write missing run_id, listing_id, or channel"
             )
         return False
-    now_iso = datetime.now(timezone.utc).isoformat()
-    row = {
-        "run_id": run_id,
-        "listing_id": listing_id,
-        "listing_url": listing_url,
-        "opportunity_id": opportunity_id,
-        "channel": channel,
-        "status": status,
-        "external_id": external_id,
-        "error_message": error_message,
-        "updated_at": now_iso,
-    }
+    row = build_delivery_log_row(
+        run_id=run_id,
+        listing_id=listing_id,
+        listing_url=listing_url,
+        opportunity_id=opportunity_id,
+        channel=channel,
+        status=status,
+        external_id=external_id,
+        error_message=error_message,
+    )
     primary_error: Optional[Exception] = None
     try:
         if supabase_client is not None:
             existing = _delivery_log_lookup(run_id, listing_id, channel)
             if existing and existing.get("id"):
-                row["attempt_count"] = int(existing.get("attempt_count") or 0) + 1
+                update_row = build_delivery_log_update_row(row, existing)
                 (
                     supabase_client.table("ingest_delivery_log")
-                    .update(row)
+                    .update(update_row)
                     .eq("id", existing["id"])
                     .execute()
                 )
             else:
-                row["attempt_count"] = 1
-                row["created_at"] = now_iso
-                supabase_client.table("ingest_delivery_log").insert(row).execute()
+                insert_row = build_delivery_log_insert_row(row)
+                supabase_client.table("ingest_delivery_log").insert(insert_row).execute()
             return False
     except Exception as exc:
         primary_error = exc
