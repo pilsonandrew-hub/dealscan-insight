@@ -86,6 +86,11 @@ from backend.ingest.openrouter_routing import (
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
 from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
+from backend.ingest.service_config import (
+    resolve_apify_api_token,
+    resolve_app_public_url,
+    resolve_rover_actions_base_url,
+)
 from backend.ingest.webhook_replay import select_recent_replay_row
 from backend.ingest.sonar_listings import build_sonar_listing_row
 from backend.ingest.telegram_alerts import (
@@ -163,7 +168,7 @@ _supabase_url = _supabase_config.url
 _supabase_service_role_key = _supabase_config.service_role_key
 _supabase_anon_key = _supabase_config.anon_key
 _environment = _supabase_config.environment
-_APP_PUBLIC_URL = (os.getenv("APP_PUBLIC_URL") or "https://dealscan-insight-production.up.railway.app").strip()
+_APP_PUBLIC_URL = resolve_app_public_url(os.environ)
 _supabase_key = _supabase_config.key
 if _supabase_config.message:
     if _supabase_config.severity == "critical":
@@ -184,7 +189,7 @@ except Exception as _supa_err:
 
 
 def _apify_api_token() -> str:
-    return (os.getenv("APIFY_TOKEN") or os.getenv("APIFY_API_TOKEN") or "").strip()
+    return resolve_apify_api_token(os.environ)
 
 
 def _normalize_openrouter_route_value(value: Any) -> str:
@@ -2073,17 +2078,7 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
 
 
 def _rover_actions_base_url() -> str:
-    base_url = (
-        os.getenv("ROVER_API_BASE_URL")
-        or os.getenv("INTERNAL_API_BASE_URL")
-        or os.getenv("BACKEND_URL")
-        or os.getenv("BASE_URL")
-    )
-    if base_url:
-        return base_url.rstrip("/")
-
-    port = os.getenv("PORT", "8080")
-    return f"http://127.0.0.1:{port}"
+    return resolve_rover_actions_base_url(os.environ)
 
 
 async def _submit_rover_action(opportunity_id: str, action: str, user_id: str) -> None:
