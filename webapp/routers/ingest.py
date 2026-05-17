@@ -49,6 +49,7 @@ from backend.ingest.audit_state import (
     audit_fallbacks,
     format_audit_failure,
     format_ingest_run_summary,
+    increment_reason_counter,
     merge_audit_error_message,
     record_audit_fallback,
 )
@@ -2472,7 +2473,7 @@ def _prepare_direct_pg_value(value):
 
 
 def _increment_reason_counter(counter: dict, reason: str) -> None:
-    counter[reason] = counter.get(reason, 0) + 1
+    increment_reason_counter(counter, reason)
 
 
 def _audit_fallbacks(audit_state: Optional[dict[str, Any]]) -> list[str]:

@@ -3,6 +3,7 @@ from backend.ingest.audit_state import (
     audit_fallbacks,
     format_audit_failure,
     format_ingest_run_summary,
+    increment_reason_counter,
     merge_audit_error_message,
     record_audit_fallback,
 )
@@ -72,3 +73,11 @@ def test_format_audit_failure_includes_primary_when_present():
         primary_error=None,
         fallback_error=RuntimeError("pg down"),
     ) == "critical webhook_log insert failed via direct PG fallback: direct_pg=pg down"
+
+
+def test_increment_reason_counter_adds_and_increments_reason():
+    counter = {}
+    increment_reason_counter(counter, "gate:rust_state")
+    increment_reason_counter(counter, "gate:rust_state")
+    increment_reason_counter(counter, "save_exception")
+    assert counter == {"gate:rust_state": 2, "save_exception": 1}

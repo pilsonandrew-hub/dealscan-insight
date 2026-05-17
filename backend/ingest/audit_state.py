@@ -7,6 +7,11 @@ from typing import Any, Optional
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 
 
+
+def increment_reason_counter(counter: dict[str, int], reason: str) -> None:
+    counter[reason] = counter.get(reason, 0) + 1
+
+
 def audit_fallbacks(audit_state: Optional[dict[str, Any]]) -> list[str]:
     fallbacks = (audit_state or {}).get("fallbacks") or []
     deduped: list[str] = []
