@@ -85,3 +85,12 @@ def webhook_replay_window_seconds(*, env_name: str = "APIFY_WEBHOOK_REPLAY_WINDO
 
 def webhook_max_age_seconds(*, env_name: str = "APIFY_WEBHOOK_MAX_AGE_SECONDS", default: int = 0) -> int:
     return max(env_int(env_name, default), 0)
+
+
+def request_client_ip_for_security_log(request: Any, extractor: Any = None) -> str:
+    if extractor is not None:
+        try:
+            return extractor(request)
+        except Exception:
+            pass
+    return getattr(getattr(request, "client", None), "host", None) or "unknown"

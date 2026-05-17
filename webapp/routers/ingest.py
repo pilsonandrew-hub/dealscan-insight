@@ -77,6 +77,7 @@ from backend.ingest.telegram_alerts import (
 from backend.ingest.webhook_security import (
     configured_webhook_secret_entries,
     match_webhook_secret,
+    request_client_ip_for_security_log,
     stale_webhook_error,
     verify_webhook_secret,
     webhook_max_age_seconds,
@@ -750,10 +751,9 @@ def _stale_webhook_error(metadata: dict) -> Optional[str]:
 def _request_client_ip_for_security_log(request: Request) -> str:
     try:
         from webapp.middleware.rate_limit import extract_client_ip
-
-        return extract_client_ip(request)
     except Exception:
-        return getattr(getattr(request, "client", None), "host", None) or "unknown"
+        extract_client_ip = None
+    return request_client_ip_for_security_log(request, extract_client_ip)
 
 
 def _raw_item_identity(item: Any, run_id: str, item_index: int) -> tuple[str, Optional[str]]:

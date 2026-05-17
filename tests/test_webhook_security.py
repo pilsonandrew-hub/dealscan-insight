@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from backend.ingest.webhook_security import (
     configured_webhook_secret_entries,
     match_webhook_secret,
+    request_client_ip_for_security_log,
     stale_webhook_error,
     verify_webhook_secret,
     webhook_max_age_seconds,
@@ -52,3 +53,26 @@ def test_webhook_window_helpers_clamp_invalid_and_negative_env(monkeypatch):
 
     assert webhook_replay_window_seconds() == 120
     assert webhook_max_age_seconds() == 60
+
+
+class _Client:
+    host = "203.0.113.5"
+
+
+class _Request:
+    client = _Client()
+
+
+def test_request_client_ip_uses_extractor_when_available():
+    assert request_client_ip_for_security_log(_Request(), lambda request: "198.51.100.9") == "198.51.100.9"
+
+
+def test_request_client_ip_falls_back_to_request_client_host_on_extractor_failure():
+    def boom(_request):
+        raise RuntimeError("middleware unavailable")
+
+    assert request_client_ip_for_security_log(_Request(), boom) == "203.0.113.5"
+
+
+def test_request_client_ip_returns_unknown_without_client():
+    assert request_client_ip_for_security_log(object()) == "unknown"
