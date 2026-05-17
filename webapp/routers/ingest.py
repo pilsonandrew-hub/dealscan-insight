@@ -453,7 +453,25 @@ def _claim_webhook_log(
     metadata = extract_apify_webhook_metadata(payload)
     run_id = metadata["run_id"]
     if _direct_supabase_db_url and run_id:
-        return _claim_webhook_log_direct_pg(payload, audit_state=audit_state)
+        try:
+            return _claim_webhook_log_direct_pg(payload, audit_state=audit_state)
+        except Exception as direct_error:
+            logger.warning(
+                "[INGEST_AUDIT] direct PG webhook claim failed for run_id=%s; "
+                "falling back to Supabase REST when available: %s",
+                run_id,
+                direct_error,
+            )
+            record_audit_fallback(audit_state, "webhook_log_claim_direct_pg_unavailable")
+            if supabase_client is None and require_durable:
+                raise CriticalAuditWriteError(
+                    format_audit_failure(
+                        surface="webhook_log",
+                        operation="claim",
+                        primary_error=None,
+                        fallback_error=direct_error,
+                    )
+                ) from direct_error
 
     recent_replay = _find_recent_webhook_replay(
         run_id,

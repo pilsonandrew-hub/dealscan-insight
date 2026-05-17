@@ -469,6 +469,57 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertTrue(any("pg_advisory_xact_lock" in query for query, _ in executed))
         self.assertFalse(any("insert into public.webhook_log" in query for query, _ in executed))
 
+    def test_claim_webhook_log_falls_back_to_rest_when_direct_pg_unreachable(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-direct-unreachable", "defaultDatasetId": "dataset-direct-unreachable"},
+        }
+        audit_state = {"fallbacks": []}
+        insert_calls = []
+
+        def fake_insert(_payload, **kwargs):
+            insert_calls.append(kwargs)
+            return "rest-log-1"
+
+        with patch.object(ingest, "_direct_supabase_db_url", "postgresql://unreachable"), patch.object(
+            ingest, "supabase_client", _Supabase([])
+        ), patch.object(
+            ingest.psycopg2, "connect", side_effect=OSError("network is unreachable")
+        ), patch.object(
+            ingest, "insert_webhook_log", fake_insert
+        ):
+            webhook_log_id, replay = ingest._claim_webhook_log(
+                payload,
+                require_durable=True,
+                audit_state=audit_state,
+            )
+
+        self.assertEqual(webhook_log_id, "rest-log-1")
+        self.assertIsNone(replay)
+        self.assertIn("webhook_log_claim_direct_pg_unavailable", audit_state["fallbacks"])
+        self.assertEqual(insert_calls[0]["require_durable"], True)
+
+    def test_claim_webhook_log_fails_loudly_when_direct_pg_and_rest_unavailable(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-no-durable-path", "defaultDatasetId": "dataset-no-durable-path"},
+        }
+        audit_state = {"fallbacks": []}
+
+        with patch.object(ingest, "_direct_supabase_db_url", "postgresql://unreachable"), patch.object(
+            ingest, "supabase_client", None
+        ), patch.object(
+            ingest.psycopg2, "connect", side_effect=OSError("network is unreachable")
+        ):
+            with self.assertRaises(ingest.CriticalAuditWriteError):
+                ingest._claim_webhook_log(
+                    payload,
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+
+        self.assertIn("webhook_log_claim_direct_pg_unavailable", audit_state["fallbacks"])
+
     def test_apify_webhook_marks_audit_fallback_when_critical_rows_use_direct_pg(self):
         payload = {
             "createdAt": datetime.now(timezone.utc).isoformat(),
