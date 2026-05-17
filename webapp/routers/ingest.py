@@ -44,6 +44,14 @@ from backend.ingest.gates import (
     passes_basic_gates as _passes_basic_gates,
 )
 from backend.ingest.listing_identity import compute_listing_id as _compute_listing_id
+from backend.ingest.audit_state import (
+    attach_audit_state,
+    audit_fallbacks,
+    format_audit_failure,
+    format_ingest_run_summary,
+    merge_audit_error_message,
+    record_audit_fallback,
+)
 from backend.ingest.alert_validation import (
     alert_validation_mmr_estimate,
     build_alert_validation_prompt,
@@ -2468,35 +2476,18 @@ def _increment_reason_counter(counter: dict, reason: str) -> None:
 
 
 def _audit_fallbacks(audit_state: Optional[dict[str, Any]]) -> list[str]:
-    fallbacks = (audit_state or {}).get("fallbacks") or []
-    deduped: list[str] = []
-    for fallback in fallbacks:
-        if fallback and fallback not in deduped:
-            deduped.append(str(fallback))
-    return deduped
+    return audit_fallbacks(audit_state)
 
 
 def _record_audit_fallback(audit_state: Optional[dict[str, Any]], fallback_label: str) -> None:
-    if audit_state is None:
-        return
-    fallbacks = audit_state.setdefault("fallbacks", [])
-    if fallback_label not in fallbacks:
-        fallbacks.append(fallback_label)
+    record_audit_fallback(audit_state, fallback_label)
 
 
 def _merge_audit_error_message(
     error_message: Optional[str],
     fallback_labels: list[str],
 ) -> Optional[str]:
-    labels = [label for label in fallback_labels if label]
-    if not labels:
-        return error_message
-    marker = f"{AUDIT_FALLBACK_MARKER}{','.join(labels)}"
-    if not error_message:
-        return marker
-    if marker in error_message:
-        return error_message
-    return f"{error_message}; {marker}"
+    return merge_audit_error_message(error_message, fallback_labels, marker_prefix=AUDIT_FALLBACK_MARKER)
 
 
 def _format_ingest_run_summary(
@@ -2512,26 +2503,22 @@ def _format_ingest_run_summary(
     notion_sync_count: int,
     hot_deals_count: int,
 ) -> str:
-    return (
-        "funnel="
-        f"items:{dataset_item_count},"
-        f"evaluated:{evaluated},"
-        f"saved:{saved_count},"
-        f"existing:{duplicate_existing},"
-        f"failed:{failed_save_count},"
-        f"sonar_write_failures:{sonar_write_failures},"
-        f"skipped:{skipped},"
-        f"duplicates:{duplicate_count},"
-        f"notion_sync:{notion_sync_count},"
-        f"hot_deals:{hot_deals_count}"
+    return format_ingest_run_summary(
+        dataset_item_count=dataset_item_count,
+        evaluated=evaluated,
+        saved_count=saved_count,
+        duplicate_existing=duplicate_existing,
+        failed_save_count=failed_save_count,
+        sonar_write_failures=sonar_write_failures,
+        skipped=skipped,
+        duplicate_count=duplicate_count,
+        notion_sync_count=notion_sync_count,
+        hot_deals_count=hot_deals_count,
     )
 
 
 def _attach_audit_state(response: dict[str, Any], audit_state: Optional[dict[str, Any]]) -> None:
-    fallbacks = _audit_fallbacks(audit_state)
-    response["audit_status"] = "fallback" if fallbacks else "ok"
-    if fallbacks:
-        response["audit_fallbacks"] = fallbacks
+    attach_audit_state(response, audit_state)
 
 
 def _format_audit_failure(
@@ -2541,12 +2528,12 @@ def _format_audit_failure(
     primary_error: Optional[BaseException],
     fallback_error: BaseException,
 ) -> str:
-    if primary_error is not None:
-        return (
-            f"critical {surface} {operation} failed via Supabase and direct PG fallback: "
-            f"supabase={primary_error}; direct_pg={fallback_error}"
-        )
-    return f"critical {surface} {operation} failed via direct PG fallback: direct_pg={fallback_error}"
+    return format_audit_failure(
+        surface=surface,
+        operation=operation,
+        primary_error=primary_error,
+        fallback_error=fallback_error,
+    )
 
 
 def _insert_webhook_log_direct_pg(row: dict) -> Optional[str]:
