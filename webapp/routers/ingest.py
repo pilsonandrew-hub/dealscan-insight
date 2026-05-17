@@ -79,6 +79,8 @@ from backend.ingest.webhook_security import (
     match_webhook_secret,
     stale_webhook_error,
     verify_webhook_secret,
+    webhook_max_age_seconds,
+    webhook_replay_window_seconds,
 )
 from backend.ingest.time_utils import (
     normalize_auction_end_time as _normalize_auction_end_time,
@@ -572,11 +574,11 @@ def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
 
 
 def _webhook_replay_window_seconds() -> int:
-    return max(_env_int("APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS", 3600), 0)
+    return webhook_replay_window_seconds()
 
 
 def _webhook_max_age_seconds() -> int:
-    return max(_env_int("APIFY_WEBHOOK_MAX_AGE_SECONDS", 0), 0)
+    return webhook_max_age_seconds()
 
 
 def _claim_webhook_log(

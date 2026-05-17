@@ -5,6 +5,8 @@ from backend.ingest.webhook_security import (
     match_webhook_secret,
     stale_webhook_error,
     verify_webhook_secret,
+    webhook_max_age_seconds,
+    webhook_replay_window_seconds,
 )
 
 
@@ -36,3 +38,17 @@ def test_stale_webhook_error_reports_old_and_future_created_at():
         "Webhook createdAt is too far in the future (301s skew)"
     )
     assert stale_webhook_error({"created_at": now - timedelta(seconds=30)}, 60, now=now) is None
+
+
+def test_webhook_window_helpers_clamp_invalid_and_negative_env(monkeypatch):
+    monkeypatch.setenv("APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS", "not-an-int")
+    monkeypatch.setenv("APIFY_WEBHOOK_MAX_AGE_SECONDS", "-5")
+
+    assert webhook_replay_window_seconds() == 3600
+    assert webhook_max_age_seconds() == 0
+
+    monkeypatch.setenv("APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS", "120")
+    monkeypatch.setenv("APIFY_WEBHOOK_MAX_AGE_SECONDS", "60")
+
+    assert webhook_replay_window_seconds() == 120
+    assert webhook_max_age_seconds() == 60

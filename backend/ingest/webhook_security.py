@@ -6,6 +6,7 @@ No FastAPI, database, or logger dependencies live here.
 from __future__ import annotations
 
 import hmac
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -69,3 +70,18 @@ def stale_webhook_error(metadata: dict[str, Any], max_age_seconds: int, *, now: 
     if age_seconds < -300:
         return f"Webhook createdAt is too far in the future ({int(abs(age_seconds))}s skew)"
     return None
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def webhook_replay_window_seconds(*, env_name: str = "APIFY_WEBHOOK_REPLAY_WINDOW_SECONDS", default: int = 3600) -> int:
+    return max(env_int(env_name, default), 0)
+
+
+def webhook_max_age_seconds(*, env_name: str = "APIFY_WEBHOOK_MAX_AGE_SECONDS", default: int = 0) -> int:
+    return max(env_int(env_name, default), 0)
