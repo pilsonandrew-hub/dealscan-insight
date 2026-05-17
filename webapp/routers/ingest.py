@@ -88,8 +88,6 @@ from backend.ingest.telegram_alerts import (
     build_telegram_reply_markup,
     clean_bid_direct_url,
     redact_telegram_bot_token,
-    telegram_html_escape,
-    telegram_link,
 )
 from backend.ingest.webhook_security import (
     configured_webhook_secret_entries,
@@ -179,18 +177,6 @@ WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 ANDREW_UUID = "ff8425cd-0596-470b-b2b8-3a7a30ef4e37"
-
-
-def _redact_telegram_bot_token(text: Any) -> str:
-    return redact_telegram_bot_token(text)
-
-
-def _telegram_html_escape(value: Any) -> str:
-    return telegram_html_escape(value)
-
-
-def _telegram_link(url: str, label: str) -> str:
-    return telegram_link(url, label)
 
 
 OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
@@ -2139,7 +2125,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             resp.raise_for_status()
             payload = resp.json()
     except Exception as e:
-        safe_error = _redact_telegram_bot_token(e)
+        safe_error = redact_telegram_bot_token(e)
         logger.error("[TELEGRAM] Alert failed (non-fatal): %s", safe_error)
         _record_delivery_log(
             run_id=run_id,
