@@ -160,7 +160,7 @@ class SupervisorRuntimeTests(unittest.TestCase):
         for _ in range(200):
             status = get_supervisor_runtime_status(self.db_path)
             current_runtime = status["current_runtime"]
-            if current_runtime is not None:
+            if current_runtime is not None and current_runtime["status"] == STATUS_LIVE:
                 runtime_instance_id = current_runtime["runtime_instance_id"]
                 break
             time.sleep(0.01)
@@ -168,6 +168,7 @@ class SupervisorRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(runtime_instance_id)
         status = get_supervisor_runtime_status(self.db_path)
         self.assertIsNotNone(status["current_runtime"])
+        self.assertEqual(status["current_runtime"]["runtime_instance_id"], runtime_instance_id)
         self.assertEqual(status["current_runtime"]["status"], STATUS_LIVE)
 
         request_supervisor_shutdown(self.db_path, runtime_instance_id)

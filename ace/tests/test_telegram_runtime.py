@@ -21,9 +21,51 @@ class TelegramRuntimeTests(unittest.TestCase):
         self.state_dir = Path(self.tempdir.name) / "state"
         self.runtime_db = self.state_dir / "telegram_runtime.db"
         self.inbox_path = Path(self.tempdir.name) / "telegram_inbox.json"
+        self._saved_ace_env = {
+            key: value
+            for key, value in os.environ.items()
+            if key.startswith("ACE_TELEGRAM_") or key.startswith("ACE_OPENCLAW_") or key == "ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN"
+        }
+        for key in self._saved_ace_env:
+            os.environ.pop(key, None)
 
     def tearDown(self) -> None:
+        for key in list(os.environ):
+            if key.startswith("ACE_TELEGRAM_") or key.startswith("ACE_OPENCLAW_") or key == "ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN":
+                os.environ.pop(key, None)
+        os.environ.update(self._saved_ace_env)
         self.tempdir.cleanup()
+
+
+    def test_load_ace_telegram_env_file_fills_missing_ace_values(self) -> None:
+        env_file = Path(self.tempdir.name) / "ace-telegram.env"
+        env_file.write_text(
+            "ACE_TELEGRAM_TRANSPORT=telegram_bot_api\n"
+            "ACE_TELEGRAM_BOT_TOKEN=file-token\n"
+            "ACE_TELEGRAM_CHAT_ID=7529788084\n"
+            "OTHER_TOKEN=must-not-load\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"ACE_TELEGRAM_ENV_FILE": str(env_file)}, clear=True):
+            loaded = telegram_runtime.load_ace_telegram_env_file()
+            self.assertTrue(loaded)
+            self.assertEqual(os.environ["ACE_TELEGRAM_TRANSPORT"], "telegram_bot_api")
+            self.assertEqual(os.environ["ACE_TELEGRAM_BOT_TOKEN"], "file-token")
+            self.assertEqual(os.environ["ACE_TELEGRAM_CHAT_ID"], "7529788084")
+            self.assertNotIn("OTHER_TOKEN", os.environ)
+
+    def test_load_ace_telegram_env_file_does_not_override_process_env(self) -> None:
+        env_file = Path(self.tempdir.name) / "ace-telegram.env"
+        env_file.write_text("ACE_TELEGRAM_BOT_TOKEN=file-token\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {
+            "ACE_TELEGRAM_ENV_FILE": str(env_file),
+            "ACE_TELEGRAM_BOT_TOKEN": "process-token",
+        }, clear=True):
+            loaded = telegram_runtime.load_ace_telegram_env_file()
+            self.assertFalse(loaded)
+            self.assertEqual(os.environ["ACE_TELEGRAM_BOT_TOKEN"], "process-token")
 
     def test_fetch_returns_empty_when_inbox_path_not_configured(self) -> None:
         with patch.dict(os.environ, {}, clear=False), \

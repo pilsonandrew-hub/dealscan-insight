@@ -1,7 +1,7 @@
 # ACE 1.0 Status
 
-Date: 2026-05-15
-Current commit: `dc9b3d3 ace: track gate4 inspection artifacts`
+Date: 2026-05-16
+Current commit: pending Gate 1 transport ownership commit
 
 ACE 1.0 is a local governed resident foundation for turning bounded operator work into auditable item lifecycle records. It runs under launchd, keeps a local SQLite-backed item/event ledger, records append-only event hashes, ingests direct Telegram work through the proven OpenClaw session-stream path, and can move explicitly eligible work through the governed lifecycle to verified completion.
 
@@ -33,11 +33,18 @@ ACE 1.0 does not provide broad natural-language understanding. Telegram direct-w
 
 ACE 1.0 parser breadth is scoped to operator-directive messages sent to ACE. Commitment self-statements such as “I’ll X” / “need to Y” and deadline-only patterns such as “by Friday” are not in the current 1.0 parser scope. If ACE later ingests non-operator conversations such as Slack channels or multi-party chats, those markers should be added as a separate slice.
 
-ACE 1.0 does not use raw Telegram Bot API polling in production. Shared-token Bot API polling conflicts with OpenClaw's Telegram ownership, so production intake uses the OpenClaw session stream.
+ACE 1.0 governed foundation originally used the OpenClaw session stream for Telegram intake. V1 hardening Gate 1 has now moved transport ownership to a dedicated ACE Telegram Bot API token for `@JACEthaACE_Bot`, stored only in the ignored local `ace/state/ace-telegram.env` file. Shared-token Bot API polling through OpenClaw remains forbidden.
 
 ACE 1.0 does not integrate with external billing providers or automatically measure model-provider spend. The current cost guardrails are local deterministic guardrails only.
 
 ACE 1.0 does not claim broad platform autonomy, broad source authenticity, distributed runtime fabric, or general-purpose agent orchestration. It is a local governed foundation with bounded proven seams.
+
+
+## V1 hardening sprint status
+
+- Gate 1 — Telegram transport ownership: PASS pending final CI on this commit. Dedicated bot `@JACEthaACE_Bot` verified via `getMe`; `getUpdates` returned OK with no shared-token conflict; delivery proof is recorded in local ACE `alert_log` after the test message send.
+- Gate 2 — broader resilience proof: NOT STARTED in this slice.
+- Gate 3 — end-to-end resident operator loop proof: NOT STARTED in this slice.
 
 ## Recent hardening proof status
 

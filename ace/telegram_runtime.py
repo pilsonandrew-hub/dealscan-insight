@@ -17,6 +17,39 @@ OPENCLAW_MAIN_SESSIONS_DIR = Path.home() / ".openclaw" / "agents" / "main" / "se
 OPENCLAW_MAIN_SESSIONS_INDEX = OPENCLAW_MAIN_SESSIONS_DIR / "sessions.json"
 
 
+
+
+def load_ace_telegram_env_file(path: Path | None = None) -> bool:
+    """Load ACE-owned Telegram transport secrets from a local ignored env file.
+
+    This is intentionally separate from OpenClaw's shared Telegram bot config so
+    ACE can prove owned Bot API transport without consuming OpenClaw's token.
+    Existing process environment values win; the file only fills missing ACE_*
+    variables.
+    """
+    if path is not None:
+        env_path = path
+    else:
+        configured_path = os.environ.get("ACE_TELEGRAM_ENV_FILE", "").strip()
+        env_path = Path(configured_path).expanduser() if configured_path else STATE_DIR / "ace-telegram.env"
+    if not env_path.exists() or not env_path.is_file():
+        return False
+
+    loaded = False
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key.startswith("ACE_TELEGRAM_"):
+            continue
+        if key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+            loaded = True
+    return loaded
+
+
 def _runtime_db_path() -> Path:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     return TELEGRAM_RUNTIME_DB
@@ -480,6 +513,7 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
 
 
 def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
+    load_ace_telegram_env_file()
     transport_preference = os.environ.get("ACE_TELEGRAM_TRANSPORT", "auto").strip().lower() or "auto"
     if transport_preference not in {"auto", "openclaw_session", "telegram_bot_api", "inbox_file"}:
         _record_transport_attempt(

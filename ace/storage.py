@@ -185,6 +185,19 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS alert_log (
+        id TEXT PRIMARY KEY,
+        alert_type TEXT NOT NULL,
+        transport TEXT NOT NULL,
+        bot_username TEXT,
+        chat_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        delivery_state TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        metadata_json TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS runtime_instances (
         runtime_instance_id TEXT PRIMARY KEY,
         runtime_family TEXT NOT NULL,
@@ -221,6 +234,7 @@ SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_contradictions_source ON contradictions(source_item_id)",
     "CREATE INDEX IF NOT EXISTS idx_contradictions_target ON contradictions(target_item_id)",
     "CREATE INDEX IF NOT EXISTS idx_governed_runs_status_created_at ON governed_runs(status, created_at DESC, run_id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_alert_log_sent_at ON alert_log(sent_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_instances_family_status_created_at ON runtime_instances(runtime_family, status, created_at DESC, runtime_instance_id DESC)",
 )
 

@@ -36,6 +36,15 @@ class StorageContractTests(unittest.TestCase):
         self.assertTrue(self.db_path.parent.exists())
         self.assertTrue(self.db_path.exists())
 
+
+    def test_bootstrap_db_creates_local_alert_log_for_transport_proof(self) -> None:
+        bootstrap_db(self.db_path)
+        with sqlite3.connect(self.db_path) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(alert_log)").fetchall()}
+        self.assertIn("message_id", columns)
+        self.assertIn("delivery_state", columns)
+        self.assertIn("metadata_json", columns)
+
     def test_utc_now_returns_zulu_timestamp(self) -> None:
         value = utc_now()
         self.assertTrue(value.endswith("Z"))
