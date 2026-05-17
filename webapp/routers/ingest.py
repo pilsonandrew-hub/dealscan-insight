@@ -24,7 +24,6 @@ import os
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
 
 import psycopg2
 from psycopg2 import extras as psycopg2_extras
@@ -62,6 +61,7 @@ from backend.ingest.delivery_log import (
     build_delivery_log_row,
     build_delivery_log_update_row,
 )
+from backend.ingest.db_url import derive_supabase_direct_db_url
 from backend.ingest.direct_pg import prepare_direct_pg_value
 from backend.ingest.canonical_identity import (
     MAKE_ALIASES,
@@ -266,32 +266,7 @@ def _resolve_openrouter_lane_model(deal: dict[str, Any], deal_id: str) -> tuple[
 
 
 def _derive_supabase_direct_db_url() -> Optional[str]:
-    candidates = (
-        os.getenv("SUPABASE_DB_URL"),
-        os.getenv("SUPABASE_DATABASE_URL"),
-        os.getenv("SUPABASE_DIRECT_DB_URL"),
-    )
-    for candidate in candidates:
-        if candidate:
-            return candidate
-
-    db_password = os.getenv("SUPABASE_DB_PASSWORD")
-    if not db_password:
-        return None
-
-    project_ref = os.getenv("SUPABASE_PROJECT_ID") or os.getenv("VITE_SUPABASE_PROJECT_ID")
-    if not project_ref and _supabase_url:
-        match = re.search(r"https://([a-z0-9]+)\.supabase\.co", _supabase_url)
-        if match:
-            project_ref = match.group(1)
-
-    if not project_ref:
-        return None
-
-    return (
-        f"postgresql://postgres:{quote(db_password, safe='')}"
-        f"@db.{project_ref}.supabase.co:5432/postgres?sslmode=require"
-    )
+    return derive_supabase_direct_db_url(os.environ)
 
 
 _direct_supabase_db_url = _derive_supabase_direct_db_url()
