@@ -87,27 +87,50 @@ Run `25999990822` succeeded. Aggregate evidence from Supabase REST:
 
 Proof boundary: this closes the prior “no Supabase inspection path” blocker at aggregate level. It proves the service-role GitHub secret can read live Supabase and that the core live evidence tables contain recent rows through 2026-05-15. It still does not prove today’s Apify runs generated DB rows, that any individual deal is profitable, or that Telegram delivery content was received by a human.
 
+
+
+## Supabase Per-Run Reconciliation — 2026-05-17 19:11 UTC
+A second manual read-only GitHub Actions workflow now exists: `DealerScope Ingest Reconciliation` (`.github/workflows/supabase-ingest-reconciliation.yml`). It wraps the existing `scripts/reconcile_apify_ingest_runs.py` and uses GitHub Actions `APIFY_TOKEN`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` secrets. It performs read-only Apify/API + Supabase REST inspection and does not print secrets.
+
+Run `26000106495` succeeded. Evidence from the default 72-hour window:
+- data path: `SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY` via Supabase REST
+- window: `2026-05-14T19:11:53+00:00` → `2026-05-17T19:11:53+00:00`
+- actors checked: 10
+- Apify runs found: 60
+- DB webhook runs found: 12
+- DB opportunity runs found: 7
+- issue summary:
+  - `missing_webhook`: 48
+  - `missing_delivery_log`: 38
+  - `missing_db_save_ledger`: 38
+  - `no_db_landing`: 38
+
+The script classified many successful Apify runs as `pre_app_webhook_miss`: Apify reports a successful actor run, but DealerScope has no matching webhook, delivery, or opportunity evidence for the run. Examples include successful runs for `ds-govplanet`, `ds-govdeals`, `ds-hibid-v2`, `ds-gsaauctions`, `ds-allsurplus`, `ds-proxibid`, `ds-usgovbid`, `ds-jjkane`, and `ds-publicsurplus` within the 72-hour window.
+
+Proof boundary: this is stronger than watchdog actor health and changes the live truth. Actor execution is healthy, but per-run landing is not broadly proven. The next operational investigation should focus on Apify webhook delivery configuration/history and webhook secret alignment for the actors, not additional ingest refactoring.
+
 ## Remaining Blockers / Gaps
-1. Local shell direct Supabase inspection remains blocked, but a read-only GitHub Actions Supabase inspection path now exists and has succeeded:
+1. Local shell direct Supabase inspection remains blocked, but GitHub Actions now has two proven read-only Supabase evidence paths:
+   - aggregate inspection run `25999990822` read live table counts/freshness from Supabase REST
+   - per-run reconciliation run `26000106495` compared Apify actor runs to `webhook_log`, `opportunities`, and `ingest_delivery_log`
    - stored direct pooler URL returns `Tenant or user not found`
    - no usable service-role key is visible in local env/readable files
-   - GitHub Actions has working Supabase secrets and run `25999990822` read aggregate live table evidence from Supabase REST
-   - this proves aggregate table presence/freshness, but not per-run ingestion or alert receipt
-2. Legacy scraper code still has CSV/mock/offline remnants:
+2. Per-run reconciliation found a real live landing gap: 48 of 60 Apify runs in the inspected 72-hour window had missing webhook evidence, and 38 had no DB landing/delivery ledger evidence.
+3. Legacy scraper code still has CSV/mock/offline remnants:
    - `backend/ingest/scrape_all.py` still writes CSV
    - no `scrape_runs` / `parse_events` migration surfaced in grep
-3. Frontend lint debt remains pre-existing.
-4. CI Python coverage is lighter than the local backend/ingest validation performed here.
-5. Local Apify skill token appears stale/scoped wrong; repo secret token remains the stronger available Apify signal.
-6. A Google Cloud Build trigger attached to GitHub failed its Deploy step for `de62eb4`; Vercel/Railway production deploys remain green, so treat this as non-production/secondary until ownership is confirmed.
+4. Frontend lint debt remains pre-existing.
+5. CI Python coverage is lighter than the local backend/ingest validation performed here.
+6. Local Apify skill token appears stale/scoped wrong; repo secret token remains the stronger available Apify signal.
+7. A Google Cloud Build trigger attached to GitHub failed its Deploy step for `de62eb4`; Vercel/Railway production deploys remain green, so treat this as non-production/secondary until ownership is confirmed.
 
 ## Next High-Value Actions
-1. Improve Supabase inspection from aggregate proof to per-run reconciliation:
-   - use `scripts/reconcile_apify_ingest_runs.py` through a read-only/manual GitHub Actions path, or restore a current local service-role/direct DB credential
-2. Verify per-run live tables for recent Apify runs:
+1. Investigate Apify webhook delivery configuration/history and webhook secret alignment for the actors with missing webhook evidence.
+2. Re-run `DealerScope Ingest Reconciliation` after any Apify webhook/config fix and require per-run landing evidence in:
    - `webhook_log`
    - `opportunities`
-   - `alert_log`
+   - `ingest_delivery_log`
+   - `alert_log` when applicable
 3. Decide whether local CSV scraper paths should be retired, wired to Supabase, or documented as non-production legacy.
 4. If Apify inspection from OpenClaw is required, rotate/update the local Apify skill token to match the working GitHub Actions secret scope.
 5. Decide whether the failing Google Cloud Build trigger should be disabled, repaired, or documented as non-production.
