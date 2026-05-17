@@ -55,6 +55,7 @@ from backend.ingest.canonical_identity import (
     normalize_model_for_identity as _normalize_model,
 )
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
+from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
 from backend.ingest.telegram_alerts import (
     build_telegram_alert_message,
@@ -745,27 +746,7 @@ def _request_client_ip_for_security_log(request: Request) -> str:
 
 
 def _raw_item_identity(item: Any, run_id: str, item_index: int) -> tuple[str, Optional[str]]:
-    if not isinstance(item, dict):
-        fallback_id = hashlib.sha256(f"{run_id}|raw|{item_index}".encode()).hexdigest()[:40]
-        return fallback_id, None
-
-    source = (item.get("source_site") or item.get("source") or "unknown").strip().lower()
-    listing_url = (item.get("listing_url") or item.get("url") or "").strip() or None
-    raw_listing_id = (
-        item.get("listing_id")
-        or item.get("assetId")
-        or item.get("id")
-        or item.get("url")
-        or item.get("listing_url")
-        or item.get("vin")
-    )
-    if raw_listing_id:
-        listing_id = hashlib.sha256(f"{source}|{raw_listing_id}".encode()).hexdigest()[:40]
-        return listing_id, listing_url
-
-    title = (item.get("title") or "").strip()
-    fallback_id = hashlib.sha256(f"{run_id}|{source}|{listing_url or title}|{item_index}".encode()).hexdigest()[:40]
-    return fallback_id, listing_url
+    return raw_item_identity(item, run_id, item_index)
 
 
 def _record_pre_save_skip(
