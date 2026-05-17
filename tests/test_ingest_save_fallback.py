@@ -132,6 +132,27 @@ class _FakeUniqueViolation(psycopg2.errors.UniqueViolation):
 
 
 class SaveOpportunityFallbackTests(unittest.TestCase):
+    def test_below_threshold_save_records_queryable_outcome(self):
+        vehicle = {
+            "dos_score": 49,
+            "score_breakdown": {
+                "score_version": "v3_two_lane",
+                "score_engine_impl": "score_deal_v3_two_lane",
+                "assumption_level": "minor",
+                "fallback_flags": ["mmr_proxy_used"],
+            },
+        }
+
+        saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertIsNone(saved_id)
+        self.assertEqual(vehicle["_save_status"], "below_save_threshold")
+        self.assertEqual(vehicle["_save_outcome"]["status"], "below_save_threshold")
+        self.assertEqual(vehicle["_save_outcome"]["score_version"], "v3_two_lane")
+        self.assertEqual(vehicle["_save_outcome"]["score_engine_impl"], "score_deal_v3_two_lane")
+        self.assertEqual(vehicle["_save_outcome"]["score_assumption_level"], "minor")
+        self.assertEqual(vehicle["_save_outcome"]["score_fallback_flags"], ["mmr_proxy_used"])
+
     def test_generic_supabase_failure_falls_back_to_direct_pg(self):
         row = {
             "listing_id": "listing-1",
@@ -154,6 +175,8 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
 
         self.assertEqual(saved_id, "pg-123")
         self.assertEqual(vehicle["_save_status"], "saved_direct_pg")
+        self.assertEqual(vehicle["_save_outcome"]["status"], "saved_direct_pg")
+        self.assertEqual(vehicle["_save_outcome"]["opportunity_id"], "pg-123")
         self.assertEqual(fallback_calls, [row])
 
     def test_duplicate_recovery_does_not_fall_through_to_direct_pg(self):

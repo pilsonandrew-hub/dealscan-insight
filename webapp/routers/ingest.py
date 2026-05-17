@@ -34,6 +34,20 @@ from psycopg2 import sql as psycopg2_sql
 from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 from backend.ingest.config_loader import get_config
+from backend.ingest.canonical_identity import (
+    MAKE_ALIASES,
+    compute_canonical_id,
+    normalize_make_for_identity as _normalize_make,
+    normalize_model_for_identity as _normalize_model,
+)
+from backend.ingest.save_outcome import mark_save_outcome
+from backend.ingest.source_site import (
+    SOURCE_SITE_ALIASES as _SOURCE_SITE_ALIASES,
+    SOURCE_SITE_URL_HINTS as _SOURCE_SITE_URL_HINTS,
+    canonical_source_site as _canonical_source_site,
+    infer_source_site as _infer_source_site,
+    source_site_from_url as _source_site_from_url,
+)
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 telegram_router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -471,20 +485,8 @@ _MODEL_PATTERNS = [
 ]
 
 
-MAKE_ALIASES = {
-    "chev": "chevrolet", "chevy": "chevrolet", "vw": "volkswagen",
-    "mercedes-benz": "mercedes", "mercedesbenz": "mercedes",
-}
-
-
-def _normalize_make(make: str) -> str:
-    m = re.sub(r"[^a-z0-9]", "", (make or "").lower().strip())
-    return MAKE_ALIASES.get(m, m)
-
-
-def _normalize_model(model: str) -> str:
-    words = re.sub(r"[^a-z0-9 ]", "", (model or "").lower().strip()).split()
-    return " ".join(words[:2])
+# Canonical identity helpers are imported from backend.ingest.canonical_identity
+# so the pure dedup key behavior is testable outside this router.
 
 
 def _find_title_brand_issue(vehicle: dict) -> Optional[str]:
@@ -511,28 +513,6 @@ def _find_title_brand_issue(vehicle: dict) -> Optional[str]:
             if matched:
                 return f"title_brand_rejected ({field_name} matched '{label}')"
     return None
-
-
-def compute_canonical_id(vehicle: dict) -> str:
-    vin = (vehicle.get("vin") or "").strip().upper()
-    if len(vin) == 17:
-        return hashlib.sha256(vin.encode()).hexdigest()[:32]
-
-    # Use listing_url as high-entropy fallback when VIN is missing.
-    # This prevents AllSurplus, GSA, and other no-VIN sources from false-deduplicating
-    # distinct vehicles that share year/make/model/state but have no mileage/VIN.
-    listing_url = (vehicle.get("listing_url") or "").strip()
-    if listing_url:
-        return hashlib.sha256(listing_url.encode()).hexdigest()[:32]
-
-    year = str(vehicle.get("year") or vehicle.get("model_year") or "")
-    make = _normalize_make(vehicle.get("make") or "")
-    model = _normalize_model(vehicle.get("model") or "")
-    state = (vehicle.get("state") or vehicle.get("location_state") or "")[:2].upper()
-    mileage = int(vehicle.get("mileage") or vehicle.get("meter_count") or 0)
-    bucket = round(mileage / 2500) * 2500
-    key = f"{year}_{make}_{model}_{state}_{bucket}"
-    return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
 def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
@@ -1841,86 +1821,8 @@ def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] =
     return None
 
 
-_SOURCE_SITE_ALIASES = {
-    "allsurplus": "allsurplus",
-    "bidspotter": "bidspotter",
-    "equipmentfacts": "equipmentfacts",
-    "gsa auctions": "gsaauctions",
-    "gsaauctions": "gsaauctions",
-    "govdeals": "govdeals",
-    "govdeals.com": "govdeals",
-    "govdeals-sold": "govdeals-sold",
-    "govdeals_sold": "govdeals-sold",
-    "govplanet": "govplanet",
-    "hibid": "hibid",
-    "hibid-v2": "hibid",
-    "ironplanet": "ironplanet",
-    "jjkane": "jjkane",
-    "municibid": "municibid",
-    "publicsurplus": "publicsurplus",
-    "publicsurplus_tx": "publicsurplus",
-    "proxibid": "proxibid",
-    "usgovbid": "usgovbid",
-}
-
-_SOURCE_SITE_URL_HINTS = (
-    ("allsurplus.com", "allsurplus"),
-    ("bidspotter.com", "bidspotter"),
-    ("equipmentfacts.com", "equipmentfacts"),
-    ("gsaauctions.gov", "gsaauctions"),
-    ("govdeals.com", "govdeals"),
-    ("govplanet.com", "govplanet"),
-    ("hibid.com", "hibid"),
-    ("ironplanet.com", "ironplanet"),
-    ("jjkane.com", "jjkane"),
-    ("municibid.com", "municibid"),
-    ("publicsurplus.com", "publicsurplus"),
-    ("proxibid.com", "proxibid"),
-    ("usgovbid.com", "usgovbid"),
-)
-
-
-def _canonical_source_site(raw_value: Any) -> str:
-    text = str(raw_value or "").strip().lower()
-    if not text or text in {"apify", "none", "null", "unknown"}:
-        return ""
-    if text in _SOURCE_SITE_ALIASES:
-        return _SOURCE_SITE_ALIASES[text]
-    normalized = text.replace("_", "-")
-    return _SOURCE_SITE_ALIASES.get(normalized, "")
-
-
-def _source_site_from_url(url: str) -> str:
-    lowered = (url or "").strip().lower()
-    if not lowered:
-        return ""
-    for needle, source_site in _SOURCE_SITE_URL_HINTS:
-        if needle in lowered:
-            return source_site
-    return ""
-
-
-def _infer_source_site(item: dict, *, source_hint: Optional[str] = None) -> Optional[str]:
-    for candidate in (
-        item.get("source_site"),
-        item.get("source"),
-        source_hint,
-    ):
-        source_site = _canonical_source_site(candidate)
-        if source_site:
-            return source_site
-
-    for candidate in (
-        item.get("listing_url"),
-        item.get("auction_url"),
-        item.get("url"),
-    ):
-        source_site = _source_site_from_url(str(candidate or ""))
-        if source_site:
-            return source_site
-
-    return None
-
+# Source-site normalization is kept behind these imported aliases so existing
+# ingest.py callers and tests can remain unchanged during incremental extraction.
 
 def normalize_apify_vehicle(
     item: dict,
@@ -2461,11 +2363,36 @@ def _fallback_score(vehicle: dict) -> dict:
     except Exception:
         acquisition_price_basis = vehicle.get("current_bid") or 0
         pass
+    score_provenance = {
+        "engine_version": "fallback_v1",
+        "engine_impl": "webapp.routers.ingest._fallback_score",
+        "scored_at": datetime.now(timezone.utc).isoformat(),
+        "lane": "fallback",
+        "mmr_source": "none",
+        "mmr_confidence_proxy": None,
+        "pricing_source": "mmr_proxy",
+        "fallback_flags": ["hard_fallback_score", "no_mmr"],
+        "assumption_level": "severe",
+        "input_profile": {
+            "has_bid": bool(vehicle.get("current_bid")),
+            "has_mmr": False,
+            "has_live_manheim": False,
+            "has_year": bool(vehicle.get("year")),
+            "has_mileage": bool(vehicle.get("mileage")),
+            "source_site": vehicle.get("source_site"),
+        },
+        "component_traces": [],
+    }
     return {
         "dos_score": min(100, round(score, 1)),
         "score": min(100, round(score, 1)),
         "legacy_dos_score": min(100, round(score, 1)),
         "score_version": "fallback_v1",
+        "score_engine_impl": "webapp.routers.ingest._fallback_score",
+        "score_timestamp_utc": score_provenance["scored_at"],
+        "score_provenance": score_provenance,
+        "fallback_flags": score_provenance["fallback_flags"],
+        "assumption_level": score_provenance["assumption_level"],
         "mmr_estimated": 0,
         "margin": 0,
         "gross_margin": 0,
@@ -3814,7 +3741,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
     """Save scored vehicle to Supabase. Min DOS 50 to save."""
     score = vehicle.get("dos_score", 0)
     if score < 50:
-        vehicle["_save_status"] = "below_save_threshold"
+        _mark_save_outcome(vehicle, "below_save_threshold")
         return None
 
     row = build_opportunity_row(vehicle)
@@ -3843,18 +3770,18 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                             "[DEDUP] VIN %s updated existing record %s with higher DOS score %.1f",
                             normalized_vin, existing_id, float(score),
                         )
-                        vehicle["_save_status"] = "vin_dedup_updated"
+                        _mark_save_outcome(vehicle, "vin_dedup_updated", opportunity_id=existing_id)
                         return existing_id
                     except Exception as upd_err:
                         logger.warning("[DEDUP] VIN update failed for %s: %s", existing_id, upd_err)
-                        vehicle["_save_status"] = "vin_dedup_skipped"
+                        _mark_save_outcome(vehicle, "vin_dedup_skipped", opportunity_id=existing_id, error_message=str(upd_err))
                         return existing_id
                 else:
                     logger.warning(
                         "[DEDUP] Duplicate VIN %s skipped — already exists as %s",
                         normalized_vin, existing_id,
                     )
-                    vehicle["_save_status"] = "vin_dedup_skipped"
+                    _mark_save_outcome(vehicle, "vin_dedup_skipped", opportunity_id=existing_id)
                     return existing_id
         except Exception as dedup_err:
             logger.warning("[DEDUP] VIN dedup logic error for VIN %s: %s", normalized_vin, dedup_err)
@@ -3864,12 +3791,13 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
         try:
             result = supabase_client.table("opportunities").insert(row).execute()
             if result.data:
-                vehicle["_save_status"] = "saved_supabase"
-                return result.data[0].get("id")
+                saved_id = result.data[0].get("id")
+                _mark_save_outcome(vehicle, "saved_supabase", opportunity_id=saved_id)
+                return saved_id
 
             existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
             if existing_id:
-                vehicle["_save_status"] = "duplicate_existing"
+                _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                 return existing_id
         except Exception as e:
             title = vehicle.get("title", "unknown")[:80]
@@ -3884,8 +3812,9 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                             retry = supabase_client.table("opportunities").insert(duplicate_row).execute()
                             if retry.data:
                                 _finalize_duplicate_recovery(vehicle, canonical_row, canonical_update)
-                                vehicle["_save_status"] = "saved_supabase_duplicate"
-                                return retry.data[0].get("id")
+                                saved_id = retry.data[0].get("id")
+                                _mark_save_outcome(vehicle, "saved_supabase_duplicate", opportunity_id=saved_id)
+                                return saved_id
                         except Exception as retry_err:
                             logger.warning(
                                 "[DEDUP] Supabase duplicate recovery failed for '%s': %s",
@@ -3895,9 +3824,9 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                 existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
                 if existing_id:
                     logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
-                    vehicle["_save_status"] = "duplicate_existing"
+                    _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                     return existing_id
-                vehicle["_save_status"] = "duplicate_unresolved"
+                _mark_save_outcome(vehicle, "duplicate_unresolved", error_message=error_text)
                 return None
             logger.warning(
                 "[INGEST] Falling back to direct Postgres insert for '%s' after Supabase write failure.",
@@ -3912,8 +3841,23 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
         if canonical_row:
             vehicle["is_duplicate"] = True
             vehicle["canonical_record_id"] = canonical_row["id"]
-    vehicle["_save_status"] = save_status
+    _mark_save_outcome(vehicle, save_status, opportunity_id=saved_id)
     return saved_id
+
+
+def _mark_save_outcome(
+    vehicle: dict,
+    status: str,
+    *,
+    opportunity_id: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    mark_save_outcome(
+        vehicle,
+        status,
+        opportunity_id=opportunity_id,
+        error_message=error_message,
+    )
 
 
 def build_opportunity_row(vehicle: dict) -> dict:

@@ -178,6 +178,57 @@ def test_score_deal_subtracts_recon_reserve_from_margin():
     assert result["margin"] == 7950.0
 
 
+def test_score_deal_emits_queryable_score_provenance_without_changing_math():
+    result = score_deal(
+        bid=10000,
+        mmr_ca=20000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=2024,
+        mileage=20000,
+        manheim_mmr_mid=20000,
+        manheim_source_status="live",
+        pricing_source="manheim_market_data",
+        title_status="clean",
+        description="clean vehicle",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["score_version"] == "v3_two_lane"
+    assert result["score_engine_impl"] == "score_deal_v3_two_lane"
+    assert result["assumption_level"] == "none"
+    assert result["fallback_flags"] == []
+    assert result["score_timestamp_utc"]
+    provenance = result["score_provenance"]
+    assert provenance["engine_version"] == "v3_two_lane"
+    assert provenance["engine_impl"] == "score_deal_v3_two_lane"
+    assert provenance["lane"] == result["vehicle_tier"]
+    assert provenance["mmr_source"] == "manheim_mmr_mid"
+    assert provenance["input_profile"]["has_bid"] is True
+    assert provenance["input_profile"]["has_mmr"] is True
+    assert provenance["input_profile"]["has_live_manheim"] is True
+
+
+def test_score_deal_marks_missing_bid_as_severe_provenance_not_silent_default():
+    result = score_deal(
+        bid=0,
+        mmr_ca=20000,
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=2024,
+        mileage=20000,
+    )
+
+    assert result["dos_score"] == 0.0
+    assert result["assumption_level"] == "severe"
+    assert "zero_or_missing_bid" in result["fallback_flags"]
+    assert result["score_provenance"]["input_profile"]["has_bid"] is False
+
+
 def test_score_vehicle_adds_police_fleet_recon_buffer():
     vehicle = {
         "title": "2023 Ford Explorer Police Interceptor Utility",
@@ -197,6 +248,26 @@ def test_score_vehicle_adds_police_fleet_recon_buffer():
 
     assert result["recon_reserve"] == 950.0
     assert result["manheim_source_status"] == "fallback"
+
+
+def test_score_vehicle_fallback_score_marks_hard_fallback_provenance(monkeypatch):
+    from webapp.routers import ingest
+
+    result = ingest._fallback_score({
+        "title": "2023 Toyota Camry",
+        "make": "Toyota",
+        "year": 2023,
+        "current_bid": 10000,
+        "state": "CA",
+        "source_site": "govdeals",
+    })
+
+    assert result["score_version"] == "fallback_v1"
+    assert result["score_engine_impl"] == "webapp.routers.ingest._fallback_score"
+    assert result["assumption_level"] == "severe"
+    assert "hard_fallback_score" in result["fallback_flags"]
+    assert result["score_provenance"]["lane"] == "fallback"
+    assert result["score_provenance"]["input_profile"]["has_bid"] is True
 
 
 def test_score_vehicle_boosts_govdeals_near_close_when_structurally_viable():

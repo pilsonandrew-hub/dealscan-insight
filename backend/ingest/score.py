@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Optional
 
@@ -16,6 +16,9 @@ def _current_year() -> int:
 
 
 CURRENT_YEAR = _current_year()
+
+SCORE_ENGINE_VERSION = "v3_two_lane"
+SCORE_ENGINE_IMPL = "score_deal_v3_two_lane"
 
 HIGH_RUST_STATES = {
     "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD", "NE", "KS", "WV",
@@ -64,6 +67,78 @@ def _coerce_year(value: object) -> Optional[int]:
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _resolve_mmr_source(
+    *,
+    manheim_mmr_mid: Optional[float],
+    mmr_ca: Optional[float],
+    pricing_source: Optional[str],
+    mmr_lookup_basis: Optional[str],
+) -> str:
+    if _coerce_float(manheim_mmr_mid) and float(manheim_mmr_mid) > 0:
+        return "manheim_mmr_mid"
+    if _coerce_float(mmr_ca) and float(mmr_ca) > 0:
+        return pricing_source or mmr_lookup_basis or "mmr_ca"
+    return "none"
+
+
+def _build_score_provenance(
+    *,
+    lane: str,
+    bid: Optional[float],
+    mmr_ca: Optional[float],
+    manheim_mmr_mid: Optional[float],
+    pricing_source: Optional[str],
+    mmr_lookup_basis: Optional[str],
+    mmr_confidence_proxy: Optional[float],
+    source_site: str,
+    year: Optional[int],
+    mileage: Optional[float],
+    fallback_flags: Optional[list[str]] = None,
+) -> dict:
+    flags = list(fallback_flags or [])
+    bid_value = _coerce_float(bid)
+    mmr_source = _resolve_mmr_source(
+        manheim_mmr_mid=manheim_mmr_mid,
+        mmr_ca=mmr_ca,
+        pricing_source=pricing_source,
+        mmr_lookup_basis=mmr_lookup_basis,
+    )
+    if mmr_source == "none" and "no_mmr" not in flags:
+        flags.append("no_mmr")
+    elif mmr_source != "manheim_mmr_mid" and "mmr_proxy_used" not in flags:
+        flags.append("mmr_proxy_used")
+    if (bid_value is None or bid_value <= 0) and "zero_or_missing_bid" not in flags:
+        flags.append("zero_or_missing_bid")
+
+    severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}
+    assumption_level = "severe" if any(flag in severe_flags for flag in flags) else "minor" if flags else "none"
+
+    return {
+        "engine_version": SCORE_ENGINE_VERSION,
+        "engine_impl": SCORE_ENGINE_IMPL,
+        "scored_at": _utc_timestamp(),
+        "lane": lane,
+        "mmr_source": mmr_source,
+        "mmr_confidence_proxy": mmr_confidence_proxy,
+        "pricing_source": pricing_source or mmr_lookup_basis or ("mmr_proxy" if mmr_source != "none" else "none"),
+        "fallback_flags": flags,
+        "assumption_level": assumption_level,
+        "input_profile": {
+            "has_bid": bid_value is not None and bid_value > 0,
+            "has_mmr": mmr_source != "none",
+            "has_live_manheim": mmr_source == "manheim_mmr_mid",
+            "has_year": year is not None,
+            "has_mileage": mileage is not None,
+            "source_site": source_site,
+        },
+        "component_traces": [],
+    }
 
 
 def _parse_datetime(value: object) -> Optional[datetime]:
@@ -686,11 +761,28 @@ def score_deal(
     if bid_value is None or bid_value <= 0:
         buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
         bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88 if vehicle_tier == "premium" else None
+        score_provenance = _build_score_provenance(
+            lane=vehicle_tier,
+            bid=bid_value,
+            mmr_ca=mmr_ca,
+            manheim_mmr_mid=manheim_mmr_mid,
+            pricing_source=pricing_source,
+            mmr_lookup_basis=mmr_lookup_basis,
+            mmr_confidence_proxy=mmr_confidence_proxy,
+            source_site=source_site,
+            year=year,
+            mileage=mileage,
+        )
         return {
             "dos_score": 0.0,
             "score": 0.0,
             "legacy_dos_score": 0.0,
-            "score_version": "v3_two_lane",
+            "score_version": SCORE_ENGINE_VERSION,
+            "score_engine_impl": SCORE_ENGINE_IMPL,
+            "score_timestamp_utc": score_provenance["scored_at"],
+            "score_provenance": score_provenance,
+            "fallback_flags": score_provenance["fallback_flags"],
+            "assumption_level": score_provenance["assumption_level"],
             "mmr_estimated": mmr,
             "margin": 0.0,
             "gross_margin": 0.0,
@@ -918,11 +1010,30 @@ def score_deal(
         or _strong_structural
     )
 
+    score_provenance = _build_score_provenance(
+        lane=vehicle_tier,
+        bid=bid_value,
+        mmr_ca=mmr_ca,
+        manheim_mmr_mid=manheim_mmr_mid,
+        pricing_source=pricing_source,
+        mmr_lookup_basis=mmr_lookup_basis,
+        mmr_confidence_proxy=mmr_confidence_proxy,
+        source_site=source_site,
+        year=year,
+        mileage=mileage,
+        fallback_flags=["high_rust_state_rejected"] if rust_state_rejected else [],
+    )
+
     return {
         "dos_score": selected_dos,
         "score": selected_dos,
         "legacy_dos_score": selected_dos,
-        "score_version": "v3_two_lane",
+        "score_version": SCORE_ENGINE_VERSION,
+        "score_engine_impl": SCORE_ENGINE_IMPL,
+        "score_timestamp_utc": score_provenance["scored_at"],
+        "score_provenance": score_provenance,
+        "fallback_flags": score_provenance["fallback_flags"],
+        "assumption_level": score_provenance["assumption_level"],
         "mmr_estimated": mmr,
         "mmr_confidence_proxy": mmr_confidence_proxy,
         "margin": gross_margin,
