@@ -34,6 +34,7 @@ from psycopg2 import sql as psycopg2_sql
 from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 from backend.ingest.config_loader import get_config
+from backend.ingest.listing_identity import compute_listing_id as _compute_listing_id
 from backend.ingest.canonical_identity import (
     MAKE_ALIASES,
     compute_canonical_id,
@@ -41,6 +42,10 @@ from backend.ingest.canonical_identity import (
     normalize_model_for_identity as _normalize_model,
 )
 from backend.ingest.save_outcome import mark_save_outcome
+from backend.ingest.time_utils import (
+    normalize_auction_end_time as _normalize_auction_end_time,
+    parse_datetime_utc as _parse_datetime_utc,
+)
 from backend.ingest.source_site import (
     SOURCE_SITE_ALIASES as _SOURCE_SITE_ALIASES,
     SOURCE_SITE_URL_HINTS as _SOURCE_SITE_URL_HINTS,
@@ -571,22 +576,7 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
         raise
 
 
-def _parse_datetime_utc(raw_value) -> Optional[datetime]:
-    if raw_value in {None, ""}:
-        return None
-    if isinstance(raw_value, datetime):
-        dt = raw_value
-    else:
-        text = str(raw_value).strip()
-        if not text:
-            return None
-        try:
-            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+# Datetime parsing helpers are imported from backend.ingest.time_utils.
 
 
 def extract_apify_webhook_metadata(payload: dict) -> dict:
@@ -1771,54 +1761,7 @@ async def pass_opportunity(
     return {"status": "passed", "opportunity_id": opportunity_id}
 
 
-def _normalize_auction_end_time(raw_value, *, reference_dt: Optional[datetime] = None) -> Optional[str]:
-    if raw_value in {None, ""}:
-        return None
-    if isinstance(raw_value, datetime):
-        dt = _parse_datetime_utc(raw_value)
-        return dt.isoformat() if dt else None
-
-    text = str(raw_value).strip()
-    if not text:
-        return None
-
-    parsed_absolute = _parse_datetime_utc(text)
-    if parsed_absolute:
-        return parsed_absolute.isoformat()
-
-    lower_text = text.lower()
-    total_delta = timedelta(0)
-    matched = False
-
-    # Handle HH:MM:SS or MM:SS countdown format (e.g. "12:34:56" or "45:00")
-    hms_match = re.fullmatch(r'(\d+):(\d{2}):(\d{2})', text.strip())
-    ms_match = re.fullmatch(r'(\d+):(\d{2})', text.strip()) if not hms_match else None
-    if hms_match:
-        h, m, s = int(hms_match.group(1)), int(hms_match.group(2)), int(hms_match.group(3))
-        total_delta = timedelta(hours=h, minutes=m, seconds=s)
-        matched = True
-    elif ms_match:
-        m, s = int(ms_match.group(1)), int(ms_match.group(2))
-        total_delta = timedelta(minutes=m, seconds=s)
-        matched = True
-    else:
-        # Spelled-out and compact relative formats:
-        # "2 days 4 hours", "1d 2h", "45 minutes", "45m", "3 hrs"
-        for pattern, unit in (
-            (r'(\d+)\s*d(?:ay(?:s)?)?\b', "days"),
-            (r'(\d+)\s*(?:hour|hr|hrs|h)\b', "hours"),
-            (r'(\d+)\s*(?:min(?:ute)?(?:s)?|m)\b', "minutes"),
-        ):
-            match = re.search(pattern, lower_text)
-            if match:
-                matched = True
-                total_delta += timedelta(**{unit: int(match.group(1))})
-
-    if matched:
-        anchor = reference_dt or datetime.now(timezone.utc)
-        return (anchor + total_delta).astimezone(timezone.utc).isoformat()
-
-    return None
+# Auction end-time normalization is imported from backend.ingest.time_utils.
 
 
 # Source-site normalization is kept behind these imported aliases so existing
@@ -3384,10 +3327,7 @@ def _record_delivery_log(
         return False
 
 
-def _compute_listing_id(source: str, listing_url: str) -> str:
-    normalized_source = (source or "unknown").strip().lower()
-    normalized_url = (listing_url or "").strip()
-    return hashlib.sha256(f"{normalized_source}|{normalized_url}".encode()).hexdigest()[:40]
+# Listing identity helper is imported from backend.ingest.listing_identity.
 
 
 def _upsert_delivery_log_direct_pg(row: dict) -> None:
