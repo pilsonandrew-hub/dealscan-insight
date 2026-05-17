@@ -59,3 +59,42 @@ def compute_canonical_id(vehicle: dict[str, Any]) -> str:
     bucket = round(mileage / 2500) * 2500
     key = f"{year}_{make}_{model}_{state}_{bucket}"
     return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def build_duplicate_recovery_payload(row: dict[str, Any], canonical_row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Build the duplicate insert row and optional canonical source update.
+
+    This preserves the historical duplicate-recovery behavior used after a
+    canonical unique-conflict: the new row is inserted as duplicate, and the
+    canonical row is updated only when the duplicate source is new.
+    """
+    duplicate_row = dict(row)
+    duplicate_row["is_duplicate"] = True
+    duplicate_row["canonical_record_id"] = canonical_row["id"]
+    duplicate_row["all_sources"] = []
+    duplicate_row["duplicate_count"] = 0
+
+    existing_sources = canonical_row.get("all_sources") or []
+    new_source = duplicate_row.get("source")
+    canonical_update = None
+    if new_source and new_source not in existing_sources:
+        updated_sources = existing_sources + [new_source]
+        canonical_update = {
+            "id": canonical_row["id"],
+            "all_sources": updated_sources,
+            "duplicate_count": len(updated_sources) - 1,
+        }
+    return duplicate_row, canonical_update
+
+
+def is_canonical_unique_conflict(error_text: str) -> bool:
+    """Return True for canonical unique-index conflict messages."""
+    normalized = (error_text or "").lower()
+    return (
+        "idx_opportunities_canonical_unique" in normalized
+        or (
+            "duplicate key value" in normalized
+            and "canonical_id" in normalized
+            and "is_duplicate" in normalized
+        )
+    )

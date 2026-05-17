@@ -65,7 +65,9 @@ from backend.ingest.delivery_log import (
 from backend.ingest.direct_pg import prepare_direct_pg_value
 from backend.ingest.canonical_identity import (
     MAKE_ALIASES,
+    build_duplicate_recovery_payload,
     compute_canonical_id,
+    is_canonical_unique_conflict,
     normalize_make_for_identity as _normalize_make,
     normalize_model_for_identity as _normalize_model,
 )
@@ -2753,43 +2755,11 @@ def _lookup_existing_canonical_opportunity(canonical_id: Optional[str]) -> Optio
     return None
 
 
-def _build_duplicate_recovery_payload(row: dict, canonical_row: dict) -> tuple[dict, Optional[dict]]:
-    duplicate_row = dict(row)
-    duplicate_row["is_duplicate"] = True
-    duplicate_row["canonical_record_id"] = canonical_row["id"]
-    duplicate_row["all_sources"] = []
-    duplicate_row["duplicate_count"] = 0
-
-    existing_sources = canonical_row.get("all_sources") or []
-    new_source = duplicate_row.get("source")
-    canonical_update = None
-    if new_source and new_source not in existing_sources:
-        updated_sources = existing_sources + [new_source]
-        canonical_update = {
-            "id": canonical_row["id"],
-            "all_sources": updated_sources,
-            "duplicate_count": len(updated_sources) - 1,
-        }
-    return duplicate_row, canonical_update
-
-
 def _finalize_duplicate_recovery(vehicle: dict, canonical_row: dict, canonical_update: Optional[dict]) -> None:
     vehicle["is_duplicate"] = True
     vehicle["canonical_record_id"] = canonical_row["id"]
     if canonical_update and _apply_canonical_update(canonical_update):
         logger.info("[DEDUP] canonical source update applied for %s", canonical_row["id"])
-
-
-def _is_canonical_unique_conflict(error_text: str) -> bool:
-    normalized = (error_text or "").lower()
-    return (
-        "idx_opportunities_canonical_unique" in normalized
-        or (
-            "duplicate key value" in normalized
-            and "canonical_id" in normalized
-            and "is_duplicate" in normalized
-        )
-    )
 
 
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
@@ -2895,10 +2865,10 @@ def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
         return _insert_opportunity_direct_pg(row), "saved_direct_pg"
     except psycopg2.errors.UniqueViolation as pg_err:
         error_text = getattr(pg_err, "pgerror", None) or str(pg_err)
-        if _is_canonical_unique_conflict(error_text):
+        if is_canonical_unique_conflict(error_text):
             canonical_row = _lookup_existing_canonical_opportunity(row.get("canonical_id"))
             if canonical_row:
-                duplicate_row, canonical_update = _build_duplicate_recovery_payload(row, canonical_row)
+                duplicate_row, canonical_update = build_duplicate_recovery_payload(row, canonical_row)
                 try:
                     duplicate_id = _insert_opportunity_direct_pg(duplicate_row)
                     if canonical_update:
@@ -3009,10 +2979,10 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             logger.error(f"[INGEST] Supabase save FAILED for '{title}': {e}")
             error_text = str(e)
             if "23505" in error_text or "duplicate key value" in error_text:
-                if _is_canonical_unique_conflict(error_text):
+                if is_canonical_unique_conflict(error_text):
                     canonical_row = _lookup_existing_canonical_opportunity(row.get("canonical_id"))
                     if canonical_row:
-                        duplicate_row, canonical_update = _build_duplicate_recovery_payload(row, canonical_row)
+                        duplicate_row, canonical_update = build_duplicate_recovery_payload(row, canonical_row)
                         try:
                             retry = supabase_client.table("opportunities").insert(duplicate_row).execute()
                             if retry.data:
