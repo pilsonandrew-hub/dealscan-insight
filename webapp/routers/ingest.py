@@ -31,6 +31,7 @@ from psycopg2 import sql as psycopg2_sql
 
 from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
+from backend.ingest.apify_metadata import extract_apify_webhook_metadata
 from backend.ingest.config_loader import get_config
 from backend.ingest.env_utils import env_float, env_int
 from backend.ingest.fallback_score import build_fallback_score
@@ -326,80 +327,6 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
 
 
 # Datetime parsing helpers are imported from backend.ingest.time_utils.
-
-
-def extract_apify_webhook_metadata(payload: dict) -> dict:
-    resource = payload.get("resource", {}) if isinstance(payload, dict) else {}
-    event_data = payload.get("eventData", {}) if isinstance(payload, dict) else {}
-    nested_resource = event_data.get("resource", {}) if isinstance(event_data, dict) else {}
-
-    item_count = None
-    for candidate in (
-        payload.get("item_count"),
-        payload.get("itemCount"),
-        event_data.get("itemCount") if isinstance(event_data, dict) else None,
-        resource.get("item_count"),
-        resource.get("itemCount"),
-        nested_resource.get("itemCount") if isinstance(nested_resource, dict) else None,
-    ):
-        if candidate is not None:
-            item_count = candidate
-            break
-
-    if item_count is None and isinstance(payload.get("items"), list):
-        item_count = len(payload["items"])
-
-    try:
-        item_count = int(item_count) if item_count is not None else None
-    except (TypeError, ValueError):
-        item_count = None
-
-    actor_id = (
-        resource.get("actId")
-        or resource.get("actorId")
-        or nested_resource.get("actId")
-        or nested_resource.get("actorId")
-        or event_data.get("actorId")
-        or payload.get("actId")
-        or payload.get("actorId")
-        or payload.get("actor_id")
-    )
-    run_id = (
-        resource.get("id")
-        or nested_resource.get("id")
-        or event_data.get("actorRunId")
-        or event_data.get("runId")
-        or payload.get("actorRunId")
-        or payload.get("runId")
-        or payload.get("id")
-        or payload.get("run_id")
-    )
-    dataset_id = (
-        resource.get("defaultDatasetId")
-        or nested_resource.get("defaultDatasetId")
-        or event_data.get("defaultDatasetId")
-        or payload.get("defaultDatasetId")
-        or payload.get("defaultDatasetID")
-        or payload.get("datasetId")
-        or payload.get("defaultDataset")
-    )
-
-    return {
-        "source": payload.get("source") or "apify",
-        "actor_id": actor_id,
-        "run_id": run_id,
-        "dataset_id": dataset_id,
-        "item_count": item_count,
-        "created_at": _parse_datetime_utc(
-            payload.get("createdAt")
-            or payload.get("timestamp")
-            or event_data.get("createdAt") if isinstance(event_data, dict) else None
-            or resource.get("createdAt")
-            or resource.get("startedAt")
-            or nested_resource.get("createdAt") if isinstance(nested_resource, dict) else None
-            or nested_resource.get("startedAt") if isinstance(nested_resource, dict) else None
-        ),
-    }
 
 
 def insert_webhook_log(
