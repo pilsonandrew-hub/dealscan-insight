@@ -64,6 +64,12 @@ from backend.ingest.telegram_alerts import (
     telegram_html_escape,
     telegram_link,
 )
+from backend.ingest.webhook_security import (
+    configured_webhook_secret_entries,
+    match_webhook_secret,
+    stale_webhook_error,
+    verify_webhook_secret,
+)
 from backend.ingest.time_utils import (
     normalize_auction_end_time as _normalize_auction_end_time,
     parse_datetime_utc as _parse_datetime_utc,
@@ -536,16 +542,7 @@ def update_webhook_log(
 
 
 def _configured_webhook_secret_entries() -> tuple[tuple[str, str], ...]:
-    def _split_secret_values(raw_secret: str) -> list[str]:
-        return [secret.strip() for secret in raw_secret.split(",") if secret.strip()]
-
-    entries: list[tuple[str, str]] = [
-        ("current", secret) for secret in _split_secret_values(WEBHOOK_SECRET)
-    ]
-    entries.extend(
-        ("previous", secret) for secret in _split_secret_values(WEBHOOK_SECRET_PREVIOUS)
-    )
-    return tuple(entries)
+    return configured_webhook_secret_entries(WEBHOOK_SECRET, WEBHOOK_SECRET_PREVIOUS)
 
 
 def _webhook_secret_posture() -> dict[str, Any]:
@@ -553,11 +550,7 @@ def _webhook_secret_posture() -> dict[str, Any]:
 
 
 def _match_webhook_secret(presented_secret: Optional[str]) -> Optional[str]:
-    presented = presented_secret or ""
-    for label, configured_secret in _configured_webhook_secret_entries():
-        if hmac.compare_digest(presented, configured_secret):
-            return label
-    return None
+    return match_webhook_secret(presented_secret, WEBHOOK_SECRET, WEBHOOK_SECRET_PREVIOUS)
 
 
 def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
@@ -565,9 +558,7 @@ def _verify_webhook_secret(presented_secret: Optional[str]) -> bool:
     current (active) secret is actually set.  A previous/rotation secret alone
     is not sufficient when no active secret exists — that would mean we have no
     rotation baseline and any prior-round secret would be accepted forever."""
-    if not WEBHOOK_SECRET.strip():
-        return False
-    return _match_webhook_secret(presented_secret) is not None
+    return verify_webhook_secret(presented_secret, WEBHOOK_SECRET, WEBHOOK_SECRET_PREVIOUS)
 
 
 def _webhook_replay_window_seconds() -> int:
@@ -741,18 +732,7 @@ def _select_recent_replay_row(rows: list[dict]) -> Optional[dict]:
 
 
 def _stale_webhook_error(metadata: dict) -> Optional[str]:
-    max_age_seconds = _webhook_max_age_seconds()
-    created_at = metadata.get("created_at")
-    if max_age_seconds <= 0 or created_at is None:
-        return None
-
-    now = datetime.now(timezone.utc)
-    age_seconds = (now - created_at).total_seconds()
-    if age_seconds > max_age_seconds:
-        return f"Webhook createdAt is stale ({int(age_seconds)}s old; max {max_age_seconds}s)"
-    if age_seconds < -300:
-        return f"Webhook createdAt is too far in the future ({int(abs(age_seconds))}s skew)"
-    return None
+    return stale_webhook_error(metadata, _webhook_max_age_seconds())
 
 
 def _request_client_ip_for_security_log(request: Request) -> str:
