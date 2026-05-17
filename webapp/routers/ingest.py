@@ -32,6 +32,7 @@ from psycopg2 import sql as psycopg2_sql
 from backend.ingest.webhook_secret_posture import build_webhook_secret_posture
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 from backend.ingest.config_loader import get_config
+from backend.ingest.env_utils import env_float, env_int
 from backend.ingest.fallback_score import build_fallback_score
 from backend.ingest.gates import (
     HIGH_RUST_STATES,
@@ -137,25 +138,11 @@ alerts_this_run_ts: dict[str, float] = {}
 
 
 def _env_float(name: str, default: float) -> float:
-    raw_value = os.getenv(name)
-    if raw_value in {None, ""}:
-        return default
-    try:
-        return float(raw_value)
-    except ValueError:
-        logger.warning("[ALERT_GATE] Invalid %s=%r; using %s", name, raw_value, default)
-        return default
+    return env_float(os.environ, name, default, log=logger, context="ALERT_GATE")
 
 
 def _env_int(name: str, default: int) -> int:
-    raw_value = os.getenv(name)
-    if raw_value in {None, ""}:
-        return default
-    try:
-        return int(raw_value)
-    except ValueError:
-        logger.warning("[INGEST_AUTH] Invalid %s=%r; using %s", name, raw_value, default)
-        return default
+    return env_int(os.environ, name, default, log=logger, context="INGEST_AUTH")
 
 
 def _alert_thresholds() -> Optional["AlertThresholds"]:
