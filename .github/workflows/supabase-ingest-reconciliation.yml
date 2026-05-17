@@ -1,0 +1,68 @@
+name: DealerScope Ingest Reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Hours to reconcile backward from now"
+        required: false
+        default: "72"
+      actors:
+        description: "Optional space-separated actor names/ids, e.g. ds-allsurplus ds-jjkane"
+        required: false
+        default: ""
+      summary_only:
+        description: "Only print runs with issues"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      fail_on_issues:
+        description: "Fail workflow if reconciliation finds missing/degraded landing evidence"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
+      - name: Run read-only Apify to Supabase reconciliation
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+          ACTORS: ${{ inputs.actors }}
+          SUMMARY_ONLY: ${{ inputs.summary_only }}
+          FAIL_ON_ISSUES: ${{ inputs.fail_on_issues }}
+        run: |
+          set -euo pipefail
+          args=(--lookback-hours "${LOOKBACK_HOURS:-72}")
+          if [[ -n "${ACTORS:-}" ]]; then
+            # shellcheck disable=SC2206
+            actor_args=(${ACTORS})
+            args+=(--actors "${actor_args[@]}")
+          fi
+          if [[ "${SUMMARY_ONLY:-false}" == "true" ]]; then
+            args+=(--summary-only)
+          fi
+          if [[ "${FAIL_ON_ISSUES:-false}" == "true" ]]; then
+            args+=(--fail-on-issues)
+          fi
+          python3 scripts/reconcile_apify_ingest_runs.py "${args[@]}"
