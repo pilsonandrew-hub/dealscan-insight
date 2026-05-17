@@ -122,6 +122,7 @@ from backend.ingest.source_site import (
     infer_source_site as _infer_source_site,
     source_site_from_url as _source_site_from_url,
 )
+from backend.ingest.supabase_config import resolve_supabase_ingest_config
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 telegram_router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -173,38 +174,18 @@ OPENROUTER_LANE_MODEL_PAIRS = DEFAULT_OPENROUTER_LANE_MODEL_PAIRS
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
 
-# Prefer backend-only env vars; fall back to VITE_* for compatibility during transition
-_supabase_url = (
-    os.getenv("SUPABASE_URL")
-    or os.getenv("VITE_SUPABASE_URL")
-) or None
-_supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-_supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
-_environment = os.getenv("ENVIRONMENT", "production")
+_supabase_config = resolve_supabase_ingest_config(os.environ)
+_supabase_url = _supabase_config.url
+_supabase_service_role_key = _supabase_config.service_role_key
+_supabase_anon_key = _supabase_config.anon_key
+_environment = _supabase_config.environment
 _APP_PUBLIC_URL = (os.getenv("APP_PUBLIC_URL") or "https://dealscan-insight-production.up.railway.app").strip()
-
-if _supabase_service_role_key:
-    _supabase_key = _supabase_service_role_key
-elif _supabase_anon_key:
-    if _environment == "development":
-        _supabase_key = _supabase_anon_key
-        logger.warning(
-            "SUPABASE_SERVICE_ROLE_KEY missing in development; falling back to anon key."
-        )
+_supabase_key = _supabase_config.key
+if _supabase_config.message:
+    if _supabase_config.severity == "critical":
+        logger.critical(_supabase_config.message)
     else:
-        logger.critical(
-            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations in production."
-        )
-else:
-    _supabase_key = None
-    if _environment == "development":
-        logger.warning(
-            "SUPABASE_SERVICE_ROLE_KEY missing in development and no anon key is available."
-        )
-    else:
-        logger.critical(
-            "SUPABASE_SERVICE_ROLE_KEY env var required for privileged ingest operations."
-        )
+        logger.warning(_supabase_config.message)
 
 supabase_client = None
 try:
