@@ -57,6 +57,7 @@ from backend.ingest.alert_validation import (
     alert_validation_mmr_estimate,
     build_alert_validation_prompt,
 )
+from backend.ingest.direct_pg import prepare_direct_pg_value
 from backend.ingest.canonical_identity import (
     MAKE_ALIASES,
     compute_canonical_id,
@@ -2469,9 +2470,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
 
 
 def _prepare_direct_pg_value(value):
-    if isinstance(value, dict):
-        return psycopg2_extras.Json(value)
-    return value
+    return prepare_direct_pg_value(value)
 
 
 def _increment_reason_counter(counter: dict, reason: str) -> None:
