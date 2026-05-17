@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/proxy/health", "destination": "https://dealscan-insight-production.up.railway.app/health" },
+    { "source": "/api/outcomes", "destination": "https://dealscan-insight-production.up.railway.app/api/outcomes" },
+    { "source": "/api/rover/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/rover/$1" },
+    { "source": "/api/ingest/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/ingest/$1" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
