@@ -58,6 +58,7 @@ SONAR_MIRROR_FAILURE_STATUSES = {
     "sonar_client_unavailable",
 }
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
+DIRECT_PG_UNAVAILABLE_FALLBACK_MARKER = "webhook_log_claim_direct_pg_unavailable"
 POSTGREST_PAGE_SIZE = 1000
 _CURL_SSL_FALLBACK_NOTIFIED = False
 
@@ -784,6 +785,13 @@ def classify_run(
     sonar_failed_rows = sum(int(sonar_statuses.get(s) or 0) for s in SONAR_MIRROR_FAILURE_STATUSES)
     latest_webhook_status = str((webhook or {}).get("latest_status") or "unknown").lower()
     latest_webhook_error = str((webhook or {}).get("latest_error") or "")
+    used_rest_fallback_after_direct_pg_unavailable = (
+        DIRECT_PG_UNAVAILABLE_FALLBACK_MARKER in latest_webhook_error
+    )
+    used_legacy_audit_backfill = (
+        AUDIT_FALLBACK_MARKER in latest_webhook_error
+        and not used_rest_fallback_after_direct_pg_unavailable
+    )
     has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or existing_rows > 0
     has_accounted_non_save_outcome = (
         inserted_rows == 0
@@ -797,11 +805,15 @@ def classify_run(
         if webhook or opportunities or delivery:
             has_clean_webhook = not webhook or latest_webhook_status in WEBHOOK_SUCCESS_STATUSES
             if has_clean_webhook and has_successful_db_landing and failed_rows == 0:
-                if AUDIT_FALLBACK_MARKER in latest_webhook_error:
+                if used_rest_fallback_after_direct_pg_unavailable:
+                    issues.append("direct_pg_claim_rest_fallback")
+                elif used_legacy_audit_backfill:
                     issues.append("audit_backfilled")
                 return issues
             issues.append("db_only_run")
-            if AUDIT_FALLBACK_MARKER in latest_webhook_error:
+            if used_rest_fallback_after_direct_pg_unavailable:
+                issues.append("direct_pg_claim_rest_fallback")
+            elif used_legacy_audit_backfill:
                 issues.append("audit_backfilled")
         return issues
 
@@ -823,7 +835,9 @@ def classify_run(
                     and failed_rows == 0
                 ):
                     issues.append("webhook_pending_stale")
-            if AUDIT_FALLBACK_MARKER in latest_webhook_error:
+            if used_rest_fallback_after_direct_pg_unavailable:
+                issues.append("direct_pg_claim_rest_fallback")
+            elif used_legacy_audit_backfill:
                 issues.append("audit_backfilled")
 
             webhook_item_count = _first_int(webhook.get("max_item_count"))
@@ -873,10 +887,17 @@ def infer_likely_cause(
     if "sonar_mirror_failures" in issues:
         return "sonar_mirror_write_failures: sonar_listings mirror writes failed. Inspect sonar_mirror channel in ingest_delivery_log for the run."
 
+    if "direct_pg_claim_rest_fallback" in issues:
+        return (
+            "direct_pg_claim_rest_fallback: the app accepted the webhook through the Supabase REST "
+            "durable path after direct Postgres was unavailable. This proves the 500 guard worked; "
+            "fix the Railway/Supabase direct DB DSN separately if direct-PG audit claims are required."
+        )
+
     if "audit_backfilled" in issues:
         return (
-            "critical_audit_backfilled_via_direct_pg: webhook or db_save evidence landed through the "
-            "direct Postgres fallback. Inspect Supabase/API health before the next replay or deploy."
+            "critical_audit_backfilled_via_direct_pg: webhook or db_save evidence landed through a "
+            "direct Postgres backfill path. Inspect Supabase/API health before the next replay or deploy."
         )
 
     if "missing_delivery_log" in issues or "missing_db_save_ledger" in issues:

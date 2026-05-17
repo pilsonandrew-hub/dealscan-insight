@@ -304,6 +304,31 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, ["audit_backfilled"])
 
+    def test_classify_run_labels_direct_pg_unavailable_rest_fallback_separately(self):
+        issues = reconcile.classify_run(
+            run_id="run-rest-fallback",
+            apify_run={"run_id": "run-rest-fallback", "status": "SUCCEEDED", "item_count": 1},
+            webhook={
+                "latest_status": "processed",
+                "latest_error": "funnel=items:1; audit_fallbacks=webhook_log_claim_direct_pg_unavailable",
+            },
+            opportunities={"opportunity_rows": 1},
+            delivery={"channels": {"db_save": {"statuses": {"saved_supabase": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, ["direct_pg_claim_rest_fallback"])
+        likely_cause = reconcile.infer_likely_cause(
+            apify_run={"run_id": "run-rest-fallback", "status": "SUCCEEDED"},
+            webhook={"latest_status": "processed"},
+            opportunities={"opportunity_rows": 1},
+            delivery={"channels": {"db_save": {"statuses": {"saved_supabase": 1}}}},
+            issues=issues,
+        )
+        self.assertIn("direct_pg_claim_rest_fallback", likely_cause)
+        self.assertIn("500 guard worked", likely_cause)
+
     def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
         with patch.object(
             reconcile,
