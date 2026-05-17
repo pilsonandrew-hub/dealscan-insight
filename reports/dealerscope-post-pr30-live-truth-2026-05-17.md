@@ -9,16 +9,16 @@ These were safe modularization/provenance/test-hygiene hardening slices, not bus
 
 ## Confirmed Live State
 - `origin/main` is canonical.
-- Local `main` is up to date with `origin/main` at `fb97585` after PR #31.
+- Local `main` was re-synced after PR #32; latest observed canonical `origin/main` was `03c7a94`.
 - Vercel status: success.
 - Railway status: success.
 - Railway health endpoint responds OK: `https://dealscan-insight-production.up.railway.app/health`.
 - Backend protected endpoints reject unauthenticated traffic as expected.
 - `/api/ingest/apify` exists; GET returns 405 as expected for webhook route.
 - GitHub scraper watchdog runs are green.
-- Latest inspected `DealerScope Watchdog Hunter` run: `25998277401`.
+- Latest inspected `DealerScope Watchdog Hunter` run: `25999101570`.
 - Latest inspected watchdog output: `Watchdog Hunter: all monitored scrapers healthy`.
-- Open PR list is empty after closing stale PR #1.
+- Open PR list was empty after closing stale PR #1 and merging PRs #30–#32.
 
 ## Production Ingest Authority
 Production-relevant ingest path is:
@@ -51,7 +51,11 @@ Proof boundary: watchdog success proves latest actor run recency/status within i
 - `npm lint` failed from pre-existing frontend debt.
 - PR #30 checks passed and merged.
 - PR #31 checks passed and merged.
-- Post-PR #31 live health remained OK.
+- PR #32 docs-only live-truth report update checks passed and merged.
+- Post-PR #31/#32 live health remained OK.
+- Latest inspected `Saved Searches Check` run `25999166075` returned HTTP 200 from Railway `/api/saved-searches/check`.
+- Latest inspected `DealerScope Daily Digest` run `25996273988` completed successfully using GitHub Actions Supabase secrets.
+- Latest inspected `Deal Expiry Sweeper` run `25990870351` completed successfully using GitHub Actions Supabase secrets.
 
 ## Test Hygiene Fixed
 The prior unscoped pytest gap is now fixed by `pytest.ini` in PR #31:
@@ -61,10 +65,21 @@ The prior unscoped pytest gap is now fixed by `pytest.ini` in PR #31:
 
 This does not remove the legacy scripts or their optional dependencies; it prevents accidental default test collection from treating operational/performance scripts as unit tests.
 
+
+## Additional GitHub Actions Signals — 2026-05-17
+- `Saved Searches Check` run `25999166075`: success; Railway endpoint returned HTTP 200 for `/api/saved-searches/check`.
+- `DealerScope Daily Digest` run `25996273988`: success; workflow is configured with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` GitHub secrets.
+- `Deal Expiry Sweeper` run `25990870351`: success; workflow is configured with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` GitHub secrets.
+- `DealerScope Watchdog Hunter` run `25999101570`: success; workflow used GitHub `APIFY_TOKEN` and reported `Watchdog Hunter: all monitored scrapers healthy`.
+
+Proof boundary: these runs prove repo secrets and scheduled endpoint/API paths are functioning at the workflow level. They still do not prove the recent Apify webhook payloads landed in `webhook_log`, produced `opportunities`, or emitted Telegram hot-deal alerts.
+
 ## Remaining Blockers / Gaps
-1. Supabase live DB inspection is blocked:
+1. Supabase live DB inspection from OpenClaw/local shell is blocked:
    - stored direct pooler URL returns `Tenant or user not found`
    - no usable service-role key is visible in local env/readable files
+   - GitHub Actions has working Supabase secrets for scheduled jobs, but those are not readable from OpenClaw/local shell
+   - available GitHub Actions logs prove some service-role-backed jobs execute successfully, but do not expose table contents or prove ingest row landing end-to-end
 2. Legacy scraper code still has CSV/mock/offline remnants:
    - `backend/ingest/scrape_all.py` still writes CSV
    - no `scrape_runs` / `parse_events` migration surfaced in grep
