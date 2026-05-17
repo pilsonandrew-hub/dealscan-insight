@@ -1,0 +1,4 @@
+{
+  "buildCommand": "mkdir -p dist && printf '%s\n' '<!doctype html><html><head><meta charset=\"utf-8\"><title>ACE Governed Foundation</title></head><body><h1>ACE governed foundation branch</h1><p>This branch contains ACE runtime/governance work only. DealerScope frontend previews deploy from the DealerScope app branch.</p></body></html>' > dist/index.html",
+  "outputDirectory": "dist"
+}
