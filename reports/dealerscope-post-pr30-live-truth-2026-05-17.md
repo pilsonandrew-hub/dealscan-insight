@@ -12,6 +12,7 @@ These were safe modularization/provenance/test-hygiene hardening slices, not bus
 - Local `main` was re-synced after PR #32; latest observed canonical `origin/main` was `03c7a94`.
 - Vercel status: success.
 - Railway status: success.
+- Google Cloud Build status on `de62eb4`: failure in Deploy step after Build/Push succeeded; this appears to be a secondary/stale Cloud Build trigger because repo production authority is Railway/Vercel and no repo-owned Cloud Build config was found beyond incidental docs.
 - Railway health endpoint responds OK: `https://dealscan-insight-production.up.railway.app/health`.
 - Backend protected endpoints reject unauthenticated traffic as expected.
 - `/api/ingest/apify` exists; GET returns 405 as expected for webhook route.
@@ -86,6 +87,7 @@ Proof boundary: these runs prove repo secrets and scheduled endpoint/API paths a
 3. Frontend lint debt remains pre-existing.
 4. CI Python coverage is lighter than the local backend/ingest validation performed here.
 5. Local Apify skill token appears stale/scoped wrong; repo secret token remains the stronger available Apify signal.
+6. A Google Cloud Build trigger attached to GitHub failed its Deploy step for `de62eb4`; Vercel/Railway production deploys remain green, so treat this as non-production/secondary until ownership is confirmed.
 
 ## Next High-Value Actions
 1. Restore/rotate a current Supabase live inspection path:
@@ -96,3 +98,4 @@ Proof boundary: these runs prove repo secrets and scheduled endpoint/API paths a
    - `alert_log`
 3. Decide whether local CSV scraper paths should be retired, wired to Supabase, or documented as non-production legacy.
 4. If Apify inspection from OpenClaw is required, rotate/update the local Apify skill token to match the working GitHub Actions secret scope.
+5. Decide whether the failing Google Cloud Build trigger should be disabled, repaired, or documented as non-production.
