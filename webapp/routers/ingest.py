@@ -69,6 +69,13 @@ from backend.ingest.canonical_identity import (
     normalize_make_for_identity as _normalize_make,
     normalize_model_for_identity as _normalize_model,
 )
+from backend.ingest.openrouter_routing import (
+    DEFAULT_OPENROUTER_LANE_MODEL_PAIRS,
+    legacy_deepseek_fallback_enabled,
+    legacy_defaulting_enabled,
+    normalize_openrouter_route_value,
+    resolve_openrouter_lane_model,
+)
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
 from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
@@ -187,10 +194,7 @@ def _telegram_link(url: str, label: str) -> str:
 OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
 # DeepSeek direct API (legacy fallback only if explicitly enabled)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-OPENROUTER_LANE_MODEL_PAIRS = {
-    "premium": "deepseek/deepseek-v3.2",
-    "standard": "deepseek/deepseek-v3.2",
-}
+OPENROUTER_LANE_MODEL_PAIRS = DEFAULT_OPENROUTER_LANE_MODEL_PAIRS
 # ALERT CONTROL PLANE: FastAPI -> Telegram directly
 # Decision: 2026-03-11, keep FastAPI direct, not OpenClaw messaging
 # Reason: already deployed, working, single path
@@ -245,38 +249,32 @@ def _apify_api_token() -> str:
 
 
 def _normalize_openrouter_route_value(value: Any) -> str:
-    return str(value or "").strip().lower()
+    return normalize_openrouter_route_value(value)
 
 
 def _openrouter_legacy_defaulting_enabled() -> bool:
-    return _normalize_openrouter_route_value(os.getenv("OPENROUTER_LEGACY_DEFAULTING_ENABLED")) == "true"
+    return legacy_defaulting_enabled(os.environ)
 
 
 def _openrouter_legacy_deepseek_fallback_enabled() -> bool:
-    return _normalize_openrouter_route_value(
-        os.getenv("OPENROUTER_LEGACY_DEEPSEEK_FALLBACK_ENABLED")
-    ) == "true"
+    return legacy_deepseek_fallback_enabled(os.environ)
 
 
 def _resolve_openrouter_lane_model(deal: dict[str, Any], deal_id: str) -> tuple[str, str]:
-    lane = _normalize_openrouter_route_value(deal.get("designated_lane"))
-    if not lane:
-        if not _openrouter_legacy_defaulting_enabled():
-            raise ValueError("Missing designated_lane for OpenRouter validation")
-        lane = _normalize_openrouter_route_value(os.getenv("OPENROUTER_LEGACY_DEFAULT_LANE", "premium"))
+    missing_lane = not _normalize_openrouter_route_value(deal.get("designated_lane"))
+    lane, model = resolve_openrouter_lane_model(
+        deal,
+        lane_model_pairs=OPENROUTER_LANE_MODEL_PAIRS,
+        legacy_defaulting=_openrouter_legacy_defaulting_enabled(),
+        legacy_default_lane=os.getenv("OPENROUTER_LEGACY_DEFAULT_LANE", "premium"),
+    )
+    if missing_lane:
         logger.warning(
             "[AI_VALIDATE] deal_id=%s missing designated_lane; using legacy default lane=%s",
             deal_id,
             lane or "unknown",
         )
-
-    model = _normalize_openrouter_route_value(deal.get("openrouter_model"))
-    expected_model = OPENROUTER_LANE_MODEL_PAIRS.get(lane)
-    if not expected_model:
-        raise ValueError(f"Unsupported OpenRouter lane: {lane}")
-    if model and model != expected_model:
-        raise ValueError(f"Unsupported OpenRouter lane/model pair: {lane}/{model}")
-    return lane, expected_model
+    return lane, model
 
 
 def _derive_supabase_direct_db_url() -> Optional[str]:
