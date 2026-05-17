@@ -75,12 +75,24 @@ This does not remove the legacy scripts or their optional dependencies; it preve
 
 Proof boundary: these runs prove repo secrets and scheduled endpoint/API paths are functioning at the workflow level. They still do not prove the recent Apify webhook payloads landed in `webhook_log`, produced `opportunities`, or emitted Telegram hot-deal alerts.
 
+
+## Supabase Live Inspection — 2026-05-17 19:06 UTC
+A manual read-only GitHub Actions workflow now exists: `DealerScope Supabase Live Inspection` (`.github/workflows/supabase-live-inspection.yml`). It uses existing GitHub Actions `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` secrets and prints aggregate table evidence only; it does not print row payloads or secrets and performs no writes.
+
+Run `25999990822` succeeded. Aggregate evidence from Supabase REST:
+- `webhook_log`: 3,649 rows; latest `received_at` = `2026-05-15T12:03:37.241992+00:00`; sample `processing_status`: processed 179, ignored_replay 15, error 6.
+- `opportunities`: 5,997 rows; latest `created_at` = `2026-05-15T12:11:33.849763+00:00`; latest 200-row source-site sample showed `allsurplus`.
+- `alert_log`: 226 rows; latest `sent_at` = `2026-05-15T13:07:57.259535+00:00`; latest sample channel: telegram.
+- `ingest_delivery_log`: 199,692 rows; latest `created_at` = `2026-05-15T13:07:57.056366+00:00`; sample statuses included `sent`, `saved_supabase`, `saved_supabase_duplicate`, `duplicate_existing`, and skip statuses.
+
+Proof boundary: this closes the prior “no Supabase inspection path” blocker at aggregate level. It proves the service-role GitHub secret can read live Supabase and that the core live evidence tables contain recent rows through 2026-05-15. It still does not prove today’s Apify runs generated DB rows, that any individual deal is profitable, or that Telegram delivery content was received by a human.
+
 ## Remaining Blockers / Gaps
-1. Supabase live DB inspection from OpenClaw/local shell is blocked:
+1. Local shell direct Supabase inspection remains blocked, but a read-only GitHub Actions Supabase inspection path now exists and has succeeded:
    - stored direct pooler URL returns `Tenant or user not found`
    - no usable service-role key is visible in local env/readable files
-   - GitHub Actions has working Supabase secrets for scheduled jobs, but those are not readable from OpenClaw/local shell
-   - available GitHub Actions logs prove some service-role-backed jobs execute successfully, but do not expose table contents or prove ingest row landing end-to-end
+   - GitHub Actions has working Supabase secrets and run `25999990822` read aggregate live table evidence from Supabase REST
+   - this proves aggregate table presence/freshness, but not per-run ingestion or alert receipt
 2. Legacy scraper code still has CSV/mock/offline remnants:
    - `backend/ingest/scrape_all.py` still writes CSV
    - no `scrape_runs` / `parse_events` migration surfaced in grep
@@ -90,9 +102,9 @@ Proof boundary: these runs prove repo secrets and scheduled endpoint/API paths a
 6. A Google Cloud Build trigger attached to GitHub failed its Deploy step for `de62eb4`; Vercel/Railway production deploys remain green, so treat this as non-production/secondary until ownership is confirmed.
 
 ## Next High-Value Actions
-1. Restore/rotate a current Supabase live inspection path:
-   - service-role REST key or current direct DB URL
-2. Verify live tables:
+1. Improve Supabase inspection from aggregate proof to per-run reconciliation:
+   - use `scripts/reconcile_apify_ingest_runs.py` through a read-only/manual GitHub Actions path, or restore a current local service-role/direct DB credential
+2. Verify per-run live tables for recent Apify runs:
    - `webhook_log`
    - `opportunities`
    - `alert_log`
