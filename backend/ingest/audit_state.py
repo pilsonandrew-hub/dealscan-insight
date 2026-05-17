@@ -7,6 +7,10 @@ from typing import Any, Optional
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 
 
+class CriticalAuditWriteError(RuntimeError):
+    """Raised when an ingest audit write cannot land on any durable path."""
+
+
 
 def increment_reason_counter(counter: dict[str, int], reason: str) -> None:
     counter[reason] = counter.get(reason, 0) + 1

@@ -44,6 +44,8 @@ from backend.ingest.gates import (
 )
 from backend.ingest.listing_identity import compute_listing_id as _compute_listing_id
 from backend.ingest.audit_state import (
+    AUDIT_FALLBACK_MARKER,
+    CriticalAuditWriteError,
     attach_audit_state,
     audit_fallbacks,
     format_audit_failure,
@@ -132,11 +134,6 @@ import time as _time
 
 alerts_this_run: dict[str, int] = {}
 alerts_this_run_ts: dict[str, float] = {}
-AUDIT_FALLBACK_MARKER = "audit_fallbacks="
-
-
-class CriticalAuditWriteError(RuntimeError):
-    pass
 
 
 def _env_float(name: str, default: float) -> float:

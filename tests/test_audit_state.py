@@ -1,4 +1,6 @@
 from backend.ingest.audit_state import (
+    AUDIT_FALLBACK_MARKER,
+    CriticalAuditWriteError,
     attach_audit_state,
     audit_fallbacks,
     format_audit_failure,
@@ -81,3 +83,11 @@ def test_increment_reason_counter_adds_and_increments_reason():
     increment_reason_counter(counter, "gate:rust_state")
     increment_reason_counter(counter, "save_exception")
     assert counter == {"gate:rust_state": 2, "save_exception": 1}
+
+
+def test_critical_audit_write_error_is_runtime_error():
+    assert issubclass(CriticalAuditWriteError, RuntimeError)
+
+
+def test_audit_fallback_marker_constant_matches_wire_format():
+    assert AUDIT_FALLBACK_MARKER == "audit_fallbacks="
