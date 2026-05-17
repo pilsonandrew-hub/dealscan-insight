@@ -72,6 +72,7 @@ from backend.ingest.canonical_identity import (
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
 from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
+from backend.ingest.webhook_replay import select_recent_replay_row
 from backend.ingest.sonar_listings import build_sonar_listing_row
 from backend.ingest.telegram_alerts import (
     build_telegram_alert_message,
@@ -665,7 +666,7 @@ def _claim_webhook_log_direct_pg(
                 """,
                 (run_id, cutoff),
             )
-            recent_replay = _select_recent_replay_row([dict(item) for item in cur.fetchall()])
+            recent_replay = select_recent_replay_row([dict(item) for item in cur.fetchall()])
             if recent_replay:
                 record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
                 return None, recent_replay
@@ -715,14 +716,14 @@ def _find_recent_webhook_replay(
                 .execute()
             )
             rows = result.data or []
-            return _select_recent_replay_row(rows)
+            return select_recent_replay_row(rows)
         except Exception as exc:
             primary_error = exc
 
     try:
         rows = _find_recent_webhook_replay_direct_pg(run_id, cutoff)
         record_audit_fallback(audit_state, "webhook_replay_lookup_direct_pg")
-        return _select_recent_replay_row(rows)
+        return select_recent_replay_row(rows)
     except Exception as fallback_error:
         if strict:
             raise CriticalAuditWriteError(
@@ -737,19 +738,6 @@ def _find_recent_webhook_replay(
             logger.warning("[INGEST_AUTH] replay lookup failed for run_id=%s: %s", run_id, primary_error)
         logger.warning("[INGEST_AUTH] direct PG replay lookup fallback failed for run_id=%s: %s", run_id, fallback_error)
         return None
-
-
-def _select_recent_replay_row(rows: list[dict]) -> Optional[dict]:
-    for row in rows:
-        status = str(row.get("processing_status") or "").lower()
-        # Block duplicate deliveries once a run is already claimed or processed.
-        # Duplicate Apify webhooks can arrive nearly simultaneously; allowing a
-        # second delivery while the first is still "pending" can enqueue the same
-        # run twice before either row reaches "processed".  Error/degraded rows
-        # remain retryable so a genuinely failed run can be replayed.
-        if status in {"pending", "processing", "processed"}:
-            return row
-    return None
 
 
 def _stale_webhook_error(metadata: dict) -> Optional[str]:
