@@ -5,7 +5,7 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.0
 
 # Data validation
-pydantic==2.8.0
+pydantic==2.11.7
 pydantic-settings==2.6.0
 
 # Auth & security
@@ -30,7 +30,7 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 
 # Supabase
-supabase==2.10.0
+supabase==2.30.0
 
 # ML
 scikit-learn==1.4.0
