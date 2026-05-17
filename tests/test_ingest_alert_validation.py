@@ -1,7 +1,7 @@
+from backend.ingest.telegram_alerts import redact_telegram_bot_token
 from webapp.routers.ingest import (
     _alert_validation_mmr_estimate,
     _build_alert_validation_prompt,
-    _redact_telegram_bot_token,
 )
 
 
@@ -61,7 +61,7 @@ def test_telegram_error_redaction_removes_bot_token_from_api_url():
         "'https://api.telegram.org/bot1234567890:ABCdef_ghi-JKLmnopQRSTuvwxYZ/sendMessage'"
     )
 
-    redacted = _redact_telegram_bot_token(raw_error)
+    redacted = redact_telegram_bot_token(raw_error)
 
     assert "1234567890:ABCdef" not in redacted
     assert "bot[REDACTED_TELEGRAM_TOKEN]/sendMessage" in redacted
