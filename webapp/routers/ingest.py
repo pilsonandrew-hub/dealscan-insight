@@ -84,6 +84,7 @@ from backend.ingest.webhook_security import (
     webhook_max_age_seconds,
     webhook_replay_window_seconds,
 )
+from backend.ingest.vin_dedup import check_vin_duplicate, normalize_vin
 from backend.ingest.time_utils import (
     normalize_auction_end_time as _normalize_auction_end_time,
     parse_datetime_utc as _parse_datetime_utc,
@@ -3000,42 +3001,12 @@ def _save_opportunity_direct_pg(row: dict) -> tuple[Optional[str], str]:
 
 
 def _normalize_vin(vin: Optional[str]) -> Optional[str]:
-    """Normalize a VIN: strip whitespace and uppercase."""
-    if not vin:
-        return None
-    normalized = vin.strip().upper()
-    return normalized if normalized else None
+    return normalize_vin(vin)
 
 
 def _check_vin_duplicate(vin: str, new_dos_score: float) -> tuple[Optional[str], bool]:
-    """
-    Check if a live opportunity with this VIN already exists in Supabase.
-
-    Returns (existing_id, should_update) where:
-    - existing_id: the ID of the existing record, or None if no duplicate
-    - should_update: True if new score is higher and we should UPDATE instead of skip
-
-    Fail closed: any lookup error is raised so the caller can skip the item.
-    """
-    if supabase_client is None:
-        return None, False
     try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        result = (
-            supabase_client.table("opportunities")
-            .select("id, listing_url, dos_score")
-            .eq("vin", vin)
-            .gte("auction_end_date", now_iso)
-            .limit(1)
-            .execute()
-        )
-        if result.data:
-            existing = result.data[0]
-            existing_id = existing.get("id")
-            existing_score = float(existing.get("dos_score") or 0)
-            should_update = new_dos_score > existing_score
-            return existing_id, should_update
-        return None, False
+        return check_vin_duplicate(vin, new_dos_score, supabase_client=supabase_client)
     except Exception as vin_check_err:
         logger.warning("[DEDUP] VIN duplicate check failed for VIN %s: %s", vin, vin_check_err)
         raise
