@@ -67,6 +67,7 @@ from backend.ingest.canonical_identity import (
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
 from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
+from backend.ingest.sonar_listings import build_sonar_listing_row
 from backend.ingest.telegram_alerts import (
     build_telegram_alert_message,
     build_telegram_reply_markup,
@@ -3016,30 +3017,7 @@ def _save_to_sonar_listings(vehicle: dict) -> None:
     """Write a simplified record to sonar_listings — NO filters (DOS, state, mileage)."""
     if supabase_client is None:
         return
-    row = {
-        "listing_id": vehicle.get("listing_id"),
-        "source": vehicle.get("source") or vehicle.get("source_site"),
-        "title": vehicle.get("title"),
-        "year": vehicle.get("year"),
-        "make": vehicle.get("make"),
-        "model": vehicle.get("model"),
-        "trim": vehicle.get("trim"),
-        "mileage": vehicle.get("mileage"),
-        "state": vehicle.get("state"),
-        "city": vehicle.get("city"),
-        "current_bid": float(vehicle.get("current_bid") or 0),
-        "auction_end_date": vehicle.get("auction_end_date"),
-        "listing_url": vehicle.get("listing_url"),
-        "image_url": vehicle.get("image_url") or vehicle.get("photo_url"),
-        "photo_url": vehicle.get("photo_url") or vehicle.get("image_url"),
-        "agency_name": vehicle.get("agency_name") or vehicle.get("issuing_agency"),
-        "condition": vehicle.get("condition"),
-        "title_status": vehicle.get("title_status"),
-        "vin": vehicle.get("vin"),
-        "source_site": vehicle.get("source_site") or vehicle.get("source"),
-        "dos_score": vehicle.get("dos_score"),
-    }
-    supabase_client.table("sonar_listings").insert(row).execute()
+    supabase_client.table("sonar_listings").insert(build_sonar_listing_row(vehicle)).execute()
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
