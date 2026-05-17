@@ -480,17 +480,17 @@ def insert_webhook_log(
     try:
         fallback_label = "webhook_log_insert_direct_pg"
         fallback_row = dict(row)
-        fallback_row["error_message"] = _merge_audit_error_message(
+        fallback_row["error_message"] = merge_audit_error_message(
             fallback_row.get("error_message"),
             [fallback_label],
         )
         inserted_id = _insert_webhook_log_direct_pg(fallback_row)
-        _record_audit_fallback(audit_state, fallback_label)
+        record_audit_fallback(audit_state, fallback_label)
         return inserted_id
     except Exception as fallback_error:
         if require_durable:
             raise CriticalAuditWriteError(
-                _format_audit_failure(
+                format_audit_failure(
                     surface="webhook_log",
                     operation="insert",
                     primary_error=primary_error,
@@ -535,17 +535,17 @@ def update_webhook_log(
     try:
         fallback_label = "webhook_log_update_direct_pg"
         fallback_row = dict(update_row)
-        fallback_row["error_message"] = _merge_audit_error_message(
+        fallback_row["error_message"] = merge_audit_error_message(
             fallback_row.get("error_message"),
             [fallback_label],
         )
         _update_webhook_log_direct_pg(webhook_log_id, fallback_row)
-        _record_audit_fallback(audit_state, fallback_label)
+        record_audit_fallback(audit_state, fallback_label)
         return
     except Exception as fallback_error:
         if require_durable:
             raise CriticalAuditWriteError(
-                _format_audit_failure(
+                format_audit_failure(
                     surface="webhook_log",
                     operation="update",
                     primary_error=primary_error,
@@ -662,7 +662,7 @@ def _claim_webhook_log_direct_pg(
             )
             recent_replay = _select_recent_replay_row([dict(item) for item in cur.fetchall()])
             if recent_replay:
-                _record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
+                record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
                 return None, recent_replay
             cur.execute(
                 """
@@ -682,7 +682,7 @@ def _claim_webhook_log_direct_pg(
                 ),
             )
             inserted = cur.fetchone()
-            _record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
+            record_audit_fallback(audit_state, "webhook_log_claim_direct_pg")
             return (str(inserted["id"]) if inserted else None), None
 
 
@@ -716,12 +716,12 @@ def _find_recent_webhook_replay(
 
     try:
         rows = _find_recent_webhook_replay_direct_pg(run_id, cutoff)
-        _record_audit_fallback(audit_state, "webhook_replay_lookup_direct_pg")
+        record_audit_fallback(audit_state, "webhook_replay_lookup_direct_pg")
         return _select_recent_replay_row(rows)
     except Exception as fallback_error:
         if strict:
             raise CriticalAuditWriteError(
-                _format_audit_failure(
+                format_audit_failure(
                     surface="webhook_log",
                     operation="replay_lookup",
                     primary_error=primary_error,
@@ -845,7 +845,7 @@ async def _process_webhook_items(
                 webhook_log_id,
                 "error",
                 item_count=metadata["item_count"],
-                error_message=_merge_audit_error_message("dataset_id_missing", _audit_fallbacks(audit_state)),
+                error_message=merge_audit_error_message("dataset_id_missing", audit_fallbacks(audit_state)),
                 require_durable=True,
                 audit_state=audit_state,
             )
@@ -856,7 +856,7 @@ async def _process_webhook_items(
             update_webhook_log(
                 webhook_log_id,
                 "error",
-                error_message=_merge_audit_error_message("invalid_dataset_id", _audit_fallbacks(audit_state)),
+                error_message=merge_audit_error_message("invalid_dataset_id", audit_fallbacks(audit_state)),
                 require_durable=True,
                 audit_state=audit_state,
             )
@@ -878,7 +878,7 @@ async def _process_webhook_items(
             update_webhook_log(
                 webhook_log_id,
                 "error",
-                error_message=_merge_audit_error_message(f"fetch_failed: {e}", _audit_fallbacks(audit_state)),
+                error_message=merge_audit_error_message(f"fetch_failed: {e}", audit_fallbacks(audit_state)),
                 require_durable=True,
                 audit_state=audit_state,
             )
@@ -889,7 +889,7 @@ async def _process_webhook_items(
                 webhook_log_id,
                 "processed",
                 item_count=metadata["item_count"],
-                error_message=_merge_audit_error_message(None, _audit_fallbacks(audit_state)),
+                error_message=merge_audit_error_message(None, audit_fallbacks(audit_state)),
                 require_durable=True,
                 audit_state=audit_state,
             )
@@ -926,11 +926,11 @@ async def _process_webhook_items(
             except Exception as norm_err:
                 logger.warning(f"[INGEST] item {item_index} normalize error: {norm_err}")
                 skipped += 1
-                _increment_reason_counter(skip_reasons, "normalize_exception")
+                increment_reason_counter(skip_reasons, "normalize_exception")
                 continue
             if vehicle is None:
                 skipped += 1
-                _increment_reason_counter(skip_reasons, "normalize_rejected")
+                increment_reason_counter(skip_reasons, "normalize_rejected")
                 _record_pre_save_skip(
                     item=item,
                     run_id=apify_run_id,
@@ -991,7 +991,7 @@ async def _process_webhook_items(
                 except Exception as exc:
                     logger.warning(f"[DEALER_SALES] Insert failed: {exc}")
                     failed_save_count += 1
-                    _increment_reason_counter(skip_reasons, f"dealer_sales:{dealer_sales_status if dealer_sales_status != 'unknown' else 'error'}")
+                    increment_reason_counter(skip_reasons, f"dealer_sales:{dealer_sales_status if dealer_sales_status != 'unknown' else 'error'}")
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1009,7 +1009,7 @@ async def _process_webhook_items(
             if not gate_result["pass"]:
                 logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
                 skipped += 1
-                _increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
+                increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1032,7 +1032,7 @@ async def _process_webhook_items(
                     score_err,
                 )
                 skipped += 1
-                _increment_reason_counter(skip_reasons, "score_exception")
+                increment_reason_counter(skip_reasons, "score_exception")
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1057,7 +1057,7 @@ async def _process_webhook_items(
                     f"{vehicle.get('title','?')[:60]}"
                 )
                 skipped += 1
-                _increment_reason_counter(skip_reasons, "margin_below_floor")
+                increment_reason_counter(skip_reasons, "margin_below_floor")
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1077,7 +1077,7 @@ async def _process_webhook_items(
                     f"headroom=${score_result.get('bid_headroom', 0):,.0f}: {vehicle.get('title','?')[:60]}"
                 )
                 skipped += 1
-                _increment_reason_counter(
+                increment_reason_counter(
                     skip_reasons,
                     f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
                 )
@@ -1111,7 +1111,7 @@ async def _process_webhook_items(
                 except Exception as dedup_err:
                     logger.error("[DEDUP] lookup failed; skipping item %s: %s", vehicle.get("title", "?"), dedup_err)
                     skipped += 1
-                    _increment_reason_counter(skip_reasons, "dedup_exception")
+                    increment_reason_counter(skip_reasons, "dedup_exception")
                     continue
             is_dup = dedup["is_duplicate"]
             if is_dup:
@@ -1126,8 +1126,8 @@ async def _process_webhook_items(
             except Exception as exc:
                 logger.error(f"[SAVE ERROR] failed to save vehicle {vehicle.get('title')} with error: {exc}")
                 failed_save_count += 1
-                _increment_reason_counter(skip_reasons, "save_exception")
-                _increment_reason_counter(save_outcomes, "save_exception")
+                increment_reason_counter(skip_reasons, "save_exception")
+                increment_reason_counter(save_outcomes, "save_exception")
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1194,7 +1194,7 @@ async def _process_webhook_items(
                         audit_state=audit_state,
                     )
             save_status = vehicle.get("_save_status", "unknown")
-            _increment_reason_counter(save_outcomes, save_status)
+            increment_reason_counter(save_outcomes, save_status)
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
@@ -1295,7 +1295,7 @@ async def _process_webhook_items(
             skip_reasons,
         )
 
-        summary_message = _format_ingest_run_summary(
+        summary_message = format_ingest_run_summary(
             dataset_item_count=dataset_item_count,
             evaluated=evaluated,
             saved_count=saved_count,
@@ -1320,9 +1320,9 @@ async def _process_webhook_items(
             webhook_log_id,
             "processed" if failed_save_count == 0 and sonar_write_fail_count == 0 else "error",
             item_count=dataset_item_count,
-            error_message=_merge_audit_error_message(
+            error_message=merge_audit_error_message(
                 combined_message,
-                _audit_fallbacks(audit_state),
+                audit_fallbacks(audit_state),
             ),
             require_durable=True,
             audit_state=audit_state,
@@ -1336,7 +1336,7 @@ async def _process_webhook_items(
                 update_webhook_log(
                     webhook_log_id,
                     "error",
-                    error_message=_merge_audit_error_message(str(e), _audit_fallbacks(audit_state)),
+                    error_message=merge_audit_error_message(str(e), audit_fallbacks(audit_state)),
                     require_durable=True,
                     audit_state=audit_state,
                 )
@@ -1419,7 +1419,7 @@ async def apify_webhook(
                 "replay_ignored": True,
                 "message": "Duplicate webhook ignored",
             }
-            _attach_audit_state(response, audit_state)
+            attach_audit_state(response, audit_state)
             return response
 
         background_tasks.add_task(
@@ -1440,7 +1440,7 @@ async def apify_webhook(
                 update_webhook_log(
                     webhook_log_id,
                     "error",
-                    error_message=_merge_audit_error_message(str(e.detail), _audit_fallbacks(audit_state)),
+                    error_message=merge_audit_error_message(str(e.detail), audit_fallbacks(audit_state)),
                     require_durable=True,
                     audit_state=audit_state,
                 )
@@ -1454,7 +1454,7 @@ async def apify_webhook(
                 update_webhook_log(
                     webhook_log_id,
                     "error",
-                    error_message=_merge_audit_error_message(str(e), _audit_fallbacks(audit_state)),
+                    error_message=merge_audit_error_message(str(e), audit_fallbacks(audit_state)),
                     require_durable=True,
                     audit_state=audit_state,
                 )
@@ -2471,73 +2471,7 @@ async def ai_validate_hot_deals(deals: list) -> list:
     return validated_deals
 
 
-def _prepare_direct_pg_value(value):
-    return prepare_direct_pg_value(value)
 
-
-def _increment_reason_counter(counter: dict, reason: str) -> None:
-    increment_reason_counter(counter, reason)
-
-
-def _audit_fallbacks(audit_state: Optional[dict[str, Any]]) -> list[str]:
-    return audit_fallbacks(audit_state)
-
-
-def _record_audit_fallback(audit_state: Optional[dict[str, Any]], fallback_label: str) -> None:
-    record_audit_fallback(audit_state, fallback_label)
-
-
-def _merge_audit_error_message(
-    error_message: Optional[str],
-    fallback_labels: list[str],
-) -> Optional[str]:
-    return merge_audit_error_message(error_message, fallback_labels, marker_prefix=AUDIT_FALLBACK_MARKER)
-
-
-def _format_ingest_run_summary(
-    *,
-    dataset_item_count: int,
-    evaluated: int,
-    saved_count: int,
-    duplicate_existing: int,
-    failed_save_count: int,
-    sonar_write_failures: int = 0,
-    skipped: int,
-    duplicate_count: int,
-    notion_sync_count: int,
-    hot_deals_count: int,
-) -> str:
-    return format_ingest_run_summary(
-        dataset_item_count=dataset_item_count,
-        evaluated=evaluated,
-        saved_count=saved_count,
-        duplicate_existing=duplicate_existing,
-        failed_save_count=failed_save_count,
-        sonar_write_failures=sonar_write_failures,
-        skipped=skipped,
-        duplicate_count=duplicate_count,
-        notion_sync_count=notion_sync_count,
-        hot_deals_count=hot_deals_count,
-    )
-
-
-def _attach_audit_state(response: dict[str, Any], audit_state: Optional[dict[str, Any]]) -> None:
-    attach_audit_state(response, audit_state)
-
-
-def _format_audit_failure(
-    *,
-    surface: str,
-    operation: str,
-    primary_error: Optional[BaseException],
-    fallback_error: BaseException,
-) -> str:
-    return format_audit_failure(
-        surface=surface,
-        operation=operation,
-        primary_error=primary_error,
-        fallback_error=fallback_error,
-    )
 
 
 def _insert_webhook_log_direct_pg(row: dict) -> Optional[str]:
@@ -2688,17 +2622,17 @@ def _record_delivery_log(
     try:
         fallback_label = "ingest_delivery_log_direct_pg"
         fallback_row = dict(row)
-        fallback_row["error_message"] = _merge_audit_error_message(
+        fallback_row["error_message"] = merge_audit_error_message(
             fallback_row.get("error_message"),
             [fallback_label],
         )
         _upsert_delivery_log_direct_pg(fallback_row)
-        _record_audit_fallback(audit_state, fallback_label)
+        record_audit_fallback(audit_state, fallback_label)
         return True
     except Exception as fallback_error:
         if require_durable:
             raise CriticalAuditWriteError(
-                _format_audit_failure(
+                format_audit_failure(
                     surface="ingest_delivery_log",
                     operation="upsert",
                     primary_error=primary_error,
@@ -2920,7 +2854,7 @@ def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Option
 
 def _insert_row_direct_pg(table_name: str, row: dict, *, returning_id: bool = True) -> Optional[str]:
     columns = list(row.keys())
-    values = [_prepare_direct_pg_value(row[column]) for column in columns]
+    values = [prepare_direct_pg_value(row[column]) for column in columns]
     insert_sql = psycopg2_sql.SQL(
         "INSERT INTO public.{table} ({fields}) VALUES ({values}){returning_clause}"
     ).format(

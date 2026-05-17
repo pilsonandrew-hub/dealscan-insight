@@ -47,7 +47,7 @@ if "fastapi" not in sys.modules:
     sys.modules["fastapi"] = fastapi_stub
     sys.modules["fastapi.responses"] = _responses_stub
 
-from webapp.routers import ingest
+from backend.ingest.audit_state import format_ingest_run_summary
 
 
 class TestFormatIngestRunSummarySonar(unittest.TestCase):
@@ -66,16 +66,16 @@ class TestFormatIngestRunSummarySonar(unittest.TestCase):
     )
 
     def test_happy_path_sonar_zero(self):
-        result = ingest._format_ingest_run_summary(**self._BASE, sonar_write_failures=0)
+        result = format_ingest_run_summary(**self._BASE, sonar_write_failures=0)
         self.assertIn("sonar_write_failures:0", result)
         self.assertIn("failed:0", result)
 
     def test_sonar_failures_rendered(self):
-        result = ingest._format_ingest_run_summary(**self._BASE, sonar_write_failures=3)
+        result = format_ingest_run_summary(**self._BASE, sonar_write_failures=3)
         self.assertIn("sonar_write_failures:3", result)
 
     def test_default_sonar_write_failures_is_zero(self):
-        result = ingest._format_ingest_run_summary(**self._BASE)
+        result = format_ingest_run_summary(**self._BASE)
         self.assertIn("sonar_write_failures:0", result)
 
 
