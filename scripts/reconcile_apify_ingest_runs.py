@@ -57,6 +57,42 @@ SONAR_MIRROR_FAILURE_STATUSES = {
     "sonar_error",
     "sonar_client_unavailable",
 }
+
+HISTORICAL_ARTIFACT_ISSUES = {
+    "audit_backfilled",
+    "db_only_run",
+    "direct_pg_claim_rest_fallback",
+}
+CURRENT_LANDING_ISSUES = {
+    "db_save_failures",
+    "missing_db_save_ledger",
+    "missing_delivery_log",
+    "missing_webhook",
+    "no_db_landing",
+    "sonar_mirror_failures",
+    "webhook_degraded",
+    "webhook_error",
+    "webhook_item_count_mismatch",
+    "webhook_pending_stale",
+}
+
+
+def classify_issue_scope(issues: list[str]) -> str:
+    """Classify whether issues represent current landing risk or historical residue.
+
+    Historical artifacts such as db_only_run/direct_pg_claim_rest_fallback are kept
+    visible, but they should not be mixed with current actor -> webhook -> DB
+    landing failures in summaries or operator reports.
+    """
+    issue_set = set(issues)
+    if not issue_set:
+        return "clean"
+    if issue_set & CURRENT_LANDING_ISSUES:
+        return "current_landing_issue"
+    if issue_set <= HISTORICAL_ARTIFACT_ISSUES:
+        return "historical_artifact"
+    return "needs_review"
+
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 DIRECT_PG_UNAVAILABLE_FALLBACK_MARKER = "webhook_log_claim_direct_pg_unavailable"
 POSTGREST_PAGE_SIZE = 1000
@@ -937,6 +973,7 @@ def build_reports(
             now_utc=now_utc,
             pending_grace_minutes=pending_grace_minutes,
         )
+        issue_scope = classify_issue_scope(issues)
         reports.append(
             {
                 "run_id": run_id,
@@ -945,6 +982,7 @@ def build_reports(
                 "opportunities": opportunities,
                 "delivery": delivery,
                 "issues": issues,
+                "issue_scope": issue_scope,
                 "likely_cause": infer_likely_cause(
                     apify_run=apify_run,
                     webhook=webhook,
@@ -968,8 +1006,14 @@ def build_reports(
 
 def print_issue_summary(reports: list[dict[str, Any]]) -> None:
     counter: Counter[str] = Counter()
+    scope_counter: Counter[str] = Counter()
     for report in reports:
         counter.update(report["issues"])
+        scope_counter.update([report.get("issue_scope") or classify_issue_scope(report["issues"])])
+    print("Issue scope summary")
+    for scope in ("current_landing_issue", "historical_artifact", "needs_review", "clean"):
+        if scope_counter.get(scope):
+            print(f"- {scope}: {scope_counter[scope]}")
     print("Issue summary")
     if not counter:
         print("- none")
@@ -1034,6 +1078,7 @@ def print_reports(reports: list[dict[str, Any]], summary_only: bool) -> None:
             print("  delivery=missing")
         if webhook.get("latest_error"):
             print(f"  webhook_error={str(webhook['latest_error'])[:200]}")
+        print("  issue_scope=" + (report.get("issue_scope") or classify_issue_scope(issues)))
         print("  issues=" + (", ".join(issues) if issues else "none"))
         if report.get("likely_cause"):
             print(f"  likely_cause={report['likely_cause']}")
@@ -1041,12 +1086,17 @@ def print_reports(reports: list[dict[str, Any]], summary_only: bool) -> None:
 
 def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
     issue_counts: Counter[str] = Counter()
+    issue_scope_counts: Counter[str] = Counter()
     for report in reports:
         issue_counts.update(report["issues"])
+        issue_scope_counts.update([report.get("issue_scope") or classify_issue_scope(report["issues"])])
     return {
         "run_count": len(reports),
+        "issue_scope_counts": dict(issue_scope_counts),
         "issue_counts": dict(issue_counts),
         "runs_with_issues": sum(1 for report in reports if report["issues"]),
+        "runs_with_current_landing_issues": issue_scope_counts.get("current_landing_issue", 0),
+        "runs_with_historical_artifacts": issue_scope_counts.get("historical_artifact", 0),
     }
 
 

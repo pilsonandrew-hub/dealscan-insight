@@ -319,6 +319,7 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         )
 
         self.assertEqual(issues, ["direct_pg_claim_rest_fallback"])
+        self.assertEqual(reconcile.classify_issue_scope(issues), "historical_artifact")
         likely_cause = reconcile.infer_likely_cause(
             apify_run={"run_id": "run-rest-fallback", "status": "SUCCEEDED"},
             webhook={"latest_status": "processed"},
@@ -328,6 +329,46 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         )
         self.assertIn("direct_pg_claim_rest_fallback", likely_cause)
         self.assertIn("500 guard worked", likely_cause)
+
+    def test_build_reports_separates_historical_artifacts_from_current_landing_issues(self):
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "run-rest-fallback",
+                    "actor_name": "ds-govdeals",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "started_at": datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc),
+                },
+                {
+                    "run_id": "run-missing-webhook",
+                    "actor_name": "ds-publicsurplus",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "started_at": datetime(2026, 3, 17, 0, 1, tzinfo=timezone.utc),
+                },
+            ],
+            webhook_rows={
+                "run-rest-fallback": {
+                    "latest_status": "processed",
+                    "latest_error": "audit_fallbacks=webhook_log_claim_direct_pg_unavailable",
+                }
+            },
+            opportunity_rows={"run-rest-fallback": {"opportunity_rows": 1}},
+            delivery_rows={
+                "run-rest-fallback": {
+                    "channels": {"db_save": {"statuses": {"saved_supabase": 1}}}
+                }
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertEqual(by_run_id["run-rest-fallback"]["issue_scope"], "historical_artifact")
+        self.assertEqual(by_run_id["run-missing-webhook"]["issue_scope"], "current_landing_issue")
+        summary = reconcile.summarize(reports)
+        self.assertEqual(summary["runs_with_historical_artifacts"], 1)
+        self.assertEqual(summary["runs_with_current_landing_issues"], 1)
 
     def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
         with patch.object(

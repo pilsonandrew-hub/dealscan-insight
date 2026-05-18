@@ -1,4 +1,9 @@
-"""Orchestrates all scrapers and persists results."""
+"""Legacy local scraper orchestrator.
+
+Production ingest is Apify webhook -> /api/ingest/apify -> Supabase. This module is
+kept only for explicit local/offline diagnostics because it writes CSV files under
+DATA_DIR and does not represent the production ingest path.
+"""
 import asyncio
 import csv
 import json
@@ -15,6 +20,18 @@ from .scrapers.registry import get_scrapers
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(__file__))
 CONFIGS_DIR = os.path.join(_BACKEND_ROOT, "config")
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(_BACKEND_ROOT, "..", "data"))
+ALLOW_LEGACY_LOCAL_SCRAPER_ENV = "DEALERSCOPE_ALLOW_LEGACY_LOCAL_SCRAPER"
+
+
+def require_legacy_local_scraper_enabled() -> None:
+    """Fail closed unless an operator explicitly enables CSV/offline scraper output."""
+    enabled = os.getenv(ALLOW_LEGACY_LOCAL_SCRAPER_ENV, "").strip().lower()
+    if enabled not in {"1", "true", "yes"}:
+        raise RuntimeError(
+            "backend.ingest.scrape_all is a legacy local CSV/offline scraper path. "
+            "Production ingest is Apify webhook -> /api/ingest/apify -> Supabase. "
+            f"Set {ALLOW_LEGACY_LOCAL_SCRAPER_ENV}=1 only for explicit local diagnostics."
+        )
 
 
 def _load_cfg():
@@ -63,7 +80,8 @@ async def run_scrapers() -> list:
 
 
 async def main():
-    """Full scrape pipeline: fetch, filter rust states, write CSV."""
+    """Legacy local CSV scrape pipeline; disabled unless explicitly opted in."""
+    require_legacy_local_scraper_enabled()
     os.makedirs(DATA_DIR, exist_ok=True)
     non_rust_states = _load_rust_states()
     listings = await run_scrapers()

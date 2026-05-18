@@ -1,18 +1,36 @@
 # DealerScope Current-State Audit — 2026-05-18
 
-Scope: evidence from 2026-05-11 through 2026-05-18, current repo/live state at HEAD `e63282f40b1ffb3ba0f1b0b4ce1690d29e62e8a8`.
+Scope: evidence from 2026-05-11 through 2026-05-18. Historical narrative sections are a baseline; the verification block below is the current HEAD truth.
+
+## Current Verification Block
+
+- Verified at: 2026-05-18T21:19:42Z+ (GitHub check-run evidence observed after completion)
+- Verified HEAD: `8378125937c70e46c78523d7410a9fe6abaec6d4`
+- Verification scope: current `origin/main`/local `main` check-runs for HEAD `8378125`
+- Current check-run proof:
+  - Codespaces Prebuild / `prebuild`: `completed / success`, run `26060265089`, completed `2026-05-18T21:19:42Z`
+  - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx`: `completed / success`, build `e34cb628-7563-474f-93f1-3f0c156a2971`
+  - Cursor Review: `completed / success`, run `26060265866`
+  - Saved Searches Check: `completed / success`, run `26061747624`
+  - Watchdog Hunter: `completed / success`, run `26061799029`
+- Current unresolved items after this verification:
+  - Legacy CSV/local scraper path is now fail-closed unless explicitly enabled for local diagnostics.
+  - Historical ingest artifact clutter is now explicitly scoped in reconciliation output; continue monitoring current landing issues separately.
+  - Apify local skill token scope is closed as optional local tooling; GitHub Actions remains source-of-record.
+  - Stale GitHub noise policy is explicit: current HEAD/protected/production-impacting evidence only.
+  - Hermes Layer 0 remains design-only and is not implemented.
 
 ## Verdict
 
-Current repo-controlled DealerScope state is **green except for one still-running Codespaces prebuild check**.
+Current repo-controlled DealerScope state is **green on the current HEAD verification block**.
 
-All code-actionable failures found during the May 11–18 cleanup window have been remediated or explicitly moved into a non-code blocker category. Current HEAD check-runs verified after the audit commit:
+All code-actionable failures found during the May 11–18 cleanup window have been remediated or explicitly moved into a non-code blocker category. Current HEAD check-runs verified after the latest audit-status commit:
 
 - `watchdog-hunter` — success
 - `cursor-review` — success
 - Deploy GOLD Validation Reports — success (`security-precheck`, `validate`, `enforce-slos`, `deploy`; `notification` skipped)
 - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx` — success
-- `prebuild` / Codespaces Prebuild — **still in progress** as run `26059251923`
+- `prebuild` / Codespaces Prebuild — **completed success** as run `26060265089`
 
 ## Major Work Completed
 
@@ -90,9 +108,9 @@ Status: **closed for current HEAD**.
 Completed:
 - Added `.devcontainer/devcontainer.json` using stable `node:24-bookworm` instead of failing default universal image pull.
 - Prior Codespaces Prebuild proof passed after the stable devcontainer fix.
-- On latest HEAD `e63282f40b1ffb3ba0f1b0b4ce1690d29e62e8a8`, Codespaces Prebuild run `26059251923` is still in progress and has not produced a fresh conclusion yet.
+- On latest verified HEAD `8378125937c70e46c78523d7410a9fe6abaec6d4`, Codespaces Prebuild run `26060265089` completed successfully.
 
-Status: **pending fresh HEAD conclusion**.
+Status: **closed for current HEAD**.
 
 ### 6. GitHub billing/spending-limit blocker
 
@@ -101,9 +119,9 @@ Completed:
 - Updated account-level budget/spending settings.
 - Reran blocked checks.
 - Billing/spending-limit failures stopped blocking later runner startup; current HEAD Cursor Review, GOLD Validation, Watchdog, and Google Cloud Build passed.
-- Latest Codespaces Prebuild is still running, so billing is not currently proven as a blocker for that check but the final conclusion is pending.
+- Latest Codespaces Prebuild completed successfully, so billing/spending-limit failure is not a current blocker for HEAD `8378125`.
 
-Status: **closed for billing; Codespaces conclusion pending**.
+Status: **closed for billing and current Codespaces proof**.
 
 ### 7. Hermes design artifact
 
@@ -116,17 +134,21 @@ Status: **design artifact committed; implementation not started**.
 
 ## Current Open Items
 
-### A. Final reconciliation proof follow-up
+### A. Final reconciliation proof follow-up / historical artifact scoping
 
 Manual run `26059063029` was triggered as a final read-only audit proof after this review and later reported success in GitHub Actions. Continue using reconciliation as the source of truth for actor → webhook → DB landing evidence.
 
-Classification: **current proof green; keep monitoring**.
+Historical artifact handling is now explicit in `scripts/reconcile_apify_ingest_runs.py`: `db_only_run`, `direct_pg_claim_rest_fallback`, and `audit_backfilled` are reported as `issue_scope=historical_artifact` when they are not mixed with current landing failures. Current actor → webhook → DB failures remain `issue_scope=current_landing_issue`.
 
-### B. Latest Codespaces Prebuild still running
+Verification: `.venv-test/bin/python -m pytest tests/test_reconcile_apify_ingest_runs.py -q` → `23 passed`.
 
-Current HEAD run `26059251923` remains `in_progress` as of the last audit read. A scheduled follow-up is already configured to report pass/fail.
+Classification: **current proof green; historical artifact clutter classified separately**.
 
-Classification: **pending verification**.
+### B. Codespaces Prebuild final proof
+
+Current HEAD `8378125937c70e46c78523d7410a9fe6abaec6d4` has a passing Codespaces Prebuild: run `26060265089`, `completed / success`, completed `2026-05-18T21:19:42Z`.
+
+Classification: **closed for current HEAD**.
 
 ### C. Historical stale failures still visible in GitHub mobile
 
@@ -142,13 +164,44 @@ Classification: **non-blocking noise**.
 
 ### E. Legacy local scraper path
 
-`backend/ingest/scrape_all.py` and older scraper surfaces still have CSV/mock/offline remnants. Production ingest authority is Apify webhook → Railway `/api/ingest/apify` → Supabase.
+`backend/ingest/scrape_all.py` still writes local CSV files under `DATA_DIR`, including `no_rust_exception_list.csv` and `scraped_listings.csv`. This is not the production ingest path. Production ingest authority is Apify webhook → Railway `/api/ingest/apify` → Supabase.
 
-Classification: **real cleanup candidate, lower priority than Hermes truth-ledger unless it misleads operators**.
+The path is now explicitly marked as legacy local/offline diagnostics and fails closed unless `DEALERSCOPE_ALLOW_LEGACY_LOCAL_SCRAPER=1` is set. This prevents accidental use as a production ingest surface while preserving an intentional local diagnostic escape hatch.
+
+Verification: `.venv-test/bin/python -m pytest tests/test_reconcile_apify_ingest_runs.py tests/test_scrape_all_legacy_guard.py -q` → `25 passed`.
+
+Classification: **closed as production ambiguity; retained only as explicit local diagnostics**.
+
+
+### F. Apify local skill token scope
+
+Local shell inspection does not currently have `APIFY_TOKEN` or `APIFY_API_TOKEN` exported, and prior local skill-token evidence was stale/scoped incorrectly. This is not a production blocker because the repo-owned GitHub Actions workflows use repository secret `APIFY_TOKEN` for read-only actor/watchdog/reconciliation checks:
+
+- `.github/workflows/supabase-ingest-reconciliation.yml`
+- `.github/workflows/dealerscope-scraper-watchdog.yml`
+- `.github/workflows/apify-health-check.yml`
+- `.github/workflows/scraper-health-agent.yml`
+
+Decision: local Apify visibility is optional operator convenience, not source-of-record. Do not rotate/update local Apify credentials unless direct OpenClaw-side Apify inspection becomes necessary. For normal DealerScope truth, use the repo workflows and their secret-backed evidence.
+
+Classification: **closed as optional local tooling; GitHub Actions remains source-of-record**.
+
+### G. Stale GitHub noise policy
+
+Investigate only:
+
+1. failures on the current HEAD,
+2. protected workflow failures that block deploy/validation,
+3. production-impacting failures with live evidence, or
+4. failures reproduced by the source-of-record workflow/reconciliation path.
+
+Do not chase old GitHub mobile red Xs, older branch failures, Node20 warnings from GitHub-owned action runtime annotations, or historical workflow failures unless they reproduce on current HEAD or affect production truth.
+
+Classification: **active policy**.
 
 ## Recommended Next Step
 
-Start Hermes foundation, but only Layer -1 / Layer 0:
+Remaining non-Hermes truth-cleanup items are now closed or policy-classified. Next, start Hermes foundation, but only Layer -1 / Layer 0:
 
 1. Truth ledger schema/design in repo, source-backed and append-only.
 2. Pipeline-truth snapshot generator that summarizes actor run → webhook → DB landing → delivery/alert evidence.
