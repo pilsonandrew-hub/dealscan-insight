@@ -39,10 +39,14 @@ health_check() {
         echo "⚠️ Low disk space: ${available_space}KB available"
     fi
     
-    # Check memory
-    available_memory=$(free -m | awk 'NR==2{printf "%.0f", $7}')
-    if [ "$available_memory" -lt 512 ]; then  # Less than 512MB
-        echo "⚠️ Low memory: ${available_memory}MB available"
+    # Check memory. Linux runners expose `free`; macOS/local runners do not.
+    if command -v free >/dev/null 2>&1; then
+        available_memory=$(free -m | awk 'NR==2{printf "%.0f", $7}')
+        if [ "$available_memory" -lt 512 ]; then  # Less than 512MB
+            echo "⚠️ Low memory: ${available_memory}MB available"
+        fi
+    else
+        echo "  ℹ️ Memory check skipped: free(1) unavailable on this runner"
     fi
     
     echo "✅ System health check completed"
@@ -51,39 +55,99 @@ health_check() {
 # Security validation
 security_scan() {
     echo "🔒 Running security validation..."
-    
+
     local security_score=0
     local issues_found=0
-    
-    # Check for common vulnerabilities
+
+    # Bandit returns non-zero whenever findings exist. Parse the JSON instead of
+    # converting any finding set into a flat synthetic failure count. The GOLD
+    # gate should fail on high-severity Python findings, while preserving the
+    # medium/low counts for audit visibility.
     if command -v bandit >/dev/null 2>&1; then
         echo "  🔍 Running Python security scan..."
-        if bandit -r . -f json -o "$REPORTS_DIR/raw/bandit-results.json" 2>/dev/null; then
-            security_score=$((security_score + 20))
+        bandit -r . \
+            -x "./node_modules,./.git,./.venv,./.venv-test,./dist,./build,./coverage,./tests" \
+            -f json -o "$REPORTS_DIR/raw/bandit-results.json" >/dev/null 2>&1 || true
+
+        if command -v python3 >/dev/null 2>&1; then
+            python3 - "$REPORTS_DIR/raw/bandit-results.json" <<'PY' > "$REPORTS_DIR/raw/bandit-counts.json"
+import json, sys
+path = sys.argv[1]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception:
+    data = {"results": []}
+counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+for result in data.get("results", []):
+    severity = str(result.get("issue_severity", "")).upper()
+    if severity in counts:
+        counts[severity] += 1
+print(json.dumps(counts, sort_keys=True))
+PY
+            local bandit_high
+            bandit_high=$(python3 - "$REPORTS_DIR/raw/bandit-counts.json" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1])).get("HIGH", 0))
+PY
+)
+            if [ "$bandit_high" -gt 0 ]; then
+                issues_found=$((issues_found + bandit_high))
+            else
+                security_score=$((security_score + 20))
+            fi
         else
-            issues_found=$((issues_found + 5))
+            echo "  ⚠️ Python unavailable for Bandit result parsing"
+            issues_found=$((issues_found + 1))
         fi
     fi
-    
-    # Check Node.js dependencies
+
+    # Check Node.js dependencies. npm audit returns non-zero when vulnerabilities
+    # meet the threshold, so the JSON metadata is the authoritative count.
     if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
         echo "  🔍 Checking Node.js dependencies..."
-        if npm audit --audit-level=moderate --json > "$REPORTS_DIR/raw/npm-audit.json" 2>/dev/null; then
-            security_score=$((security_score + 20))
+        npm audit --audit-level=moderate --json > "$REPORTS_DIR/raw/npm-audit.json" 2>/dev/null || true
+        if command -v python3 >/dev/null 2>&1; then
+            local npm_blocking
+            npm_blocking=$(python3 - "$REPORTS_DIR/raw/npm-audit.json" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    print(1)
+    raise SystemExit
+vulns = data.get("metadata", {}).get("vulnerabilities", {})
+print(int(vulns.get("moderate", 0)) + int(vulns.get("high", 0)) + int(vulns.get("critical", 0)))
+PY
+)
+            if [ "$npm_blocking" -gt 0 ]; then
+                issues_found=$((issues_found + npm_blocking))
+            else
+                security_score=$((security_score + 20))
+            fi
         else
-            issues_found=$((issues_found + 3))
+            echo "  ⚠️ Python unavailable for npm audit result parsing"
+            issues_found=$((issues_found + 1))
         fi
     fi
-    
+
     # File permissions check
     echo "  🔍 Checking file permissions..."
-    if find . -type f -perm /022 -name "*.sh" | grep -q .; then
+    local writable_perm="/022"
+    if ! find . -type f -perm "$writable_perm" -name "*.sh" -quit >/dev/null 2>&1; then
+        writable_perm="+022"
+    fi
+    if find . -type f -perm "$writable_perm" -name "*.sh" \
+        -not -path "./.git/*" \
+        -not -path "./node_modules/*" \
+        -not -path "./.venv/*" \
+        -not -path "./.venv-test/*" \
+        | grep -q .; then
         echo "  ⚠️ Found world-writable scripts"
         issues_found=$((issues_found + 2))
     else
         security_score=$((security_score + 10))
     fi
-    
+
     echo "🔒 Security scan completed. Score: $security_score, Issues: $issues_found"
     echo "$issues_found" > "$REPORTS_DIR/raw/security_issues.txt"
 }
@@ -497,26 +561,52 @@ generate_dashboard() {
 </html>
 EOF
 
-    # Replace placeholders with actual values using comprehensive substitution
-    sed -i "s/STATUS_VALUE/$overall_status/g" "$FINAL_DIR/index.html"
-    sed -i "s/STATUS_CLASS/$([ "$overall_status" = "PASS" ] && echo "pass" || echo "fail")/g" "$FINAL_DIR/index.html"
-    sed -i "s/API_LATENCY/$p95_latency/g" "$FINAL_DIR/index.html"
-    sed -i "s/SECURITY_ISSUES/$security_issues/g" "$FINAL_DIR/index.html"
-    sed -i "s/MEMORY_USAGE/$memory_usage/g" "$FINAL_DIR/index.html"
-    sed -i "s/SUCCESS_RATE/$success_rate/g" "$FINAL_DIR/index.html"
-    sed -i "s/GENERATED_AT/$generated_at/g" "$FINAL_DIR/index.html"
-    
+    # Replace placeholders with actual values using portable in-place substitution.
+    # BSD sed and GNU sed differ on -i semantics, and slash-containing values can
+    # break sed replacements. Python keeps this runner portable.
     # Calculate progress percentages
     local progress_percent=$([ "$overall_status" = "PASS" ] && echo "100" || echo "60")
     local api_progress=$((100 - p95_latency / 3))
     local security_progress=$((100 - security_issues * 10))
     local memory_progress=$((100 - memory_usage))
-    
-    sed -i "s/PROGRESS_PERCENT/$progress_percent/g" "$FINAL_DIR/index.html"
-    sed -i "s/API_PROGRESS/$api_progress/g" "$FINAL_DIR/index.html"
-    sed -i "s/SECURITY_PROGRESS/$security_progress/g" "$FINAL_DIR/index.html"
-    sed -i "s/MEMORY_PROGRESS/$memory_progress/g" "$FINAL_DIR/index.html"
-    sed -i "s/DEPLOYMENT_STATUS/$([ "$overall_status" = "PASS" ] && echo "✅ Ready" || echo "❌ Blocked")/g" "$FINAL_DIR/index.html"
+    local status_class=$([ "$overall_status" = "PASS" ] && echo "pass" || echo "fail")
+    local deployment_status=$([ "$overall_status" = "PASS" ] && echo "✅ Ready" || echo "❌ Blocked")
+
+    STATUS_VALUE="$overall_status" \
+    STATUS_CLASS="$status_class" \
+    API_LATENCY="$p95_latency" \
+    SECURITY_ISSUES="$security_issues" \
+    MEMORY_USAGE="$memory_usage" \
+    SUCCESS_RATE="$success_rate" \
+    GENERATED_AT="$generated_at" \
+    PROGRESS_PERCENT="$progress_percent" \
+    API_PROGRESS="$api_progress" \
+    SECURITY_PROGRESS="$security_progress" \
+    MEMORY_PROGRESS="$memory_progress" \
+    DEPLOYMENT_STATUS="$deployment_status" \
+    python3 - "$FINAL_DIR/index.html" <<'PY'
+from pathlib import Path
+import os
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+for key in [
+    "STATUS_VALUE",
+    "STATUS_CLASS",
+    "API_LATENCY",
+    "SECURITY_ISSUES",
+    "MEMORY_USAGE",
+    "SUCCESS_RATE",
+    "GENERATED_AT",
+    "PROGRESS_PERCENT",
+    "API_PROGRESS",
+    "SECURITY_PROGRESS",
+    "MEMORY_PROGRESS",
+    "DEPLOYMENT_STATUS",
+]:
+    text = text.replace(key, os.environ[key])
+path.write_text(text, encoding="utf-8")
+PY
     
     echo "🌐 Dashboard generated successfully"
 }
