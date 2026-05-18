@@ -19,8 +19,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
@@ -175,32 +173,19 @@ jobs:
         echo "📁 Pages directory prepared:"
         ls -la pages/
         
-    - name: Setup Pages
-      uses: actions/configure-pages@v4
-      
-    - name: Upload to GitHub Pages
-      uses: actions/upload-pages-artifact@v3
+    - name: Upload dashboard artifact
+      uses: actions/upload-artifact@v4
       with:
+        name: validation-pages-${{ github.run_id }}
         path: pages/
+        retention-days: 30
         
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: run-validation-suite
-    
-    steps:
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
-      
-    - name: Post deployment summary
+    - name: Post artifact summary
       run: |
-        echo "## 🚀 Validation Reports Deployed" >> $GITHUB_STEP_SUMMARY
+        echo "## 🚀 Validation Reports Prepared" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "📋 **Main Report**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
-        echo "📊 **All Reports**: ${{ steps.deployment.outputs.page_url }}reports.html" >> $GITHUB_STEP_SUMMARY
-        echo "📄 **JSON Summary**: ${{ steps.deployment.outputs.page_url }}summary.json" >> $GITHUB_STEP_SUMMARY
+        echo "📋 **Main Report:** validation-pages-${{ github.run_id }} artifact" >> $GITHUB_STEP_SUMMARY
+        echo "📊 **All Reports:** reports.html inside the artifact" >> $GITHUB_STEP_SUMMARY
+        echo "📄 **JSON Summary:** summary.json inside the artifact" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "The validation suite runs daily at 6 AM UTC and deploys updated reports automatically." >> $GITHUB_STEP_SUMMARY
+        echo "GitHub Pages deployment is intentionally skipped unless Pages is enabled for this repository." >> $GITHUB_STEP_SUMMARY

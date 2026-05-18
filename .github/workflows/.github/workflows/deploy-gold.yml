@@ -317,22 +317,18 @@ jobs:
           a:hover{text-decoration:underline}
           CSS
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload to GitHub Pages
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: final-dashboard
           path: pages/
+          retention-days: 30
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Post deployment summary
+      - name: Post dashboard artifact summary
         run: |
-          echo "## 🚀 Validation Reports Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Deployment URL: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Validation Reports Prepared" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Dashboard artifact: final-dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "GitHub Pages deployment is intentionally skipped unless Pages is enabled for this repository." >> $GITHUB_STEP_SUMMARY
           if [ "${{ github.event.inputs.force_deploy }}" = "true" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Forced by @${{ github.actor }}** — Reason: ${{ github.event.inputs.justification || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
