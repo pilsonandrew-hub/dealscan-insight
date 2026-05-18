@@ -568,33 +568,26 @@ jobs:
           }
           EOF
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: gold-validation-dashboard
           path: pages/
+          retention-days: 30
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Post deployment summary
+      - name: Post dashboard artifact summary
         run: |
           validation_status="${{ needs.validate.outputs.validation_status }}"
           slo_status="${{ needs.enforce-slos.outputs.slo_status || 'skipped' }}"
           
-          echo "## 🚀 GOLD Validation Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏆 GOLD Validation Dashboard Prepared" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Dashboard URL:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
           echo "**Validation Status:** $validation_status" >> $GITHUB_STEP_SUMMARY
           echo "**SLO Status:** $slo_status" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact:** gold-validation-dashboard" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Quick Access" >> $GITHUB_STEP_SUMMARY
-          echo "- [Live Dashboard](${{ steps.deployment.outputs.page_url }}reports/final/)" >> $GITHUB_STEP_SUMMARY
-          echo "- [API Summary](${{ steps.deployment.outputs.page_url }}api/summary.json)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Health Check](${{ steps.deployment.outputs.page_url }}health/)" >> $GITHUB_STEP_SUMMARY
+          echo "GitHub Pages deployment is intentionally skipped unless Pages is enabled for this repository." >> $GITHUB_STEP_SUMMARY
+          echo "The prepared dashboard is available as the workflow artifact." >> $GITHUB_STEP_SUMMARY
 
   notification:
     needs: [validate, enforce-slos, deploy]
