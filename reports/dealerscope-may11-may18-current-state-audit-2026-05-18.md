@@ -4,15 +4,16 @@ Scope: evidence from 2026-05-11 through 2026-05-18. Historical narrative section
 
 ## Current Verification Block
 
-- Verified at: 2026-05-18T22:17:08Z+ (GitHub check-run evidence observed after completion)
-- Verified HEAD: `af768924a8c7f062a397fd6d5bd70c1dcaa8669c`
-- Verification scope: current `origin/main`/local `main` check-runs for HEAD `af76892`
+- Verified at: 2026-05-18T22:58:00Z+ (GitHub check-run evidence observed after completion)
+- Verified HEAD: `6bcf07c441f197b6aa22b4b0c54e7d456708cd20`
+- Verification scope: current `origin/main`/local `main` check-runs for HEAD `6bcf07c`
 - Current check-run proof:
-  - Codespaces Prebuild / `prebuild`: `completed / success`, run `26062962826`, completed `2026-05-18T22:17:08Z`
-  - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx`: `completed / success`, completed `2026-05-18T22:04:05Z`
-  - Cursor Review: `completed / success`, run `26062963515`, completed `2026-05-18T22:00:18Z`
-  - Deploy GOLD Validation Reports: `completed / success`, run `26062963517` (`security-precheck`, `validate`, `enforce-slos`, `deploy`)
-  - Latest relevant Watchdog/Saved Searches/Ingest Reconciliation source-of-record runs remain green.
+  - Codespaces Prebuild / `prebuild`: `completed / success`, run `26063791815`, completed `2026-05-18T22:37:29Z`
+  - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx`: `completed / success`, completed `2026-05-18T22:23:35Z`
+  - Cursor Review: `completed / success`, run `26063792435`, completed `2026-05-18T22:20:01Z`
+  - Watchdog Hunter: `completed / success`, run `26065010634`, completed `2026-05-18T22:50:32Z`
+  - Saved Searches Check: `completed / success`, run `26065141619`, completed `2026-05-18T22:53:59Z`
+  - Prior Deploy GOLD Validation Reports remains green on `af76892`; `6bcf07c` was a report-only alignment commit after those protected gates and local gates had passed.
 - Current unresolved items after this verification:
   - Legacy CSV/local scraper path is now fail-closed unless explicitly enabled for local diagnostics.
   - Historical ingest artifact clutter is now explicitly scoped in reconciliation output; continue monitoring current landing issues separately.
@@ -29,7 +30,7 @@ All code-actionable failures found during the May 11–18 cleanup window have be
 - `cursor-review` — success
 - Deploy GOLD Validation Reports — success (`security-precheck`, `validate`, `enforce-slos`, `deploy`; `notification` skipped)
 - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx` — success
-- `prebuild` / Codespaces Prebuild — **completed success** as run `26062962826`
+- `prebuild` / Codespaces Prebuild — **completed success** as run `26063791815`
 
 ## Major Work Completed
 
@@ -107,7 +108,7 @@ Status: **closed for current HEAD**.
 Completed:
 - Added `.devcontainer/devcontainer.json` using stable `node:24-bookworm` instead of failing default universal image pull.
 - Prior Codespaces Prebuild proof passed after the stable devcontainer fix.
-- On latest verified HEAD `af768924a8c7f062a397fd6d5bd70c1dcaa8669c`, Codespaces Prebuild run `26062962826` completed successfully.
+- On latest verified HEAD `6bcf07c441f197b6aa22b4b0c54e7d456708cd20`, Codespaces Prebuild run `26063791815` completed successfully.
 
 Status: **closed for current HEAD**.
 
@@ -118,7 +119,7 @@ Completed:
 - Updated account-level budget/spending settings.
 - Reran blocked checks.
 - Billing/spending-limit failures stopped blocking later runner startup; current HEAD Cursor Review, GOLD Validation, Watchdog, and Google Cloud Build passed.
-- Latest Codespaces Prebuild completed successfully, so billing/spending-limit failure is not a current blocker for HEAD `af76892`.
+- Latest Codespaces Prebuild completed successfully, so billing/spending-limit failure is not a current blocker for HEAD `6bcf07c`.
 
 Status: **closed for billing and current Codespaces proof**.
 
@@ -136,7 +137,7 @@ Classification: **current proof green; historical artifact clutter classified se
 
 ### B. Codespaces Prebuild final proof
 
-Current HEAD `af768924a8c7f062a397fd6d5bd70c1dcaa8669c` has a passing Codespaces Prebuild: run `26062962826`, `completed / success`, completed `2026-05-18T22:17:08Z`.
+Current HEAD `6bcf07c441f197b6aa22b4b0c54e7d456708cd20` has a passing Codespaces Prebuild: run `26063791815`, `completed / success`, completed `2026-05-18T22:37:29Z`.
 
 Classification: **closed for current HEAD**.
 
