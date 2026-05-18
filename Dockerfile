@@ -4,12 +4,14 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies.
+# Do not run blanket apt-get upgrade during image builds: it makes builds
+# non-reproducible and has broken Cloud Build on Debian package maintainer
+# scripts (for example bash update-alternatives manpage links).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     ca-certificates \
-    && apt-get upgrade -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/* \
