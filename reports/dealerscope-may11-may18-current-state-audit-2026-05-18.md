@@ -1,18 +1,18 @@
 # DealerScope Current-State Audit — 2026-05-18
 
-Scope: evidence from 2026-05-11 through 2026-05-18, current repo/live state at HEAD `dcc435a4ea402653b50f37505d8ca8739b759bf9`.
+Scope: evidence from 2026-05-11 through 2026-05-18, current repo/live state at HEAD `e63282f40b1ffb3ba0f1b0b4ce1690d29e62e8a8`.
 
 ## Verdict
 
-Current repo-controlled DealerScope state is **green**.
+Current repo-controlled DealerScope state is **green except for one still-running Codespaces prebuild check**.
 
-All code-actionable failures found during the May 11–18 cleanup window have been remediated or explicitly moved into a non-code blocker category. Current HEAD check-runs are green:
+All code-actionable failures found during the May 11–18 cleanup window have been remediated or explicitly moved into a non-code blocker category. Current HEAD check-runs verified after the audit commit:
 
 - `watchdog-hunter` — success
-- `prebuild` / Codespaces Prebuild — success
 - `cursor-review` — success
-- `Check saved searches for new matches` — success
+- Deploy GOLD Validation Reports — success (`security-precheck`, `validate`, `enforce-slos`, `deploy`; `notification` skipped)
 - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx` — success
+- `prebuild` / Codespaces Prebuild — **still in progress** as run `26059251923`
 
 ## Major Work Completed
 
@@ -89,9 +89,10 @@ Status: **closed for current HEAD**.
 
 Completed:
 - Added `.devcontainer/devcontainer.json` using stable `node:24-bookworm` instead of failing default universal image pull.
-- Current HEAD Codespaces Prebuild now passes.
+- Prior Codespaces Prebuild proof passed after the stable devcontainer fix.
+- On latest HEAD `e63282f40b1ffb3ba0f1b0b4ce1690d29e62e8a8`, Codespaces Prebuild run `26059251923` is still in progress and has not produced a fresh conclusion yet.
 
-Status: **closed for current HEAD**.
+Status: **pending fresh HEAD conclusion**.
 
 ### 6. GitHub billing/spending-limit blocker
 
@@ -99,9 +100,10 @@ Completed:
 - Identified Cursor Review, Codespaces, Watchdog, and Saved Searches failures as GitHub Actions runner-start failures due to account payment/spending-limit issues, not repo failures.
 - Updated account-level budget/spending settings.
 - Reran blocked checks.
-- Current HEAD checks now pass.
+- Billing/spending-limit failures stopped blocking later runner startup; current HEAD Cursor Review, GOLD Validation, Watchdog, and Google Cloud Build passed.
+- Latest Codespaces Prebuild is still running, so billing is not currently proven as a blocker for that check but the final conclusion is pending.
 
-Status: **closed**.
+Status: **closed for billing; Codespaces conclusion pending**.
 
 ### 7. Hermes design artifact
 
@@ -114,25 +116,31 @@ Status: **design artifact committed; implementation not started**.
 
 ## Current Open Items
 
-### A. Final reconciliation run pending
+### A. Final reconciliation proof follow-up
 
-Manual run `26059063029` was triggered as a final read-only audit proof after this review. It was still running at handoff. A cron follow-up is scheduled to report its pass/fail result.
+Manual run `26059063029` was triggered as a final read-only audit proof after this review and later reported success in GitHub Actions. Continue using reconciliation as the source of truth for actor → webhook → DB landing evidence.
+
+Classification: **current proof green; keep monitoring**.
+
+### B. Latest Codespaces Prebuild still running
+
+Current HEAD run `26059251923` remains `in_progress` as of the last audit read. A scheduled follow-up is already configured to report pass/fail.
 
 Classification: **pending verification**.
 
-### B. Historical stale failures still visible in GitHub mobile
+### C. Historical stale failures still visible in GitHub mobile
 
 GitHub mobile can show old red Xs from earlier commits. Current HEAD check-runs are the authority.
 
 Classification: **not current blocker**.
 
-### C. Node 20 deprecation annotations
+### D. Node 20 deprecation annotations
 
 Some GitHub-owned actions still emit Node 20 warnings despite Node 24 forcing. Current checks pass.
 
 Classification: **non-blocking noise**.
 
-### D. Legacy local scraper path
+### E. Legacy local scraper path
 
 `backend/ingest/scrape_all.py` and older scraper surfaces still have CSV/mock/offline remnants. Production ingest authority is Apify webhook → Railway `/api/ingest/apify` → Supabase.
 
