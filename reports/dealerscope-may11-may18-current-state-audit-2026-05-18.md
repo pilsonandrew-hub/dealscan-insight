@@ -4,21 +4,20 @@ Scope: evidence from 2026-05-11 through 2026-05-18. Historical narrative section
 
 ## Current Verification Block
 
-- Verified at: 2026-05-18T21:19:42Z+ (GitHub check-run evidence observed after completion)
-- Verified HEAD: `8378125937c70e46c78523d7410a9fe6abaec6d4`
-- Verification scope: current `origin/main`/local `main` check-runs for HEAD `8378125`
+- Verified at: 2026-05-18T22:17:08Z+ (GitHub check-run evidence observed after completion)
+- Verified HEAD: `af768924a8c7f062a397fd6d5bd70c1dcaa8669c`
+- Verification scope: current `origin/main`/local `main` check-runs for HEAD `af76892`
 - Current check-run proof:
-  - Codespaces Prebuild / `prebuild`: `completed / success`, run `26060265089`, completed `2026-05-18T21:19:42Z`
-  - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx`: `completed / success`, build `e34cb628-7563-474f-93f1-3f0c156a2971`
-  - Cursor Review: `completed / success`, run `26060265866`
-  - Saved Searches Check: `completed / success`, run `26061747624`
-  - Watchdog Hunter: `completed / success`, run `26061799029`
+  - Codespaces Prebuild / `prebuild`: `completed / success`, run `26062962826`, completed `2026-05-18T22:17:08Z`
+  - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx`: `completed / success`, completed `2026-05-18T22:04:05Z`
+  - Cursor Review: `completed / success`, run `26062963515`, completed `2026-05-18T22:00:18Z`
+  - Deploy GOLD Validation Reports: `completed / success`, run `26062963517` (`security-precheck`, `validate`, `enforce-slos`, `deploy`)
+  - Latest relevant Watchdog/Saved Searches/Ingest Reconciliation source-of-record runs remain green.
 - Current unresolved items after this verification:
   - Legacy CSV/local scraper path is now fail-closed unless explicitly enabled for local diagnostics.
   - Historical ingest artifact clutter is now explicitly scoped in reconciliation output; continue monitoring current landing issues separately.
   - Apify local skill token scope is closed as optional local tooling; GitHub Actions remains source-of-record.
   - Stale GitHub noise policy is explicit: current HEAD/protected/production-impacting evidence only.
-  - Hermes Layer 0 remains design-only and is not implemented.
 
 ## Verdict
 
@@ -30,7 +29,7 @@ All code-actionable failures found during the May 11–18 cleanup window have be
 - `cursor-review` — success
 - Deploy GOLD Validation Reports — success (`security-precheck`, `validate`, `enforce-slos`, `deploy`; `notification` skipped)
 - Google Cloud Build `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx` — success
-- `prebuild` / Codespaces Prebuild — **completed success** as run `26060265089`
+- `prebuild` / Codespaces Prebuild — **completed success** as run `26062962826`
 
 ## Major Work Completed
 
@@ -108,7 +107,7 @@ Status: **closed for current HEAD**.
 Completed:
 - Added `.devcontainer/devcontainer.json` using stable `node:24-bookworm` instead of failing default universal image pull.
 - Prior Codespaces Prebuild proof passed after the stable devcontainer fix.
-- On latest verified HEAD `8378125937c70e46c78523d7410a9fe6abaec6d4`, Codespaces Prebuild run `26060265089` completed successfully.
+- On latest verified HEAD `af768924a8c7f062a397fd6d5bd70c1dcaa8669c`, Codespaces Prebuild run `26062962826` completed successfully.
 
 Status: **closed for current HEAD**.
 
@@ -119,18 +118,9 @@ Completed:
 - Updated account-level budget/spending settings.
 - Reran blocked checks.
 - Billing/spending-limit failures stopped blocking later runner startup; current HEAD Cursor Review, GOLD Validation, Watchdog, and Google Cloud Build passed.
-- Latest Codespaces Prebuild completed successfully, so billing/spending-limit failure is not a current blocker for HEAD `8378125`.
+- Latest Codespaces Prebuild completed successfully, so billing/spending-limit failure is not a current blocker for HEAD `af76892`.
 
 Status: **closed for billing and current Codespaces proof**.
-
-### 7. Hermes design artifact
-
-Completed:
-- Added `reports/hermes-dealerscope-operating-spec-2026-05-18.md`.
-- Hermes defined as DealerScope’s Signal, Reliability, and Acquisition Judgment Officer.
-- Build order defined: truth-ledger, pipeline-truth, ingest-reconciler, alert-chain-verifier, operator-briefing, actor-health-profiler, deal-quality-auditor, Opportunity Desk, market-memory, incident-commander.
-
-Status: **design artifact committed; implementation not started**.
 
 ## Current Open Items
 
@@ -146,7 +136,7 @@ Classification: **current proof green; historical artifact clutter classified se
 
 ### B. Codespaces Prebuild final proof
 
-Current HEAD `8378125937c70e46c78523d7410a9fe6abaec6d4` has a passing Codespaces Prebuild: run `26060265089`, `completed / success`, completed `2026-05-18T21:19:42Z`.
+Current HEAD `af768924a8c7f062a397fd6d5bd70c1dcaa8669c` has a passing Codespaces Prebuild: run `26062962826`, `completed / success`, completed `2026-05-18T22:17:08Z`.
 
 Classification: **closed for current HEAD**.
 
@@ -201,10 +191,4 @@ Classification: **active policy**.
 
 ## Recommended Next Step
 
-Remaining non-Hermes truth-cleanup items are now closed or policy-classified. Next, start Hermes foundation, but only Layer -1 / Layer 0:
-
-1. Truth ledger schema/design in repo, source-backed and append-only.
-2. Pipeline-truth snapshot generator that summarizes actor run → webhook → DB landing → delivery/alert evidence.
-3. Operator briefing generated from the truth ledger, not model memory.
-
-Do **not** start economic recommendations yet. Hermes should not recommend buys until each recommendation can carry its proof chain.
+No additional non-Hermes code-actionable cleanup is open from this audit thread. Continue monitoring only current HEAD/protected/production-impacting evidence through the source-of-record workflows.
