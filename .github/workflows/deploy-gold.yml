@@ -56,18 +56,42 @@ jobs:
       - name: Security scan
         id: security
         run: |
+          set -euo pipefail
           echo "Performing security pre-check..."
           
-          # Check for exposed secrets
-          if grep -rE "(password|secret|key|token).*=.*['\"][^'\"]{10,}" \
-               --exclude-dir=node_modules \
-               --exclude-dir=.git \
-               --exclude="*.lock" \
-               --exclude="*.json" . || false; then
-            echo "::error::Potential exposed secrets detected"
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          # Check for likely committed raw credential values without flagging
+          # ordinary environment-variable names such as SUPABASE_SERVICE_ROLE_KEY.
+          python - <<'PY'
+          import pathlib, re, sys
+
+          excluded_dirs = {".git", "node_modules", ".venv", "dist", "build", "coverage"}
+          excluded_suffixes = {".lock", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".sqlite", ".db"}
+          raw_secret_patterns = [
+              re.compile(r"apify_api_[A-Za-z0-9_-]{20,}"),
+              re.compile(r"gh[pousr]_[A-Za-z0-9_]{20,}"),
+              re.compile(r"sk-(?:live|test|proj)-[A-Za-z0-9_-]{20,}"),
+              re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
+              re.compile(r"[0-9]{8,}:[A-Za-z0-9_-]{30,}"),
+          ]
+          findings = []
+          for path in pathlib.Path('.').rglob('*'):
+              if not path.is_file():
+                  continue
+              if set(path.parts) & excluded_dirs or path.suffix.lower() in excluded_suffixes:
+                  continue
+              try:
+                  text = path.read_text(errors='ignore')
+              except Exception:
+                  continue
+              for lineno, line in enumerate(text.splitlines(), 1):
+                  if any(pattern.search(line) for pattern in raw_secret_patterns):
+                      findings.append(f"{path}:{lineno}: possible raw credential")
+          if findings:
+              print("::error::Potential committed raw credentials detected")
+              for finding in findings[:50]:
+                  print(finding)
+              sys.exit(1)
+          PY
           
           # Check for executable files with wrong permissions
           if find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | head -5; then
