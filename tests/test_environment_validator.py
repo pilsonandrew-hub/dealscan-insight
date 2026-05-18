@@ -5,6 +5,17 @@ from unittest.mock import patch
 from config.environment_validator import EnvironmentValidator
 
 
+class SettingsImportTests(unittest.TestCase):
+    def test_missing_secret_key_does_not_crash_import(self):
+        with patch.dict(os.environ, {}, clear=True):
+            import importlib
+            import config.settings as settings_module
+
+            reloaded = importlib.reload(settings_module)
+
+        self.assertEqual(reloaded.settings.secret_key, "dev-secret-change-in-prod")
+
+
 class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
     def test_production_rejects_placeholder_active_webhook_secret(self):
         env = {

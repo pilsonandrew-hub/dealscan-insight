@@ -47,9 +47,12 @@ except ModuleNotFoundError:
             return raw_value
 
 logger = logging.getLogger(__name__)
-SECRET_KEY = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY environment variable is not set")
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
+if SECRET_KEY == "dev-secret-change-in-prod":
+    logger.critical(
+        "SECRET_KEY environment variable is not set; using development fallback. "
+        "Production validation must reject this before traffic is trusted."
+    )
 
 
 class Settings(BaseSettings):
