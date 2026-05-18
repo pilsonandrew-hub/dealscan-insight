@@ -39,6 +39,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Wire these to org/network values via repo/org secrets if you’re behind a proxy.
   HTTP_PROXY:  ${{ secrets.HTTP_PROXY }}
   HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}

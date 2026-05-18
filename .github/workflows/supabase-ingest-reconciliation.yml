@@ -31,6 +31,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   reconcile-ingest:
     runs-on: ubuntu-latest

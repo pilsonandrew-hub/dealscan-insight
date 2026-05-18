@@ -5,6 +5,9 @@ on:
     - cron: '0 16 * * *'   # 9am PT daily
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   daily-digest:
     runs-on: ubuntu-latest
