@@ -246,7 +246,7 @@ generate_summary() {
   "source_commit": "${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo 'unknown')}",
   "workflow_run": "${GITHUB_RUN_NUMBER:-unknown}",
   "validation_duration_seconds": $duration,
-  "overall_status": "$overall_status",
+  "overall_status":"$overall_status",
   "security_issues": $security_issues,
   "p95_api_ms": $p95_latency,
   "memory_mb": $memory_usage,
