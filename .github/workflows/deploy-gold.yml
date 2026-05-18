@@ -105,8 +105,10 @@ jobs:
               sys.exit(1)
           PY
           
-          # Check for executable files with wrong permissions
-          if find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | head -5; then
+          # Check for executable files with wrong permissions without tripping pipefail.
+          mapfile -t non_exec_scripts < <(find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | head -5 || true)
+          if [ "${#non_exec_scripts[@]}" -gt 0 ]; then
+            printf '%s\n' "${non_exec_scripts[@]}"
             echo "::warning::Found non-executable shell scripts"
           fi
           
@@ -234,7 +236,7 @@ jobs:
     needs: [validate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: always()
+    if: needs.validate.outputs.reports_generated == 'true'
     outputs:
       slo_status: ${{ steps.slo-check.outputs.status }}
     steps:
@@ -276,8 +278,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: |
-      always() && 
-      (needs.enforce-slos.outputs.slo_status == 'passed' || 
+      always() &&
+      needs.validate.outputs.reports_generated == 'true' &&
+      (needs.enforce-slos.outputs.slo_status == 'passed' ||
        github.event.inputs.force_deploy == 'true')
     environment: 
       name: github-pages
@@ -580,7 +583,7 @@ jobs:
       - name: Post deployment summary
         run: |
           validation_status="${{ needs.validate.outputs.validation_status }}"
-          slo_status="${{ needs.enforce-slos.outputs.slo_status }}"
+          slo_status="${{ needs.enforce-slos.outputs.slo_status || 'skipped' }}"
           
           echo "## 🚀 GOLD Validation Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -603,6 +606,6 @@ jobs:
           echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Validation Status:** ${{ needs.validate.outputs.validation_status }}" >> $GITHUB_STEP_SUMMARY
-          echo "**SLO Status:** ${{ needs.enforce-slos.outputs.slo_status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SLO Status:** ${{ needs.enforce-slos.outputs.slo_status || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Investment-grade standards not met. Review validation reports before retry." >> $GITHUB_STEP_SUMMARY
