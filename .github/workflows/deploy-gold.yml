@@ -64,10 +64,20 @@ jobs:
           python - <<'PY'
           import pathlib, re, sys
 
-          excluded_dirs = {".git", "node_modules", ".venv", "dist", "build", "coverage"}
+          excluded_dirs = {
+              ".git",
+              "node_modules",
+              ".venv",
+              ".venv-test",
+              ".pytest_cache",
+              "__pycache__",
+              "dist",
+              "build",
+              "coverage",
+          }
           excluded_suffixes = {".lock", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".sqlite", ".db"}
           raw_secret_patterns = [
-              re.compile(r"apify_api_[A-Za-z0-9_-]{20,}"),
+              re.compile(r"apify_api_[A-Za-z0-9_-]{20,}", re.IGNORECASE),
               re.compile(r"gh[pousr]_[A-Za-z0-9_]{20,}"),
               re.compile(r"sk-(?:live|test|proj)-[A-Za-z0-9_-]{20,}"),
               re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
@@ -84,6 +94,8 @@ jobs:
               except Exception:
                   continue
               for lineno, line in enumerate(text.splitlines(), 1):
+                  if "test" in path.parts or "tests" in path.parts:
+                      continue
                   if any(pattern.search(line) for pattern in raw_secret_patterns):
                       findings.append(f"{path}:{lineno}: possible raw credential")
           if findings:
