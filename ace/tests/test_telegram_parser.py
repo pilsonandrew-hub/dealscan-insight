@@ -20,6 +20,8 @@ class TelegramParserTests(unittest.TestCase):
         self.assertIn("can you", result.parser_reason)
         self.assertEqual(result.source_chat_id, "7529788084")
         self.assertEqual(result.source_message_id, "msg-100")
+        self.assertFalse(result.autonomy_eligible)
+        self.assertIn("requires governed execution evidence", result.autonomy_policy_reason or "")
 
     def test_actionable_audit_command_without_polite_marker(self) -> None:
         result = parse_telegram_message(
@@ -45,6 +47,8 @@ class TelegramParserTests(unittest.TestCase):
         self.assertTrue(result.actionable)
         self.assertEqual(result.classification, "direct_work")
         self.assertIn("keep working", result.parser_reason)
+        self.assertTrue(result.autonomy_eligible)
+        self.assertIn("operator-continuation", result.autonomy_policy_reason or "")
 
     def test_actionable_continue_and_proceed_command(self) -> None:
         result = parse_telegram_message(
@@ -57,6 +61,7 @@ class TelegramParserTests(unittest.TestCase):
         self.assertTrue(result.actionable)
         self.assertEqual(result.classification, "direct_work")
         self.assertIn("continue", result.parser_reason)
+        self.assertTrue(result.autonomy_eligible)
 
     def test_non_actionable_chatter(self) -> None:
         result = parse_telegram_message(

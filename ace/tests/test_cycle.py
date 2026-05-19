@@ -252,7 +252,7 @@ class AceCycleTests(unittest.TestCase):
         message = {
             "chat_id": "7529788084",
             "message_id": "msg-200",
-            "text": "Can you check whether ACE closes parser-created Telegram work end to end?",
+            "text": "Proceed and continue checking whether ACE closes parser-created Telegram work end to end.",
             "received_at": "2026-05-08T16:50:00Z",
             "sender_id": "7529788084",
             "sender_name": "Andrew Pilson",

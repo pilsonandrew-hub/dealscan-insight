@@ -271,9 +271,9 @@ def request_supervisor_shutdown(
             raise KeyError(f"unknown runtime_instance_id: {normalized_runtime_instance_id}")
 
         current_status = row["status"]
-        if current_status not in {STATUS_LIVE, STATUS_STALE}:
+        if current_status not in {STATUS_STARTING, STATUS_LIVE, STATUS_STALE}:
             raise ValidationError(
-                f"illegal supervisor shutdown request: expected live or stale runtime, found {current_status}"
+                f"illegal supervisor shutdown request: expected starting, live, or stale runtime, found {current_status}"
             )
 
         shutdown_status = row["shutdown_status"]

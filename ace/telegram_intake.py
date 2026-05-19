@@ -122,6 +122,8 @@ def intake_inbound_telegram_work(
                     "semantic_direct_work_key": _semantic_direct_work_key(parse_result.source_text),
                     "parser_rule": parse_result.parser_rule,
                     "parser_reason": parse_result.parser_reason,
+                    "autonomy_eligible": parse_result.autonomy_eligible,
+                    "autonomy_policy_reason": parse_result.autonomy_policy_reason,
                     "intake_actor": actor,
                     "sender_id": sender_id.strip() if isinstance(sender_id, str) and sender_id.strip() else None,
                     "sender_name": sender_name.strip() if isinstance(sender_name, str) and sender_name.strip() else None,
@@ -155,12 +157,14 @@ def intake_inbound_telegram_work(
         created_by=TELEGRAM_PARSER_ACTOR,
         actor=TELEGRAM_PARSER_ACTOR,
     )
-    eligibility_evidence_id = mark_item_autonomy_eligible(
-        db_path,
-        item.id,
-        reason=parse_result.parser_reason,
-        actor=TELEGRAM_PARSER_ACTOR,
-    )
+    eligibility_evidence_id = None
+    if parse_result.autonomy_eligible:
+        eligibility_evidence_id = mark_item_autonomy_eligible(
+            db_path,
+            item.id,
+            reason=parse_result.autonomy_policy_reason or parse_result.parser_reason,
+            actor=TELEGRAM_PARSER_ACTOR,
+        )
     duplicate_evidence_id = None
     if duplicate_of_existing:
         duplicate_evidence_id = repo.add_evidence(
@@ -184,5 +188,7 @@ def intake_inbound_telegram_work(
         "source_evidence_id": source_evidence_id,
         "parser_evidence_id": parser_evidence_id,
         "eligibility_evidence_id": eligibility_evidence_id,
+        "autonomy_eligible": parse_result.autonomy_eligible,
+        "autonomy_policy_reason": parse_result.autonomy_policy_reason,
         "duplicate_evidence_id": duplicate_evidence_id,
     }

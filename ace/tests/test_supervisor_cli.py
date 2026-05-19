@@ -148,6 +148,19 @@ class SupervisorCliTests(unittest.TestCase):
             self.assertIn("auto_stopped=false", output)
             self.assertIn("runtime_status=stopped", output)
 
+    def test_supervisor_shutdown_can_interrupt_starting_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            runtime = start_supervisor_runtime(db_path, stale_after_seconds=60)
+
+            from ace.supervisor_runtime import request_supervisor_shutdown
+
+            result = request_supervisor_shutdown(db_path, runtime["runtime_instance_id"])
+
+            self.assertEqual(result["status"], "starting")
+            self.assertEqual(result["shutdown_status"], "requested")
+
     def test_supervisor_shutdown_requests_current_runtime_when_not_explicitly_provided(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

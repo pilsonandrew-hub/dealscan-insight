@@ -60,9 +60,12 @@ class TelegramIntakeTests(unittest.TestCase):
                 (item.id,),
             ).fetchall()
 
+        self.assertFalse(result["autonomy_eligible"])
+        self.assertIsNone(result["eligibility_evidence_id"])
+        self.assertIn("requires governed execution evidence", result["autonomy_policy_reason"])
         self.assertIn(("ace://telegram/intake-source", "ace.telegram_intake"), [tuple(row) for row in evidence_rows])
         self.assertIn(("ace://telegram/parser-decision", "ace.telegram_parser"), [tuple(row) for row in evidence_rows])
-        self.assertIn(("ace://autonomy/eligible-direct-work", "ace.autonomy_lane"), [tuple(row) for row in evidence_rows])
+        self.assertNotIn(("ace://autonomy/eligible-direct-work", "ace.autonomy_lane"), [tuple(row) for row in evidence_rows])
 
     def test_idempotency_uses_same_message_once(self) -> None:
         first = intake_inbound_telegram_work(
@@ -112,6 +115,9 @@ class TelegramIntakeTests(unittest.TestCase):
         self.assertFalse(second["created"])
         self.assertTrue(second["coalesced"])
         self.assertEqual(first["item_id"], second["item_id"])
+        self.assertTrue(second["autonomy_eligible"])
+        self.assertIsNotNone(second["eligibility_evidence_id"])
+        self.assertIn("operator-continuation", second["autonomy_policy_reason"])
         self.assertIsNotNone(second["duplicate_evidence_id"])
 
         with connect(self.db_path) as connection:
@@ -126,6 +132,28 @@ class TelegramIntakeTests(unittest.TestCase):
 
         self.assertEqual(item_count, 1)
         self.assertEqual(duplicate_count, 1)
+
+    def test_direct_work_without_bounded_continuation_is_not_autonomy_eligible(self) -> None:
+        result = intake_inbound_telegram_work(
+            self.db_path,
+            chat_id="7529788084",
+            message_id="msg-203",
+            text="Please investigate whether this production issue is safe to fix.",
+            received_at="2026-05-08T17:03:00Z",
+        )
+
+        self.assertTrue(result["actionable"])
+        self.assertTrue(result["created"])
+        self.assertFalse(result["autonomy_eligible"])
+        self.assertIsNone(result["eligibility_evidence_id"])
+
+        with connect(self.db_path) as connection:
+            eligible_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (result["item_id"], "ace://autonomy/eligible-direct-work"),
+            ).fetchone()[0]
+
+        self.assertEqual(eligible_count, 0)
 
     def test_non_actionable_message_creates_no_item(self) -> None:
         result = intake_inbound_telegram_work(

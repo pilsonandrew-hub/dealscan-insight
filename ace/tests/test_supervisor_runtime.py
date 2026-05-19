@@ -258,10 +258,11 @@ class SupervisorRuntimeTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             heartbeat_supervisor_runtime(self.db_path, runtime["runtime_instance_id"])
 
-    def test_shutdown_request_requires_live_or_stale_runtime(self) -> None:
+    def test_shutdown_request_accepts_starting_live_or_stale_runtime(self) -> None:
         runtime = start_supervisor_runtime(self.db_path)
-        with self.assertRaises(ValidationError):
-            request_supervisor_shutdown(self.db_path, runtime["runtime_instance_id"])
+        result = request_supervisor_shutdown(self.db_path, runtime["runtime_instance_id"])
+        self.assertEqual(result["status"], "starting")
+        self.assertEqual(result["shutdown_status"], SHUTDOWN_STATUS_REQUESTED)
 
     def test_failed_runtime_can_record_recovery_request_and_completion(self) -> None:
         runtime = start_supervisor_runtime(self.db_path)
