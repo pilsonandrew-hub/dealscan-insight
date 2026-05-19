@@ -112,6 +112,16 @@ def _state_changed_payload(
     return payload
 
 
+def _evidence_claim_payload(evidence_text: str | None) -> dict[str, Any]:
+    if not evidence_text:
+        return {}
+    try:
+        payload = json.loads(evidence_text)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _closeout_attempted_payload(
     *,
     item_id: str,
@@ -933,10 +943,17 @@ class ItemRepository:
     def item_supporting_evidence_count(self, item_id: str) -> int:
         with connect(self.db_path) as connection:
             rows = connection.execute(
-                "SELECT evidence_uri FROM evidence WHERE item_id = ?",
+                "SELECT evidence_uri, evidence_text FROM evidence WHERE item_id = ?",
                 (item_id,),
             ).fetchall()
-        return sum(1 for row in rows if is_claim_supporting_evidence_uri(row["evidence_uri"]))
+        return sum(
+            1
+            for row in rows
+            if is_claim_supporting_evidence_uri(
+                row["evidence_uri"],
+                payload=_evidence_claim_payload(row["evidence_text"]),
+            )
+        )
 
     def item_open_obligation_count(self, item_id: str) -> int:
         with connect(self.db_path) as connection:

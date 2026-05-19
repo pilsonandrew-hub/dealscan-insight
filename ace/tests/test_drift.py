@@ -114,6 +114,53 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertEqual(dimension.status, "block")
         self.assertIn("supporting_evidence_events_seen=0", dimension.detail)
 
+    def test_claim_drift_ignores_governed_plan_notification_and_jace_delivery_metadata_as_pass_support(self) -> None:
+        events = [
+            event(1, "item.evidence_added", {"evidence_uri": "ace://governed-execution/plan"}),
+            event(2, "item.evidence_added", {"evidence_uri": "ace://telegram/duplicate-direct-work"}),
+            event(3, "item.evidence_added", {"evidence_uri": "ace://notification/delivery"}),
+            event(4, "item.evidence_added", {"evidence_uri": "ace://jace/outbound-status-delivery"}),
+            event(5, "item.verdict_recorded", {"verdict": "ship"}),
+            event(6, "item.closeout_attempted", {"result": "passed", "evidence_count": 4}),
+        ]
+
+        dimension = compute_claim_drift(events)
+
+        self.assertEqual(dimension.status, "block")
+        self.assertIn("supporting_evidence_events_seen=0", dimension.detail)
+
+    def test_claim_drift_counts_only_passing_governed_execution_results_as_support(self) -> None:
+        failed_result_events = [
+            event(1, "item.evidence_added", {"evidence_uri": "ace://governed-execution/result", "result": "fail"}),
+            event(2, "item.verdict_recorded", {"verdict": "ship"}),
+            event(3, "item.closeout_attempted", {"result": "passed", "evidence_count": 1}),
+        ]
+        passing_result_events = [
+            event(1, "item.evidence_added", {"evidence_uri": "ace://governed-execution/result", "result": "pass"}),
+            event(2, "item.verdict_recorded", {"verdict": "ship"}),
+            event(3, "item.closeout_attempted", {"result": "passed", "evidence_count": 1}),
+        ]
+
+        failed_dimension = compute_claim_drift(failed_result_events)
+        passing_dimension = compute_claim_drift(passing_result_events)
+
+        self.assertEqual(failed_dimension.status, "block")
+        self.assertIn("supporting_evidence_events_seen=0", failed_dimension.detail)
+        self.assertEqual(passing_dimension.status, "clear")
+        self.assertIn("supporting_evidence_events_seen=1", passing_dimension.detail)
+
+    def test_claim_drift_ignores_failed_local_action_outcomes_as_pass_support(self) -> None:
+        events = [
+            event(1, "item.evidence_added", {"evidence_uri": "ace://phase2/action-outcome", "outcome": "action_failed_missing_target"}),
+            event(2, "item.verdict_recorded", {"verdict": "ship"}),
+            event(3, "item.closeout_attempted", {"result": "passed", "evidence_count": 1}),
+        ]
+
+        dimension = compute_claim_drift(events)
+
+        self.assertEqual(dimension.status, "block")
+        self.assertIn("supporting_evidence_events_seen=0", dimension.detail)
+
     def test_compute_item_drift_returns_three_visible_dimensions(self) -> None:
         events = [
             event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://proof/business-rule-verification"}),

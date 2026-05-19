@@ -409,6 +409,28 @@ class ItemRepositoryContractTests(unittest.TestCase):
         self.assertIn('"evidence_count":1', closeout_event.payload_json or "")
         self.assertIn('"supporting_evidence_count":0', closeout_event.payload_json or "")
 
+    def test_finalize_closeout_blocks_failed_governed_execution_result_as_claim_support(self) -> None:
+        item = self.repo.create_item(item_type="task", title="Failed governed result is not support", actor="test")
+        approved = self.repo.apply_action(item.id, "approve", actor="test")
+        claimed = self.repo.apply_action(approved.id, "done", actor="test")
+        self.repo.add_evidence(
+            claimed.id,
+            evidence_text='{"result":"fail","durable_checks":{"event_hash_chain":{"ok":false}}}',
+            evidence_uri="ace://governed-execution/result",
+            actor="test",
+        )
+        self.repo.record_verdict(claimed.id, "pass", actor="test", reason="failed inspection should not close")
+
+        with self.assertRaises(CloseoutGateError) as raised:
+            self.repo.apply_action(claimed.id, "resolve", actor="test")
+
+        self.assertIn("missing_supporting_evidence", str(raised.exception))
+        closeout_event = next(
+            event for event in self.repo.list_item_events(claimed.id) if event.event_type == "item.closeout_attempted"
+        )
+        self.assertIn('"evidence_count":1', closeout_event.payload_json or "")
+        self.assertIn('"supporting_evidence_count":0', closeout_event.payload_json or "")
+
     def test_finalize_closeout_passes_and_records_closeout_linkage(self) -> None:
         item = self.repo.create_item(item_type="task", title="Ready for closeout", actor="test")
         approved = self.repo.apply_action(item.id, "approve", actor="test")

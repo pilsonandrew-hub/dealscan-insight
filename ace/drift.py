@@ -155,20 +155,34 @@ def compute_decision_drift(events: Iterable[Any], *, window: int = 20) -> DriftD
 _NON_SUPPORTING_EVIDENCE_URIS = {
     "ace://telegram/intake-source",
     "ace://telegram/parser-decision",
+    "ace://telegram/duplicate-direct-work",
     "ace://autonomy/eligible-direct-work",
     "ace://autonomy/explicit-direct-work-closeout",
+    "ace://governed-execution/plan",
     "ace://notification/delivery",
+    "ace://jace/outbound-status-delivery",
 }
+
+_FAILED_ACTION_OUTCOME_PREFIX = "action_failed"
 
 
 def _is_claim_supporting_evidence(payload: Mapping[str, Any]) -> bool:
-    return is_claim_supporting_evidence_uri(payload.get("evidence_uri"))
+    return is_claim_supporting_evidence_uri(payload.get("evidence_uri"), payload=payload)
 
 
-def is_claim_supporting_evidence_uri(evidence_uri: Any) -> bool:
+def is_claim_supporting_evidence_uri(
+    evidence_uri: Any,
+    *,
+    payload: Mapping[str, Any] | None = None,
+) -> bool:
     normalized = str(evidence_uri or "").strip()
     if normalized in _NON_SUPPORTING_EVIDENCE_URIS:
         return False
+    if normalized == "ace://governed-execution/result":
+        return (payload or {}).get("result") == "pass"
+    if normalized in {"ace://phase2/action-outcome", "ace://phase2/action-rejection"}:
+        outcome = str((payload or {}).get("outcome") or "").strip().lower()
+        return not outcome.startswith(_FAILED_ACTION_OUTCOME_PREFIX)
     return True
 
 
