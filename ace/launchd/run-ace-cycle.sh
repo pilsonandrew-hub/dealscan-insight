@@ -25,11 +25,21 @@ fi
 
 NOTIFICATION_CHANNEL="${ACE_NOTIFICATION_CHANNEL:-jace}"
 NOTIFICATION_TARGET="${ACE_NOTIFICATION_TARGET:-${ACE_OPERATOR_TARGET}}"
+TRIAGE_AFTER_HOURS="${ACE_TRIAGE_AFTER_HOURS:-24}"
+APPROVED_AFTER_HOURS="${ACE_APPROVED_AFTER_HOURS:-72}"
+BLOCKED_AFTER_HOURS="${ACE_BLOCKED_AFTER_HOURS:-24}"
+CLAIMED_DONE_AFTER_HOURS="${ACE_CLAIMED_DONE_AFTER_HOURS:-24}"
+ACTIVE_AFTER_HOURS="${ACE_ACTIVE_AFTER_HOURS:-72}"
 
 exec python3 ace/ace.py \
   --db "$DB_PATH" \
   cycle \
   --briefing-path "$BRIEFING_PATH" \
+  --triage-after-hours "$TRIAGE_AFTER_HOURS" \
+  --approved-after-hours "$APPROVED_AFTER_HOURS" \
+  --blocked-after-hours "$BLOCKED_AFTER_HOURS" \
+  --claimed-done-after-hours "$CLAIMED_DONE_AFTER_HOURS" \
+  --active-after-hours "$ACTIVE_AFTER_HOURS" \
   --notification-channel "$NOTIFICATION_CHANNEL" \
   --notification-target "$NOTIFICATION_TARGET" \
   "${THREAD_ARG[@]}" \

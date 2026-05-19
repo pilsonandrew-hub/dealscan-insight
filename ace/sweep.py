@@ -195,7 +195,6 @@ def _classify_item(
             "classification": classification,
             "state": item.state,
             "stale_after_seconds": stale_after_seconds,
-            "evidence_count": evidence_count,
             "open_obligation_count": open_obligation_count,
             "open_contradiction_count": open_contradiction_count,
         }

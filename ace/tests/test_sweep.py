@@ -72,7 +72,7 @@ class SweepRuntimeTests(unittest.TestCase):
         events = self.repo.list_item_events(item.id, event_type=ITEM_SWEEP_FLAGGED_EVENT_TYPE)
         self.assertEqual(len(events), 1)
 
-    def test_run_sweep_re_emits_when_item_activity_changes(self) -> None:
+    def test_run_sweep_suppresses_evidence_only_activity_changes(self) -> None:
         item = self.repo.create_item(item_type="task", title="Activity change", actor="test")
         thresholds = SweepThresholds(triage_after_seconds=0)
 
@@ -92,12 +92,12 @@ class SweepRuntimeTests(unittest.TestCase):
             actor="test",
             now="2026-05-05T12:05:00Z",
         )
-        self.assertEqual(second["emitted_count"], 1)
-        self.assertFalse(second["findings"][0]["suppressed"])
+        self.assertEqual(second["emitted_count"], 0)
+        self.assertTrue(second["findings"][0]["suppressed"])
         self.assertEqual(second["findings"][0]["evidence_count"], 1)
 
         events = self.repo.list_item_events(item.id, event_type=ITEM_SWEEP_FLAGGED_EVENT_TYPE)
-        self.assertEqual(len(events), 2)
+        self.assertEqual(len(events), 1)
 
     def test_run_sweep_classifies_claimed_done_and_counts_open_dependencies(self) -> None:
         item = self.repo.create_item(item_type="task", title="Closeout stalled", actor="test")
