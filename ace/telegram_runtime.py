@@ -515,12 +515,20 @@ def _load_inbound_messages_from_telegram(token: str) -> list[dict[str, Any]]:
 def fetch_unprocessed_telegram_messages() -> list[dict[str, Any]]:
     load_ace_telegram_env_file()
     transport_preference = os.environ.get("ACE_TELEGRAM_TRANSPORT", "auto").strip().lower() or "auto"
-    if transport_preference not in {"auto", "openclaw_session", "telegram_bot_api", "inbox_file"}:
+    if transport_preference not in {"auto", "openclaw_session", "telegram_bot_api", "inbox_file", "none", "disabled"}:
         _record_transport_attempt(
             transport=transport_preference,
             status="disabled",
             error_type="invalid_transport",
-            error_summary="ACE_TELEGRAM_TRANSPORT must be one of: auto, openclaw_session, telegram_bot_api, inbox_file.",
+            error_summary="ACE_TELEGRAM_TRANSPORT must be one of: auto, openclaw_session, telegram_bot_api, inbox_file, none, disabled.",
+        )
+        return []
+
+    if transport_preference in {"none", "disabled"}:
+        _record_transport_attempt(
+            transport=transport_preference,
+            status="disabled",
+            message_count=0,
         )
         return []
 

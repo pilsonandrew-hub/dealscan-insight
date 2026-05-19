@@ -330,12 +330,26 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
     if not {"previous_event_hash", "event_hash"}.issubset(columns):
         return
 
-    previous_event_hash: str | None = None
+    missing = connection.execute(
+        "SELECT COUNT(*) AS count FROM events WHERE previous_event_hash IS NULL AND event_hash IS NULL"
+    ).fetchone()["count"]
+    if not missing:
+        return
+
+    first_missing = connection.execute(
+        "SELECT MIN(id) AS id FROM events WHERE previous_event_hash IS NULL AND event_hash IS NULL"
+    ).fetchone()["id"]
+    previous_event_hash = connection.execute(
+        "SELECT event_hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1",
+        (first_missing,),
+    ).fetchone()
+    previous_hash = previous_event_hash["event_hash"] if previous_event_hash else None
     rows = connection.execute(
         """
         SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
-               created_at, previous_event_hash, event_hash
+               created_at
         FROM events
+        WHERE previous_event_hash IS NULL AND event_hash IS NULL
         ORDER BY id ASC
         """
     ).fetchall()
@@ -349,14 +363,13 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
             source=row["source"],
             session_id=row["session_id"],
             created_at=row["created_at"],
-            previous_event_hash=previous_event_hash,
+            previous_event_hash=previous_hash,
         )
-        if row["previous_event_hash"] is None and row["event_hash"] is None:
-            connection.execute(
-                "UPDATE events SET previous_event_hash = ?, event_hash = ? WHERE id = ?",
-                (previous_event_hash, expected_hash, row["id"]),
-            )
-        previous_event_hash = row["event_hash"] or expected_hash
+        connection.execute(
+            "UPDATE events SET previous_event_hash = ?, event_hash = ? WHERE id = ?",
+            (previous_hash, expected_hash, row["id"]),
+        )
+        previous_hash = expected_hash
 
 
 def repair_event_hash_chain_for_legacy_races(connection: sqlite3.Connection) -> int:

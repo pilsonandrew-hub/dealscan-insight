@@ -18,7 +18,9 @@ class LaunchdConfigTests(unittest.TestCase):
 
         self.assertEqual(env.get("ACE_OPERATOR_CHANNEL"), "telegram")
         self.assertEqual(env.get("ACE_OPERATOR_TARGET"), "7529788084")
-        self.assertEqual(env.get("ACE_TELEGRAM_TRANSPORT"), "telegram_bot_api")
+        self.assertEqual(env.get("ACE_TELEGRAM_TRANSPORT"), "none")
+        self.assertEqual(env.get("ACE_NOTIFICATION_CHANNEL"), "jace")
+        self.assertEqual(env.get("ACE_NOTIFICATION_TARGET"), "7529788084")
         self.assertNotIn("ACE_USE_OPENCLAW_TELEGRAM_BOT_TOKEN", env)
         self.assertNotIn("ACE_TELEGRAM_BOT_TOKEN", env)
 
