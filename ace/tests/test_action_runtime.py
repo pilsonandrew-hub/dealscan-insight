@@ -22,6 +22,7 @@ from ace.action_runtime import (
     execute_record_operator_followup,
     execute_operator_notification,
     send_jace_status_message,
+    send_operator_notification,
 )
 from ace.repository import ItemRepository
 from ace.repository import ValidationError
@@ -688,6 +689,61 @@ class ActionRuntimeTests(unittest.TestCase):
         ):
             with self.assertRaises(action_runtime.JaceStatusDeliveryError):
                 send_jace_status_message(self.db_path, self.item.id, message="No token")
+
+    def test_operator_notification_can_route_through_jace_owned_bot(self) -> None:
+        telegram_calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_telegram_request(token: str, method: str, params: dict[str, object]) -> dict[str, object]:
+            telegram_calls.append((method, params))
+            self.assertEqual(token, "jace-token")
+            if method == "getMe":
+                return {"ok": True, "result": {"username": "JACEthaACE_Bot"}}
+            if method == "sendMessage":
+                self.assertEqual(params["chat_id"], "7529788084")
+                self.assertIn(str(self.item.id), str(params["text"]))
+                return {"ok": True, "result": {"message_id": 5252}}
+            raise AssertionError(method)
+
+        with patch.dict(
+            action_runtime.os.environ,
+            {
+                "ACE_TELEGRAM_BOT_TOKEN": "jace-token",
+                "ACE_TELEGRAM_CHAT_ID": "7529788084",
+            },
+            clear=False,
+        ), patch.object(action_runtime, "_telegram_bot_api_request", side_effect=fake_telegram_request):
+            result = send_operator_notification(
+                self.db_path,
+                self.item.id,
+                channel="jace",
+                target="7529788084",
+                reason="stale_triage",
+                age_context="48h stale",
+            )
+
+        self.assertEqual([call[0] for call in telegram_calls], ["getMe", "sendMessage"])
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["evidence_written"])
+
+        with connect(self.db_path) as connection:
+            notification_evidence = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE evidence_uri = ?",
+                (NOTIFICATION_ACTION_EVIDENCE_URI,),
+            ).fetchone()[0]
+            jace_evidence = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE evidence_uri = ? AND created_by = ?",
+                (JACE_STATUS_EVIDENCE_URI, JACE_STATUS_CREATED_BY),
+            ).fetchone()[0]
+            alert = connection.execute(
+                "SELECT transport, bot_username, message_id, delivery_state FROM alert_log WHERE alert_type = 'jace_status'",
+            ).fetchone()
+        self.assertEqual(notification_evidence, 1)
+        self.assertEqual(jace_evidence, 1)
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert["transport"], "telegram_bot_api")
+        self.assertEqual(alert["bot_username"], "JACEthaACE_Bot")
+        self.assertEqual(alert["message_id"], "5252")
+        self.assertEqual(alert["delivery_state"], "sent")
 
     def test_openclaw_message_sender_uses_gateway_tool_invoke(self) -> None:
         config_path = Path(self.tempdir.name) / "openclaw.json"

@@ -407,13 +407,22 @@ def execute_operator_notification(
             )
 
         try:
-            sender_result = sender(
-                channel=channel,
-                target=target,
-                message=message,
-                thread_id=thread_id,
-            )
-        except NotificationDeliveryError as exc:
+            if channel == "jace":
+                sender_result = send_jace_status_message(
+                    db_path,
+                    target_item_id,
+                    message=message,
+                    chat_id=target,
+                    actor=actor or NOTIFICATION_ACTION_CREATED_BY,
+                )
+            else:
+                sender_result = sender(
+                    channel=channel,
+                    target=target,
+                    message=message,
+                    thread_id=thread_id,
+                )
+        except (NotificationDeliveryError, JaceStatusDeliveryError) as exc:
             return _fail_action(
                 connection,
                 normalized_action_id,

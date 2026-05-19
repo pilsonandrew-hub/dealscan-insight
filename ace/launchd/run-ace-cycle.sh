@@ -23,11 +23,14 @@ if [[ -n "${ACE_OPERATOR_THREAD_ID:-}" ]]; then
   THREAD_ARG=(--notification-thread-id "$ACE_OPERATOR_THREAD_ID")
 fi
 
+NOTIFICATION_CHANNEL="${ACE_NOTIFICATION_CHANNEL:-jace}"
+NOTIFICATION_TARGET="${ACE_NOTIFICATION_TARGET:-${ACE_OPERATOR_TARGET}}"
+
 exec python3 ace/ace.py \
   --db "$DB_PATH" \
   cycle \
   --briefing-path "$BRIEFING_PATH" \
-  --notification-channel "$ACE_OPERATOR_CHANNEL" \
-  --notification-target "$ACE_OPERATOR_TARGET" \
+  --notification-channel "$NOTIFICATION_CHANNEL" \
+  --notification-target "$NOTIFICATION_TARGET" \
   "${THREAD_ARG[@]}" \
   --actor launchd

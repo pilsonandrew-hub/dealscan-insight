@@ -21,7 +21,7 @@
     <key>ACE_BRIEFING_PATH</key>
     <string>/Users/andrewpilson/.openclaw/workspace/ace/state/ace_briefing.md</string>
     <key>ACE_TELEGRAM_TRANSPORT</key>
-    <string>openclaw_session</string>
+    <string>telegram_bot_api</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
