@@ -332,6 +332,8 @@ class AceCycleTests(unittest.TestCase):
 
         self.assertEqual(obligation_count, 1)
         self.assertEqual(eligibility_count, 0)
+        self.assertEqual(result["governed_execution"]["planned_ids"], [item.id])
+        self.assertEqual(len(result["governed_execution"]["evidence_ids"]), 1)
 
     def test_cycle_skips_when_another_cycle_is_active(self) -> None:
         fresh_active_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
