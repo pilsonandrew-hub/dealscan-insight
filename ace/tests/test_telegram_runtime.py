@@ -570,6 +570,64 @@ class TelegramRuntimeTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(tuple(attempt), ("openclaw_session", "ok", 2, None))
 
+
+    def test_openclaw_session_reader_tails_large_session_files(self) -> None:
+        session_file = Path(self.tempdir.name) / "large-session.jsonl"
+        old_lines = [
+            jsonlib.dumps({
+                "type": "message",
+                "id": f"old-{i}",
+                "message": {"role": "user", "content": [{"type": "text", "text": "Please ignore old backlog"}]},
+            })
+            for i in range(50)
+        ]
+        line_id = "recent-user-msg"
+        recent_lines = [
+            jsonlib.dumps({
+                "type": "message",
+                "id": line_id,
+                "message": {"role": "user", "content": [{"type": "text", "text": "Please process recent bounded work"}]},
+            }),
+            jsonlib.dumps({
+                "type": "custom_message",
+                "customType": "openclaw.runtime-context",
+                "parentId": line_id,
+                "content": (
+                    "Conversation info (untrusted metadata):\n```json\n"
+                    + jsonlib.dumps(
+                        {
+                            "chat_id": "telegram:7529788084",
+                            "message_id": "44550",
+                            "sender_id": "7529788084",
+                            "sender": "Andrew Pilson",
+                            "timestamp": "Tue 2026-05-19 05:40 PDT",
+                        }
+                    )
+                    + "\n```"
+                ),
+            }),
+        ]
+        session_file.write_text("\n".join(old_lines + recent_lines) + "\n", encoding="utf-8")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "ACE_OPENCLAW_SESSION_FILE": str(session_file),
+                    "ACE_OPENCLAW_CHAT_ID": "telegram:7529788084",
+                    "ACE_OPENCLAW_SESSION_TAIL_LINES": "4",
+                },
+                clear=False,
+            ),
+            patch.object(telegram_runtime, "STATE_DIR", self.state_dir),
+            patch.object(telegram_runtime, "TELEGRAM_RUNTIME_DB", self.runtime_db),
+        ):
+            messages = telegram_runtime.fetch_unprocessed_telegram_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["message_id"], "44550")
+        self.assertEqual(messages[0]["text"], "Please process recent bounded work")
+
     def test_fetch_prefers_explicit_openclaw_session_file(self) -> None:
         session_file = Path(self.tempdir.name) / "explicit.jsonl"
         line_id = "user-msg-explicit"

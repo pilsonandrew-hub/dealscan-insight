@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timezone
 import json
 import os
@@ -321,15 +322,27 @@ def _resolve_openclaw_session_file() -> Path | None:
     return candidates[0][1]
 
 
-def _load_inbound_messages_from_openclaw_session(path: Path) -> list[dict[str, Any]]:
+def _openclaw_session_tail_line_limit() -> int:
+    raw = os.environ.get("ACE_OPENCLAW_SESSION_TAIL_LINES", "2000").strip()
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        value = int(raw)
+    except ValueError:
+        return 2000
+    return max(100, min(value, 20000))
+
+
+def _iter_openclaw_session_tail(path: Path) -> list[str]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return list(deque(handle, maxlen=_openclaw_session_tail_line_limit()))
     except OSError:
         return []
 
+
+def _load_inbound_messages_from_openclaw_session(path: Path) -> list[dict[str, Any]]:
     runtime_context_by_parent: dict[str, dict[str, Any]] = {}
     entries: list[dict[str, Any]] = []
-    for line in lines:
+    for line in _iter_openclaw_session_tail(path):
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:

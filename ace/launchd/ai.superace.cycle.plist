@@ -21,11 +21,13 @@
     <key>ACE_BRIEFING_PATH</key>
     <string>/Users/andrewpilson/.openclaw/workspace/ace/state/ace_briefing.md</string>
     <key>ACE_TELEGRAM_TRANSPORT</key>
-    <string>none</string>
+    <string>openclaw_session</string>
     <key>ACE_NOTIFICATION_CHANNEL</key>
     <string>jace</string>
     <key>ACE_NOTIFICATION_TARGET</key>
     <string>7529788084</string>
+    <key>ACE_OPENCLAW_SESSION_TAIL_LINES</key>
+    <string>2000</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
