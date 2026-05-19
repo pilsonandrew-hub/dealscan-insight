@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
 from .repository import ItemRepository, ValidationError
 from .storage import DB_PATH, append_event, bootstrap_db, connect, new_id, utc_now
+from .telegram_runtime import load_ace_telegram_env_file, _telegram_ssl_context
 
 
 ACTION_KIND = "record_operator_followup"
@@ -22,6 +25,8 @@ NOTIFICATION_ACTION_CREATED_BY = "ace.notification_runtime"
 NOTIFICATION_ACTION_EVIDENCE_URI = "ace://notification/delivery"
 NOTIFICATION_FAILURE_CODE = "action_failed_notification"
 NOTIFICATION_RUNTIME_FAILURE_CODE = "action_failed_runtime_error"
+JACE_STATUS_EVIDENCE_URI = "ace://jace/outbound-status-delivery"
+JACE_STATUS_CREATED_BY = "ace.jace_status_runtime"
 OPENCLAW_GATEWAY_URL = "http://127.0.0.1:18789/tools/invoke"
 OPENCLAW_CONFIG_PATH = Path.home() / ".openclaw" / "openclaw.json"
 
@@ -35,7 +40,124 @@ class NotificationDeliveryError(RuntimeError):
     """Raised when the notification transport fails visibly."""
 
 
+class JaceStatusDeliveryError(RuntimeError):
+    """Raised when JACE-owned outbound status delivery fails visibly."""
+
+
 NotificationSender = Callable[..., dict[str, Any]]
+
+
+def send_jace_status_message(
+    db_path: Path | str = DB_PATH,
+    item_id: str | None = None,
+    *,
+    message: str,
+    chat_id: str | None = None,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    """Send an independently attributable JACE status message via ACE's bot.
+
+    This deliberately does not use OpenClaw's shared message tool. It uses the
+    ACE/JACE-owned Bot API token from ``ace/state/ace-telegram.env`` and records
+    both local transport proof (``alert_log``) and item evidence.
+    """
+    bootstrap_db(db_path)
+    normalized_item_id = _normalize_required_text(item_id, field_name="item_id")
+    normalized_message = _normalize_required_text(message, field_name="message")
+    load_ace_telegram_env_file()
+    token = _normalize_optional_text(os.environ.get("ACE_TELEGRAM_BOT_TOKEN"))
+    if token is None:
+        raise JaceStatusDeliveryError("ACE_TELEGRAM_BOT_TOKEN is not configured")
+    normalized_chat_id = _normalize_optional_text(chat_id) or _normalize_optional_text(
+        os.environ.get("ACE_TELEGRAM_CHAT_ID")
+    )
+    if normalized_chat_id is None:
+        raise JaceStatusDeliveryError("ACE_TELEGRAM_CHAT_ID is not configured")
+
+    repo = ItemRepository(db_path)
+    if repo.get_item(normalized_item_id) is None:
+        raise KeyError(f"unknown item_id: {normalized_item_id}")
+
+    bot = _telegram_bot_api_get_me(token)
+    delivery = _telegram_bot_api_send_message(
+        token=token,
+        chat_id=normalized_chat_id,
+        text=normalized_message,
+    )
+    result = delivery.get("result") if isinstance(delivery.get("result"), dict) else {}
+    message_id = _normalize_required_text(result.get("message_id"), field_name="message_id")
+    bot_username = _normalize_optional_text(bot.get("username"))
+    sent_at = utc_now()
+    alert_id = new_id("alert")
+    evidence_payload = {
+        "alert_id": alert_id,
+        "bot_username": bot_username,
+        "chat_id": normalized_chat_id,
+        "created_by": JACE_STATUS_CREATED_BY,
+        "delivery_state": "sent",
+        "item_id": normalized_item_id,
+        "message": normalized_message,
+        "message_id": message_id,
+        "outcome": "jace_status_message_sent",
+        "transport": "telegram_bot_api",
+    }
+    evidence_text = _canonical_json(evidence_payload)
+
+    with connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO alert_log(
+                id, alert_type, transport, bot_username, chat_id, message_id,
+                delivery_state, sent_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                alert_id,
+                "jace_status",
+                "telegram_bot_api",
+                bot_username,
+                normalized_chat_id,
+                message_id,
+                "sent",
+                sent_at,
+                _canonical_json({"item_id": normalized_item_id, "message": normalized_message}),
+            ),
+        )
+        evidence_id = new_id("evidence")
+        connection.execute(
+            """
+            INSERT INTO evidence(id, item_id, evidence_text, evidence_uri, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (evidence_id, normalized_item_id, evidence_text, JACE_STATUS_EVIDENCE_URI, JACE_STATUS_CREATED_BY, sent_at),
+        )
+        append_event(
+            connection,
+            event_type="item.evidence_added",
+            payload={
+                "item_id": normalized_item_id,
+                "evidence_id": evidence_id,
+                "evidence_text": evidence_text,
+                "evidence_uri": JACE_STATUS_EVIDENCE_URI,
+                "created_by": JACE_STATUS_CREATED_BY,
+                "delivery_result": delivery,
+            },
+            item_id=normalized_item_id,
+            actor=actor or JACE_STATUS_CREATED_BY,
+            created_at=sent_at,
+        )
+        connection.commit()
+
+    return {
+        "item_id": normalized_item_id,
+        "alert_id": alert_id,
+        "evidence_id": evidence_id,
+        "message_id": message_id,
+        "bot_username": bot_username,
+        "chat_id": normalized_chat_id,
+        "delivery_state": "sent",
+        "evidence_written": True,
+    }
 
 
 def enqueue_record_operator_followup(
@@ -928,6 +1050,53 @@ def _openclaw_message_sender(
     if isinstance(payload, dict):
         return payload
     return {"ok": True, "payload": payload}
+
+
+def _telegram_bot_api_get_me(token: str) -> dict[str, Any]:
+    payload = _telegram_bot_api_request(token, "getMe", {})
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        raise JaceStatusDeliveryError("Telegram getMe returned no bot result")
+    return result
+
+
+def _telegram_bot_api_send_message(*, token: str, chat_id: str, text: str) -> dict[str, Any]:
+    return _telegram_bot_api_request(
+        token,
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": text,
+        },
+    )
+
+
+def _telegram_bot_api_request(token: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    body = urllib.parse.urlencode(params).encode("utf-8")
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/{method}",
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20, context=_telegram_ssl_context()) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip() or f"http {exc.code}"
+        raise JaceStatusDeliveryError(f"Telegram {method} failed: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise JaceStatusDeliveryError(f"Telegram {method} failed: {exc}") from exc
+    except TimeoutError as exc:
+        raise JaceStatusDeliveryError(f"Telegram {method} timed out") from exc
+
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise JaceStatusDeliveryError(f"Telegram {method} returned non-json response") from exc
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise JaceStatusDeliveryError(f"Telegram {method} failed: {payload}")
+    return payload
 
 
 def _load_openclaw_gateway_token(config_path: Path | None = None) -> str:

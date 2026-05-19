@@ -31,6 +31,7 @@ from ace.cost_guardrails import (
     get_cost_guardrail_status,
     record_cost_usage,
 )
+from ace.action_runtime import send_jace_status_message
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -197,6 +198,15 @@ def build_parser() -> argparse.ArgumentParser:
     evidence.add_argument("--evidence-uri")
     evidence.add_argument("--created-by")
     evidence.add_argument("--actor")
+
+    jace_status = subparsers.add_parser(
+        "jace-status-send",
+        help="Send a JACE-owned outbound status message and record delivery evidence",
+    )
+    jace_status.add_argument("item_id")
+    jace_status.add_argument("message")
+    jace_status.add_argument("--chat-id")
+    jace_status.add_argument("--actor")
 
     autonomy_eligible = subparsers.add_parser(
         "mark-autonomy-eligible",
@@ -581,6 +591,18 @@ def _print_evidence_added(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} evidence_id={evidence_id}")
 
 
+def _print_jace_status_delivery(result: dict[str, object]) -> None:
+    print(f"jace_status.item_id={result['item_id']}")
+    print(f"jace_status.alert_id={result['alert_id']}")
+    print(f"jace_status.evidence_id={result['evidence_id']}")
+    print(f"jace_status.message_id={result['message_id']}")
+    print(f"jace_status.chat_id={result['chat_id']}")
+    print(f"jace_status.delivery_state={result['delivery_state']}")
+    print(f"jace_status.evidence_written={str(result['evidence_written']).lower()}")
+    if result.get("bot_username") is not None:
+        print(f"jace_status.bot_username={result['bot_username']}")
+
+
 def _print_autonomy_eligibility_marked(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} autonomy_eligibility_evidence_id={evidence_id}")
 
@@ -856,6 +878,17 @@ def main(argv: list[str] | None = None) -> int:
                 actor=args.actor,
             )
             _print_evidence_added(item_id=args.item_id, evidence_id=evidence_id)
+            return 0
+
+        if command == "jace-status-send":
+            result = send_jace_status_message(
+                db_path,
+                args.item_id,
+                message=_normalize_required_text(args.message, field_name="message"),
+                chat_id=_normalize_optional_text(args.chat_id, field_name="chat_id"),
+                actor=_normalize_optional_text(args.actor, field_name="actor"),
+            )
+            _print_jace_status_delivery(result)
             return 0
 
         if command == "mark-autonomy-eligible":

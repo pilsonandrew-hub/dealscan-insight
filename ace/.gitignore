@@ -5,6 +5,8 @@ __pycache__/
 # Local runtime state
 state/ace.db
 state/ace.db-*
+state/ace.sqlite
+state/ace.sqlite-*
 state/telegram_runtime.db
 state/telegram_runtime.db-*
 state/*.env
