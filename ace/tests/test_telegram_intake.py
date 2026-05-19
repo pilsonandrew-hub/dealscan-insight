@@ -146,14 +146,57 @@ class TelegramIntakeTests(unittest.TestCase):
         self.assertTrue(result["created"])
         self.assertFalse(result["autonomy_eligible"])
         self.assertIsNone(result["eligibility_evidence_id"])
+        self.assertIsNotNone(result["obligation_id"])
 
         with connect(self.db_path) as connection:
             eligible_count = connection.execute(
                 "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
                 (result["item_id"], "ace://autonomy/eligible-direct-work"),
             ).fetchone()[0]
+            obligation_row = connection.execute(
+                """
+                SELECT obligation_type, target_surface, status, notes
+                FROM obligations
+                WHERE item_id = ?
+                """,
+                (result["item_id"],),
+            ).fetchone()
 
         self.assertEqual(eligible_count, 0)
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["obligation_type"], "governed_execution_required")
+        self.assertEqual(obligation_row["target_surface"], "ace/autonomy_contract")
+        self.assertEqual(obligation_row["status"], "open")
+        self.assertIn("not marked autonomy-eligible", obligation_row["notes"])
+
+    def test_idempotent_non_autonomous_direct_work_does_not_duplicate_obligation(self) -> None:
+        first = intake_inbound_telegram_work(
+            self.db_path,
+            chat_id="7529788084",
+            message_id="msg-204",
+            text="Please investigate whether this production issue is safe to fix.",
+            received_at="2026-05-08T17:04:00Z",
+        )
+        second = intake_inbound_telegram_work(
+            self.db_path,
+            chat_id="7529788084",
+            message_id="msg-204",
+            text="Please investigate whether this production issue is safe to fix.",
+            received_at="2026-05-08T17:04:00Z",
+        )
+
+        self.assertTrue(first["created"])
+        self.assertFalse(second["created"])
+        self.assertIsNone(second["obligation_id"])
+
+        with connect(self.db_path) as connection:
+            obligation_count = connection.execute(
+                "SELECT COUNT(*) FROM obligations WHERE item_id = ?",
+                (first["item_id"],),
+            ).fetchone()[0]
+
+        self.assertEqual(obligation_count, 1)
 
     def test_non_actionable_message_creates_no_item(self) -> None:
         result = intake_inbound_telegram_work(

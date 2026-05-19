@@ -17,6 +17,7 @@ TELEGRAM_PARSER_ACTOR = "ace.telegram_parser"
 TELEGRAM_SOURCE_EVIDENCE_URI = "ace://telegram/intake-source"
 TELEGRAM_PARSER_EVIDENCE_URI = "ace://telegram/parser-decision"
 TELEGRAM_DUPLICATE_EVIDENCE_URI = "ace://telegram/duplicate-direct-work"
+TELEGRAM_GOVERNED_EXECUTION_OBLIGATION = "governed_execution_required"
 
 _COALESCE_STATES = {"TRIAGE", "APPROVED", "CLAIMED_DONE", "VERIFIED_DONE"}
 
@@ -158,11 +159,25 @@ def intake_inbound_telegram_work(
         actor=TELEGRAM_PARSER_ACTOR,
     )
     eligibility_evidence_id = None
+    obligation_id = None
     if parse_result.autonomy_eligible:
         eligibility_evidence_id = mark_item_autonomy_eligible(
             db_path,
             item.id,
             reason=parse_result.autonomy_policy_reason or parse_result.parser_reason,
+            actor=TELEGRAM_PARSER_ACTOR,
+        )
+    elif created:
+        obligation_id = repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/autonomy_contract",
+            notes=(
+                "Direct Telegram work was intentionally not marked autonomy-eligible. "
+                "ACE must execute it through a governed work plan, attach concrete "
+                "execution evidence, or escalate before closeout. "
+                f"policy_reason={parse_result.autonomy_policy_reason}"
+            ),
             actor=TELEGRAM_PARSER_ACTOR,
         )
     duplicate_evidence_id = None
@@ -188,6 +203,7 @@ def intake_inbound_telegram_work(
         "source_evidence_id": source_evidence_id,
         "parser_evidence_id": parser_evidence_id,
         "eligibility_evidence_id": eligibility_evidence_id,
+        "obligation_id": obligation_id,
         "autonomy_eligible": parse_result.autonomy_eligible,
         "autonomy_policy_reason": parse_result.autonomy_policy_reason,
         "duplicate_evidence_id": duplicate_evidence_id,

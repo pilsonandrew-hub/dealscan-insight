@@ -293,6 +293,46 @@ class AceCycleTests(unittest.TestCase):
         self.assertIn("item.closeout_attempted", event_types)
         self.assertIn("item.state_changed", event_types)
 
+    def test_cycle_keeps_broad_direct_work_open_with_governed_obligation(self) -> None:
+        message = {
+            "chat_id": "7529788084",
+            "message_id": "msg-201",
+            "text": "Please investigate whether this production issue is safe to fix.",
+            "received_at": "2026-05-08T16:55:00Z",
+            "sender_id": "7529788084",
+            "sender_name": "Andrew Pilson",
+        }
+
+        with patch("ace.cycle.fetch_unprocessed_telegram_messages", return_value=[message]), patch("ace.cycle.mark_telegram_message_processed"):
+            result = run_cycle(self.db_path, actor="launchd", briefing_path=self.briefing_path)
+
+        self.assertEqual(result["governed_run"]["status"], "completed")
+        self.assertEqual(result["autonomy"]["verified_done_ids"], [])
+
+        item = self.repo.get_item_by_source_and_session("telegram/direct", "telegram:7529788084:msg-201")
+        self.assertIsNotNone(item)
+        assert item is not None
+        self.assertEqual(item.state, "TRIAGE")
+
+        with connect(self.db_path) as connection:
+            obligation_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM obligations
+                WHERE item_id = ?
+                  AND obligation_type = 'governed_execution_required'
+                  AND status = 'open'
+                """,
+                (item.id,),
+            ).fetchone()[0]
+            eligibility_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = 'ace://autonomy/eligible-direct-work'",
+                (item.id,),
+            ).fetchone()[0]
+
+        self.assertEqual(obligation_count, 1)
+        self.assertEqual(eligibility_count, 0)
+
     def test_cycle_skips_when_another_cycle_is_active(self) -> None:
         fresh_active_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         with connect(self.db_path) as connection:
