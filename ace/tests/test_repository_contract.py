@@ -166,17 +166,17 @@ class ItemRepositoryContractTests(unittest.TestCase):
         )
         self.assertIsNone(found)
 
-    def test_get_item_by_source_and_session_rejects_duplicate_provenance_rows(self) -> None:
+    def test_create_item_reuses_existing_item_for_duplicate_provenance(self) -> None:
         source = "continuity/open-loops.json"
         source_session = "continuity/open-loops.json|dup|digest"
-        self.repo.create_item(
+        first = self.repo.create_item(
             item_type="continuity_open_loop",
             title="First",
             source=source,
             source_session=source_session,
             actor="test",
         )
-        self.repo.create_item(
+        second = self.repo.create_item(
             item_type="continuity_open_loop",
             title="Second",
             source=source,
@@ -184,8 +184,22 @@ class ItemRepositoryContractTests(unittest.TestCase):
             actor="test",
         )
 
-        with self.assertRaises(ValidationError):
-            self.repo.get_item_by_source_and_session(source, source_session)
+        self.assertEqual(second, first)
+        found = self.repo.get_item_by_source_and_session(source, source_session)
+        self.assertEqual(found, first)
+
+        with connect(self.db_path) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM items WHERE source = ? AND source_session = ?",
+                (source, source_session),
+            ).fetchone()[0]
+            created_event_count = connection.execute(
+                "SELECT COUNT(*) FROM events WHERE item_id = ? AND event_type = ?",
+                (first.id, "item.created"),
+            ).fetchone()[0]
+
+        self.assertEqual(count, 1)
+        self.assertEqual(created_event_count, 1)
 
     def test_add_evidence_rejects_whitespace_only_text(self) -> None:
         item = self.repo.create_item(item_type="note", title="Evidence target", actor="test")

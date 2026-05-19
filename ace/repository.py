@@ -266,32 +266,48 @@ class ItemRepository:
             event_payload.update(created_payload_extra)
 
         with connect(self.db_path) as connection:
-            connection.execute(
-                """
-                INSERT INTO items (
-                    id, item_type, title, description, state, priority_hint,
-                    confidence_tier, verdict, source, source_session, deadline_at,
-                    owner, created_at, updated_at, last_event_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item_id,
-                    normalized_item_type,
-                    normalized_title,
-                    normalized_description,
-                    normalized_state,
-                    normalized_priority_hint,
-                    normalized_confidence_tier,
-                    normalized_verdict,
-                    normalized_source,
-                    normalized_source_session,
-                    deadline_at,
-                    normalized_owner,
-                    created_at,
-                    created_at,
-                    None,
-                ),
-            )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO items (
+                        id, item_type, title, description, state, priority_hint,
+                        confidence_tier, verdict, source, source_session, deadline_at,
+                        owner, created_at, updated_at, last_event_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item_id,
+                        normalized_item_type,
+                        normalized_title,
+                        normalized_description,
+                        normalized_state,
+                        normalized_priority_hint,
+                        normalized_confidence_tier,
+                        normalized_verdict,
+                        normalized_source,
+                        normalized_source_session,
+                        deadline_at,
+                        normalized_owner,
+                        created_at,
+                        created_at,
+                        None,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                if normalized_source is not None and normalized_source_session is not None:
+                    existing_row = connection.execute(
+                        """
+                        SELECT *
+                        FROM items
+                        WHERE source = ? AND source_session = ?
+                        ORDER BY created_at ASC, id ASC
+                        LIMIT 1
+                        """,
+                        (normalized_source, normalized_source_session),
+                    ).fetchone()
+                    if existing_row is not None:
+                        return self._row_to_item(existing_row)
+                raise ValidationError(f"failed to create item: {exc}") from exc
             event_id = append_event(
                 connection,
                 event_type="item.created",

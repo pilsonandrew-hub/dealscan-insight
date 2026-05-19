@@ -227,6 +227,11 @@ SCHEMA_STATEMENTS = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_items_state ON items(state)",
     "CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)",
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_items_source_session_unique
+    ON items(source, source_session)
+    WHERE source IS NOT NULL AND source_session IS NOT NULL
+    """,
     "CREATE INDEX IF NOT EXISTS idx_events_item_id ON events(item_id)",
     "CREATE INDEX IF NOT EXISTS idx_action_queue_status ON action_queue(status)",
     "CREATE INDEX IF NOT EXISTS idx_obligations_item_status ON obligations(item_id, status)",

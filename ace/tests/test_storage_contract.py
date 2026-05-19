@@ -46,6 +46,50 @@ class StorageContractTests(unittest.TestCase):
         self.assertIn("delivery_state", columns)
         self.assertIn("metadata_json", columns)
 
+    def test_bootstrap_db_enforces_unique_non_null_item_provenance(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO items (
+                    id, item_type, title, state, source, source_session, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("item_one", "task", "First", "TRIAGE", "source-a", "session-a", now, now),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO items (
+                        id, item_type, title, state, source, source_session, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("item_two", "task", "Second", "TRIAGE", "source-a", "session-a", now, now),
+                )
+
+    def test_bootstrap_db_allows_multiple_items_without_full_provenance(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO items (id, item_type, title, state, source, source_session, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("item_one", "task", "First", "TRIAGE", None, None, now, now),
+            )
+            connection.execute(
+                """
+                INSERT INTO items (id, item_type, title, state, source, source_session, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("item_two", "task", "Second", "TRIAGE", None, None, now, now),
+            )
+            count = connection.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+
+        self.assertEqual(count, 2)
+
     def test_utc_now_returns_zulu_timestamp(self) -> None:
         value = utc_now()
         self.assertTrue(value.endswith("Z"))
