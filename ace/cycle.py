@@ -6,7 +6,7 @@ from typing import Any
 from .action_runtime import NotificationSender, send_operator_notification
 from .autonomy_lane import run_autonomy_lane
 from .briefing import generate_briefing, render_briefing_text
-from .governed_execution import run_governed_execution_planner
+from .governed_execution import run_governed_execution
 from .cost_guardrails import enforce_cost_guardrails
 from .telegram_intake import intake_inbound_telegram_work
 from .telegram_runtime import fetch_unprocessed_telegram_messages, mark_telegram_message_processed
@@ -96,7 +96,7 @@ def run_cycle(
             source_session=governed_run["run_id"],
             now=now,
         )
-        governed_execution_result = run_governed_execution_planner(
+        governed_execution_result = run_governed_execution(
             db_path,
             actor=actor,
             source_session=governed_run["run_id"],

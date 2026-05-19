@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,8 @@ def _hours_after(timestamp: str, hours: int) -> str:
 
 class AceCycleTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.env_patcher = patch.dict(os.environ, {"ACE_TELEGRAM_TRANSPORT": "none"})
+        self.env_patcher.start()
         self.tempdir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tempdir.name) / "ace.db"
         self.briefing_path = Path(self.tempdir.name) / "ace_briefing.md"
@@ -33,6 +36,7 @@ class AceCycleTests(unittest.TestCase):
         self.repo = ItemRepository(self.db_path)
 
     def tearDown(self) -> None:
+        self.env_patcher.stop()
         self.tempdir.cleanup()
 
     def test_cycle_writes_briefing_file_without_notifications_when_no_actionable_findings(self) -> None:
@@ -156,6 +160,62 @@ class AceCycleTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(notification_actions, 0)
         self.assertEqual(notification_evidence, 0)
+
+    def test_launchd_cycle_executes_and_closes_bounded_internal_inspection_without_notification(self) -> None:
+        from ace.telegram_intake import TELEGRAM_GOVERNED_EXECUTION_OBLIGATION
+
+        item = self.repo.create_item(
+            item_type="work",
+            title="Verify ACE audit status from launchd",
+            description="Bounded internal inspection-class work. No external side effects.",
+            source="ace/internal",
+            source_session="cycle:launchd-governed-exec-proof",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/governed_execution",
+            actor="test",
+        )
+
+        with patch("ace.cycle.fetch_unprocessed_telegram_messages", return_value=[]):
+            result = run_cycle(
+                self.db_path,
+                actor="launchd",
+                now="2026-05-05T00:00:00Z",
+                briefing_path=self.briefing_path,
+                disable_notifications=False,
+            )
+
+        self.assertEqual(result["governed_run"]["status"], "completed")
+        self.assertEqual(result["governed_run"]["trigger_kind"], "launchd")
+        self.assertEqual(result["notification_count"], 0)
+        self.assertEqual(result["governed_execution"]["executed_ids"], [item.id])
+        self.assertEqual(result["governed_execution"]["closed_ids"], [item.id])
+        closed = self.repo.get_item(item.id)
+        self.assertIsNotNone(closed)
+        assert closed is not None
+        self.assertEqual(closed.state, "VERIFIED_DONE")
+        self.assertEqual(closed.verdict, "pass")
+        with connect(self.db_path) as connection:
+            obligation_row = connection.execute(
+                "SELECT status, satisfied_at FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()
+            result_evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (item.id, "ace://governed-execution/result"),
+            ).fetchone()[0]
+            delivery_evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE evidence_uri = 'ace://notification/delivery'"
+            ).fetchone()[0]
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["status"], "resolved")
+        self.assertIsNotNone(obligation_row["satisfied_at"])
+        self.assertEqual(result_evidence_count, 1)
+        self.assertEqual(delivery_evidence_count, 0)
 
     def test_cycle_records_interrupted_terminal_state(self) -> None:
         self.repo.create_item(item_type="note", title="Interrupt target")

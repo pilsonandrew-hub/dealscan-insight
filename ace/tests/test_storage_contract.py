@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,7 +40,7 @@ class StorageContractTests(unittest.TestCase):
 
     def test_bootstrap_db_creates_local_alert_log_for_transport_proof(self) -> None:
         bootstrap_db(self.db_path)
-        with sqlite3.connect(self.db_path) as connection:
+        with closing(sqlite3.connect(self.db_path)) as connection:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(alert_log)").fetchall()}
         self.assertIn("message_id", columns)
         self.assertIn("delivery_state", columns)

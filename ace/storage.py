@@ -472,21 +472,55 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
     return True, None
 
 
+def _verify_event_hash_chain_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    previous_event_hash: str | None = None
+    with connect(db_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _backfill_event_hashes(connection)
+        rows = connection.execute(
+            """
+            SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+                   created_at, previous_event_hash, event_hash
+            FROM events
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        connection.commit()
+
+    for row in rows:
+        if row["previous_event_hash"] != previous_event_hash:
+            return False, f"event {row['event_id']} has broken previous_event_hash"
+        expected_hash = compute_event_hash(
+            event_id=row["event_id"],
+            item_id=row["item_id"],
+            event_type=row["event_type"],
+            payload_json=row["payload_json"],
+            actor=row["actor"],
+            source=row["source"],
+            session_id=row["session_id"],
+            created_at=row["created_at"],
+            previous_event_hash=previous_event_hash,
+        )
+        if row["event_hash"] != expected_hash:
+            return False, f"event {row['event_id']} hash mismatch"
+        previous_event_hash = row["event_hash"]
+    return True, None
+
+
 def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[bool, str | None]]:
     """Return read-only audit verification results for governed ACE integrity surfaces."""
 
+    bootstrap_db(db_path)
+    event_hash_chain_result = _verify_event_hash_chain_bootstrapped(db_path)
     return {
-        "event_hash_chain": verify_event_hash_chain(db_path),
-        "evidence_consistency": verify_evidence_consistency(db_path),
-        "governed_run_integrity": verify_governed_run_integrity(db_path),
-        "runtime_instance_integrity": verify_runtime_instance_integrity(db_path),
+        "event_hash_chain": event_hash_chain_result,
+        "evidence_consistency": _verify_evidence_consistency_bootstrapped(db_path),
+        "governed_run_integrity": _verify_governed_run_integrity_bootstrapped(db_path),
+        "runtime_instance_integrity": _verify_runtime_instance_integrity_bootstrapped(db_path),
     }
 
 
-def verify_evidence_consistency(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
-    """Verify evidence rows reference existing items and, when set, existing events."""
-
-    bootstrap_db(db_path)
+def _verify_evidence_consistency_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
     with connect(db_path) as connection:
         missing_item = connection.execute(
             """
@@ -517,10 +551,7 @@ def verify_evidence_consistency(db_path: Path | str = DB_PATH) -> tuple[bool, st
     return True, None
 
 
-def verify_governed_run_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
-    """Verify governed_runs rows use valid statuses and coherent terminal timestamps."""
-
-    bootstrap_db(db_path)
+def _verify_governed_run_integrity_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
     valid_statuses = {"pending", "starting", "running", "completed", "failed", "interrupted", "skipped"}
     terminal_statuses = {"completed", "failed", "interrupted", "skipped"}
     active_statuses = {"pending", "starting", "running"}
@@ -551,10 +582,7 @@ def verify_governed_run_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, 
     return True, None
 
 
-def verify_runtime_instance_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
-    """Verify runtime_instances rows have coherent lifecycle status combinations."""
-
-    bootstrap_db(db_path)
+def _verify_runtime_instance_integrity_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
     valid_statuses = {"starting", "live", "stale", "stopped", "failed"}
     valid_startup = {"starting", "completed", "failed"}
     valid_shutdown = {"not_requested", "requested", "completed", "failed"}
@@ -611,6 +639,27 @@ def verify_runtime_instance_integrity(db_path: Path | str = DB_PATH) -> tuple[bo
 
     return True, None
 
+
+
+def verify_evidence_consistency(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Verify evidence rows reference existing items and, when set, existing events."""
+
+    bootstrap_db(db_path)
+    return _verify_evidence_consistency_bootstrapped(db_path)
+
+
+def verify_governed_run_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Verify governed_runs rows use valid statuses and coherent terminal timestamps."""
+
+    bootstrap_db(db_path)
+    return _verify_governed_run_integrity_bootstrapped(db_path)
+
+
+def verify_runtime_instance_integrity(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Verify runtime_instances rows have coherent lifecycle status combinations."""
+
+    bootstrap_db(db_path)
+    return _verify_runtime_instance_integrity_bootstrapped(db_path)
 
 def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
     db_path = Path(db_path)

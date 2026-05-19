@@ -10,8 +10,10 @@ from ace.governed_execution import (
     GOVERNED_EXECUTION_ESCALATION_EVIDENCE_URI,
     GOVERNED_EXECUTION_PLAN_EVIDENCE_URI,
     GOVERNED_EXECUTION_RESULT_EVIDENCE_URI,
+    run_governed_execution,
     run_governed_execution_planner,
 )
+from ace import governed_execution as governed_execution_module
 from ace.repository import ItemRepository
 from ace.storage import bootstrap_db, connect
 from ace.telegram_intake import TELEGRAM_GOVERNED_EXECUTION_OBLIGATION
@@ -218,3 +220,152 @@ class GovernedExecutionTests(unittest.TestCase):
 
         self.assertEqual(result["planned_ids"], [])
         self.assertEqual(result["evidence_ids"], [])
+
+class GovernedExecutionExecutorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tempdir.name) / "ace.db"
+        bootstrap_db(self.db_path)
+        self.repo = ItemRepository(self.db_path)
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def test_launchd_closes_bounded_internal_inspection_with_durable_result_evidence(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Verify ACE audit status",
+            description="Check audit integrity for the local ACE database.",
+            source="ace/internal",
+            source_session="self-test:governed-exec-inspection",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/governed_execution",
+            actor="test",
+        )
+
+        result = run_governed_execution(self.db_path, actor="launchd", source_session="run_exec")
+
+        self.assertEqual(result["planned_ids"], [item.id])
+        self.assertEqual(result["executed_ids"], [item.id])
+        self.assertEqual(result["resolved_ids"], [item.id])
+        self.assertEqual(result["closed_ids"], [item.id])
+        closed = self.repo.get_item(item.id)
+        self.assertIsNotNone(closed)
+        assert closed is not None
+        self.assertEqual(closed.state, "VERIFIED_DONE")
+        self.assertEqual(closed.verdict, "pass")
+        with connect(self.db_path) as connection:
+            obligation_row = connection.execute(
+                "SELECT status, satisfied_at FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()
+            result_row = connection.execute(
+                "SELECT evidence_text, evidence_uri, created_by FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (item.id, GOVERNED_EXECUTION_RESULT_EVIDENCE_URI),
+            ).fetchone()
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["status"], "resolved")
+        self.assertIsNotNone(obligation_row["satisfied_at"])
+        self.assertIsNotNone(result_row)
+        assert result_row is not None
+        self.assertEqual(result_row["created_by"], GOVERNED_EXECUTION_ACTOR)
+        payload = json.loads(result_row["evidence_text"])
+        self.assertEqual(payload["obligation_id"], obligation_id)
+        self.assertEqual(payload["execution_kind"], "bounded_internal_inspection")
+        self.assertTrue(payload["contract"]["no_external_side_effects"])
+        self.assertTrue(all(check["ok"] for check in payload["durable_checks"].values()))
+
+    def test_launchd_records_fail_verdict_without_verified_closeout_when_inspection_fails(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Verify ACE audit status",
+            description="Check audit integrity for the local ACE database.",
+            source="ace/internal",
+            source_session="self-test:governed-exec-failing-inspection",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/governed_execution",
+            actor="test",
+        )
+        original_verify = governed_execution_module.verify_audit_integrity
+        governed_execution_module.verify_audit_integrity = lambda db_path: {
+            "event_hash_chain": (False, "synthetic hash break")
+        }
+        try:
+            result = run_governed_execution(self.db_path, actor="launchd", source_session="run_exec_fail")
+        finally:
+            governed_execution_module.verify_audit_integrity = original_verify
+
+        self.assertEqual(result["executed_ids"], [item.id])
+        self.assertEqual(result["closed_ids"], [])
+        checked = self.repo.get_item(item.id)
+        self.assertIsNotNone(checked)
+        assert checked is not None
+        self.assertEqual(checked.state, "CLAIMED_DONE")
+        self.assertEqual(checked.verdict, "fail")
+        with connect(self.db_path) as connection:
+            obligation_row = connection.execute(
+                "SELECT status, satisfied_at FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()
+            result_row = connection.execute(
+                "SELECT evidence_text FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (item.id, GOVERNED_EXECUTION_RESULT_EVIDENCE_URI),
+            ).fetchone()
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["status"], "resolved")
+        self.assertIsNotNone(obligation_row["satisfied_at"])
+        self.assertIsNotNone(result_row)
+        assert result_row is not None
+        payload = json.loads(result_row["evidence_text"])
+        self.assertEqual(payload["result"], "fail")
+        self.assertEqual(payload["durable_checks"]["event_hash_chain"]["detail"], "synthetic hash break")
+
+    def test_launchd_does_not_execute_telegram_broad_work_without_result_or_escalation(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Fix production issue",
+            source="telegram/direct",
+            source_session="telegram:7529788084:broad-work",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/governed_execution",
+            actor="test",
+        )
+
+        result = run_governed_execution(self.db_path, actor="launchd", source_session="run_safe")
+
+        self.assertEqual(result["planned_ids"], [item.id])
+        self.assertEqual(result["executed_ids"], [])
+        self.assertEqual(result["closed_ids"], [])
+        held = self.repo.get_item(item.id)
+        self.assertIsNotNone(held)
+        assert held is not None
+        self.assertEqual(held.state, "TRIAGE")
+        self.assertIsNone(held.verdict)
+        with connect(self.db_path) as connection:
+            obligation_row = connection.execute(
+                "SELECT status, satisfied_at FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()
+            result_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (item.id, GOVERNED_EXECUTION_RESULT_EVIDENCE_URI),
+            ).fetchone()[0]
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["status"], "open")
+        self.assertIsNone(obligation_row["satisfied_at"])
+        self.assertEqual(result_count, 0)
