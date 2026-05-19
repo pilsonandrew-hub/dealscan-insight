@@ -48,6 +48,8 @@ class TelegramIntakeTests(unittest.TestCase):
         self.assertEqual(payload["source_message_id"], "msg-100")
         self.assertEqual(payload["source_chat_id"], "7529788084")
         self.assertEqual(payload["source_received_at"], "2026-05-08T16:50:00Z")
+        self.assertIsInstance(payload["semantic_direct_work_key"], str)
+        self.assertEqual(len(payload["semantic_direct_work_key"]), 64)
         self.assertEqual(payload["parser_rule"], "bounded_direct_work_rule")
         self.assertIn("can you", payload["parser_reason"])
         self.assertEqual(payload["intake_actor"], "ace.telegram_intake")
@@ -89,6 +91,41 @@ class TelegramIntakeTests(unittest.TestCase):
             ).fetchone()[0]
 
         self.assertEqual(count, 1)
+
+    def test_semantically_duplicate_direct_work_coalesces_without_new_item(self) -> None:
+        first = intake_inbound_telegram_work(
+            self.db_path,
+            chat_id="7529788084",
+            message_id="msg-201",
+            text="Proceed + continue on that path.",
+            received_at="2026-05-08T17:01:00Z",
+        )
+        second = intake_inbound_telegram_work(
+            self.db_path,
+            chat_id="7529788084",
+            message_id="msg-202",
+            text="  Proceed   + continue on that path.  ",
+            received_at="2026-05-08T17:02:00Z",
+        )
+
+        self.assertTrue(first["created"])
+        self.assertFalse(second["created"])
+        self.assertTrue(second["coalesced"])
+        self.assertEqual(first["item_id"], second["item_id"])
+        self.assertIsNotNone(second["duplicate_evidence_id"])
+
+        with connect(self.db_path) as connection:
+            item_count = connection.execute(
+                "SELECT COUNT(*) FROM items WHERE source = ?",
+                ("telegram/direct",),
+            ).fetchone()[0]
+            duplicate_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (first["item_id"], "ace://telegram/duplicate-direct-work"),
+            ).fetchone()[0]
+
+        self.assertEqual(item_count, 1)
+        self.assertEqual(duplicate_count, 1)
 
     def test_non_actionable_message_creates_no_item(self) -> None:
         result = intake_inbound_telegram_work(
