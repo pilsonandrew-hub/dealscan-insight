@@ -21,6 +21,7 @@ from ace.action_runtime import (
     enqueue_operator_notification,
     execute_record_operator_followup,
     execute_operator_notification,
+    run_action_queue_dispatcher,
     send_jace_status_message,
     send_operator_notification,
 )
@@ -102,6 +103,49 @@ class ActionRuntimeTests(unittest.TestCase):
                 ),
             )
             connection.commit()
+
+    def test_action_queue_dispatcher_executes_only_local_evidence_actions(self) -> None:
+        followup = enqueue_record_operator_followup(
+            self.db_path,
+            self.item.id,
+            note="Record bounded local follow-up",
+        )
+        notification = enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="jace",
+            target="7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+
+        result = run_action_queue_dispatcher(self.db_path, actor="test.dispatcher")
+
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["executed_count"], 1)
+        self.assertEqual(result["failed_count"], 0)
+        self.assertEqual(result["executed"][0]["action_id"], followup["action_id"])
+        with connect(self.db_path) as connection:
+            followup_row = connection.execute(
+                "SELECT status FROM action_queue WHERE id = ?",
+                (followup["action_id"],),
+            ).fetchone()
+            notification_row = connection.execute(
+                "SELECT status FROM action_queue WHERE id = ?",
+                (notification["action_id"],),
+            ).fetchone()
+            followup_evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (self.item.id, ACTION_EVIDENCE_URI),
+            ).fetchone()[0]
+            notification_evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (self.item.id, NOTIFICATION_ACTION_EVIDENCE_URI),
+            ).fetchone()[0]
+        self.assertEqual(followup_row["status"], "completed")
+        self.assertEqual(notification_row["status"], "queued")
+        self.assertEqual(followup_evidence_count, 1)
+        self.assertEqual(notification_evidence_count, 0)
 
     def test_enqueue_claim_execute_writes_one_evidence_row_and_completes(self) -> None:
         enqueue_result = enqueue_record_operator_followup(

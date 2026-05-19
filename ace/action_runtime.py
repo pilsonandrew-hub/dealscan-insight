@@ -47,6 +47,88 @@ class JaceStatusDeliveryError(RuntimeError):
 NotificationSender = Callable[..., dict[str, Any]]
 
 
+DISPATCHABLE_LOCAL_ACTION_KINDS = frozenset({ACTION_KIND, REJECTION_ACTION_KIND})
+
+
+def run_action_queue_dispatcher(
+    db_path: Path | str = DB_PATH,
+    *,
+    actor: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Drain a bounded set of safe local queued actions.
+
+    This dispatcher intentionally excludes external-delivery actions such as
+    operator notifications. It only executes local, durable evidence-recording
+    actions whose side effect is confined to the ACE database.
+    """
+    bootstrap_db(db_path)
+    if limit < 1:
+        raise ValidationError("limit must be >= 1")
+
+    candidates = _queued_dispatchable_actions(db_path, limit=limit)
+    executed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for candidate in candidates:
+        action_id = str(candidate["id"])
+        action_type = str(candidate["action_type"])
+        try:
+            if action_type == ACTION_KIND:
+                claim_record_operator_followup(db_path, action_id, actor=actor)
+                result = execute_record_operator_followup(db_path, action_id, actor=actor)
+            elif action_type == REJECTION_ACTION_KIND:
+                claim_record_operator_rejection(db_path, action_id, actor=actor)
+                result = execute_record_operator_rejection(db_path, action_id, actor=actor)
+            else:  # pragma: no cover - guarded by query and kept as a hard boundary
+                skipped.append({
+                    "action_id": action_id,
+                    "action_type": action_type,
+                    "reason": "unsupported_action_type",
+                })
+                continue
+        except Exception as exc:  # pragma: no cover - defensive dispatcher boundary
+            failed.append({
+                "action_id": action_id,
+                "action_type": action_type,
+                "error": str(exc) or exc.__class__.__name__,
+            })
+            continue
+
+        if result["status"] == _ACTION_STATUS_FAILED:
+            failed.append(result)
+        else:
+            executed.append(result)
+
+    return {
+        "candidate_count": len(candidates),
+        "executed_count": len(executed),
+        "failed_count": len(failed),
+        "skipped_count": len(skipped),
+        "executed": executed,
+        "failed": failed,
+        "skipped": skipped,
+    }
+
+
+def _queued_dispatchable_actions(db_path: Path | str, *, limit: int) -> list[sqlite3.Row]:
+    allowed_kinds = sorted(DISPATCHABLE_LOCAL_ACTION_KINDS)
+    placeholders = ", ".join("?" for _ in allowed_kinds)
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, action_type
+            FROM action_queue
+            WHERE status = ? AND action_type IN ({placeholders})
+            ORDER BY priority DESC, created_at ASC, id ASC
+            LIMIT ?
+            """,
+            (_ACTION_STATUS_QUEUED, *allowed_kinds, limit),
+        ).fetchall()
+    return list(rows)
+
+
 def send_jace_status_message(
     db_path: Path | str = DB_PATH,
     item_id: str | None = None,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .action_runtime import NotificationSender, send_operator_notification
+from .action_runtime import NotificationSender, run_action_queue_dispatcher, send_operator_notification
 from .autonomy_lane import run_autonomy_lane
 from .briefing import generate_briefing, render_briefing_text
 from .governed_execution import run_governed_execution
@@ -102,6 +102,10 @@ def run_cycle(
             source_session=governed_run["run_id"],
             now=now,
         )
+        action_queue_result = run_action_queue_dispatcher(
+            db_path,
+            actor=actor,
+        )
         sweep_result = run_sweep(db_path, thresholds=thresholds, actor=actor, now=now)
         briefing = generate_briefing(db_path, thresholds=thresholds, now=now)
 
@@ -151,6 +155,7 @@ def run_cycle(
             "ingested_messages": ingested_messages,
             "autonomy": autonomy_result,
             "governed_execution": governed_execution_result,
+            "action_queue": action_queue_result,
             "sweep": sweep_result,
             "briefing": briefing,
             "briefing_path": str(briefing_file),

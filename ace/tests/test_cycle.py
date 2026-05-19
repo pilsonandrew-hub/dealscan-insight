@@ -217,6 +217,61 @@ class AceCycleTests(unittest.TestCase):
         self.assertEqual(result_evidence_count, 1)
         self.assertEqual(delivery_evidence_count, 0)
 
+    def test_cycle_dispatches_queued_local_action_without_external_notification(self) -> None:
+        from ace.action_runtime import (
+            ACTION_EVIDENCE_URI,
+            enqueue_operator_notification,
+            enqueue_record_operator_followup,
+        )
+
+        item = self.repo.create_item(item_type="note", title="Queued local action target")
+        followup = enqueue_record_operator_followup(
+            self.db_path,
+            item.id,
+            note="Cycle may record this local follow-up",
+        )
+        notification = enqueue_operator_notification(
+            self.db_path,
+            item.id,
+            channel="jace",
+            target="7529788084",
+            reason="stale_triage",
+            age_context="48h stale",
+        )
+
+        with patch("ace.cycle.fetch_unprocessed_telegram_messages", return_value=[]):
+            result = run_cycle(
+                self.db_path,
+                actor="launchd",
+                now="2026-05-05T00:00:00Z",
+                briefing_path=self.briefing_path,
+            )
+
+        self.assertEqual(result["governed_run"]["status"], "completed")
+        self.assertEqual(result["action_queue"]["executed_count"], 1)
+        self.assertEqual(result["action_queue"]["executed"][0]["action_id"], followup["action_id"])
+        self.assertEqual(result["notification_count"], 0)
+        with connect(self.db_path) as connection:
+            followup_row = connection.execute(
+                "SELECT status FROM action_queue WHERE id = ?",
+                (followup["action_id"],),
+            ).fetchone()
+            notification_row = connection.execute(
+                "SELECT status FROM action_queue WHERE id = ?",
+                (notification["action_id"],),
+            ).fetchone()
+            local_evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE item_id = ? AND evidence_uri = ?",
+                (item.id, ACTION_EVIDENCE_URI),
+            ).fetchone()[0]
+            delivery_evidence_count = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE evidence_uri = 'ace://notification/delivery'"
+            ).fetchone()[0]
+        self.assertEqual(followup_row["status"], "completed")
+        self.assertEqual(notification_row["status"], "queued")
+        self.assertEqual(local_evidence_count, 1)
+        self.assertEqual(delivery_evidence_count, 0)
+
     def test_cycle_records_interrupted_terminal_state(self) -> None:
         self.repo.create_item(item_type="note", title="Interrupt target")
 
