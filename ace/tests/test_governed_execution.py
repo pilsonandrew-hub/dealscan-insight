@@ -7,7 +7,9 @@ from pathlib import Path
 
 from ace.governed_execution import (
     GOVERNED_EXECUTION_ACTOR,
+    GOVERNED_EXECUTION_ESCALATION_EVIDENCE_URI,
     GOVERNED_EXECUTION_PLAN_EVIDENCE_URI,
+    GOVERNED_EXECUTION_RESULT_EVIDENCE_URI,
     run_governed_execution_planner,
 )
 from ace.repository import ItemRepository
@@ -96,6 +98,117 @@ class GovernedExecutionTests(unittest.TestCase):
             ).fetchone()[0]
 
         self.assertEqual(evidence_count, 1)
+
+    def test_planner_resolves_obligation_when_result_evidence_exists(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Investigate production issue",
+            source="telegram/direct",
+            source_session="telegram:7529788084:governed-exec-3",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/autonomy_contract",
+            actor="test",
+        )
+        self.repo.add_evidence(
+            item.id,
+            evidence_text=json.dumps({"obligation_id": obligation_id, "result": "completed with proof"}),
+            evidence_uri=GOVERNED_EXECUTION_RESULT_EVIDENCE_URI,
+            created_by="test.executor",
+            actor="test",
+        )
+
+        result = run_governed_execution_planner(self.db_path, actor="launchd", source_session="run_result")
+
+        self.assertEqual(result["resolved_ids"], [item.id])
+        self.assertEqual(result["planned_ids"], [])
+        with connect(self.db_path) as connection:
+            obligation_row = connection.execute(
+                "SELECT status, satisfied_at FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()
+            event_row = connection.execute(
+                "SELECT payload_json FROM events WHERE item_id = ? AND event_type = 'item.obligation_resolved'",
+                (item.id,),
+            ).fetchone()
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["status"], "resolved")
+        self.assertIsNotNone(obligation_row["satisfied_at"])
+        self.assertIsNotNone(event_row)
+        assert event_row is not None
+        self.assertIn("governed execution result evidence is present", event_row["payload_json"])
+
+    def test_planner_resolves_obligation_when_escalation_evidence_exists(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Escalate unclear issue",
+            source="telegram/direct",
+            source_session="telegram:7529788084:governed-exec-4",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/autonomy_contract",
+            actor="test",
+        )
+        self.repo.add_evidence(
+            item.id,
+            evidence_text=json.dumps({"obligation_id": obligation_id, "escalation": "needs operator approval"}),
+            evidence_uri=GOVERNED_EXECUTION_ESCALATION_EVIDENCE_URI,
+            created_by="test.executor",
+            actor="test",
+        )
+
+        result = run_governed_execution_planner(self.db_path, actor="launchd", source_session="run_escalation")
+
+        self.assertEqual(result["escalated_ids"], [item.id])
+        with connect(self.db_path) as connection:
+            obligation_row = connection.execute(
+                "SELECT status, satisfied_at FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()
+        self.assertIsNotNone(obligation_row)
+        assert obligation_row is not None
+        self.assertEqual(obligation_row["status"], "resolved")
+        self.assertIsNotNone(obligation_row["satisfied_at"])
+
+    def test_planner_ignores_result_evidence_for_different_obligation(self) -> None:
+        item = self.repo.create_item(
+            item_type="work",
+            title="Investigate production issue",
+            source="telegram/direct",
+            source_session="telegram:7529788084:governed-exec-5",
+            actor="test",
+        )
+        obligation_id = self.repo.add_obligation(
+            item.id,
+            obligation_type=TELEGRAM_GOVERNED_EXECUTION_OBLIGATION,
+            target_surface="ace/autonomy_contract",
+            actor="test",
+        )
+        self.repo.add_evidence(
+            item.id,
+            evidence_text=json.dumps({"obligation_id": "other_obligation", "result": "not this obligation"}),
+            evidence_uri=GOVERNED_EXECUTION_RESULT_EVIDENCE_URI,
+            created_by="test.executor",
+            actor="test",
+        )
+
+        result = run_governed_execution_planner(self.db_path, actor="launchd", source_session="run_wrong_evidence")
+
+        self.assertEqual(result["resolved_ids"], [])
+        self.assertEqual(result["planned_ids"], [item.id])
+        with connect(self.db_path) as connection:
+            obligation_status = connection.execute(
+                "SELECT status FROM obligations WHERE id = ?",
+                (obligation_id,),
+            ).fetchone()[0]
+        self.assertEqual(obligation_status, "open")
 
     def test_planner_ignores_other_obligations(self) -> None:
         item = self.repo.create_item(item_type="work", title="Other obligation", actor="test")

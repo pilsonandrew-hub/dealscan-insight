@@ -11,6 +11,8 @@ from .telegram_intake import TELEGRAM_GOVERNED_EXECUTION_OBLIGATION
 
 GOVERNED_EXECUTION_ACTOR = "ace.governed_execution"
 GOVERNED_EXECUTION_PLAN_EVIDENCE_URI = "ace://governed-execution/plan"
+GOVERNED_EXECUTION_RESULT_EVIDENCE_URI = "ace://governed-execution/result"
+GOVERNED_EXECUTION_ESCALATION_EVIDENCE_URI = "ace://governed-execution/escalation"
 GOVERNED_EXECUTION_SOURCE = "ace/governed_execution.py"
 
 
@@ -34,6 +36,8 @@ def run_governed_execution_planner(
     acting_session = source_session or now or utc_now()
 
     planned_ids: list[str] = []
+    resolved_ids: list[str] = []
+    escalated_ids: list[str] = []
     evidence_ids: list[str] = []
     obligation_ids: list[str] = []
 
@@ -42,6 +46,42 @@ def run_governed_execution_planner(
         obligation_id = str(row["id"])
         item = repo.get_item(item_id)
         if item is None:
+            continue
+        result_evidence_id = _existing_evidence_id_for_obligation(
+            db_path,
+            item_id,
+            obligation_id,
+            GOVERNED_EXECUTION_RESULT_EVIDENCE_URI,
+        )
+        escalation_evidence_id = _existing_evidence_id_for_obligation(
+            db_path,
+            item_id,
+            obligation_id,
+            GOVERNED_EXECUTION_ESCALATION_EVIDENCE_URI,
+        )
+        if result_evidence_id is not None:
+            repo.resolve_obligation(
+                obligation_id,
+                reason=(
+                    "governed execution result evidence is present; broad direct-work "
+                    f"obligation satisfied by evidence_id={result_evidence_id}"
+                ),
+                actor=acting_actor,
+            )
+            resolved_ids.append(item_id)
+            obligation_ids.append(obligation_id)
+            continue
+        if escalation_evidence_id is not None:
+            repo.resolve_obligation(
+                obligation_id,
+                reason=(
+                    "governed execution escalation evidence is present; broad direct-work "
+                    f"obligation satisfied by escalation_evidence_id={escalation_evidence_id}"
+                ),
+                actor=acting_actor,
+            )
+            escalated_ids.append(item_id)
+            obligation_ids.append(obligation_id)
             continue
         if _existing_plan_evidence_id(db_path, item_id, obligation_id) is not None:
             continue
@@ -80,6 +120,8 @@ def run_governed_execution_planner(
 
     return {
         "planned_ids": planned_ids,
+        "resolved_ids": resolved_ids,
+        "escalated_ids": escalated_ids,
         "evidence_ids": evidence_ids,
         "obligation_ids": obligation_ids,
     }
@@ -102,18 +144,47 @@ def _open_governed_execution_obligations(db_path: Path | str) -> list[Any]:
 
 
 def _existing_plan_evidence_id(db_path: Path | str, item_id: str, obligation_id: str) -> str | None:
+    return _existing_evidence_id_for_obligation(
+        db_path,
+        item_id,
+        obligation_id,
+        GOVERNED_EXECUTION_PLAN_EVIDENCE_URI,
+        created_by=GOVERNED_EXECUTION_ACTOR,
+    )
+
+
+def _existing_evidence_id_for_obligation(
+    db_path: Path | str,
+    item_id: str,
+    obligation_id: str,
+    evidence_uri: str,
+    *,
+    created_by: str | None = None,
+) -> str | None:
     with connect(db_path) as connection:
-        rows = connection.execute(
-            """
-            SELECT id, evidence_text
-            FROM evidence
-            WHERE item_id = ?
-              AND evidence_uri = ?
-              AND created_by = ?
-            ORDER BY created_at ASC, id ASC
-            """,
-            (item_id, GOVERNED_EXECUTION_PLAN_EVIDENCE_URI, GOVERNED_EXECUTION_ACTOR),
-        ).fetchall()
+        if created_by is None:
+            rows = connection.execute(
+                """
+                SELECT id, evidence_text
+                FROM evidence
+                WHERE item_id = ?
+                  AND evidence_uri = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (item_id, evidence_uri),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT id, evidence_text
+                FROM evidence
+                WHERE item_id = ?
+                  AND evidence_uri = ?
+                  AND created_by = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (item_id, evidence_uri, created_by),
+            ).fetchall()
     for row in rows:
         try:
             payload = json.loads(row["evidence_text"])
