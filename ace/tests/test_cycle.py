@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ace.cycle import run_cycle
+from ace.sweep import SweepThresholds
 from ace.autonomy_lane import AUTONOMY_ITEM_TYPE
 from ace.governed_run_runtime import get_governed_cycle_run_status
 from ace.governed_run_runtime import correct_governed_run_trigger_kind
@@ -104,6 +105,57 @@ class AceCycleTests(unittest.TestCase):
         self.assertEqual(status["last_terminal_run"]["status"], "completed")
         self.assertEqual(status["last_terminal_run"]["notification_action_id"], result["notifications"][0]["action_id"])
         self.assertEqual(status["last_terminal_run"]["delivery_evidence_id"], result["notifications"][0]["evidence_id"])
+
+    def test_cycle_does_not_resend_notifications_for_suppressed_findings(self) -> None:
+        item = self.repo.create_item(item_type="note", title="Old triage item")
+        stale_now = _hours_after(item.created_at, 25)
+        sender_calls: list[dict[str, object]] = []
+
+        def fake_sender(**kwargs: object) -> dict[str, object]:
+            sender_calls.append(kwargs)
+            return {"ok": True, "provider": "test"}
+
+        immediate_thresholds = SweepThresholds(triage_after_seconds=0)
+        first_now = _hours_after(item.created_at, 25)
+        second_now = _hours_after(item.created_at, 50)
+
+        first = run_cycle(
+            self.db_path,
+            now=first_now,
+            briefing_path=self.briefing_path,
+            thresholds=immediate_thresholds,
+            notification_channel="telegram",
+            notification_target="telegram:7529788084",
+            sender=fake_sender,
+            disable_notifications=True,
+        )
+        second = run_cycle(
+            self.db_path,
+            now=second_now,
+            briefing_path=self.briefing_path,
+            thresholds=immediate_thresholds,
+            notification_channel="telegram",
+            notification_target="telegram:7529788084",
+            sender=fake_sender,
+        )
+
+        self.assertEqual(first["actionable_finding_count"], 1)
+        self.assertEqual(first["notification_count"], 0)
+        self.assertEqual(second["actionable_finding_count"], 1)
+        self.assertEqual(second["sweep"]["suppressed_count"], 1)
+        self.assertTrue(second["sweep"]["findings"][0]["suppressed"])
+        self.assertEqual(second["notification_count"], 0)
+        self.assertEqual(len(sender_calls), 0)
+
+        with connect(self.db_path) as connection:
+            notification_actions = connection.execute(
+                "SELECT COUNT(*) FROM action_queue WHERE action_type = 'send_operator_notification'"
+            ).fetchone()[0]
+            notification_evidence = connection.execute(
+                "SELECT COUNT(*) FROM evidence WHERE evidence_uri = 'ace://notification/delivery'"
+            ).fetchone()[0]
+        self.assertEqual(notification_actions, 0)
+        self.assertEqual(notification_evidence, 0)
 
     def test_cycle_records_interrupted_terminal_state(self) -> None:
         self.repo.create_item(item_type="note", title="Interrupt target")

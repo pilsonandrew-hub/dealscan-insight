@@ -103,16 +103,19 @@ def run_cycle(
         briefing_file.write_text(rendered_briefing + "\n", encoding="utf-8")
 
         actionable_findings = list(sweep_result.get("findings", []))
+        notification_findings = [
+            finding for finding in actionable_findings if not finding.get("suppressed", False)
+        ]
         notifications_suppressed = False
         if disable_notifications:
-            notifications_suppressed = bool(actionable_findings)
+            notifications_suppressed = bool(notification_findings)
         else:
-            if actionable_findings and (not notification_channel or not notification_target):
+            if notification_findings and (not notification_channel or not notification_target):
                 raise ValidationError(
                     "notification_channel and notification_target are required when actionable findings exist"
                 )
 
-            for finding in actionable_findings:
+            for finding in notification_findings:
                 notification_results.append(
                     send_operator_notification(
                         db_path,
