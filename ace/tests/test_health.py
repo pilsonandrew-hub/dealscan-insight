@@ -176,6 +176,66 @@ class HealthSummaryTests(unittest.TestCase):
         self.assertEqual(summary["notification_delivery_evidence_count"], 0)
         self.assertEqual(summary["alert_gap_count"], 1)
 
+    def test_historical_accepted_health_debt_is_excluded_from_issue_counts(self) -> None:
+        enqueue_operator_notification(
+            self.db_path,
+            self.item.id,
+            channel="jace",
+            target="7529788084",
+            reason="legacy_failure",
+            age_context="legacy proof",
+        )
+        failed_run = create_governed_cycle_run(self.db_path, trigger_kind="launchd")
+        start_governed_run(self.db_path, failed_run["run_id"])
+        mark_governed_run_running(self.db_path, failed_run["run_id"])
+        fail_governed_run(
+            self.db_path,
+            failed_run["run_id"],
+            failure_code="legacy_failure",
+            failure_summary="legacy failure",
+        )
+        runtime = start_supervisor_runtime(self.db_path, runtime_family=RUNTIME_FAMILY_SINGLE_TENANT)
+        with connect(self.db_path) as connection:
+            action = connection.execute(
+                "SELECT id FROM action_queue WHERE action_type = 'send_operator_notification'"
+            ).fetchone()
+            self.assertIsNotNone(action)
+            connection.execute(
+                "UPDATE action_queue SET status = 'failed', completed_at = ?, error_message = ?, updated_at = ? WHERE id = ?",
+                ("2026-05-20T09:00:00Z", "legacy accepted", "2026-05-20T09:00:00Z", action["id"]),
+            )
+            connection.execute(
+                "UPDATE runtime_instances SET status = 'failed', failure_code = ?, ended_at = ?, updated_at = ? WHERE runtime_instance_id = ?",
+                ("legacy_runtime_failure", "2026-05-20T09:00:00Z", "2026-05-20T09:00:00Z", runtime["runtime_instance_id"]),
+            )
+            for payload in (
+                '{"action_id":"' + action["id"] + '","classification":"historical_acceptable_debt"}',
+                '{"run_id":"' + failed_run["run_id"] + '","classification":"historical_acceptable_debt"}',
+                '{"runtime_instance_id":"' + runtime["runtime_instance_id"] + '","classification":"historical_acceptable_debt"}',
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO evidence(id, item_id, evidence_text, evidence_uri, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id("evidence"),
+                        self.item.id,
+                        payload,
+                        "ace://health/historical-accepted-debt",
+                        "ace.health_triage",
+                        "2026-05-20T09:00:00Z",
+                    ),
+                )
+            connection.commit()
+
+        summary = generate_health_summary(self.db_path, now="2026-05-20T10:00:00Z")
+
+        self.assertEqual(summary["failed_action_count"], 0)
+        self.assertEqual(summary["failed_run_count"], 0)
+        self.assertEqual(summary["failed_runtime_count"], 0)
+        self.assertEqual(summary["issue_count"], 0)
+
     def test_render_health_summary_lines_is_deterministic(self) -> None:
         summary = generate_health_summary(self.db_path, now="2026-05-20T10:00:00Z")
 

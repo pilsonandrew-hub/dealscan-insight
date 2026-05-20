@@ -14,6 +14,7 @@ _SKIPPED_RUN_STATUS = "skipped"
 _ACTIVE_RUNTIME_STATUSES = ("starting", "live", "stale")
 _FAILED_RUNTIME_STATUSES = ("failed", "stale")
 _FAILED_ALERT_STATES = ("failed", "error", "rejected")
+_HISTORICAL_ACCEPTED_HEALTH_DEBT_URI = "ace://health/historical-accepted-debt"
 
 
 def generate_health_summary(
@@ -39,8 +40,20 @@ def generate_health_summary(
         )
         failed_action_count = _scalar_count(
             connection,
-            "SELECT COUNT(*) FROM action_queue WHERE status = ?",
-            (_FAILED_ACTION_STATUS,),
+            f"""
+            SELECT COUNT(*)
+            FROM action_queue
+            WHERE status = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM evidence
+                WHERE evidence_uri = ?
+                  AND (
+                    evidence_text LIKE '%' || action_queue.id || '%'
+                    OR json_extract(evidence_text, '$.action_id') = action_queue.id
+                  )
+              )
+            """,
+            (_FAILED_ACTION_STATUS, _HISTORICAL_ACCEPTED_HEALTH_DEBT_URI),
         )
         active_run_count = _scalar_count(
             connection,
@@ -49,13 +62,37 @@ def generate_health_summary(
         )
         failed_run_count = _scalar_count(
             connection,
-            "SELECT COUNT(*) FROM governed_runs WHERE status IN (?, ?)",
-            _FAILED_RUN_STATUSES,
+            f"""
+            SELECT COUNT(*)
+            FROM governed_runs
+            WHERE status IN (?, ?)
+              AND NOT EXISTS (
+                SELECT 1 FROM evidence
+                WHERE evidence_uri = ?
+                  AND (
+                    evidence_text LIKE '%' || governed_runs.run_id || '%'
+                    OR json_extract(evidence_text, '$.run_id') = governed_runs.run_id
+                  )
+              )
+            """,
+            (*_FAILED_RUN_STATUSES, _HISTORICAL_ACCEPTED_HEALTH_DEBT_URI),
         )
         skipped_run_count = _scalar_count(
             connection,
-            "SELECT COUNT(*) FROM governed_runs WHERE status = ?",
-            (_SKIPPED_RUN_STATUS,),
+            f"""
+            SELECT COUNT(*)
+            FROM governed_runs
+            WHERE status = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM evidence
+                WHERE evidence_uri = ?
+                  AND (
+                    evidence_text LIKE '%' || governed_runs.run_id || '%'
+                    OR json_extract(evidence_text, '$.run_id') = governed_runs.run_id
+                  )
+              )
+            """,
+            (_SKIPPED_RUN_STATUS, _HISTORICAL_ACCEPTED_HEALTH_DEBT_URI),
         )
         active_runtime_count = _scalar_count(
             connection,
@@ -64,8 +101,20 @@ def generate_health_summary(
         )
         failed_runtime_count = _scalar_count(
             connection,
-            "SELECT COUNT(*) FROM runtime_instances WHERE status IN (?, ?)",
-            _FAILED_RUNTIME_STATUSES,
+            f"""
+            SELECT COUNT(*)
+            FROM runtime_instances
+            WHERE status IN (?, ?)
+              AND NOT EXISTS (
+                SELECT 1 FROM evidence
+                WHERE evidence_uri = ?
+                  AND (
+                    evidence_text LIKE '%' || runtime_instances.runtime_instance_id || '%'
+                    OR json_extract(evidence_text, '$.runtime_instance_id') = runtime_instances.runtime_instance_id
+                  )
+              )
+            """,
+            (*_FAILED_RUNTIME_STATUSES, _HISTORICAL_ACCEPTED_HEALTH_DEBT_URI),
         )
         failed_alert_count = _scalar_count(
             connection,
