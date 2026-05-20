@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,6 +99,44 @@ _NON_REDUCTION_PROOF = (
     "failure_recovery_truth_owned_on_supervisor_runtime_not_governed_run_failed_interrupted",
     "inspection_surface_exposes_transition_recovery_history_and_non_claims_beyond_bounded_ace_cycle",
 )
+
+_SUPERVISOR_SQLITE_RETRYABLE_CODES = {
+    "database is locked",
+    "database table is locked",
+}
+_SUPERVISOR_SQLITE_WRITE_ATTEMPTS = 5
+_SUPERVISOR_SQLITE_WRITE_BACKOFF_SECONDS = 0.2
+
+
+def _is_retryable_sqlite_write_error(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    message = str(exc).lower()
+    return any(code in message for code in _SUPERVISOR_SQLITE_RETRYABLE_CODES)
+
+
+def _retry_supervisor_sqlite_write(operation: Any) -> Any:
+    """Retry narrow supervisor ledger writes during transient SQLite contention.
+
+    The resident supervisor is expected to coexist with launchd cycles, audits, and
+    health probes against the same local SQLite file. A transient writer collision
+    should not kill the resident process or poison a 24h endurance proof; a
+    persistent lock still fails loudly after a bounded retry window.
+    """
+
+    last_error: sqlite3.OperationalError | None = None
+    for attempt in range(_SUPERVISOR_SQLITE_WRITE_ATTEMPTS):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if not _is_retryable_sqlite_write_error(exc):
+                raise
+            last_error = exc
+            if attempt == _SUPERVISOR_SQLITE_WRITE_ATTEMPTS - 1:
+                break
+            time.sleep(_SUPERVISOR_SQLITE_WRITE_BACKOFF_SECONDS * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 def start_supervisor_runtime(
@@ -233,13 +272,15 @@ def mark_supervisor_runtime_live(
     db_path: Path | str = DB_PATH,
     runtime_instance_id: str | None = None,
 ) -> dict[str, Any]:
-    return _transition_runtime(
-        db_path,
-        runtime_instance_id,
-        expected_status=STATUS_STARTING,
-        target_status=STATUS_LIVE,
-        touch_last_seen=True,
-        event_type="ace.supervisor.live",
+    return _retry_supervisor_sqlite_write(
+        lambda: _transition_runtime(
+            db_path,
+            runtime_instance_id,
+            expected_status=STATUS_STARTING,
+            target_status=STATUS_LIVE,
+            touch_last_seen=True,
+            event_type="ace.supervisor.live",
+        )
     )
 
 
@@ -247,17 +288,28 @@ def heartbeat_supervisor_runtime(
     db_path: Path | str = DB_PATH,
     runtime_instance_id: str | None = None,
 ) -> dict[str, Any]:
-    return _transition_runtime(
-        db_path,
-        runtime_instance_id,
-        expected_status=STATUS_LIVE,
-        target_status=STATUS_LIVE,
-        touch_last_seen=True,
-        event_type="ace.supervisor.heartbeat",
+    return _retry_supervisor_sqlite_write(
+        lambda: _transition_runtime(
+            db_path,
+            runtime_instance_id,
+            expected_status=STATUS_LIVE,
+            target_status=STATUS_LIVE,
+            touch_last_seen=True,
+            event_type="ace.supervisor.heartbeat",
+        )
     )
 
 
 def request_supervisor_shutdown(
+    db_path: Path | str = DB_PATH,
+    runtime_instance_id: str | None = None,
+) -> dict[str, Any]:
+    return _retry_supervisor_sqlite_write(
+        lambda: _request_supervisor_shutdown_once(db_path, runtime_instance_id)
+    )
+
+
+def _request_supervisor_shutdown_once(
     db_path: Path | str = DB_PATH,
     runtime_instance_id: str | None = None,
 ) -> dict[str, Any]:
@@ -314,7 +366,9 @@ def stop_supervisor_runtime(
     db_path: Path | str = DB_PATH,
     runtime_instance_id: str | None = None,
 ) -> dict[str, Any]:
-    return _terminalize_runtime(db_path, runtime_instance_id, target_status=STATUS_STOPPED)
+    return _retry_supervisor_sqlite_write(
+        lambda: _terminalize_runtime(db_path, runtime_instance_id, target_status=STATUS_STOPPED)
+    )
 
 
 def request_supervisor_recovery(
@@ -493,13 +547,17 @@ def fail_supervisor_runtime(
     normalized_failure_phase = None
     if failure_phase is not None:
         normalized_failure_phase = _normalize_failure_phase(failure_phase)
-    return _terminalize_runtime(
-        db_path,
-        runtime_instance_id,
-        target_status=STATUS_FAILED,
-        failure_code=_normalize_required_text(failure_code, field_name="failure_code"),
-        failure_summary=_normalize_required_text(failure_summary, field_name="failure_summary"),
-        failure_phase=normalized_failure_phase,
+    normalized_failure_code = _normalize_required_text(failure_code, field_name="failure_code")
+    normalized_failure_summary = _normalize_required_text(failure_summary, field_name="failure_summary")
+    return _retry_supervisor_sqlite_write(
+        lambda: _terminalize_runtime(
+            db_path,
+            runtime_instance_id,
+            target_status=STATUS_FAILED,
+            failure_code=normalized_failure_code,
+            failure_summary=normalized_failure_summary,
+            failure_phase=normalized_failure_phase,
+        )
     )
 
 

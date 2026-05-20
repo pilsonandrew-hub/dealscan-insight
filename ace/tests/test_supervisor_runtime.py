@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import time
 import threading
@@ -47,6 +48,31 @@ class SupervisorRuntimeTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
+
+    def test_heartbeat_retries_transient_sqlite_lock_contention(self) -> None:
+        runtime = start_supervisor_runtime(self.db_path)
+        mark_supervisor_runtime_live(self.db_path, runtime["runtime_instance_id"])
+
+        lock_ready = threading.Event()
+        release_lock = threading.Event()
+
+        def _hold_lock_until_released() -> None:
+            lock_connection = sqlite3.connect(self.db_path, timeout=0.1)
+            lock_connection.execute("BEGIN IMMEDIATE")
+            lock_ready.set()
+            release_lock.wait(timeout=1)
+            lock_connection.rollback()
+            lock_connection.close()
+
+        locker = threading.Thread(target=_hold_lock_until_released)
+        locker.start()
+        self.assertTrue(lock_ready.wait(timeout=5))
+        release_lock.set()
+
+        heartbeat = heartbeat_supervisor_runtime(self.db_path, runtime["runtime_instance_id"])
+        locker.join(timeout=5)
+
+        self.assertEqual(heartbeat["status"], STATUS_LIVE)
 
     def test_start_live_heartbeat_and_stop_persist_distinct_runtime_truth(self) -> None:
         runtime = start_supervisor_runtime(
