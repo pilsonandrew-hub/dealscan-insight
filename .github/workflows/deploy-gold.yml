@@ -105,11 +105,13 @@ jobs:
               sys.exit(1)
           PY
           
-          # Check for executable files with wrong permissions without tripping pipefail.
-          mapfile -t non_exec_scripts < <(find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | head -5 || true)
+          # Shell scripts are operational controls; non-executable scripts are
+          # a hard packaging failure, not a warning.
+          mapfile -t non_exec_scripts < <(find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | sort || true)
           if [ "${#non_exec_scripts[@]}" -gt 0 ]; then
             printf '%s\n' "${non_exec_scripts[@]}"
-            echo "::warning::Found non-executable shell scripts"
+            echo "::error::Found non-executable shell scripts"
+            exit 1
           fi
           
           echo "status=passed" >> $GITHUB_OUTPUT
