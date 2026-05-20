@@ -92,7 +92,7 @@ export async function htmlContentHash(html: string): Promise<string> {
 function normalizeHtml(html: string): string {
   return html
     // Remove timestamps and dynamic content
-    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[Z\d\-\+:.]*/g, 'TIMESTAMP')
+    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[Z\d+:. -]*/g, 'TIMESTAMP')
     .replace(/\d{13,}/g, 'TIMESTAMP_MS') // Millisecond timestamps
     .replace(/\d{10}/g, 'TIMESTAMP_S')   // Second timestamps
     

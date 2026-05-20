@@ -6,8 +6,8 @@
 class InputSanitizer {
   private readonly SQL_INJECTION_PATTERNS = [
     /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION|SCRIPT)\b)/gi,
-    /('|''|"|""|\-\-|#|\/\*)/gi,
-    /(\b(OR|AND)\b\s*\=)/gi,
+    /('|''|"|""|--|#|\/\*)/gi,
+    /(\b(OR|AND)\b\s*=)/gi,
     /(\b(WAITFOR|DELAY)\b)/gi,
     /(xp_|sp_)/gi,
   ];

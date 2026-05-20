@@ -81,34 +81,33 @@ interface StatusResponse {
   timed_out?: boolean;
 }
 
-export function sonarSearchStreaming(
+export async function sonarSearchStreaming(
   params: SonarSearchParams,
   onBatch: (batch: SonarBatch) => void,
 ): Promise<void> {
-  return new Promise(async (resolve, reject) => {
-    try {
-      // 1. Start search
-      const startResp = await fetch(`${API_BASE}/api/sonar/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: params.query,
-          min_price: params.minPrice,
-          max_price: params.maxPrice,
-          extended: params.extended,
-        }),
-      });
+  // 1. Start search
+  const startResp = await fetch(`${API_BASE}/api/sonar/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: params.query,
+      min_price: params.minPrice,
+      max_price: params.maxPrice,
+      extended: params.extended,
+    }),
+  });
 
-      if (!startResp.ok) {
-        throw new Error(`Search start failed: ${startResp.status}`);
-      }
+  if (!startResp.ok) {
+    throw new Error(`Search start failed: ${startResp.status}`);
+  }
 
-      const { job_id } = await startResp.json();
-      const seenIds = new Set<string>();
-      const startTime = Date.now();
+  const { job_id } = await startResp.json();
+  const seenIds = new Set<string>();
+  const startTime = Date.now();
 
-      // 2. Poll for results
-      const poll = async () => {
+  await new Promise<void>((resolve) => {
+    // 2. Poll for results
+    const poll = async () => {
         if (Date.now() - startTime > MAX_POLL_MS) {
           // Timeout — deliver whatever we have
           for (const source of SONAR_SOURCES) {
@@ -163,11 +162,8 @@ export function sonarSearchStreaming(
         setTimeout(poll, POLL_INTERVAL_MS);
       };
 
-      // Start polling after initial delay
-      setTimeout(poll, POLL_INTERVAL_MS);
-    } catch (err) {
-      reject(err);
-    }
+    // Start polling after initial delay
+    setTimeout(poll, POLL_INTERVAL_MS);
   });
 }
 

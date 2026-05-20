@@ -56,7 +56,7 @@ function getCurrentComponent(): string {
     for (let i = 2; i < lines.length; i++) {
       const line = lines[i];
       if (line && !line.includes('logger.ts') && !line.includes('productionLogger.ts')) {
-        const match = line.match(/\/([^\/]+)\.(tsx?|jsx?):/);
+        const match = line.match(/\/([^/]+)\.(tsx?|jsx?):/);
         if (match) {
           return match[1];
         }

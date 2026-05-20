@@ -71,10 +71,6 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     ([_, config]) => config.theme || config.color
   )
 
-  if (!colorConfig.length) {
-    return null
-  }
-
   // Create CSS content safely without dangerouslySetInnerHTML
   const cssContent = Object.entries(THEMES)
     .map(([theme, prefix]) => {
