@@ -27,7 +27,7 @@ jobs:
         run: npx tsc --noEmit
         
       - name: Run linting
-        run: npm run lint || echo "Lint warnings present — build continues"
+        run: npm run lint
         
       - name: Run canary tests
         run: |
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Run security audit
-        run: npm audit --audit-level=high || echo "⚠️ npm audit warnings present — non-blocking"
+        run: npm audit --audit-level=high
         
       - name: Check for vulnerabilities
         run: |
