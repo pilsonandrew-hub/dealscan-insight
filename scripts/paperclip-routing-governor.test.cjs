@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { routeRoutingRequest, buildBridgeRequest, buildClaudeCompactContract } = require('./paperclip-routing-governor.cjs');
+const { routeRoutingRequest, buildBridgeRequest, buildCompactPremiumContract } = require('./paperclip-routing-governor.cjs');
 
 const CONFIG_PATH = path.join(__dirname, '..', 'reports', 'paperclip-routing-governor-config-v2-2026-04-16.json');
 
@@ -182,14 +182,14 @@ test('buildBridgeRequest converts a RoutingDecision into bridge input', () => {
   assert.equal(bridgeRequest.contract, undefined);
 });
 
-test('buildBridgeRequest attaches compact Claude contract for premium recon routing', () => {
+test('buildBridgeRequest attaches compact premium contract for recon routing', () => {
   const bridgeRequest = buildBridgeRequest(
-    { task_class: 'recon_scoring', agent_hint: 'claude' },
+    { task_class: 'recon_scoring', agent_hint: 'gemini' },
     { configPath: CONFIG_PATH }
   );
 
-  assert.equal(bridgeRequest.lane, 'openrouter_claude_premium');
-  assert.equal(bridgeRequest.model, 'anthropic/claude-opus-4.7');
+  assert.equal(bridgeRequest.lane, 'openrouter_gemini_review');
+  assert.equal(bridgeRequest.model, 'google/gemini-2.5-flash');
   assert.equal(bridgeRequest.contract.response_format, 'json_compact');
   assert.deepEqual(bridgeRequest.contract.output_contract.ordered_keys, [
     'verdict',
@@ -201,6 +201,6 @@ test('buildBridgeRequest attaches compact Claude contract for premium recon rout
   ]);
 });
 
-test('buildClaudeCompactContract returns null for non-premium classes without a custom contract', () => {
-  assert.equal(buildClaudeCompactContract('external_review'), null);
+test('buildCompactPremiumContract returns null for non-premium classes without a custom contract', () => {
+  assert.equal(buildCompactPremiumContract('external_review'), null);
 });

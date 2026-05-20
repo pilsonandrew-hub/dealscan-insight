@@ -164,7 +164,7 @@ function routeRoutingRequest(input, options = {}) {
 
   const taskPolicy = config.task_policy?.[taskClass];
   const financialSensitiveTaskClasses = new Set(['recon_scoring', 'deal_adjudication', 'market_intel_financial', 'premium_judgment']);
-  const approvedFinancialLaneNames = new Set(['openrouter_gemini_review', 'openrouter_gemini_proven', 'openrouter_claude_premium', 'local_private_lane']);
+  const approvedFinancialLaneNames = new Set(['openrouter_gemini_review', 'openrouter_gemini_proven', 'openrouter_qwen_review', 'local_private_lane']);
   if (!taskPolicy || !taskPolicy.primary) {
     throw routingError(`No permitted route exists for task_class ${taskClass}`, 'no_permitted_route');
   }
@@ -251,7 +251,7 @@ function routeRoutingRequest(input, options = {}) {
   return decision;
 }
 
-function buildClaudeCompactContract(taskClass) {
+function buildCompactPremiumContract(taskClass) {
   if (taskClass === 'recon_scoring') {
     return {
       response_format: 'json_compact',
@@ -309,10 +309,10 @@ function buildBridgeRequest(input, options = {}) {
     },
   };
 
-  if (decision.selected_lane === 'openrouter_claude_premium') {
-    const claudeContract = buildClaudeCompactContract(decision.task_class);
-    if (claudeContract) {
-      bridgeRequest.contract = claudeContract;
+  if (['recon_scoring', 'deal_adjudication', 'premium_judgment', 'market_intel_financial'].includes(decision.task_class)) {
+    const compactContract = buildCompactPremiumContract(decision.task_class);
+    if (compactContract) {
+      bridgeRequest.contract = compactContract;
     }
   }
 
@@ -372,5 +372,5 @@ module.exports = {
   loadRoutingGovernorConfig,
   routeRoutingRequest,
   buildBridgeRequest,
-  buildClaudeCompactContract,
+  buildCompactPremiumContract,
 };

@@ -15,24 +15,6 @@ const RUN_FAILOVER_ATTEMPT_TIMEOUT_MS = Number(process.env.PAPERCLIP_RUN_FAILOVE
 const RUN_FAILOVER_BACKOFF_MS = Number(process.env.PAPERCLIP_RUN_FAILOVER_BACKOFF_MS || 250);
 
 const OPENROUTER_LANES = Object.freeze({
-  openrouter_claude_premium: Object.freeze({
-    provider: 'openrouter',
-    defaultModel: 'anthropic/claude-opus-4.7',
-    allowedModels: Object.freeze([
-      'anthropic/claude-opus-4.7',
-      'anthropic/claude-sonnet-4.5',
-      'anthropic/claude-3.7-sonnet',
-    ]),
-  }),
-  openrouter_claude_review: Object.freeze({
-    provider: 'openrouter',
-    defaultModel: 'anthropic/claude-opus-4.7',
-    allowedModels: Object.freeze([
-      'anthropic/claude-opus-4.7',
-      'anthropic/claude-sonnet-4.5',
-      'anthropic/claude-3.7-sonnet',
-    ]),
-  }),
   openrouter_gemini_review: Object.freeze({
     provider: 'openrouter',
     defaultModel: 'google/gemini-2.5-flash',
