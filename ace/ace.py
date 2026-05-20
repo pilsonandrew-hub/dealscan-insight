@@ -12,6 +12,7 @@ if __package__ in {None, ""}:
 from ace.repository import ItemRepository, ValidationError
 from ace.autonomy_lane import intake_autonomy_eligible_direct_work, mark_item_autonomy_eligible
 from ace.governed_run_runtime import get_governed_cycle_run_status
+from ace.health import render_health_summary_lines
 from ace.governed_run_runtime import correct_governed_run_trigger_kind
 from ace.supervisor_runtime import (
     RUNTIME_FAMILY_SINGLE_TENANT,
@@ -413,6 +414,10 @@ def _print_cycle_result(result: dict[str, object]) -> None:
     print(f"notification_count={result['notification_count']}")
     if "notifications_suppressed" in result:
         print(f"notifications_suppressed={str(result['notifications_suppressed']).lower()}")
+    briefing = result.get("briefing")
+    if isinstance(briefing, dict) and isinstance(briefing.get("health_summary"), dict):
+        for line in render_health_summary_lines(briefing["health_summary"]):
+            print(line)
     print("sweep:")
     _print_sweep_result(result["sweep"])
     print("briefing:")

@@ -83,6 +83,8 @@ class BriefingTests(unittest.TestCase):
         rendered = render_briefing_text(briefing)
 
         self.assertIn(f"generated_at={stale_now}", rendered)
+        self.assertIn("health.ok=true", rendered)
+        self.assertIn("health.issue_count=0", rendered)
         self.assertIn(f"item_id={item.id}", rendered)
         self.assertIn("section[0].key=stale", rendered)
 

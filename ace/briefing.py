@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .health import generate_health_summary, render_health_summary_lines
 from .repository import ItemRepository
 from .storage import DB_PATH, bootstrap_db, utc_now
 from .sweep import SweepFinding, SweepThresholds, collect_sweep_findings
@@ -38,10 +39,12 @@ def generate_briefing(
     findings = collect_sweep_findings(db_path, thresholds=thresholds, now=generated_at)
     open_items = repo.list_items()
     sections = _build_sections(repo, open_items=open_items, findings=findings)
+    health_summary = generate_health_summary(db_path, now=generated_at)
 
     return {
         "generated_at": generated_at,
         "thresholds": thresholds.as_dict(),
+        "health_summary": health_summary,
         "item_count": len(open_items),
         "section_count": len(sections),
         "sections": [section.as_dict() for section in sections],
@@ -51,6 +54,9 @@ def generate_briefing(
 def render_briefing_text(briefing: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append(f"generated_at={briefing['generated_at']}")
+    health_summary = briefing.get("health_summary")
+    if isinstance(health_summary, dict):
+        lines.extend(render_health_summary_lines(health_summary))
     lines.append(f"item_count={briefing['item_count']}")
     lines.append(f"section_count={briefing['section_count']}")
 
