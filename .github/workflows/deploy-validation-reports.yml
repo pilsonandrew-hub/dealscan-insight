@@ -33,16 +33,16 @@ jobs:
     
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: '24'
         cache: 'npm'
         
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
         
@@ -64,7 +64,7 @@ jobs:
       continue-on-error: true
       
     - name: Archive validation artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: validation-reports-${{ github.run_id }}
         path: validation-reports/
@@ -174,7 +174,7 @@ jobs:
         ls -la pages/
         
     - name: Upload dashboard artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: validation-pages-${{ github.run_id }}
         path: pages/
