@@ -6,6 +6,11 @@
   "rewrites": [
     { "source": "/proxy/health", "destination": "https://dealscan-insight-production.up.railway.app/health" },
     { "source": "/api/outcomes", "destination": "https://dealscan-insight-production.up.railway.app/api/outcomes" },
+    { "source": "/api/outcomes/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/outcomes/$1" },
+    { "source": "/api/analytics/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/analytics/$1" },
+    { "source": "/api/sniper/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/sniper/$1" },
+    { "source": "/api/saved-searches/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/saved-searches/$1" },
+    { "source": "/api/recon/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/recon/$1" },
     { "source": "/api/rover/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/rover/$1" },
     { "source": "/api/ingest/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/ingest/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }

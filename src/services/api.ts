@@ -545,7 +545,7 @@ export const api = {
       const token = session?.access_token;
       if (!token) return results;
 
-      const res = await fetch('/api/analytics/scraper-status', {
+      const res = await fetch(`${API_BASE}/api/analytics/scraper-status`, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -795,7 +795,7 @@ export const api = {
     total_gross_margin: number;
     avg_roi: number | null;
   }> {
-    return fetchJsonWithOptionalAuth(`${API_BASE}/outcomes/summary`, 'Outcome summary fetch failed');
+    return fetchJsonWithOptionalAuth(`${API_BASE}/api/outcomes/summary`, 'Outcome summary fetch failed');
   },
 
   async recordOutcome(payload: {

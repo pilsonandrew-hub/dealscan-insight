@@ -287,6 +287,36 @@ except Exception as _e:
     logger.warning(f"Could not register telegram_router: {_e}")
 
 
+
+# ---------------------------------------------------------------------------
+# Route-contract aliases for same-origin frontend calls through Vercel.
+# Routers keep their canonical /api/* prefixes; these aliases prevent
+# production rewrites from becoming product-facing 404s when a route is
+# protected or intentionally absent.
+# ---------------------------------------------------------------------------
+@app.get("/api/outcomes/summary", tags=["outcomes"])
+async def outcomes_summary_alias(authorization: Optional[str] = Header(None)):
+    from webapp.routers.outcomes import get_outcomes_summary
+    return await get_outcomes_summary(authorization=authorization)
+
+
+@app.post("/api/outcomes", tags=["outcomes"])
+async def create_outcome_alias(payload: dict, authorization: Optional[str] = Header(None)):
+    from webapp.routers.outcomes import OutcomePayload, create_outcome
+    return await create_outcome(OutcomePayload(**payload), authorization=authorization)
+
+
+@app.patch("/api/outcomes/{opportunity_id}", tags=["outcomes"])
+async def patch_outcome_alias(opportunity_id: str, payload: dict, authorization: Optional[str] = Header(None)):
+    from webapp.routers.outcomes import OutcomePatchPayload, patch_outcome
+    return await patch_outcome(opportunity_id, OutcomePatchPayload(**payload), authorization=authorization)
+
+
+@app.post("/api/outcomes/bid", tags=["outcomes"])
+async def create_bid_outcome_alias(payload: dict, authorization: Optional[str] = Header(None)):
+    from webapp.routers.outcomes import BidOutcomePayload, create_bid_outcome
+    return await create_bid_outcome(BidOutcomePayload(**payload), authorization=authorization)
+
 # ---------------------------------------------------------------------------
 # Opportunity pass alias — frontend calls /api/opportunities/{id}/pass
 # The real handler lives in webapp/routers/ingest.py at /api/ingest/opportunities/{id}/pass

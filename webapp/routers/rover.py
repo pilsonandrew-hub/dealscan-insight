@@ -455,11 +455,14 @@ async def get_recommendations(
         raise
     except Exception as e:
         logger.error(f"[ROVER] FULL ERROR: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"DEBUG: {type(e).__name__}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/debug", tags=["rover"])
-async def rover_debug():
+@router.get("/debug", tags=["rover"], include_in_schema=False)
+async def rover_debug(x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
+    internal_secret = os.getenv("INTERNAL_API_SECRET", "")
+    if not internal_secret or x_internal_secret != internal_secret:
+        raise HTTPException(status_code=404, detail="Not found")
     return _rover_debug_snapshot()
 
 

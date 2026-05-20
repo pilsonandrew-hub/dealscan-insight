@@ -88,12 +88,15 @@ const browserWebSocketOrigin = typeof window !== 'undefined'
   ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
   : '';
 
+const configuredApiBase = import.meta.env.VITE_API_URL || '';
+const shouldUseExplicitApiBase = resolvedEnvironment !== 'production' && configuredApiBase;
+
 const defaultSettings: AppSettings = {
   environment: resolvedEnvironment,
   debug: resolvedEnvironment === 'development',
   
   api: {
-    baseUrl: import.meta.env.VITE_API_URL || '/api',
+    baseUrl: shouldUseExplicitApiBase ? configuredApiBase : '',
     timeout: 30000,
     retries: 3,
     circuitBreakerThreshold: 5,

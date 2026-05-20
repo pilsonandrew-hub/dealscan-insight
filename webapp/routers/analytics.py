@@ -1470,3 +1470,34 @@ async def source_health(authorization: Optional[str] = Header(None)):
             },
         },
     }
+
+
+@router.get("/scraper-status")
+async def scraper_status(authorization: Optional[str] = Header(None)):
+    """
+    Backward-compatible scraper status surface for existing frontend green-dot UI.
+
+    Source health is the canonical operational endpoint. This route intentionally
+    returns the legacy shapes the frontend already tolerates so product UI does
+    not hit a dead 404 while the canonical source-health model remains separate.
+    """
+    payload = await source_health(authorization)
+    sources = payload.get("sources", []) if isinstance(payload, dict) else []
+    items = []
+    for source in sources:
+        source_name = source.get("source_site") or source.get("actor_name")
+        last_run = source.get("latest_webhook_at") or source.get("latest_opportunity_at")
+        succeeded = source.get("latest_webhook_status") in {"completed", "success", "processed", "ok"}
+        if source.get("health") == "green":
+            succeeded = True
+        items.append({
+            "source": source_name,
+            "name": source_name,
+            "last_run": last_run,
+            "finished_at": last_run,
+            "succeeded": bool(succeeded),
+            "status": "SUCCEEDED" if succeeded else "UNKNOWN",
+            "health": source.get("health"),
+            "latest_run_id": source.get("latest_run_id"),
+        })
+    return {"items": items, "data": items, "generated_at": payload.get("generated_at") if isinstance(payload, dict) else None}
