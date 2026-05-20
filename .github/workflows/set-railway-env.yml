@@ -31,7 +31,7 @@ jobs:
           import sys
           import time
           import urllib.request
-          
+
           required_keys = [
               "OPENROUTER_API_KEY",
               "NOTION_TOKEN",
@@ -39,13 +39,13 @@ jobs:
               "FIRECRAWL_API_KEY",
               "SLACK_BOT_TOKEN",
           ]
-          
+
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           service_id = os.environ["SERVICE_ID"]
           environment_id = os.environ["ENVIRONMENT_ID"]
           railway_env = os.environ["RAILWAY_TOKEN"]
-          
+
           ctx = ssl.create_default_context()
           req = urllib.request.Request(
               f"{supabase_url}/rest/v1/app_config?select=key,value",
@@ -54,25 +54,25 @@ jobs:
                   "Authorization": f"Bearer {service_key}",
               },
           )
-          
+
           with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
               rows = json.loads(resp.read())
-          
+
           config = {
               row["key"]: row["value"]
               for row in rows
               if isinstance(row, dict) and "key" in row and "value" in row
           }
-          
+
           missing = [key for key in required_keys if not (config.get(key) or "").strip()]
           if missing:
               print(f"Missing required app_config keys: {', '.join(missing)}", file=sys.stderr)
               raise SystemExit(1)
-          
+
           env = os.environ.copy()
           env["RAILWAY_TOKEN"] = railway_env
-          
-          
+
+
           def run_railway(command, *, stdin_value=None):
               safe_command = " ".join(command[:4])
               for attempt in range(1, 4):
@@ -101,8 +101,8 @@ jobs:
                   if attempt < 3:
                       time.sleep(10 * attempt)
               raise last_error
-          
-          
+
+
           for key in required_keys:
               run_railway(
                   [
@@ -119,8 +119,8 @@ jobs:
                   ],
                   stdin_value=config[key],
               )
-          
+
           run_railway(["railway", "redeploy", "-s", service_id, "-y"])
-          
+
           print("Railway env vars synced from Supabase app_config and backend redeployed.")
           PYEOF
