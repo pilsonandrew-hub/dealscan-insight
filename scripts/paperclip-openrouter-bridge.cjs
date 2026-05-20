@@ -962,9 +962,45 @@ async function executeRunWithFailover({ candidates, runPrompt, fetchImpl = fetch
         await delay(RUN_FAILOVER_BACKOFF_MS);
       }
     } catch (error) {
-      attempts.push({ lane: candidate.lane, model: candidate.model, status: null, ok: false, error_code: normalizeString(error?.code) || 'request_error' });
+      attempts.push({ lane: candidate.lane, model: candidate.model, status: null, ok: false, provider: 'openrouter', error_code: normalizeString(error?.code) || 'request_error' });
       lastFailure = { type: 'request_error', candidate, error };
-      if (!isRetryableRequestError(error)) {
+
+      const canUseGeminiDirectFallback = GEMINI_API_KEY && candidate.model.startsWith('google/gemini');
+      if (canUseGeminiDirectFallback && isRetryableRequestError(error)) {
+        try {
+          const { upstream: geminiDirectResponse, data: geminiDirectData, directModel } = await requestGeminiDirect({ model: candidate.model, runPrompt, fetchImpl });
+          attempts.push({
+            lane: candidate.lane,
+            model: candidate.model,
+            status: geminiDirectResponse.status,
+            ok: geminiDirectResponse.ok,
+            provider: 'google_ai_studio',
+            direct_model: directModel,
+            fallback_for_error_code: normalizeString(error?.code) || 'request_error',
+          });
+          if (geminiDirectResponse.ok) {
+            return { ok: true, winner: { ...candidate, model: `google/${directModel}` }, data: geminiDirectData, attempts };
+          }
+          lastFailure = { type: 'upstream', candidate, status: geminiDirectResponse.status, data: geminiDirectData };
+          if (!isRetryableUpstreamStatus(geminiDirectResponse.status)) {
+            return { ok: false, terminal: true, failure: lastFailure, attempts };
+          }
+        } catch (directError) {
+          attempts.push({
+            lane: candidate.lane,
+            model: candidate.model,
+            status: null,
+            ok: false,
+            provider: 'google_ai_studio',
+            error_code: normalizeString(directError?.code) || 'request_error',
+            fallback_for_error_code: normalizeString(error?.code) || 'request_error',
+          });
+          lastFailure = { type: 'request_error', candidate, error: directError };
+          if (!isRetryableRequestError(directError)) {
+            return { ok: false, terminal: true, failure: lastFailure, attempts };
+          }
+        }
+      } else if (!isRetryableRequestError(error)) {
         return { ok: false, terminal: true, failure: lastFailure, attempts };
       }
       if (index < candidates.length - 1) {

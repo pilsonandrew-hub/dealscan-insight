@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 
 process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || 'test-key';
+process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test-gemini-key';
 process.env.PAPERCLIP_ENABLE_CANARY_FAILOVER_TESTS = 'true';
 
 function httpPostJson(port, path, body) {
@@ -101,8 +102,9 @@ test('executeRunWithFailover falls back on retryable upstream failure', async ()
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.winner.lane, 'openrouter_qwen_review');
-  assert.deepEqual(calls, ['google/gemini-2.5-flash', 'qwen/qwen3.6-plus']);
+  assert.equal(result.winner.lane, 'openrouter_gemini_review');
+  assert.equal(result.winner.model, 'google/gemini-2.5-flash');
+  assert.deepEqual(calls, ['google/gemini-2.5-flash', undefined]);
 });
 
 test('executeRunWithFailover does not fall back on non-retryable upstream failure', async () => {
@@ -128,7 +130,7 @@ test('executeRunWithFailover does not fall back on non-retryable upstream failur
 
   assert.equal(result.ok, false);
   assert.equal(result.terminal, true);
-  assert.deepEqual(calls, ['google/gemini-2.5-flash']);
+  assert.deepEqual(calls, ['google/gemini-2.5-flash', undefined]);
 });
 
 test('executeRunWithFailover exhausts the chain on retryable failures', async () => {
@@ -148,7 +150,7 @@ test('executeRunWithFailover exhausts the chain on retryable failures', async ()
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.attempts.length, 2);
+  assert.equal(result.attempts.length, 3);
   assert.equal(result.failure.status, 503);
 });
 
@@ -214,7 +216,7 @@ test('executeRunWithFailover retries after timeout-class request error', async (
   const fetchImpl = async (_url, options) => {
     const body = JSON.parse(options.body);
     calls.push(body.model);
-    if (body.model === 'google/gemini-2.5-flash') {
+    if (body.model === 'deepseek/deepseek-v3.2') {
       const error = new Error('timeout');
       error.code = 'ETIMEDOUT';
       throw error;
@@ -228,7 +230,7 @@ test('executeRunWithFailover retries after timeout-class request error', async (
 
   const result = await executeRunWithFailover({
     candidates: [
-      { lane: 'openrouter_gemini_review', model: 'google/gemini-2.5-flash', laneConfig: { provider: 'openrouter' } },
+      { lane: 'openrouter_deepseek_workhorse', model: 'deepseek/deepseek-v3.2', laneConfig: { provider: 'openrouter' } },
       { lane: 'openrouter_gemini_proven', model: 'google/gemini-2.0-flash-001', laneConfig: { provider: 'openrouter' } },
     ],
     runPrompt: { systemPrompt: 's', userPrompt: 'u', maxTokens: 10 },
@@ -237,7 +239,59 @@ test('executeRunWithFailover retries after timeout-class request error', async (
 
   assert.equal(result.ok, true);
   assert.equal(result.winner.lane, 'openrouter_gemini_proven');
-  assert.deepEqual(calls, ['google/gemini-2.5-flash', 'google/gemini-2.0-flash-001']);
+  assert.deepEqual(calls, ['deepseek/deepseek-v3.2', 'google/gemini-2.0-flash-001']);
+});
+
+test('executeRunWithFailover uses direct Gemini fallback on retryable OpenRouter request error', async () => {
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    if (String(url).includes('openrouter.ai')) {
+      const body = JSON.parse(options.body);
+      calls.push(`openrouter:${body.model}`);
+      const error = new Error('headers timeout');
+      error.code = 'UND_ERR_HEADERS_TIMEOUT';
+      throw error;
+    }
+    calls.push(`direct:${String(url)}`);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: 'DIRECT_GEMINI_OK' }] } }],
+        usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 },
+      }),
+    };
+  };
+
+  try {
+    const result = await executeRunWithFailover({
+      candidates: [
+        { lane: 'openrouter_gemini_proven', model: 'google/gemini-2.0-flash-001', laneConfig: { provider: 'openrouter' } },
+        { lane: 'openrouter_qwen_review', model: 'qwen/qwen3.6-plus', laneConfig: { provider: 'openrouter' } },
+      ],
+      runPrompt: { systemPrompt: 's', userPrompt: 'u', maxTokens: 10 },
+      fetchImpl,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.winner.lane, 'openrouter_gemini_proven');
+    assert.equal(result.winner.model, 'google/gemini-2.5-flash-lite');
+    assert.equal(result.data.choices[0].message.content, 'DIRECT_GEMINI_OK');
+    assert.equal(result.attempts[0].provider, 'openrouter');
+    assert.equal(result.attempts[1].provider, 'google_ai_studio');
+    assert.equal(result.attempts[1].fallback_for_error_code, 'UND_ERR_HEADERS_TIMEOUT');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0], 'openrouter:google/gemini-2.0-flash-001');
+    assert.match(calls[1], /^direct:https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-2\.5-flash-lite:generateContent/);
+  } finally {
+    if (originalGeminiKey === undefined) {
+      delete process.env.GEMINI_API_KEY;
+    } else {
+      process.env.GEMINI_API_KEY = originalGeminiKey;
+    }
+  }
 });
 
 test('HTTP /run handler returns fallback success with attempted lanes', async () => {
@@ -251,6 +305,13 @@ test('HTTP /run handler returns fallback success with attempted lanes', async ()
         ok: false,
         status: 503,
         json: async () => ({ error: 'temporarily_unavailable' }),
+      };
+    }
+    if (String(_url).includes('generativelanguage.googleapis.com')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: 'HTTP_FAILOVER_OK' }] } }], provider: 'Google AI Studio' }),
       };
     }
     return {
@@ -277,10 +338,10 @@ test('HTTP /run handler returns fallback success with attempted lanes', async ()
     assert.equal(typeof data, 'object');
     assert.equal(data.error, undefined, JSON.stringify(data));
     assert.equal(data.ok, true);
-    assert.equal(data.lane, 'openrouter_gemini_proven');
-    assert.deepEqual(data.attempted_lanes, ['openrouter_gemini_review', 'openrouter_gemini_proven']);
+    assert.equal(data.lane, 'openrouter_gemini_review');
+    assert.deepEqual(data.attempted_lanes, ['openrouter_gemini_review', 'openrouter_gemini_review']);
     assert.equal(data.content.trim(), 'HTTP_FAILOVER_OK');
-    assert.deepEqual(calls, ['google/gemini-2.5-flash', 'google/gemini-2.0-flash-001']);
+    assert.deepEqual(calls, ['google/gemini-2.5-flash', undefined]);
   } finally {
     global.fetch = originalFetch;
     await new Promise((resolve, reject) => ephemeralServer.close((err) => err ? reject(err) : resolve()));
