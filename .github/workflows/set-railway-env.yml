@@ -83,12 +83,31 @@ jobs:
           env = os.environ.copy()
           env["RAILWAY_TOKEN"] = railway_env
 
-          subprocess.run(cmd, check=True, env=env)
-          subprocess.run(
-              ["railway", "redeploy", "-s", service_id, "-e", environment_id, "-y"],
-              check=True,
-              env=env,
-          )
+          def run_railway(command):
+              for attempt in range(1, 4):
+                  try:
+                      subprocess.run(command, check=True, env=env, timeout=90)
+                      return
+                  except subprocess.TimeoutExpired as exc:
+                      print(
+                          f"Railway command timed out on attempt {attempt}/3: {' '.join(command[:3])}",
+                          file=sys.stderr,
+                      )
+                      last_error = exc
+                  except subprocess.CalledProcessError as exc:
+                      print(
+                          f"Railway command failed on attempt {attempt}/3: {' '.join(command[:3])} exit={exc.returncode}",
+                          file=sys.stderr,
+                      )
+                      last_error = exc
+                  if attempt < 3:
+                      import time
+
+                      time.sleep(10 * attempt)
+              raise last_error
+
+          run_railway(cmd)
+          run_railway(["railway", "redeploy", "-s", service_id, "-y"])
 
           print("Railway env vars synced from Supabase app_config and backend redeployed.")
           PYEOF
