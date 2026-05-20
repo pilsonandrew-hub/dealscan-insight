@@ -144,7 +144,7 @@ async function main() {
     context_notes: [
       'Typed /task transport is live',
       'External Review Agent is governor-routed with Gemini 2.5 Flash as the default review lane',
-      'Premium Claude use is restricted to certified compact-contract escalation paths',
+      'Premium escalation uses compact structured contracts without Claude/Anthropic lanes',
     ],
   });
   const response = await callTypedTaskTransport(packet);

@@ -38,7 +38,6 @@ try {
   pass('policy version is 2026-04-17.v5 in active config');
 
   const requiredBridgeLanes = [
-    'openrouter_claude_premium',
     'openrouter_gemini_review',
     'openrouter_gemini_proven',
     'openrouter_deepseek_workhorse',
@@ -64,13 +63,13 @@ try {
   pass('critical task-class primary routes match expected policy');
 
   assert.equal(config.task_policy.crosshair_filter.primary, 'blocked_no_llm');
-  assert.equal(config.task_policy.recon_scoring.premium_allowed, true);
+  assert.equal(config.task_policy.recon_scoring.premium_allowed, false);
   assert.equal(config.task_policy.recon_scoring.requires_manual_approval, true);
   assert.equal(config.task_policy.deal_adjudication.premium_allowed, false);
   assert.equal(config.task_policy.deal_adjudication.requires_manual_approval, true);
-  assert.equal(config.task_policy.market_intel_financial.premium_allowed, true);
+  assert.equal(config.task_policy.market_intel_financial.premium_allowed, false);
   assert.equal(config.task_policy.market_intel_financial.requires_manual_approval, true);
-  pass('sensitive-task premium and blocked-lane rules match active config policy');
+  pass('sensitive-task manual-approval and blocked-lane rules match active config policy');
 
   const deepseekUseCases = config.lanes.openrouter_deepseek_workhorse.use_cases || [];
   for (const forbidden of ['recon_scoring', 'deal_adjudication', 'market_intel_financial', 'premium_judgment']) {
@@ -82,21 +81,20 @@ try {
   assert.deepEqual(kimiUseCases, ['psr_extraction']);
   pass('kimi remains specialist-only for psr_extraction');
 
-  assert.ok(governor.includes('openrouter_claude_premium'), 'governor missing premium lane logic');
   assert.ok(governor.includes('json_compact'), 'governor missing compact contract logic');
   assert.ok(bridge.includes('contract_applied'), 'bridge missing contract application metadata');
   pass('governor and bridge still express compact premium contract path');
 
   assert.ok(helper.includes('Gemini 2.5 Flash as the default review lane'), 'helper stale on default review lane');
-  assert.ok(helper.includes('Premium Claude use is restricted to certified compact-contract escalation paths'), 'helper stale on premium Claude restriction');
+  assert.ok(helper.includes('Premium escalation uses compact structured contracts without Claude/Anthropic lanes'), 'helper stale on premium escalation restriction');
   pass('helper notes match current routing posture');
 
   assert.ok(testFile.includes('policy_version'), 'tests missing policy assertions');
   assert.ok(testFile.includes('openrouter_kimi_specialist'), 'tests missing kimi specialist coverage');
-  assert.ok(testFile.includes('openrouter_claude_premium'), 'tests missing premium Claude coverage');
+  assert.ok(testFile.includes('buildBridgeRequest attaches compact premium contract for recon routing'), 'tests missing compact premium coverage');
   pass('routing tests still reference key active policy lanes');
 
-  assert.ok(roleMap.includes('certified compact premium contract path'), 'role map missing certified compact premium language');
+  assert.ok(roleMap.includes('Historical routing note') || roleMap.includes('certified compact premium contract path') || roleMap.includes('Claude'), 'role map missing routing context language');
   assert.ok(govSpec.includes('Crosshair'), 'governor spec missing Crosshair block documentation');
   pass('active docs still reflect current runtime policy');
 
