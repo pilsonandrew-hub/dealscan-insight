@@ -38,11 +38,21 @@ describe('frontend/backend route contract', () => {
 
   it('does not expose Rover debug as public OpenAPI or unauthenticated product surface', () => {
     const roverSource = readRepoFile('webapp/routers/rover.py');
+    const roverEdgeDebug = readRepoFile('api/rover/debug.js');
 
     expect(roverSource).not.toContain('detail=f"DEBUG:');
     expect(roverSource).toContain('@router.get("/debug", tags=["rover"], include_in_schema=False)');
     expect(roverSource).toContain('X-Internal-Secret');
     expect(roverSource).toContain('raise HTTPException(status_code=404, detail="Not found")');
+    expect(roverEdgeDebug).toContain("status(404)");
+  });
+
+  it('provides an edge adapter for scraper status while backend deploys are unavailable', () => {
+    const scraperStatusEdge = readRepoFile('api/analytics/scraper-status.js');
+
+    expect(scraperStatusEdge).toContain('/api/analytics/source-health');
+    expect(scraperStatusEdge).toContain('Authentication required');
+    expect(scraperStatusEdge).toContain('normalizeSourceHealth');
   });
 
   it('forces production browser API calls through same-origin rewrites', () => {
