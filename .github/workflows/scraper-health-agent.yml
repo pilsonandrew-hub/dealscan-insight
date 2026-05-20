@@ -5,6 +5,9 @@ on:
     - cron: '30 */12 * * *'   # Every 12hrs, 30min after scraper runs
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 

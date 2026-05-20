@@ -3,6 +3,9 @@ name: Set Railway Environment Variables
 on:
   workflow_dispatch:  # Manual trigger only
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 

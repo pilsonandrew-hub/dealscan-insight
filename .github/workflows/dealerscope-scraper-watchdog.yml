@@ -5,6 +5,9 @@ on:
     - cron: '*/30 * * * *'   # lightweight 24/7 Watchdog Hunter between 12hr heavy sweeps
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
