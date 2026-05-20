@@ -7,7 +7,7 @@ import ssl
 import sys
 import urllib.request
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://lbnxzvqppccajllsqaaw.supabase.co")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("CHAT_ID")
@@ -68,7 +68,7 @@ def main() -> None:
     require_env()
 
     deals = supabase_get(
-        "opportunities?select=title,state,current_bid,dos_score,listing_url,source"
+        "opportunities?select=title,state,current_bid,dos_score,listing_url,source_site"
         f"&is_active=eq.true&dos_score=gte.{MIN_SCORE}&order=dos_score.desc&limit={LIMIT}"
     )
 
@@ -82,7 +82,7 @@ def main() -> None:
         for i, deal in enumerate(deals, 1):
             lines.append(f"{i}. <b>{deal.get('title', '?')[:45]}</b>")
             lines.append(
-                f"   DOS {deal.get('dos_score')} | ${deal.get('current_bid', 0):,.0f} | {deal.get('state', '?')} | {deal.get('source', '?')}"
+                f"   DOS {deal.get('dos_score')} | ${deal.get('current_bid', 0):,.0f} | {deal.get('state', '?')} | {deal.get('source_site', '?')}"
             )
             if deal.get("listing_url"):
                 lines.append(f"   <a href=\"{deal['listing_url']}\">View Listing</a>")
