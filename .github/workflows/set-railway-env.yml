@@ -29,8 +29,9 @@ jobs:
           import ssl
           import subprocess
           import sys
+          import time
           import urllib.request
-
+          
           required_keys = [
               "OPENROUTER_API_KEY",
               "NOTION_TOKEN",
@@ -38,13 +39,13 @@ jobs:
               "FIRECRAWL_API_KEY",
               "SLACK_BOT_TOKEN",
           ]
-
+          
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           service_id = os.environ["SERVICE_ID"]
           environment_id = os.environ["ENVIRONMENT_ID"]
           railway_env = os.environ["RAILWAY_TOKEN"]
-
+          
           ctx = ssl.create_default_context()
           req = urllib.request.Request(
               f"{supabase_url}/rest/v1/app_config?select=key,value",
@@ -53,61 +54,73 @@ jobs:
                   "Authorization": f"Bearer {service_key}",
               },
           )
-
-          with urllib.request.urlopen(req, context=ctx) as resp:
+          
+          with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
               rows = json.loads(resp.read())
-
+          
           config = {
               row["key"]: row["value"]
               for row in rows
               if isinstance(row, dict) and "key" in row and "value" in row
           }
-
+          
           missing = [key for key in required_keys if not (config.get(key) or "").strip()]
           if missing:
               print(f"Missing required app_config keys: {', '.join(missing)}", file=sys.stderr)
               raise SystemExit(1)
-
-          cmd = [
-              "railway",
-              "variable",
-              "set",
-              "-s",
-              service_id,
-              "-e",
-              environment_id,
-              "--skip-deploys",
-          ]
-          cmd.extend(f"{key}={config[key]}" for key in required_keys)
-
+          
           env = os.environ.copy()
           env["RAILWAY_TOKEN"] = railway_env
-
-          def run_railway(command):
+          
+          
+          def run_railway(command, *, stdin_value=None):
+              safe_command = " ".join(command[:4])
               for attempt in range(1, 4):
                   try:
-                      subprocess.run(command, check=True, env=env, timeout=90)
+                      subprocess.run(
+                          command,
+                          check=True,
+                          env=env,
+                          input=stdin_value,
+                          text=True,
+                          timeout=90,
+                      )
                       return
                   except subprocess.TimeoutExpired as exc:
                       print(
-                          f"Railway command timed out on attempt {attempt}/3: {' '.join(command[:3])}",
+                          f"Railway command timed out on attempt {attempt}/3: {safe_command}",
                           file=sys.stderr,
                       )
                       last_error = exc
                   except subprocess.CalledProcessError as exc:
                       print(
-                          f"Railway command failed on attempt {attempt}/3: {' '.join(command[:3])} exit={exc.returncode}",
+                          f"Railway command failed on attempt {attempt}/3: {safe_command} exit={exc.returncode}",
                           file=sys.stderr,
                       )
                       last_error = exc
                   if attempt < 3:
-                      import time
-
                       time.sleep(10 * attempt)
               raise last_error
-
-          run_railway(cmd)
+          
+          
+          for key in required_keys:
+              run_railway(
+                  [
+                      "railway",
+                      "variable",
+                      "set",
+                      "-s",
+                      service_id,
+                      "-e",
+                      environment_id,
+                      "--skip-deploys",
+                      "--stdin",
+                      key,
+                  ],
+                  stdin_value=config[key],
+              )
+          
           run_railway(["railway", "redeploy", "-s", service_id, "-y"])
-
+          
           print("Railway env vars synced from Supabase app_config and backend redeployed.")
           PYEOF
