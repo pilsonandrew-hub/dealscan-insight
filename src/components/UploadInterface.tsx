@@ -50,7 +50,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
   }, []);
 
   // Enhanced security check with upload hardening and performance monitoring
-  const performSecurityCheck = async (file: File): Promise<{ 
+  const performSecurityCheck = useCallback(async (file: File): Promise<{ 
     isSecure: boolean; 
     issues: string[]; 
     riskLevel: 'low' | 'medium' | 'high' 
@@ -166,7 +166,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
       auditLogger.logError(error as Error, 'file_security_check');
       throw error;
     }
-  };
+  }, []);
 
   const updateFile = useCallback((fileId: string, updater: (file: UploadFile) => UploadFile) => {
     setFiles(prev => prev.map(f => (f.id === fileId ? updater(f) : f)));
@@ -185,7 +185,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
     toast({ title, description, ...(variant ? { variant } : {}) });
   }, [toast]);
 
-  const processFile = async (
+  const processFile = useCallback(async (
     file: File,
     precomputedSecurityCheck?: { isSecure: boolean; issues: string[]; riskLevel: 'low' | 'medium' | 'high' }
   ): Promise<void> => {
@@ -357,7 +357,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
       
       showUploadToast("Upload Error", errorMessage, "destructive");
     }
-  };
+  }, [finishUploadProgress, markFileError, onUploadSuccess, performSecurityCheck, showUploadToast, updateFile]);
 
   const handleSelectedFiles = useCallback(async (selectedFiles: File[]) => {
     for (const file of selectedFiles) {
@@ -373,7 +373,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
 
       await processFile(file, securityCheck);
     }
-  }, [showUploadToast]);
+  }, [performSecurityCheck, processFile, showUploadToast]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();

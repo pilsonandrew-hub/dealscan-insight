@@ -308,7 +308,7 @@ export default function SniperScopeDashboard() {
   const set = (key: keyof SniperInputs, value: string) =>
     setInputs(prev => ({ ...prev, [key]: value }));
 
-  const populateFromDeal = (deal: OpportunityDetail) => {
+  const populateFromDeal = useCallback((deal: OpportunityDetail) => {
     const stateCode = (deal.state || '').toUpperCase();
     const source = normalizeAuctionSource(deal.source);
     const sourceData = AUCTION_SOURCES.find(entry => entry.value === source);
@@ -333,9 +333,9 @@ export default function SniperScopeDashboard() {
     }));
     setLoadedDeal(deal);
     setDealError(null);
-  };
+  }, []);
 
-  const loadFromDeal = async (id: string, syncUrl = true) => {
+  const loadFromDeal = useCallback(async (id: string, syncUrl = true) => {
     const normalizedId = id.trim();
     if (!normalizedId) {
       setDealError('Enter an opportunity ID to load a deal.');
@@ -370,7 +370,7 @@ export default function SniperScopeDashboard() {
     } finally {
       setLoadingDeal(false);
     }
-  };
+  }, [populateFromDeal, searchParams, setSearchParams]);
 
   const handleStateChange = (state: string) => {
     const stateData  = LOW_RUST_STATES.find(s => s.value === state);
@@ -457,7 +457,7 @@ export default function SniperScopeDashboard() {
     if (dealIdParam && dealIdParam !== loadedDeal?.id) {
       void loadFromDeal(dealIdParam, false);
     }
-  }, [dealIdParam, loadedDeal?.id]);
+  }, [dealIdParam, loadedDeal?.id, loadFromDeal]);
 
   const setOutcomeField = (key: keyof OutcomeForm, value: string) =>
     setOutcomeForm(prev => ({ ...prev, [key]: value }));

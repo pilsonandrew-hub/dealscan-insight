@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { SniperButton } from '@/components/SniperButton';
 import { useAuth } from '@/contexts/ModernAuthContext';
@@ -946,7 +946,7 @@ const RoverTab = () => {
     } finally {
       setLoading(false);
     }
-  }, [user, session, authLoading]);
+  }, [user, session]);
 
   // Only fire after auth has fully initialized
   useEffect(() => {
@@ -1388,7 +1388,7 @@ const AnalyticsTab = () => {
 
   const trustFreshnessAge = summary ? toNullableFiniteNumber(summary.trust?.freshness_age) : null;
 
-  const safeSummary = summary ? {
+  const safeSummary = useMemo(() => summary ? {
     ...summary,
     total_opportunities: toFiniteNumber(summary.total_opportunities),
     total_outcomes: toFiniteNumber(summary.total_outcomes),
@@ -1507,7 +1507,7 @@ const AnalyticsTab = () => {
         trustAgeSeconds: trustFreshnessAge,
       }),
     },
-  } : null;
+  } : null, [summary, trustFreshnessAge]);
 
   const safeBidSummary = bidSummary ? {
     count_by_outcome: {

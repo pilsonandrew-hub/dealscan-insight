@@ -92,38 +92,6 @@ export const CrosshairDashboard = () => {
     clearNewCount
   } = useRealtimeOpportunities([]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('crosshair-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'crosshair_jobs' },
-        () => {
-          updateRealtimeStats();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'listings_normalized' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            toast({
-              title: 'New Listing Found',
-              description: `${payload.new.year} ${payload.new.make} ${payload.new.model} - ${payload.new.source}`,
-            });
-          }
-        }
-      )
-      .subscribe();
-
-    loadSavedIntents();
-    updateRealtimeStats();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
   const loadSavedIntents = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -181,6 +149,38 @@ export const CrosshairDashboard = () => {
       console.error('Error updating stats:', error);
     }
   }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('crosshair-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'crosshair_jobs' },
+        () => {
+          updateRealtimeStats();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'listings_normalized' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            toast({
+              title: 'New Listing Found',
+              description: `${payload.new.year} ${payload.new.make} ${payload.new.model} - ${payload.new.source}`,
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    loadSavedIntents();
+    updateRealtimeStats();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadSavedIntents, toast, updateRealtimeStats]);
 
   const handleSearch = useCallback(async (query: CanonicalQuery, options: any) => {
     setIsSearching(true);

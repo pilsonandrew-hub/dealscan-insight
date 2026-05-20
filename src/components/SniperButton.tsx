@@ -70,7 +70,6 @@ export const SniperButton: React.FC<SniperButtonProps> = ({
 
     restore();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opportunity.id]);
 
   // ── Open modal ──────────────────────────────────────────────────────────────
