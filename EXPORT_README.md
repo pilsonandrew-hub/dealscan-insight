@@ -1,3 +1,6 @@
+> **Historical snapshot — not current production truth.**
+> This file describes an older export-package concept. Do not use it as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # DealerScope 4.8 - Complete Export Package
 
 ## 📦 How to Create the Complete Package
