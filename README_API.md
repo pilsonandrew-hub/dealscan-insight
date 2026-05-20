@@ -1,3 +1,6 @@
+> **Historical snapshot — not current production truth.**
+> This file is retained for continuity only. Do not use it as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # DealerScope API - Vehicle Arbitrage Platform
 
 A production-ready FastAPI application for intelligent vehicle arbitrage analysis.

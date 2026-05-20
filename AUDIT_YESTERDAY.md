@@ -1,3 +1,6 @@
+> **Historical snapshot — not current production truth.**
+> This file is retained for continuity only. Do not use it as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # DealerScope — Full Audit (2026-03-24 → 2026-03-25)
 **Auditor:** Ja'various (direct file review)  
 **Date:** 2026-03-25 09:01 PDT  

@@ -1,3 +1,6 @@
+> **Historical snapshot — not current production truth.**
+> This file is retained for continuity only. Do not use it as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # Codex Sync Instructions
 
 The Codex analysis appears to be reviewing an incorrect or outdated version of the repository. Use these scripts to ensure the correct production-ready version is analyzed.

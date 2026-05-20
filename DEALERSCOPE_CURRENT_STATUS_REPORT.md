@@ -1,3 +1,6 @@
+> **Historical snapshot — not current production truth.**
+> This file is retained for continuity only. Do not use it as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # DealerScope Current Status Report
 **Date:** September 16, 2025  
 **Version:** v5.0 Professional Intelligence  
