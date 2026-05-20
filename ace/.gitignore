@@ -19,3 +19,6 @@ state/proofs/
 # Test/runtime scratch
 .pytest_cache/
 .mypy_cache/
+
+# ACE endurance runtime artifacts
+state/endurance/
