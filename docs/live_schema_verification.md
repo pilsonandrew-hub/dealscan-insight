@@ -1,5 +1,11 @@
 # Live Opportunities Schema Verification
 
+> Historical operator runbook / verification procedure.
+> Do not treat this document as current proof that the live schema is valid or that
+> DealerScope is production-ready. Current truth must be re-verified against live
+> code, live Railway/Vercel/Supabase state, current CI, and fresh route/database
+> checks before making readiness claims.
+
 This is the operator check for the March 2026 launch-safe `public.opportunities` path.
 
 For live-pipe verification on a small trusted source set, use `docs/live_small_set_verification.md`.

@@ -1,5 +1,11 @@
 # DealerScope Post-PR #30/#31 Live Truth — 2026-05-17
 
+> Historical live-truth snapshot from 2026-05-17.
+> Do not treat this report as current proof that DealerScope is production-ready,
+> V1-complete, enterprise-ready, or deployment-approved. Current truth must come
+> from live code, live Railway/Vercel/Supabase state, current CI, and fresh route
+> checks.
+
 ## Verdict
 PR #30 (`ingest-modularization-provenance-20260517`) was merged into canonical `origin/main` at commit `2c768ef`.
 

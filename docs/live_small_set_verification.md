@@ -1,5 +1,11 @@
 # Small-Set Live Pipe Verification
 
+> Historical operator runbook / verification procedure.
+> Do not treat this document as current proof that the live pipe is valid or that
+> DealerScope is production-ready. Current truth must be re-verified against live
+> code, live Railway/Vercel/Supabase state, current CI, and fresh route/database
+> checks before making readiness claims.
+
 This is the operator check for the Small-Set Live Verification sprint.
 
 It is intentionally narrow. The goal is to verify live truth on a small trusted source set, not to claim broad-source completeness.
