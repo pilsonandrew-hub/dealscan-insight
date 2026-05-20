@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import BackgroundTasks, FastAPI, Depends, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import ValidationError
 
 from config.settings import settings
 from backend.ingest.webhook_secret_posture import (
@@ -303,19 +304,31 @@ async def outcomes_summary_alias(authorization: Optional[str] = Header(None)):
 @app.post("/api/outcomes", tags=["outcomes"])
 async def create_outcome_alias(payload: dict, authorization: Optional[str] = Header(None)):
     from webapp.routers.outcomes import OutcomePayload, create_outcome
-    return await create_outcome(OutcomePayload(**payload), authorization=authorization)
+    try:
+        parsed_payload = OutcomePayload(**payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors())
+    return await create_outcome(parsed_payload, authorization=authorization)
 
 
 @app.patch("/api/outcomes/{opportunity_id}", tags=["outcomes"])
 async def patch_outcome_alias(opportunity_id: str, payload: dict, authorization: Optional[str] = Header(None)):
     from webapp.routers.outcomes import OutcomePatchPayload, patch_outcome
-    return await patch_outcome(opportunity_id, OutcomePatchPayload(**payload), authorization=authorization)
+    try:
+        parsed_payload = OutcomePatchPayload(**payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors())
+    return await patch_outcome(opportunity_id, parsed_payload, authorization=authorization)
 
 
 @app.post("/api/outcomes/bid", tags=["outcomes"])
 async def create_bid_outcome_alias(payload: dict, authorization: Optional[str] = Header(None)):
     from webapp.routers.outcomes import BidOutcomePayload, create_bid_outcome
-    return await create_bid_outcome(BidOutcomePayload(**payload), authorization=authorization)
+    try:
+        parsed_payload = BidOutcomePayload(**payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors())
+    return await create_bid_outcome(parsed_payload, authorization=authorization)
 
 # ---------------------------------------------------------------------------
 # Opportunity pass alias — frontend calls /api/opportunities/{id}/pass
