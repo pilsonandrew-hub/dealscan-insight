@@ -26,8 +26,8 @@ describe('frontend/backend route contract', () => {
 
     expect(rewrites).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ source: '/api/outcomes', destination: expect.stringContaining('/api/outcomes') }),
-        expect.objectContaining({ source: '/api/outcomes/(.*)', destination: expect.stringContaining('/api/outcomes/$1') }),
+        expect.objectContaining({ source: '/api/outcomes', destination: expect.stringMatching(/\/api\/outcomes|\/outcomes$/) }),
+        expect.objectContaining({ source: '/api/outcomes/(.*)', destination: expect.stringMatching(/\/api\/outcomes\/\$1|\/outcomes\/\$1$/) }),
         expect.objectContaining({ source: '/api/analytics/(.*)', destination: expect.stringContaining('/api/analytics/$1') }),
         expect.objectContaining({ source: '/api/sniper/(.*)', destination: expect.stringContaining('/api/sniper/$1') }),
         expect.objectContaining({ source: '/api/saved-searches/(.*)', destination: expect.stringContaining('/api/saved-searches/$1') }),

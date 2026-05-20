@@ -5,8 +5,8 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/proxy/health", "destination": "https://dealscan-insight-production.up.railway.app/health" },
-    { "source": "/api/outcomes", "destination": "https://dealscan-insight-production.up.railway.app/api/outcomes" },
-    { "source": "/api/outcomes/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/outcomes/$1" },
+    { "source": "/api/outcomes", "destination": "https://dealscan-insight-production.up.railway.app/outcomes" },
+    { "source": "/api/outcomes/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/outcomes/$1" },
     { "source": "/api/analytics/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/analytics/$1" },
     { "source": "/api/sniper/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/sniper/$1" },
     { "source": "/api/saved-searches/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/saved-searches/$1" },
