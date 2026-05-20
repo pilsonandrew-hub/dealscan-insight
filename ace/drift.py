@@ -229,6 +229,46 @@ def compute_claim_drift(events: Iterable[Any], *, window: int = 20) -> DriftDime
     )
 
 
+def compute_retry_rate_drift(events: Iterable[Any], *, window: int = 20) -> DriftDimension:
+    retryable_failures = 0
+    retry_recoveries = 0
+    sampled_actions = 0
+    failed_action_ids: set[str] = set()
+
+    for event in _ordered_events(events, window=window):
+        payload = _payload(event)
+        if str(getattr(event, "event_type", "")) != "item.evidence_added":
+            continue
+        evidence_uri = str(payload.get("evidence_uri") or "").strip()
+        if evidence_uri not in {"ace://phase2/action-outcome", "ace://phase2/action-rejection"}:
+            continue
+        action_id = str(payload.get("action_id") or "").strip()
+        outcome = str(payload.get("outcome") or "").strip().lower()
+        if not outcome:
+            continue
+        sampled_actions += 1
+        if outcome.startswith(_FAILED_ACTION_OUTCOME_PREFIX):
+            retryable_failures += 1
+            if action_id:
+                failed_action_ids.add(action_id)
+            continue
+        if action_id and action_id in failed_action_ids:
+            retry_recoveries += 1
+
+    unresolved_failures = max(0, retryable_failures - retry_recoveries)
+    score = round(min(1.0, unresolved_failures / max(1, sampled_actions)), 6)
+    return DriftDimension(
+        name="retry_rate",
+        score=score,
+        sample_count=sampled_actions,
+        status=_status(score),
+        detail=(
+            f"retryable_failures={retryable_failures}; retry_recoveries={retry_recoveries}; "
+            f"unresolved_retryable_failures={unresolved_failures}; window={window}"
+        ),
+    )
+
+
 def compute_item_drift(item_id: str, events: Iterable[Any], *, window: int = 20) -> DriftReport:
     event_list = list(events)
     return DriftReport(
@@ -237,5 +277,6 @@ def compute_item_drift(item_id: str, events: Iterable[Any], *, window: int = 20)
             compute_loop_depth_drift(event_list, window=window),
             compute_decision_drift(event_list, window=window),
             compute_claim_drift(event_list, window=window),
+            compute_retry_rate_drift(event_list, window=window),
         ),
     )

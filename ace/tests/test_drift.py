@@ -9,6 +9,7 @@ from ace.drift import (
     compute_claim_drift,
     compute_item_drift,
     compute_loop_depth_drift,
+    compute_retry_rate_drift,
 )
 
 
@@ -161,7 +162,65 @@ class DriftDimensionTests(unittest.TestCase):
         self.assertEqual(dimension.status, "block")
         self.assertIn("supporting_evidence_events_seen=0", dimension.detail)
 
-    def test_compute_item_drift_returns_three_visible_dimensions(self) -> None:
+    def test_retry_rate_drift_flags_unresolved_failed_local_actions(self) -> None:
+        events = [
+            event(
+                1,
+                "item.evidence_added",
+                {
+                    "action_id": "action_failed_once",
+                    "evidence_uri": "ace://phase2/action-outcome",
+                    "outcome": "action_failed_missing_target",
+                },
+            ),
+            event(
+                2,
+                "item.evidence_added",
+                {
+                    "action_id": "action_completed",
+                    "evidence_uri": "ace://phase2/action-outcome",
+                    "outcome": "operator_followup_recorded",
+                },
+            ),
+        ]
+
+        dimension = compute_retry_rate_drift(events)
+
+        self.assertEqual(dimension.name, "retry_rate")
+        self.assertEqual(dimension.sample_count, 2)
+        self.assertEqual(dimension.status, "review")
+        self.assertIn("retryable_failures=1", dimension.detail)
+        self.assertIn("unresolved_retryable_failures=1", dimension.detail)
+
+    def test_retry_rate_drift_clears_recovered_action_failure(self) -> None:
+        events = [
+            event(
+                1,
+                "item.evidence_added",
+                {
+                    "action_id": "action_retry",
+                    "evidence_uri": "ace://phase2/action-outcome",
+                    "outcome": "action_failed_transient",
+                },
+            ),
+            event(
+                2,
+                "item.evidence_added",
+                {
+                    "action_id": "action_retry",
+                    "evidence_uri": "ace://phase2/action-outcome",
+                    "outcome": "operator_followup_recorded",
+                },
+            ),
+        ]
+
+        dimension = compute_retry_rate_drift(events)
+
+        self.assertEqual(dimension.status, "clear")
+        self.assertEqual(dimension.score, 0.0)
+        self.assertIn("retry_recoveries=1", dimension.detail)
+
+    def test_compute_item_drift_returns_four_visible_dimensions(self) -> None:
         events = [
             event(1, "item.evidence_added", {"evidence_text": "proof", "evidence_uri": "ace://proof/business-rule-verification"}),
             event(2, "item.verdict_recorded", {"verdict": "ship"}),
@@ -175,6 +234,7 @@ class DriftDimensionTests(unittest.TestCase):
             "loop_depth",
             "decision_drift",
             "claim_drift",
+            "retry_rate",
         ])
         self.assertEqual(report.composite_score, 0.0)
 
