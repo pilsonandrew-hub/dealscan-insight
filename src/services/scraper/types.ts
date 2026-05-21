@@ -43,7 +43,7 @@ export interface ScrapingJob {
   startedAt?: Date;
   completedAt?: Date;
   results?: Map<string, ScrapingResult>;
-  config?: any;
+  config?: Record<string, unknown>;
   errorMessage?: string;
 }
 
@@ -52,7 +52,7 @@ export interface ExtractionStrategy {
   siteName: string;
   fieldName: string;
   strategy: 'selector' | 'regex' | 'attribute' | 'ml' | 'llm';
-  config: any;
+  config: Record<string, unknown>;
   fallbackOrder: number;
   confidenceThreshold: number;
   successRate: number;

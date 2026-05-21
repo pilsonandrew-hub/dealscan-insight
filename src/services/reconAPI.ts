@@ -15,8 +15,10 @@ function authHeaders(token: string | null, extra?: Record<string, string>): Reco
   };
 }
 
+export type ReconResponse = Record<string, unknown>;
+
 export const reconAPI = {
-  async decodeVIN(vin: string): Promise<any> {
+  async decodeVIN(vin: string): Promise<ReconResponse> {
     const token = await getAuthToken();
     const res = await fetch(`${API_BASE}/api/recon/vin/${vin}`, {
       headers: authHeaders(token),
@@ -25,7 +27,7 @@ export const reconAPI = {
     return res.json();
   },
 
-  async evaluate(payload: Record<string, unknown>): Promise<any> {
+  async evaluate(payload: Record<string, unknown>): Promise<ReconResponse> {
     const token = await getAuthToken();
     const res = await fetch(`${API_BASE}/api/recon/evaluate`, {
       method: 'POST',
@@ -39,7 +41,7 @@ export const reconAPI = {
     return res.json();
   },
 
-  async getHistory(): Promise<any[]> {
+  async getHistory(): Promise<ReconResponse[]> {
     const token = await getAuthToken();
     const res = await fetch(`${API_BASE}/api/recon/history`, {
       headers: authHeaders(token),

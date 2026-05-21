@@ -163,8 +163,8 @@ export function normalizeMakeModel(makeModel: string): { make: string; model: st
 /**
  * Normalize data object with field aliasing
  */
-export function normalizeDataObject(data: Record<string, any>): Record<string, any> {
-  const normalized: Record<string, any> = {};
+export function normalizeDataObject(data: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
   
   for (const [key, value] of Object.entries(data)) {
     const normalizedKey = normalizeFieldName(key);

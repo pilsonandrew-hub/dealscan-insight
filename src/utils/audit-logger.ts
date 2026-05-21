@@ -11,7 +11,7 @@ export interface AuditEvent {
   id: string;
   timestamp: number;
   action: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   sessionId: string;
   userAgent: string;
   severity: 'info' | 'warning' | 'error' | 'critical';
@@ -30,7 +30,7 @@ class AuditLogger {
     action: string,
     category: AuditEvent['category'] = 'system',
     severity: AuditEvent['severity'] = 'info',
-    details?: Record<string, any>
+    details?: Record<string, unknown>
   ): void {
     const event: AuditEvent = {
       id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,

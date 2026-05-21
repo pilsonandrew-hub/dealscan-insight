@@ -43,6 +43,21 @@ export interface RoverRecommendations {
   source?: 'personalized' | 'fallback';
 }
 
+export type SavedSearchFilters = Record<string, unknown>;
+
+export interface RoverUserIntent {
+  id: string;
+  user_id?: string;
+  name?: string;
+  title?: string;
+  filters?: SavedSearchFilters;
+  canonical_query?: SavedSearchFilters;
+  search_options?: SavedSearchFilters;
+  is_active?: boolean;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
 export interface UserPreferences {
   makes: Record<string, number>;
   models: Record<string, number>;
@@ -125,7 +140,7 @@ class RoverAPIService {
     }
   }
 
-  private mapOpportunityToDealItem(opportunity: any): DealItem {
+  private mapOpportunityToDealItem(opportunity: Partial<DealItem> & { estimated_sale_price?: number; dos_score?: number }): DealItem {
     return {
       id: opportunity.id,
       make: opportunity.make,
@@ -184,7 +199,7 @@ class RoverAPIService {
   }
 
   async saveIntent(
-    query: any,
+    query: SavedSearchFilters,
     title: string,
     options?: { dosThreshold?: number; telegramChatId?: string }
   ): Promise<void> {
@@ -235,7 +250,7 @@ class RoverAPIService {
     if (!resp.ok) throw new Error(`Saved search API error: ${resp.status}`);
   }
 
-  async getUserIntents(): Promise<any[]> {
+  async getUserIntents(): Promise<RoverUserIntent[]> {
     try {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) return [];

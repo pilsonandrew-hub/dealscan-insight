@@ -36,6 +36,7 @@ interface ReconResult {
   retail_high?: number | null;
   retail_count?: number;
   retail_source?: string;
+  created_at?: string;
 }
 
 interface FormState {
@@ -171,7 +172,7 @@ export const ReconPanel: React.FC = () => {
     setError(null);
     try {
       const data: ReconResult[] = await reconAPI.getHistory();
-      setHistory((data || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      setHistory((data || []).sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load history');
     } finally {

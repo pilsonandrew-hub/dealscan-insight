@@ -19,7 +19,7 @@ addFormats(ajv);
 export interface ValidationError {
   field: string;
   message: string;
-  value?: any;
+  value?: unknown;
 }
 
 export class ValidationException extends Error {
@@ -36,7 +36,7 @@ export class ValidationException extends Error {
 /**
  * Validate data against schema and throw on failure
  */
-export function validateOrThrow<T>(data: any, schema: Schema): T {
+export function validateOrThrow<T>(data: unknown, schema: Schema): T {
   const validate = ajv.compile(schema);
   const isValid = validate(data);
   
@@ -56,7 +56,7 @@ export function validateOrThrow<T>(data: any, schema: Schema): T {
 /**
  * Validate data and return result without throwing
  */
-export function validateSafe<T>(data: any, schema: Schema): {
+export function validateSafe<T>(data: unknown, schema: Schema): {
   isValid: boolean;
   data?: T;
   errors?: ValidationError[];
