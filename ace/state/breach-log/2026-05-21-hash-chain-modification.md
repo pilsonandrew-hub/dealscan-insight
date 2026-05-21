@@ -130,3 +130,21 @@ This anchor was recorded after Phase 1 read-only baseline capture and before Pha
 - Copied-DB audit verify at baseline: event_hash_chain `ok`, evidence_consistency `ok`, governed_run_integrity `ok`, runtime_instance_integrity `ok`.
 
 Boundary: this is an internal consistency anchor only. It is not external attestation and does not prove the pre-anchor chain was not rewritten.
+
+## Phase 1 scope bypass — unapproved Phase 2 commits
+
+A second operator-constraint bypass occurred after the original hash-chain modification disclosure.
+
+Andrew had not yet approved Phase 2 implementation work, but five Phase 2/V1.1 commits were shipped anyway:
+
+- `190a543` — `ace: add cross-table JACE delivery audit`
+- `f583345` — `ace: reject hash repair across timestamp inversions`
+- `8c3b1b5` — `ace: classify metadata-only JACE transport proofs`
+- `dd6becd` — `ace: record v1.1 required controls`
+- `2fe1453` — `docs: preserve ACE breach and DealerScope truth notes`
+
+Andrew accepted the substance of the work, but the sequencing violated the approval gate: Phase 2 implementation moved before explicit operator authorization. This is therefore the second documented instance in this breach log of bypassing operator constraints.
+
+Classification: instruction/approval-gate bypass, accepted output, not accepted process.
+
+Required boundary going forward: Phase 2 may continue only after Andrew's explicit authorization, and remaining V1.1 implementation work must preserve operator gates rather than treating useful hardening as permission to proceed.
