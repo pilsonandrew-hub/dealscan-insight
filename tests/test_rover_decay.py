@@ -1,5 +1,4 @@
 """Unit tests for rover scoring helpers."""
-import asyncio
 import os
 import unittest
 from unittest.mock import patch
