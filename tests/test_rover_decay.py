@@ -50,7 +50,7 @@ class RoverDecayTests(unittest.TestCase):
             ):
                 os.environ.pop(key, None)
             with patch.object(rover, "_redis_client", object()):
-                result = asyncio.run(rover.rover_debug())
+                result = rover._rover_debug_snapshot()
 
         self.assertEqual(
             result,
