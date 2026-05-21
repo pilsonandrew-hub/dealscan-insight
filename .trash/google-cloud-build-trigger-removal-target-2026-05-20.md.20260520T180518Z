@@ -1,0 +1,31 @@
+# Google Cloud Build Trigger Removal Target — 2026-05-20
+
+## Decision
+Disable/remove the Google Cloud Build GitHub-connected trigger for DealerScope unless Andrew explicitly wants a secondary Cloud Run/container deploy path.
+
+## Why
+- DealerScope production authority is Railway backend + Vercel frontend + Supabase + Apify + GitHub Actions.
+- Google Cloud Build is not repo-owned production authority.
+- It has produced confusing GitHub red-X status noise and false urgency.
+- Current repo has no `cloudbuild.yaml`, no GitHub Actions workflow for GCB, and no repo webhook for Google Cloud Build.
+
+## Verified GitHub check source
+Latest `origin/main` check suite includes:
+
+- App: `Google Cloud Build`
+- Check: `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx (nodal-deck-470322-d8)`
+- Project shown in details URL: `37865451613`
+- Example details URL: `https://console.cloud.google.com/cloud-build/builds/da6a8ea7-204d-45b0-980d-0288ef7a33cb?project=37865451613`
+
+## Removal path
+Preferred:
+1. Open Google Cloud Console → Cloud Build → Triggers.
+2. Project: `37865451613` / displayed project `nodal-deck-470322-d8`.
+3. Find trigger named or matching `rmgpgab-dealscan-insight-europe-west1-pilsonandrew-hub-dealsmyx`.
+4. Disable it first; delete only after confirming GitHub no longer receives new GCB checks.
+
+Alternate:
+- GitHub → repo/integrations/apps → remove/suspend Google Cloud Build app access for `pilsonandrew-hub/dealscan-insight` if app installation is visible.
+
+## Current machine limitation
+`gcloud` is installed but has no authenticated account and no active project configured, so this machine cannot disable the trigger directly without Google Cloud auth.

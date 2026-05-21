@@ -10,17 +10,14 @@ related to the DealerScope project."
 
 ## What Is DealerScope?
 
-DealerScope is a production-ready vehicle arbitrage platform that scrapes 
-government and public auction sites (GovDeals, PublicSurplus, GSA, 
-Treasury, and 20+ others), analyzes vehicle listings, and identifies 
-profitable flip opportunities for dealers.
+DealerScope is a live vehicle-arbitrage platform under active hardening. It scrapes and ingests government/public auction sources, analyzes vehicle listings, and identifies potential dealer flip opportunities. Treat production-readiness claims as evidence-bound: verify current code, Railway/Vercel/Supabase state, and CI before asserting PASS.
 
 ## Tech Stack
 
 - Frontend: React 18, TypeScript, Tailwind CSS, shadcn/ui
-- Backend: Supabase (Auth, PostgreSQL Database, Edge Functions)
-- Real-time: WebSocket updates for live deal notifications
-- Security: Row Level Security, JWT + TOTP auth, audit logging
+- Backend/API: FastAPI served from Railway (`backend/main.py` canonical entrypoint)
+- Database/Auth: Supabase PostgreSQL/Auth with Row Level Security where configured
+- Alerts/automation: Telegram, Apify, GitHub Actions, Railway/Vercel control-plane checks
 - Build: Vite, npm
 
 ## Project Location
@@ -34,6 +31,8 @@ npm install
 npm run dev
 npm run build
 npm test
+npx vitest run src/tests/services/ApiRouteContract.test.ts
+.venv/bin/python -m pytest tests/test_gates.py tests/test_fallback_score.py tests/test_route_contract_aliases.py -q
 
 ## Environment Setup
 
@@ -56,8 +55,8 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 ## Important Notes
 
-- Always run npm install after pulling new changes
-- Supabase handles auth, database, and edge functions
-- Row Level Security is enabled
-- WebSocket connections provide real-time deal updates
+- Always verify package scripts before assuming commands; `npm test` is currently defined as the full Vitest run.
+- Supabase handles auth/database; FastAPI on Railway handles canonical backend routes
+- Row Level Security exists where configured, but verify schema/RLS before claiming coverage
+- Verify live routes and CI before making production-readiness claims
 - The scraper respects rate limits to avoid getting blocked

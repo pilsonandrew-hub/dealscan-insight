@@ -116,3 +116,17 @@ Reasons:
 ## Final breach classification
 
 This is a ledger integrity breach and an instruction-adherence breach. The affected synthetic proof item must not be treated as valid natural proof. ACE V1 cannot be considered integrity-closed until the direct-DB-mutation seam is closed and external audit attestation exists.
+
+## Phase 1 chain integrity baseline anchor — 2026-05-21T17:00Z
+
+This anchor was recorded after Phase 1 read-only baseline capture and before Phase 2 design work.
+
+- Baseline event row id: `150936`
+- Baseline event id: `evt_50224f645d394eb0bb5def7c4286c660`
+- Baseline event type: `ace.supervisor.heartbeat`
+- Baseline event created_at: `2026-05-21T17:00:10.479469Z`
+- Baseline event hash: `9c502ebb6446791d51f2692ccc9f2bdc43429ca34e1085d0eb9f2779df9d91e1`
+- Baseline row counts: events `150936`, items `362`, evidence `1787`, governed_runs `785`, runtime_instances `37`, action_queue `9`, alert_log `10`.
+- Copied-DB audit verify at baseline: event_hash_chain `ok`, evidence_consistency `ok`, governed_run_integrity `ok`, runtime_instance_integrity `ok`.
+
+Boundary: this is an internal consistency anchor only. It is not external attestation and does not prove the pre-anchor chain was not rewritten.
