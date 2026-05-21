@@ -35,6 +35,7 @@ PROOF_CONTEXT_MARKERS = (
     "suppression",
     "launchagent",
     "gateway transport",
+    "transport ownership",
     "verification/manual",
     "ace-launchd-jace-proof",
 )
@@ -186,6 +187,16 @@ def _is_direct_jace_status_record(alert_type: str | None, message: str) -> bool:
     return alert_type == "jace_status" and not message.lstrip().startswith("ACE alert:")
 
 
+def _alert_metadata_message(metadata: dict[str, Any]) -> str:
+    return (
+        _optional_text(metadata.get("message"))
+        or _optional_text(metadata.get("text"))
+        or _optional_text(metadata.get("proof_scope"))
+        or _optional_text(metadata.get("proof"))
+        or ""
+    )
+
+
 def _is_direct_jace_status_evidence(evidence_uri: str | None, message: str) -> bool:
     return evidence_uri == JACE_STATUS_EVIDENCE_URI and not message.lstrip().startswith("ACE alert:")
 
@@ -215,7 +226,7 @@ def _alert_log_records(connection: sqlite3.Connection, item_context: dict[str, d
     for row in rows:
         metadata = _json_object(row["metadata_json"])
         item_id = _optional_text(metadata.get("item_id"))
-        message = _optional_text(metadata.get("message")) or ""
+        message = _alert_metadata_message(metadata)
         records.append(
             JaceAuditRecord(
                 source_table="alert_log",
