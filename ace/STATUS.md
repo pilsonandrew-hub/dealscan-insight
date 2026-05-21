@@ -1,12 +1,22 @@
 # ACE 1.0 Status
 
 Date: 2026-05-21
-Current closeout commit: `94d3ebc ci: quiet ace checkout default branch hint`
-Verified endurance proof source: `049e3c9 ace: exclude accepted historical health debt`
+Current status: V1 incomplete pending integrity remediation
+Previously verified endurance proof source: `049e3c9 ace: exclude accepted historical health debt`
 
 ACE 1.0 is a local governed resident foundation for turning bounded operator work into auditable item lifecycle records. It runs under launchd, keeps a local SQLite-backed item/event ledger, records append-only event hashes, ingests direct Telegram work through the bounded OpenClaw session-stream path, routes ACE/JACE outbound operator status through the dedicated JACE Telegram Bot API path, and can move explicitly eligible or narrowly bounded internal work through the governed lifecycle to verified completion.
 
 ACE remains a governed-foundation system, not a broad V1 platform/runtime fabric. The current direction is broad autonomous operating-layer hardening through narrow, proven, durable seams.
+
+## V1 incomplete pending integrity remediation
+
+On 2026-05-21, the audit chain was directly modified outside the governed API and re-hashed to pass audit verify. The original pre-modification event record is unrecoverable. V1 cannot be tagged until the direct-DB-mutation seam is closed and external audit attestation is in place.
+
+The event row for `item_978c25008f054f918cef4a1fdbb5e9b2` / `evt_2cea161db6fe4f4796e582021b3aaaeb` was modified, and downstream hashes were rewrote to restore internal hash-chain consistency. That makes the affected live-chain segment contaminated for append-only proof claims.
+
+Breach log: `ace/state/breach-log/2026-05-21-hash-chain-modification.md`.
+
+The `ace-1.0` tag has been removed locally and from remote pending integrity remediation.
 
 ## What ACE 1.0 does
 
@@ -65,6 +75,16 @@ ACE 1.0 does not claim broad platform autonomy, broad source authenticity, distr
 - Bounded Telegram parser breadth: PASS. Evidence commit: `f88cdeb ace: widen bounded telegram parser breadth`.
 - Audit verify integrity extension: PASS. Evidence commit: `9fb349e ace: extend audit verify integrity checks`.
 
+## Ledger contamination disclosure — 2026-05-21
+
+After the ACE 1.0 closeout/tag work, a later synthetic JACE auto E2E proof item contaminated the live ACE event ledger. Event `evt_2cea161db6fe4f4796e582021b3aaaeb` for item `item_978c25008f054f918cef4a1fdbb5e9b2` was directly backdated and the hash chain was rehashed forward outside the governed append-only pipeline.
+
+This does not invalidate the separately documented pre-incident ACE 1.0 endurance proof at source commit `049e3c9`, but it means the live post-incident `ace/state/ace.db` hash chain must not be treated as clean append-only proof across the contaminated segment. The contaminated proof item is not valid natural post-tag launchd/JACE automatic-delivery proof.
+
+Disclosure artifact: `ace/reports/breach/ace-ledger-contamination-disclosure-2026-05-21.md`.
+
+Required V1.1 follow-up items are recorded as file-backed required items under `ace/state/v1_1_required_items/` rather than inserted into the contaminated ACE SQLite state.
+
 ## Deferred to 1.x
 
 Deferred work includes:
@@ -78,7 +98,7 @@ Deferred work includes:
 
 ## Current verification posture
 
-As of this status file, the verified ACE 1.0 proof source is `049e3c9 ace: exclude accepted historical health debt`; the closeout/taggable HEAD is `94d3ebc ci: quiet ace checkout default branch hint`, which adds the final verification bundle and CI-warning cleanup without changing ACE runtime behavior.
+As of this status file, the prior endurance proof source remains `049e3c9 ace: exclude accepted historical health debt`, but V1 is incomplete pending integrity remediation because the later live ACE audit chain was modified outside the governed API and re-hashed.
 
 Latest verification observed for ACE 1.0 closeout:
 
@@ -105,7 +125,7 @@ Latest verification observed for ACE 1.0 closeout:
 
 ## ACE 1.0 proof boundary
 
-ACE 1.0 proves the bounded local launchd + resident-supervisor + governed-cycle endurance slice for proof source commit `049e3c9`; closeout/taggable HEAD `94d3ebc` contains documentation and CI hygiene only. Specifically, it proves local resident supervisor continuity, launchd cycle continuity, governed ledger/audit integrity, green health summary, accepted historical-health-debt handling, and full local/CI test health for that commit.
+The prior endurance artifact supports the bounded local launchd + resident-supervisor + governed-cycle endurance slice for proof source commit `049e3c9`; it is not sufficient for V1 closure while the direct-DB-mutation seam remains open. Specifically, it proves local resident supervisor continuity, launchd cycle continuity, governed ledger/audit integrity, green health summary, accepted historical-health-debt handling, and full local/CI test health for that commit.
 
 ACE 1.0 does not prove broad natural-language understanding, raw Telegram Bot API inbound ownership, distributed/high-availability runtime fabric, external billing/model-provider spend attribution, multi-tenant production operation, broad platform autonomy, or ACE 1.1 scope. Those remain outside the ACE 1.0 closeout boundary.
 
