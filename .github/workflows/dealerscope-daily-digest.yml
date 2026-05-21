@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
       - uses: actions/checkout@v6
 
       - name: Send daily digest

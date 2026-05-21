@@ -104,7 +104,7 @@ jobs:
                   if any(pattern.search(line) for pattern in raw_secret_patterns):
                       findings.append(f"{path}:{lineno}: possible raw credential")
           if findings:
-              print("::error::Potential committed raw credentials detected")
+              print("::%s::Potential committed raw credentials detected" % "error")
               for finding in findings[:50]:
                   print(finding)
               sys.exit(1)
@@ -115,7 +115,7 @@ jobs:
           mapfile -t non_exec_scripts < <(find . -type f -name "*.sh" -not -path "./.git/*" -exec test ! -x {} \; -print | sort || true)
           if [ "${#non_exec_scripts[@]}" -gt 0 ]; then
             printf '%s\n' "${non_exec_scripts[@]}"
-            echo "::error::Found non-executable shell scripts"
+            printf '::%s::%s\n' error "Found non-executable shell scripts"
             exit 1
           fi
           
@@ -184,7 +184,7 @@ jobs:
           
           # Ensure validation script exists and is executable
           if [ ! -f scripts/run-validation-suite.sh ]; then
-            echo "::error::Critical validation script missing"
+            printf '::%s::%s\n' error "Critical validation script missing"
             validation_failed=true
           else
             chmod +x scripts/run-validation-suite.sh
@@ -195,19 +195,19 @@ jobs:
             
             # Run validation with proper error handling
             if ! ./scripts/run-validation-suite.sh; then
-              echo "::error::Validation suite failed"
+              printf '::%s::%s\n' error "Validation suite failed"
               validation_failed=true
             fi
           fi
           
           # Verify required reports were generated
           if [ ! -f validation-reports/final/summary.json ]; then
-            echo "::error::Summary report not generated"
+            printf '::%s::%s\n' error "Summary report not generated"
             validation_failed=true
           fi
           
           if [ ! -f validation-reports/final/index.html ]; then
-            echo "::error::Dashboard not generated"
+            printf '::%s::%s\n' error "Dashboard not generated"
             validation_failed=true
           fi
           
@@ -215,7 +215,7 @@ jobs:
           if [ -f validation-reports/final/summary.json ]; then
             overall_status=$(cat validation-reports/final/summary.json | grep -o '"overall_status":"[^"]*"' | cut -d'"' -f4)
             if [ "$overall_status" = "FAIL" ]; then
-              echo "::error::Validation failed - system not ready for production"
+              printf '::%s::%s\n' error "Validation failed - system not ready for production"
               validation_failed=true
             fi
           fi
@@ -328,16 +328,16 @@ jobs:
             
             # Verify critical files exist
             if [ ! -f pages/reports/final/summary.json ]; then
-              echo "::error::Critical summary.json missing"
+              printf '::%s::%s\n' error "Critical summary.json missing"
               exit 1
             fi
             
             if [ ! -f pages/reports/final/index.html ]; then
-              echo "::error::Critical dashboard missing"
+              printf '::%s::%s\n' error "Critical dashboard missing"
               exit 1
             fi
           else
-            echo "::error::No validation reports found"
+            printf '::%s::%s\n' error "No validation reports found"
             exit 1
           fi
           
@@ -575,7 +575,7 @@ jobs:
             # Create root alias
             cp pages/api/summary.json pages/summary.json
           else
-            echo "::error::Summary JSON not found"
+            printf '::%s::%s\n' error "Summary JSON not found"
             exit 1
           fi
           

@@ -19,6 +19,9 @@ jobs:
       APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
 
     steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 2
