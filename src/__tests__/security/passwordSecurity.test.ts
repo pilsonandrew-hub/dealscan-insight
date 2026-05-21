@@ -12,7 +12,7 @@ describe('Password Security Module', () => {
 
   describe('validatePasswordStrength', () => {
     it('should accept a strong password', () => {
-      const result = validatePasswordStrength('StrongP@ssw0rd123');
+      const result = validatePasswordStrength('V3hicle$Margin!Safe');
       expect(result.isValid).toBe(true);
       expect(result.reasons).toHaveLength(0);
     });
@@ -57,7 +57,7 @@ describe('Password Security Module', () => {
   describe('isPasswordExposed', () => {
     it('should return true if the password hash is found in the HIBP database', async () => {
       // SHA-1 for "password" is 5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8
-      const pwnedHashSuffix = 'A61E4C9B93F3F0682250B6CF8331B7EE68FD8';
+      const pwnedHashSuffix = '1E4C9B93F3F0682250B6CF8331B7EE68FD8';
       mockFetch.mockResolvedValue({
         ok: true,
         text: () => Promise.resolve(`someotherhash:1\r\n${pwnedHashSuffix}:12345\r\nanotherhash:2`),

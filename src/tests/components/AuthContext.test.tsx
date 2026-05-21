@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { AuthProvider, useAuth } from '@/contexts/ModernAuthContext';
 
 // Simple test component
@@ -24,14 +24,16 @@ const TestComponent = () => {
 };
 
 describe('UnifiedAuthContext', () => {
-  it('should provide auth context correctly', () => {
+  it('should provide auth context correctly', async () => {
     const { getByTestId } = render(
       <AuthProvider>
         <TestComponent />
       </AuthProvider>
     );
     
-    // Should eventually show auth status (not authenticated initially)
-    expect(getByTestId('auth-status')).toBeInTheDocument();
+    // AuthProvider resolves the initial Supabase session asynchronously.
+    await waitFor(() => {
+      expect(getByTestId('auth-status')).toBeInTheDocument();
+    });
   });
 });
