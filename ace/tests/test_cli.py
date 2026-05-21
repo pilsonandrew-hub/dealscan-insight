@@ -142,13 +142,29 @@ class AceCliTests(unittest.TestCase):
             self.assertIn("audit.verify.runtime_instance_integrity=ok", output)
             self.assertIn("audit.verify.reason=evidence evidence_orphan_item references missing item missing_item", output)
 
+    def test_audit_jace_prints_actual_send_and_support_record_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Audit JACE item")
+            self.assertEqual(code, 0, output)
+
+            code, output = self.run_cli("--db", str(db_path), "audit", "jace")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("jace.audit.actual_send_count=0", output)
+            self.assertIn("jace.audit.support_record_count=0", output)
+            self.assertIn("jace.audit.normalized_record_count=0", output)
+            self.assertIn("jace.audit.source_counts={}", output)
+            self.assertIn("jace.audit.classification_counts={}", output)
+            self.assertIn("jace.audit.missing_message_ids=[]", output)
+
     def test_audit_without_subcommand_exits_via_argparse(self) -> None:
         stderr = io.StringIO()
         with self.assertRaises(SystemExit) as exc, redirect_stderr(stderr):
             main(["audit"])
 
         self.assertEqual(exc.exception.code, 2)
-        self.assertIn("audit requires a subcommand: verify", stderr.getvalue())
+        self.assertIn("audit requires a subcommand: verify or jace", stderr.getvalue())
 
 
     def test_cost_record_and_status_report_local_guardrail_usage(self) -> None:

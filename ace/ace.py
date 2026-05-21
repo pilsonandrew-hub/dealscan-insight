@@ -33,6 +33,7 @@ from ace.cost_guardrails import (
     record_cost_usage,
 )
 from ace.action_runtime import send_jace_status_message
+from ace.jace_audit import audit_jace_delivery_history
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -179,6 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit = subparsers.add_parser("audit", help="Run first-class ACE audit checks")
     audit_subparsers = audit.add_subparsers(dest="audit_command")
     audit_subparsers.add_parser("verify", help="Verify append-only event hash chain integrity")
+    jace_audit = audit_subparsers.add_parser("jace", help="Read-only cross-table JACE delivery audit")
+    jace_audit.add_argument("--json", action="store_true", help="Emit full JSON audit records")
 
     cost = subparsers.add_parser("cost", help="Inspect and record local ACE cost guardrails")
     cost_subparsers = cost.add_subparsers(dest="cost_command")
@@ -608,6 +611,15 @@ def _print_jace_status_delivery(result: dict[str, object]) -> None:
         print(f"jace_status.bot_username={result['bot_username']}")
 
 
+def _print_jace_audit(audit_result: dict[str, object]) -> None:
+    print(f"jace.audit.actual_send_count={audit_result['actual_send_count']}")
+    print(f"jace.audit.support_record_count={audit_result['support_record_count']}")
+    print(f"jace.audit.normalized_record_count={audit_result['normalized_record_count']}")
+    print(f"jace.audit.source_counts={audit_result['source_counts']}")
+    print(f"jace.audit.classification_counts={audit_result['classification_counts']}")
+    print(f"jace.audit.missing_message_ids={audit_result['missing_message_ids']}")
+
+
 def _print_autonomy_eligibility_marked(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} autonomy_eligibility_evidence_id={evidence_id}")
 
@@ -847,7 +859,15 @@ def main(argv: list[str] | None = None) -> int:
                 if first_reason is not None:
                     print(f"audit.verify.reason={first_reason}")
                 return 0 if all_ok else 1
-            parser.error("audit requires a subcommand: verify")
+            if args.audit_command == "jace":
+                audit_result = audit_jace_delivery_history(db_path)
+                if args.json:
+                    import json
+                    print(json.dumps(audit_result, sort_keys=True, indent=2))
+                else:
+                    _print_jace_audit(audit_result)
+                return 0
+            parser.error("audit requires a subcommand: verify or jace")
 
         if command == "cost":
             if args.cost_command == "status":
