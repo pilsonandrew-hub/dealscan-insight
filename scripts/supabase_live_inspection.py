@@ -228,9 +228,9 @@ def _summarize_recent_opportunity_truth(rows: list[dict[str, Any]]) -> dict[str,
 
 def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
     opportunity_select = ",".join([
-        "created_at", "updated_at", "source_site", "source", "state", "year",
-        "dos_score", "score", "current_bid", "price", "max_bid", "gross_margin",
-        "potential_profit", "listing_url", "url", "auction_end_date", "status",
+        "created_at", "updated_at", "source_site", "state", "year", "score",
+        "current_bid", "estimated_sale_price", "potential_profit", "profit_margin",
+        "roi_percentage", "auction_end", "status", "is_active",
     ])
     recent_opportunities = _recent_rows(base_url, service_key, "opportunities", opportunity_select, "created_at", 200)
 
