@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+class LegacyRaceRepairRejected(RuntimeError):
+    """Raised when a requested hash-chain repair is not a narrow legacy race."""
+
+
 ACE_DIR = Path(__file__).resolve().parent
 STATE_DIR = ACE_DIR / "state"
 DB_PATH = STATE_DIR / "ace.db"
@@ -389,6 +393,7 @@ def repair_event_hash_chain_for_legacy_races(connection: sqlite3.Connection) -> 
 
     _ensure_event_hash_columns(connection)
     _backfill_event_hashes(connection)
+    _assert_no_event_semantic_timestamp_inversions(connection)
     repaired = 0
     previous_event_hash: str | None = None
     rows = connection.execute(
@@ -435,6 +440,28 @@ def repair_event_hash_chain_for_legacy_races(connection: sqlite3.Connection) -> 
         else:
             previous_event_hash = row["event_hash"]
     return repaired
+
+
+def _assert_no_event_semantic_timestamp_inversions(connection: sqlite3.Connection) -> None:
+    previous_created_at: str | None = None
+    previous_event_id: str | None = None
+    rows = connection.execute(
+        """
+        SELECT id, event_id, created_at
+        FROM events
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        created_at = row["created_at"]
+        if previous_created_at is not None and created_at < previous_created_at:
+            raise LegacyRaceRepairRejected(
+                "refusing event hash repair across timestamp inversion: "
+                f"event {row['event_id']} created_at {created_at} precedes "
+                f"previous event {previous_event_id} created_at {previous_created_at}"
+            )
+        previous_created_at = created_at
+        previous_event_id = row["event_id"]
 
 
 def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:

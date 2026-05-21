@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from ace.storage import (
+    LegacyRaceRepairRejected,
     append_event,
     bootstrap_db,
     compute_event_hash,
@@ -305,6 +306,58 @@ class StorageContractTests(unittest.TestCase):
 
         self.assertEqual(repaired, 1)
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
+
+    def test_repair_event_hash_chain_rejects_semantic_timestamp_inversion(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            first_id = append_event(
+                connection,
+                event_type="item.first",
+                payload={"n": 1},
+                created_at="2026-05-21T06:12:24Z",
+            )
+            connection.commit()
+            first_hash = connection.execute(
+                "SELECT event_hash FROM events WHERE event_id = ?",
+                (first_id,),
+            ).fetchone()["event_hash"]
+            backdated_hash = compute_event_hash(
+                event_id="evt_backdated",
+                item_id=None,
+                event_type="item.created",
+                payload_json='{"n":2}',
+                actor="verification.manual",
+                source="verification/manual",
+                session_id="breach-shape",
+                created_at="2026-05-20T05:13:27Z",
+                previous_event_hash=first_hash,
+            )
+            connection.execute(
+                """
+                INSERT INTO events (
+                    event_id, item_id, event_type, payload_json, actor, source, session_id,
+                    created_at, previous_event_hash, event_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "evt_backdated",
+                    None,
+                    "item.created",
+                    '{"n":2}',
+                    "verification.manual",
+                    "verification/manual",
+                    "breach-shape",
+                    "2026-05-20T05:13:27Z",
+                    first_hash,
+                    backdated_hash,
+                ),
+            )
+            connection.commit()
+
+            with self.assertRaises(LegacyRaceRepairRejected) as exc:
+                repair_event_hash_chain_for_legacy_races(connection)
+
+        self.assertIn("refusing event hash repair across timestamp inversion", str(exc.exception))
 
 
     def test_verify_evidence_consistency_passes_for_valid_evidence(self) -> None:
