@@ -1,3 +1,6 @@
+> **Historical/planning snapshot — not current production truth.**
+> Retained for context only. Do not use this file as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # Scraper Agent Report — Mission 3
 **Date:** 2026-03-21  
 **Agent:** DealerScope Scraper Agent (Mission 3)  

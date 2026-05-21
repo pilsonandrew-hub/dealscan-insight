@@ -1,3 +1,6 @@
+> **Historical/planning snapshot — not current production truth.**
+> Retained for context only. Do not use this file as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # DealerScope Master Audit — 8-Model Synthesis
 Models: Gemini 2.5 Pro | DeepSeek R1 | GPT-4.1 | Claude 3.7 | Codex (live repo) | Grok 4.20 | Llama 4 Maverick | GPT-5.4
 Date: 2026-03-25

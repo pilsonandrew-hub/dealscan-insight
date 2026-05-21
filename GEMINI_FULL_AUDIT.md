@@ -1,3 +1,6 @@
+> **Historical/planning snapshot — not current production truth.**
+> Retained for context only. Do not use this file as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # Gemini 3.1 Pro — Complete Independent Red Team Audit
 _2026-03-26 | All 6 files audited individually to avoid token limits_
 

@@ -1,3 +1,6 @@
+> **Historical/planning snapshot — not current production truth.**
+> Retained for context only. Do not use this file as live evidence that DealerScope is production-ready, V1-complete, enterprise-ready, or deployment-approved. Current truth must come from live code, live Railway/Vercel/Supabase state, current CI, and governed status reports.
+
 # Deep Scan Report — 2026-03-22 (03:30 PDT)
 
 > Auditor: hostile senior. No mercy. All findings backed by live API calls, DB queries, and code inspection.
