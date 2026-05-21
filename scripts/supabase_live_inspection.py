@@ -244,12 +244,15 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"
     recent_opportunities = _recent_rows(base_url, service_key, "opportunities", opportunity_select, "created_at", 200)
 
+    alert_columns = _available_columns(base_url, service_key, "alert_log")
+    alert_order = "created_at" if "created_at" in alert_columns else "sent_at"
+    alert_select = ",".join([col for col in ["created_at", "sent_at", "status", "delivery_status", "channel"] if col in alert_columns]) or alert_order
     alert_rows = _recent_rows(
         base_url,
         service_key,
         "alert_log",
-        "created_at,sent_at,status,delivery_status,channel",
-        "created_at",
+        alert_select,
+        alert_order,
         50,
     )
     alert_status_counts: Counter[str] = Counter()
@@ -257,12 +260,15 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         key = row.get("delivery_status") or row.get("status") or row.get("channel") or "unknown"
         alert_status_counts[str(key)[:80]] += 1
 
+    webhook_columns = _available_columns(base_url, service_key, "webhook_log")
+    webhook_order = "received_at" if "received_at" in webhook_columns else "created_at"
+    webhook_select = ",".join([col for col in ["received_at", "created_at", "status", "processing_status", "db_save"] if col in webhook_columns]) or webhook_order
     webhook_rows = _recent_rows(
         base_url,
         service_key,
         "webhook_log",
-        "received_at,created_at,status,processing_status,db_save",
-        "received_at",
+        webhook_select,
+        webhook_order,
         100,
     )
     webhook_status_counts: Counter[str] = Counter()
