@@ -5,9 +5,7 @@
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-interface LogContext {
-  [key: string]: any;
-}
+type LogContext = Record<string, unknown>;
 
 interface LogEntry {
   timestamp: string;

@@ -19,10 +19,6 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": [
-        "warn",
-        { allowConstantExport: true },
-      ],
       "@typescript-eslint/no-unused-vars": "off",
       "@typescript-eslint/no-explicit-any": "warn",
       "react-refresh/only-export-components": [
@@ -34,6 +30,8 @@ export default tseslint.config(
             "useFormField",
             "useSidebar",
             "toast",
+            "testUtils",
+            "render",
           ],
         },
       ],

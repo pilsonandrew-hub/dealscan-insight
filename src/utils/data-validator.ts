@@ -5,17 +5,17 @@ import { performanceMonitor } from './performance-monitor';
 interface ValidationContext {
   rowIndex?: number;
   fieldName?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 interface ValidationResult {
   valid: boolean;
   message?: string;
-  details?: Record<string, any>;
-  correctedValue?: any;
+  details?: Record<string, unknown>;
+  correctedValue?: unknown;
 }
 
-interface ValidationRule<T = any> {
+interface ValidationRule<T = unknown> {
   name: string;
   description: string;
   severity: 'error' | 'warning' | 'info';
@@ -43,8 +43,8 @@ export interface ValidationError {
   rule: string;
   message: string;
   severity: 'error' | 'warning';
-  originalValue: any;
-  suggestedValue?: any;
+  originalValue: unknown;
+  suggestedValue?: unknown;
 }
 
 export interface ValidationWarning extends ValidationError {
@@ -237,7 +237,7 @@ const validationRules: Record<string, ValidationRule> = {
 };
 
 class DataValidator {
-  private validateRecord(record: Record<string, any>, rowIndex?: number): ValidationError[] {
+  private validateRecord(record: Record<string, unknown>, rowIndex?: number): ValidationError[] {
     const errors: ValidationError[] = [];
 
     Object.entries(record).forEach(([field, value]) => {
@@ -279,7 +279,7 @@ class DataValidator {
     return errors;
   }
 
-  async validateDataset(records: Record<string, any>[]): Promise<ValidationReport> {
+  async validateDataset(records: Record<string, unknown>[]): Promise<ValidationReport> {
     const timer = performanceMonitor.startTimer('data_validation');
 
     auditLogger.log('dataset_validation_start', 'data', 'info', {

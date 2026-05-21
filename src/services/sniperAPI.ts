@@ -13,6 +13,14 @@ export interface SniperTargetListResponse<T = unknown> {
   targets: T[];
 }
 
+export interface CreateSniperTargetResponse {
+  id?: string;
+  opportunity_id?: string;
+  status?: string;
+  max_bid?: number;
+  [key: string]: unknown;
+}
+
 async function getAccessToken(): Promise<string | null> {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.access_token ?? null;
@@ -41,7 +49,7 @@ export const sniperAPI = {
     return resp.json();
   },
 
-  async createTarget(payload: { opportunity_id: string; max_bid: number; telegram_chat_id?: string }): Promise<any> {
+  async createTarget(payload: { opportunity_id: string; max_bid: number; telegram_chat_id?: string }): Promise<CreateSniperTargetResponse> {
     const token = await getAccessToken();
     if (!token) {
       throw new Error('You must be logged in to snipe.');

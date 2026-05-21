@@ -2,6 +2,7 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Cell,
 } from 'recharts';
+import type { TooltipProps } from 'recharts';
 
 interface SourceHealthRowLike {
   source_site: string;
@@ -92,7 +93,7 @@ export default function AnalyticsChartsSection({
                 <YAxis tick={{ fill: '#9ca3af', fontSize: 12 }} />
                 <ReTooltip
                   contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#fff' }}
-                  formatter={(value: number, _name, props: any) => {
+                  formatter={(value: number, _name, props: TooltipProps<number, string>) => {
                     const payload = props?.payload;
                     return [
                       <div className="space-y-1">

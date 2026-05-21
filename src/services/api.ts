@@ -574,7 +574,7 @@ export const api = {
 
       if (results.size === 0 && json && typeof json === 'object' && !Array.isArray(json)) {
         for (const source of Object.keys(ACTOR_IDS)) {
-          const value = (json as Record<string, any>)[source];
+          const value = (json as Record<string, { last_run?: string; finishedAt?: string; finished_at?: string; succeeded?: boolean; status?: string }>)[source];
           if (!value) continue;
           const lastRun = value.last_run || value.finishedAt || value.finished_at;
           const succeeded = value.succeeded ?? value.status === 'SUCCEEDED';

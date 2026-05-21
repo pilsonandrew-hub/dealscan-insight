@@ -5,6 +5,7 @@
 
 import { beforeAll, afterEach, afterAll, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import type { User } from '@supabase/supabase-js';
 import '@testing-library/jest-dom';
 
 // Mock Supabase client
@@ -58,7 +59,7 @@ global.IntersectionObserver = class IntersectionObserver {
   takeRecords() {
     return [];
   }
-} as any;
+} as unknown as typeof globalThis.IntersectionObserver;
 
 // Mock ResizeObserver
 global.ResizeObserver = class ResizeObserver {
@@ -103,7 +104,7 @@ const localStorageMock = {
   removeItem: vi.fn(),
   clear: vi.fn(),
 };
-global.localStorage = localStorageMock as any;
+global.localStorage = localStorageMock as unknown as Storage;
 
 // Mock sessionStorage
 const sessionStorageMock = {
@@ -112,7 +113,7 @@ const sessionStorageMock = {
   removeItem: vi.fn(),
   clear: vi.fn(),
 };
-global.sessionStorage = sessionStorageMock as any;
+global.sessionStorage = sessionStorageMock as unknown as Storage;
 
 // Mock fetch
 global.fetch = vi.fn(() =>
@@ -141,7 +142,7 @@ global.File = class MockFile {
   size: number;
   type: string;
   lastModified: number;
-} as any;
+} as unknown as typeof File;
 
 // Mock WebSocket
 global.WebSocket = class MockWebSocket {
@@ -174,12 +175,14 @@ global.WebSocket = class MockWebSocket {
     this.readyState = WebSocket.CLOSED;
     this.onclose?.(new CloseEvent('close'));
   }
-} as any;
+} as unknown as typeof WebSocket;
 
 // Test utilities
 export const testUtils = {
   // Create mock user
-  createMockUser: (overrides = {}) => ({
+  createMockUser: (overrides: Partial<User> = {}) => ({
+    app_metadata: {},
+    user_metadata: {},
     id: 'test-user-id',
     email: 'test@example.com',
     aud: 'authenticated',
@@ -203,7 +206,7 @@ export const testUtils = {
   waitFor: async (ms = 0) => new Promise(resolve => setTimeout(resolve, ms)),
   
   // Mock API response
-  mockApiResponse: (data: any, options: { status?: number; ok?: boolean } = {}) => ({
+  mockApiResponse: (data: unknown, options: { status?: number; ok?: boolean } = {}) => ({
     ok: options.ok ?? true,
     status: options.status ?? 200,
     json: () => Promise.resolve(data),

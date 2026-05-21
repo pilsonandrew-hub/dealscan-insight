@@ -18,7 +18,7 @@ export interface PublicListing {
   created_at: string
   updated_at: string
   is_active: boolean
-  scrape_metadata?: Record<string, any>
+  scrape_metadata?: Record<string, unknown>
 }
 
 export interface ScrapingResult {

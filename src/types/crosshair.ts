@@ -96,7 +96,7 @@ export interface CrosshairJob {
   sites_targeted: string[];
   results_count: number;
   error_message?: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   started_at?: string;
   completed_at?: string;
   created_at: string;
