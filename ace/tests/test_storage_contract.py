@@ -198,7 +198,10 @@ class StorageContractTests(unittest.TestCase):
         with connect(self.db_path) as connection:
             event_id = append_event(connection, event_type="item.first", payload={"n": 1})
             connection.commit()
-            # Simulate a hostile filesystem-level actor that removes DB triggers first.
+
+        # Simulate a hostile filesystem-level actor that bypasses ACE's guarded
+        # connection API and removes DB triggers first.
+        with sqlite3.connect(self.db_path) as connection:
             connection.execute("DROP TRIGGER ace_events_no_update")
             connection.execute(
                 "UPDATE events SET payload_json = ? WHERE event_id = ?",
@@ -245,23 +248,23 @@ class StorageContractTests(unittest.TestCase):
         with connect(self.db_path) as connection:
             event_id = append_event(connection, event_type="item.first", payload={"n": 1})
             connection.commit()
-            with self.assertRaises(sqlite3.IntegrityError) as exc:
+            with self.assertRaises(sqlite3.DatabaseError) as exc:
                 connection.execute(
                     "UPDATE events SET payload_json = ? WHERE event_id = ?",
                     ('{"n":999}', event_id),
                 )
 
-        self.assertIn("events table is append-only", str(exc.exception))
+        self.assertIn("not authorized", str(exc.exception))
 
     def test_events_table_rejects_direct_delete_after_bootstrap(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
             event_id = append_event(connection, event_type="item.first", payload={"n": 1})
             connection.commit()
-            with self.assertRaises(sqlite3.IntegrityError) as exc:
+            with self.assertRaises(sqlite3.DatabaseError) as exc:
                 connection.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
 
-        self.assertIn("events table is append-only", str(exc.exception))
+        self.assertIn("not authorized", str(exc.exception))
 
     def test_audit_verify_fails_loudly_when_schema_needs_maintenance(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

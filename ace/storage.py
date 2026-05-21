@@ -307,6 +307,20 @@ def compute_event_hash(
     return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
+def _deny_event_update_delete_authorizer(action_code, arg1, arg2, _database_name, _trigger_name):
+    if action_code in {sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE} and arg1 == "events":
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+def _install_event_write_authorizer(connection: sqlite3.Connection) -> None:
+    connection.set_authorizer(_deny_event_update_delete_authorizer)
+
+
+def _clear_authorizer(connection: sqlite3.Connection) -> None:
+    connection.set_authorizer(None)
+
+
 @contextmanager
 def connect(db_path: Path | str = DB_PATH):
     connection = sqlite3.connect(str(db_path), timeout=30.0)
@@ -314,6 +328,7 @@ def connect(db_path: Path | str = DB_PATH):
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
+        _install_event_write_authorizer(connection)
         yield connection
     finally:
         connection.close()
@@ -670,6 +685,7 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as connection:
+        _clear_authorizer(connection)
         contradiction_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(contradictions)").fetchall()
@@ -934,11 +950,6 @@ def append_event(
     payload_json = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
     if not connection.in_transaction:
         connection.execute("BEGIN IMMEDIATE")
-    else:
-        # Force SQLite to acquire the write lock before reading the previous
-        # event hash. Without this, concurrent deferred transactions can compute
-        # against the same tail and later commit out of chain order.
-        connection.execute("UPDATE events SET event_id = event_id WHERE 0")
     _ensure_event_hash_columns(connection)
     _backfill_event_hashes(connection)
     previous_event_hash = connection.execute(
