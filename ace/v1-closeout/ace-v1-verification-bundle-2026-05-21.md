@@ -1,7 +1,8 @@
 # ACE 1.0 Final Verification Bundle
 
 Date: 2026-05-21
-Verified source: `049e3c90362efc4d51a325fc68c25252395268ef` (`049e3c9 ace: exclude accepted historical health debt`)
+Verified proof source: `049e3c90362efc4d51a325fc68c25252395268ef` (`049e3c9 ace: exclude accepted historical health debt`)
+Closeout/taggable HEAD: `94d3ebc1e295e1f7845e290e09990469338314aa` (`94d3ebc ci: quiet ace checkout default branch hint`)
 
 ## Classification
 
@@ -48,7 +49,7 @@ OK
 
 ## CI evidence
 
-ACE CI for the verified source:
+ACE CI for the verified proof source:
 
 - Run ID: `26140889116`
 - Head SHA: `049e3c90362efc4d51a325fc68c25252395268ef`
@@ -57,6 +58,15 @@ ACE CI for the verified source:
 - Created: `2026-05-20T04:15:01Z`
 - Updated: `2026-05-20T04:15:55Z`
 - URL: `https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/26140889116`
+
+ACE CI for closeout/taggable HEAD after the bundle and CI-warning cleanup:
+
+- Run ID: `26206618235`
+- Head SHA: `94d3ebc1e295e1f7845e290e09990469338314aa`
+- Status: `completed`
+- Conclusion: `success`
+- Log scan: 0 `::error`, 0 `::warning`, 0 `deprecated`, 0 Node20-action deprecation hits, 0 default-branch hints
+- URL: `https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/26206618235`
 
 ## Audit verification evidence
 
@@ -202,4 +212,4 @@ ACE 1.0 does not prove:
 
 ## Tagging rule
 
-Tag `ace-1.0` only after this bundle and `ace/STATUS.md` are committed and pushed. V1.1 work must not begin until the `ace-1.0` tag exists on the verified closeout commit.
+Tag `ace-1.0` must point at the closeout/taggable HEAD that contains this bundle and `ace/STATUS.md`, not at an older pre-bundle commit. V1.1 work must not begin until the corrected `ace-1.0` tag exists on that closeout commit.

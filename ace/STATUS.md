@@ -1,7 +1,8 @@
 # ACE 1.0 Status
 
 Date: 2026-05-21
-Current commit: `049e3c9 ace: exclude accepted historical health debt`
+Current closeout commit: `94d3ebc ci: quiet ace checkout default branch hint`
+Verified endurance proof source: `049e3c9 ace: exclude accepted historical health debt`
 
 ACE 1.0 is a local governed resident foundation for turning bounded operator work into auditable item lifecycle records. It runs under launchd, keeps a local SQLite-backed item/event ledger, records append-only event hashes, ingests direct Telegram work through the bounded OpenClaw session-stream path, routes ACE/JACE outbound operator status through the dedicated JACE Telegram Bot API path, and can move explicitly eligible or narrowly bounded internal work through the governed lifecycle to verified completion.
 
@@ -77,7 +78,7 @@ Deferred work includes:
 
 ## Current verification posture
 
-As of this status file, the verified ACE 1.0 closeout source is `049e3c9 ace: exclude accepted historical health debt`.
+As of this status file, the verified ACE 1.0 proof source is `049e3c9 ace: exclude accepted historical health debt`; the closeout/taggable HEAD is `94d3ebc ci: quiet ace checkout default branch hint`, which adds the final verification bundle and CI-warning cleanup without changing ACE runtime behavior.
 
 Latest verification observed for ACE 1.0 closeout:
 
@@ -95,7 +96,8 @@ Latest verification observed for ACE 1.0 closeout:
   - `governed_run_integrity=ok`
   - `runtime_instance_integrity=ok`
 - Full ACE local suite: `PYTHONWARNINGS=error python3 -m unittest discover ace/tests -t .` → `Ran 606 tests in 69.217s — OK`.
-- ACE CI: run `26140889116`, head `049e3c90362efc4d51a325fc68c25252395268ef`, `status=completed`, `conclusion=success`, URL `https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/26140889116`.
+- ACE CI for proof source: run `26140889116`, head `049e3c90362efc4d51a325fc68c25252395268ef`, `status=completed`, `conclusion=success`, URL `https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/26140889116`.
+- ACE CI for closeout/taggable HEAD: run `26206618235`, head `94d3ebc1e295e1f7845e290e09990469338314aa`, `status=completed`, `conclusion=success`; log scan found 0 `::error`, 0 `::warning`, 0 Node20 deprecation hits, and 0 default-branch hints.
 - Latest re-verification after the endurance closeout confirmed:
   - `python3 -m ace.ace --db ace/state/ace.db audit verify` still reports the four dimensions above as `ok`.
   - Current resident runtime remains `runtime_e5ec064dd5ff4db0848291f6ab9111be`, `status=live`, `startup_status=completed`, `shutdown_status=not_requested`, `recovery_status=not_requested`.
@@ -103,7 +105,7 @@ Latest verification observed for ACE 1.0 closeout:
 
 ## ACE 1.0 proof boundary
 
-ACE 1.0 proves the bounded local launchd + resident-supervisor + governed-cycle endurance slice for commit `049e3c9`. Specifically, it proves local resident supervisor continuity, launchd cycle continuity, governed ledger/audit integrity, green health summary, accepted historical-health-debt handling, and full local/CI test health for that commit.
+ACE 1.0 proves the bounded local launchd + resident-supervisor + governed-cycle endurance slice for proof source commit `049e3c9`; closeout/taggable HEAD `94d3ebc` contains documentation and CI hygiene only. Specifically, it proves local resident supervisor continuity, launchd cycle continuity, governed ledger/audit integrity, green health summary, accepted historical-health-debt handling, and full local/CI test health for that commit.
 
 ACE 1.0 does not prove broad natural-language understanding, raw Telegram Bot API inbound ownership, distributed/high-availability runtime fabric, external billing/model-provider spend attribution, multi-tenant production operation, broad platform autonomy, or ACE 1.1 scope. Those remain outside the ACE 1.0 closeout boundary.
 
