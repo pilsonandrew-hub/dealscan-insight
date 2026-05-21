@@ -22,6 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: Cursor AI Code Review (PR diff)
+        # AI review is advisory-only by design; business-rule validation is the gating check.
         continue-on-error: true
         if: github.event_name == 'pull_request'
         env:
@@ -38,6 +39,7 @@ jobs:
           echo "$REVIEW" >> $GITHUB_STEP_SUMMARY
 
       - name: Cursor AI Code Review (push to main)
+        # AI review is advisory-only by design; business-rule validation is the gating check.
         continue-on-error: true
         if: github.event_name == 'push'
         env:
