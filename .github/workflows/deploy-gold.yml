@@ -226,7 +226,7 @@ jobs:
             if [ "${{ inputs.force_deploy }}" != "true" ]; then
               exit 1
             else
-              echo "::warning::Forcing deployment despite validation failures"
+              echo "Force deployment requested despite validation failures"
               echo "status=forced" >> $GITHUB_OUTPUT
             fi
           else
@@ -288,7 +288,7 @@ jobs:
             if [ "${{ inputs.force_deploy }}" != "true" ]; then
               exit 1
             else
-              echo "::warning::Forcing deployment despite SLO failures"
+              echo "Force deployment requested despite SLO failures"
             fi
           fi
 
