@@ -917,10 +917,10 @@ const RoverTab = () => {
     setRoverDebug(`Loading for user: ${user.id.slice(0,8)}...`);
     try {
       const result = await roverAPI.getRecommendationsWithToken(user.id, token, 25);
-      const items = result?.items ?? [];
-      setRoverDebug((result as any)._debug || `API returned ${items.length} items`);
+      const items: RoverRecommendation[] = result?.items ?? [];
+      setRoverDebug(result._debug || `API returned ${items.length} items`);
 
-      const mapped: RoverRecommendation[] = items.map((item: any) => ({
+      const mapped: RoverRecommendation[] = items.map((item) => ({
         id: item.id,
         make: item.make,
         model: item.model,
@@ -1594,15 +1594,24 @@ const AnalyticsTab = () => {
         setReconActivity({ totalEvaluated: 0, avgMaxBid: null, tightestDeal: null, topSegment: null });
         return;
       }
-      const totalEvaluated = data.length;
-      const bids = data.map((d: any) => d.max_bid).filter((b: any) => b != null) as number[];
-      const avgMaxBid = bids.length > 0 ? bids.reduce((a: number, b: number) => a + b, 0) / bids.length : null;
-      const nonPass = data.filter((d: any) => d.verdict !== 'PASS' && d.max_bid != null);
+      type ReconEvaluationRow = {
+        id: string;
+        make?: string | null;
+        model?: string | null;
+        year?: number | null;
+        max_bid?: number | null;
+        verdict?: string | null;
+      };
+      const rows = data as ReconEvaluationRow[];
+      const totalEvaluated = rows.length;
+      const bids = rows.map((d) => d.max_bid).filter((b): b is number => b != null);
+      const avgMaxBid = bids.length > 0 ? bids.reduce((a, b) => a + b, 0) / bids.length : null;
+      const nonPass = rows.filter((d) => d.verdict !== 'PASS' && d.max_bid != null);
       const tightestDeal = nonPass.length > 0
-        ? nonPass.sort((a: any, b: any) => (b.max_bid || 0) - (a.max_bid || 0))[0]
+        ? nonPass.sort((a, b) => (b.max_bid || 0) - (a.max_bid || 0))[0]
         : null;
       const makeCount: Record<string, number> = {};
-      data.forEach((d: any) => { if (d.make) makeCount[d.make] = (makeCount[d.make] || 0) + 1; });
+      rows.forEach((d) => { if (d.make) makeCount[d.make] = (makeCount[d.make] || 0) + 1; });
       const topSegment = Object.entries(makeCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
       setReconActivity({ totalEvaluated, avgMaxBid, tightestDeal, topSegment });
     } catch (e) {

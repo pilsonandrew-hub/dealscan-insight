@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { validatePasswordStrength, isPasswordExposed } from '../../auth/passwordSecurity';
 
 // Mock the fetch call to HIBP API
-global.fetch = vi.fn();
+const mockFetch = vi.fn<typeof fetch>();
+global.fetch = mockFetch;
 
 describe('Password Security Module', () => {
   beforeEach(() => {
@@ -57,10 +58,10 @@ describe('Password Security Module', () => {
     it('should return true if the password hash is found in the HIBP database', async () => {
       // SHA-1 for "password" is 5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8
       const pwnedHashSuffix = 'A61E4C9B93F3F0682250B6CF8331B7EE68FD8';
-      (fetch as any).mockResolvedValue({
+      mockFetch.mockResolvedValue({
         ok: true,
         text: () => Promise.resolve(`someotherhash:1\r\n${pwnedHashSuffix}:12345\r\nanotherhash:2`),
-      });
+      } as Response);
 
       const result = await isPasswordExposed('password');
       expect(result).toBe(true);
@@ -71,17 +72,17 @@ describe('Password Security Module', () => {
     });
 
     it('should return false if the password hash is not found', async () => {
-      (fetch as any).mockResolvedValue({
+      mockFetch.mockResolvedValue({
         ok: true,
         text: () => Promise.resolve(`someotherhash:1\r\nanotherhash:2`),
-      });
+      } as Response);
 
       const result = await isPasswordExposed('a-very-unique-and-safe-password');
       expect(result).toBe(false);
     });
 
     it('should return false if the API call fails', async () => {
-      (fetch as any).mockResolvedValue({ ok: false });
+      mockFetch.mockResolvedValue({ ok: false } as Response);
       const result = await isPasswordExposed('password');
       expect(result).toBe(false);
     });

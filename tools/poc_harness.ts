@@ -20,16 +20,16 @@ export interface POCResult {
   status: 'success' | 'error' | 'timeout';
   artifacts: {
     rawHtml?: string;
-    extractedJson?: any;
-    provenanceData?: any;
-    validationReport?: any;
-    complianceResult?: any;
-    har?: any;
+    extractedJson?: Record<string, unknown>;
+    provenanceData?: Record<string, unknown>[];
+    validationReport?: ValidationReportLike;
+    complianceResult?: ComplianceResultLike;
+    har?: unknown;
   };
   metadata: {
     timestamp: string;
     renderMode: 'http' | 'headless';
-    strategyLog: any[];
+    strategyLog: StrategyLogEntry[];
     clusterId: string;
     modelVersions: Record<string, string>;
     performance: {
@@ -40,6 +40,58 @@ export interface POCResult {
     };
   };
   errors: string[];
+}
+
+interface StrategyLogEntry {
+  field: string;
+  strategy: string;
+  confidence: number;
+  retries: number;
+  success: boolean;
+  error?: string;
+}
+
+interface ValidationReportLike {
+  valid: boolean;
+  errors?: string[];
+  [key: string]: unknown;
+}
+
+interface ComplianceResultLike {
+  robotsAllowed: boolean;
+  [key: string]: unknown;
+}
+
+interface HeadlessPerformanceLike {
+  [key: string]: unknown;
+}
+
+interface ExtractionResultLike {
+  value: unknown;
+  strategy: string;
+  confidence: number;
+  retries: number;
+}
+
+interface SummaryReport {
+  timestamp: string;
+  totalUrls: number;
+  successCount: number;
+  errorCount: number;
+  timeoutCount: number;
+  averageTime: number;
+  strategyStats: Record<string, number>;
+  validationStats: { total: number; passed: number; passRate: number };
+  topErrors: Array<{ error: string; count: number }>;
+  siteBreakdown: Record<string, SiteStats>;
+}
+
+interface SiteStats {
+  total: number;
+  success: number;
+  errors: number;
+  avgTime: number;
+  renderModes: Record<'http' | 'headless', number>;
 }
 
 /**
@@ -184,7 +236,7 @@ export class POCHarness {
   private async fetchContent(url: string): Promise<{
     html: string;
     renderMode: 'http' | 'headless';
-    performance?: any;
+    performance?: HeadlessPerformanceLike;
   }> {
     // Try HTTP first (faster and cheaper)
     try {
@@ -226,22 +278,22 @@ export class POCHarness {
    * Extract structured data using the strategy engine
    */
   private async extractData(url: string, html: string, clusterId: string): Promise<{
-    data: any;
-    provenance: any[];
-    strategyLog: any[];
+    data: Record<string, unknown>;
+    provenance: Record<string, unknown>[];
+    strategyLog: StrategyLogEntry[];
   }> {
     const siteName = new URL(url).hostname;
-    const strategyLog: any[] = [];
-    const provenance: any[] = [];
+    const strategyLog: StrategyLogEntry[] = [];
+    const provenance: Record<string, unknown>[] = [];
     
     // Fields to extract (configurable based on site type)
     const fieldsToExtract = ['price', 'year', 'make', 'model', 'mileage', 'title', 'location'];
-    const extractedData: any = {};
+    const extractedData: Record<string, unknown> = {};
 
     for (const field of fieldsToExtract) {
       try {
         const context = { field, html, clusterId, url, siteName };
-        const result = await ExtractionStrategyEngine.extractField(context);
+        const result = await ExtractionStrategyEngine.extractField(context) as ExtractionResultLike;
         
         extractedData[field] = result.value;
         
@@ -259,7 +311,7 @@ export class POCHarness {
           context,
           result,
           'http' // This would be determined by actual render mode
-        );
+        ) as Record<string, unknown>;
         provenance.push(provenanceData);
 
       } catch (error) {
@@ -284,7 +336,7 @@ export class POCHarness {
   /**
    * Validate extracted data against contracts
    */
-  private async validateData(data: any): Promise<any> {
+  private async validateData(data: Record<string, unknown>): Promise<ValidationReportLike> {
     // Mock vehicle data for validation
     const vehicleData = {
       id: 'poc-test',
@@ -303,7 +355,7 @@ export class POCHarness {
   /**
    * Parse price from extracted string
    */
-  private parsePrice(priceStr: any): number {
+  private parsePrice(priceStr: unknown): number {
     if (typeof priceStr === 'number') return priceStr;
     if (typeof priceStr === 'string') {
       const cleaned = priceStr.replace(/[^0-9.]/g, '');
@@ -411,7 +463,7 @@ export class POCHarness {
   /**
    * Calculate strategy usage statistics
    */
-  private calculateStrategyStats(results: POCResult[]): any {
+  private calculateStrategyStats(results: POCResult[]): Record<string, number> {
     const stats = { selector: 0, ml: 0, llm: 0, error: 0 };
     
     for (const result of results) {
@@ -428,10 +480,10 @@ export class POCHarness {
   /**
    * Calculate validation statistics
    */
-  private calculateValidationStats(results: POCResult[]): any {
+  private calculateValidationStats(results: POCResult[]): { total: number; passed: number; passRate: number } {
     const validResults = results.filter(r => r.artifacts.validationReport);
     const totalValidations = validResults.length;
-    const passedValidations = validResults.filter(r => r.artifacts.validationReport.valid).length;
+    const passedValidations = validResults.filter(r => r.artifacts.validationReport?.valid).length;
 
     return {
       total: totalValidations,
@@ -461,8 +513,8 @@ export class POCHarness {
   /**
    * Calculate per-site breakdown
    */
-  private calculateSiteBreakdown(results: POCResult[]): any {
-    const siteStats: Record<string, any> = {};
+  private calculateSiteBreakdown(results: POCResult[]): Record<string, SiteStats> {
+    const siteStats: Record<string, SiteStats> = {};
     
     for (const result of results) {
       const hostname = new URL(result.url).hostname;
@@ -493,7 +545,7 @@ export class POCHarness {
   /**
    * Generate markdown report
    */
-  private generateMarkdownReport(summary: any, results: POCResult[]): string {
+  private generateMarkdownReport(summary: SummaryReport, results: POCResult[]): string {
     return `# POC Test Report
 
 ## Summary
@@ -513,10 +565,10 @@ export class POCHarness {
 - **Passed**: ${summary.validationStats.passed}/${summary.validationStats.total}
 
 ## Top Errors
-${summary.topErrors.map((e: any) => `- ${e.error} (${e.count} times)`).join('\n')}
+${summary.topErrors.map((e) => `- ${e.error} (${e.count} times)`).join('\n')}
 
 ## Site Breakdown
-${Object.entries(summary.siteBreakdown).map(([site, stats]: [string, any]) => 
+${Object.entries(summary.siteBreakdown).map(([site, stats]) => 
   `- **${site}**: ${stats.success}/${stats.total} success (${(stats.success/stats.total*100).toFixed(1)}%), avg ${stats.avgTime.toFixed(0)}ms`
 ).join('\n')}
 `;

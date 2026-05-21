@@ -264,7 +264,7 @@ export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) 
               const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
               const sampleData = lines.slice(1, Math.min(11, lines.length)).map(line => {
                 const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-                const record: Record<string, any> = {};
+                const record: Record<string, string> = {};
                 headers.forEach((header, index) => {
                   record[header.toLowerCase()] = values[index] || '';
                 });

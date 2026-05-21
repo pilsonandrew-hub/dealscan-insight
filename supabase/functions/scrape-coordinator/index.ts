@@ -25,6 +25,22 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-key',
 };
 
+interface ScrapeSiteInput {
+  id?: string;
+  name?: string;
+  baseUrl?: string;
+  base_url?: string;
+  category?: 'federal' | 'insurance' | 'state' | 'municipal' | string;
+}
+
+interface ScrapeResult {
+  siteId?: string;
+  success: boolean;
+  vehiclesFound?: number;
+  error?: string;
+  [key: string]: unknown;
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -59,11 +75,11 @@ Deno.serve(async (req) => {
     await upsertJob(jobId, { 
       status: 'running', 
       started_at: started, 
-      sites_targeted: sites.map((s: any) => s.id || s.name) 
+      sites_targeted: (sites as ScrapeSiteInput[]).map((s) => s.id || s.name) 
     });
 
-    const results: any[] = [];
-    for (const site of sites) {
+    const results: ScrapeResult[] = [];
+    for (const site of sites as ScrapeSiteInput[]) {
       try {
         const res = await scrapeSite(site, mode);
         results.push({ siteId: site.id, success: true, ...res });
@@ -98,7 +114,7 @@ Deno.serve(async (req) => {
     console.error('Scrape coordinator error:', error);
     return new Response(JSON.stringify({ 
       error: 'Internal server error', 
-      details: error.message 
+      details: error instanceof Error ? error.message : 'Unknown scrape coordinator error' 
     }), { 
       status: 500, 
       headers: { ...corsHeaders, 'content-type': 'application/json' }
@@ -107,7 +123,7 @@ Deno.serve(async (req) => {
 });
 
 // ---- helpers --------------------------------------------------------
-async function scrapeSite(site: any, mode: 'live'|'demo') {
+async function scrapeSite(site: ScrapeSiteInput, mode: 'live'|'demo') {
   if (mode === 'demo') {
     // Generate realistic demo data based on site category
     const vehicleCount = Math.floor(Math.random() * 50) + 10;

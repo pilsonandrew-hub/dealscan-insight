@@ -6,6 +6,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface ExportListing {
+  year?: number | string;
+  make?: string;
+  model?: string;
+  trim?: string;
+  vin?: string;
+  odo_miles?: number;
+  bid_current?: number;
+  buy_now?: number;
+  source?: string;
+  location?: { city?: string; state?: string };
+  auction_ends_at?: string;
+  arbitrage_score?: number;
+  provenance?: { via?: string };
+  url?: string;
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -25,7 +42,7 @@ serve(async (req) => {
       
       const csvRows = [
         headers.join(','),
-        ...results.map((listing: any) => [
+        ...results.map((listing: ExportListing) => [
           listing.year || '',
           listing.make || '',
           listing.model || '',
@@ -55,7 +72,7 @@ serve(async (req) => {
 Generated: ${new Date().toISOString()}
 Total Results: ${results.length}
 
-${results.map((listing: any, index: number) => `
+${results.map((listing: ExportListing, index: number) => `
 ${index + 1}. ${listing.year} ${listing.make} ${listing.model}
    Price: $${listing.bid_current || listing.buy_now || 'N/A'}
    Mileage: ${listing.odo_miles ? listing.odo_miles.toLocaleString() : 'N/A'} miles
@@ -83,7 +100,7 @@ End of Report`;
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error.message || 'Internal server error' 
+        error: error instanceof Error ? error.message : 'Internal server error' 
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

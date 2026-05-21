@@ -2,6 +2,7 @@
  * Test Helper Utilities
  */
 
+/* eslint-disable react-refresh/only-export-components -- Test helper module intentionally exports render wrappers and utility factories. */
 import { render, RenderOptions } from '@testing-library/react';
 import type { User } from '@supabase/supabase-js';
 import { ReactElement, ReactNode } from 'react';
