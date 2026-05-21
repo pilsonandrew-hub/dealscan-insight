@@ -10,10 +10,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-class LegacyRaceRepairRejected(RuntimeError):
-    """Raised when a requested hash-chain repair is not a narrow legacy race."""
-
-
 ACE_DIR = Path(__file__).resolve().parent
 STATE_DIR = ACE_DIR / "state"
 DB_PATH = STATE_DIR / "ace.db"
@@ -323,6 +319,44 @@ def connect(db_path: Path | str = DB_PATH):
         connection.close()
 
 
+@contextmanager
+def connect_readonly(db_path: Path | str = DB_PATH):
+    connection = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, timeout=30.0)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute("PRAGMA foreign_keys = ON")
+        yield connection
+    finally:
+        connection.close()
+
+
+def _install_event_append_only_triggers(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS ace_events_no_update
+        BEFORE UPDATE ON events
+        BEGIN
+            SELECT RAISE(ABORT, 'events table is append-only; update denied');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS ace_events_no_delete
+        BEFORE DELETE ON events
+        BEGIN
+            SELECT RAISE(ABORT, 'events table is append-only; delete denied');
+        END
+        """
+    )
+
+
+def _drop_event_append_only_triggers_for_maintenance(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TRIGGER IF EXISTS ace_events_no_update")
+    connection.execute("DROP TRIGGER IF EXISTS ace_events_no_delete")
+
+
 def _ensure_event_hash_columns(connection: sqlite3.Connection) -> None:
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
     if not columns:
@@ -381,99 +415,61 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
         previous_hash = expected_hash
 
 
-def repair_event_hash_chain_for_legacy_races(connection: sqlite3.Connection) -> int:
-    """Repair hash rows produced by pre-serialized append races.
-
-    This is deliberately narrow: it only rewrites rows whose stored hash matches the
-    row's stored previous hash, but whose stored previous hash does not match the
-    canonical immediately preceding event hash. That pattern is produced by older
-    concurrent appenders that computed a valid hash before another writer committed.
-    Payload/hash mismatches remain tamper evidence and are not repaired here.
-    """
-
-    _ensure_event_hash_columns(connection)
-    _backfill_event_hashes(connection)
-    _assert_no_event_semantic_timestamp_inversions(connection)
-    repaired = 0
-    previous_event_hash: str | None = None
-    rows = connection.execute(
-        """
-        SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
-               created_at, previous_event_hash, event_hash
-        FROM events
-        ORDER BY id ASC
-        """
-    ).fetchall()
-    for row in rows:
-        hash_with_stored_previous = compute_event_hash(
-            event_id=row["event_id"],
-            item_id=row["item_id"],
-            event_type=row["event_type"],
-            payload_json=row["payload_json"],
-            actor=row["actor"],
-            source=row["source"],
-            session_id=row["session_id"],
-            created_at=row["created_at"],
-            previous_event_hash=row["previous_event_hash"],
+def _schema_ready_for_readonly_audit(connection: sqlite3.Connection) -> tuple[bool, str | None]:
+    required_tables = {"events", "evidence", "items", "governed_runs", "runtime_instances"}
+    existing_tables = {
+        row["name"]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    missing_tables = sorted(required_tables - existing_tables)
+    if missing_tables:
+        return False, (
+            "schema maintenance required before audit verify: missing tables "
+            + ",".join(missing_tables)
+            + "; run explicit ACE maintenance migration/bootstrap first"
         )
-        if row["event_hash"] != hash_with_stored_previous:
-            previous_event_hash = row["event_hash"]
-            continue
-        if row["previous_event_hash"] != previous_event_hash:
-            repaired_hash = compute_event_hash(
-                event_id=row["event_id"],
-                item_id=row["item_id"],
-                event_type=row["event_type"],
-                payload_json=row["payload_json"],
-                actor=row["actor"],
-                source=row["source"],
-                session_id=row["session_id"],
-                created_at=row["created_at"],
-                previous_event_hash=previous_event_hash,
-            )
-            connection.execute(
-                "UPDATE events SET previous_event_hash = ?, event_hash = ? WHERE id = ?",
-                (previous_event_hash, repaired_hash, row["id"]),
-            )
-            repaired += 1
-            previous_event_hash = repaired_hash
-        else:
-            previous_event_hash = row["event_hash"]
-    return repaired
+
+    event_columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+    required_event_columns = {"previous_event_hash", "event_hash"}
+    missing_event_columns = sorted(required_event_columns - event_columns)
+    if missing_event_columns:
+        return False, (
+            "schema maintenance required before audit verify: events missing columns "
+            + ",".join(missing_event_columns)
+            + "; run explicit ACE maintenance migration/bootstrap first"
+        )
+
+    missing_hash_count = connection.execute(
+        "SELECT COUNT(*) AS count FROM events WHERE event_hash IS NULL"
+    ).fetchone()["count"]
+    if missing_hash_count:
+        return False, (
+            "event hash maintenance required before audit verify: "
+            f"{missing_hash_count} event rows lack event_hash; run explicit ACE maintenance migration/bootstrap first"
+        )
+
+    return True, None
 
 
-def _assert_no_event_semantic_timestamp_inversions(connection: sqlite3.Connection) -> None:
-    previous_created_at: str | None = None
-    previous_event_id: str | None = None
-    rows = connection.execute(
-        """
-        SELECT id, event_id, created_at
-        FROM events
-        ORDER BY id ASC
-        """
-    ).fetchall()
-    for row in rows:
-        created_at = row["created_at"]
-        if previous_created_at is not None and created_at < previous_created_at:
-            raise LegacyRaceRepairRejected(
-                "refusing event hash repair across timestamp inversion: "
-                f"event {row['event_id']} created_at {created_at} precedes "
-                f"previous event {previous_event_id} created_at {previous_created_at}"
-            )
-        previous_created_at = created_at
-        previous_event_id = row["event_id"]
+def _maintenance_required_results(reason: str) -> dict[str, tuple[bool, str | None]]:
+    return {
+        "event_hash_chain": (False, reason),
+        "evidence_consistency": (False, reason),
+        "governed_run_integrity": (False, reason),
+        "runtime_instance_integrity": (False, reason),
+    }
 
 
 def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
     """Return whether the append-only event hash chain is internally consistent."""
 
-    bootstrap_db(db_path)
     previous_event_hash: str | None = None
-    with connect(db_path) as connection:
-        # Take a consistent verification snapshot while also backfilling any rows
-        # appended by a still-running pre-hash runtime process.
-        connection.execute("BEGIN IMMEDIATE")
-        _backfill_event_hashes(connection)
+    with connect_readonly(db_path) as connection:
+        ready, reason = _schema_ready_for_readonly_audit(connection)
+        if not ready:
+            return False, reason
         rows = connection.execute(
             """
             SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
@@ -482,7 +478,6 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
             ORDER BY id ASC
             """
         ).fetchall()
-        connection.commit()
 
     for row in rows:
         if row["previous_event_hash"] != previous_event_hash:
@@ -505,44 +500,22 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
 
 
 def _verify_event_hash_chain_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
-    previous_event_hash: str | None = None
-    with connect(db_path) as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        _backfill_event_hashes(connection)
-        rows = connection.execute(
-            """
-            SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
-                   created_at, previous_event_hash, event_hash
-            FROM events
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        connection.commit()
-
-    for row in rows:
-        if row["previous_event_hash"] != previous_event_hash:
-            return False, f"event {row['event_id']} has broken previous_event_hash"
-        expected_hash = compute_event_hash(
-            event_id=row["event_id"],
-            item_id=row["item_id"],
-            event_type=row["event_type"],
-            payload_json=row["payload_json"],
-            actor=row["actor"],
-            source=row["source"],
-            session_id=row["session_id"],
-            created_at=row["created_at"],
-            previous_event_hash=previous_event_hash,
-        )
-        if row["event_hash"] != expected_hash:
-            return False, f"event {row['event_id']} hash mismatch"
-        previous_event_hash = row["event_hash"]
-    return True, None
+    return verify_event_hash_chain(db_path)
 
 
 def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[bool, str | None]]:
     """Return read-only audit verification results for governed ACE integrity surfaces."""
 
-    bootstrap_db(db_path)
+    try:
+        with connect_readonly(db_path) as connection:
+            ready, reason = _schema_ready_for_readonly_audit(connection)
+    except sqlite3.OperationalError as exc:
+        reason = f"schema maintenance required before audit verify: {exc}; run explicit ACE maintenance migration/bootstrap first"
+        return _maintenance_required_results(reason)
+    if not ready:
+        assert reason is not None
+        return _maintenance_required_results(reason)
+
     event_hash_chain_result = _verify_event_hash_chain_bootstrapped(db_path)
     return {
         "event_hash_chain": event_hash_chain_result,
@@ -553,7 +526,7 @@ def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[boo
 
 
 def _verify_evidence_consistency_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
-    with connect(db_path) as connection:
+    with connect_readonly(db_path) as connection:
         missing_item = connection.execute(
             """
             SELECT e.id, e.item_id
@@ -588,7 +561,7 @@ def _verify_governed_run_integrity_bootstrapped(db_path: Path | str = DB_PATH) -
     terminal_statuses = {"completed", "failed", "interrupted", "skipped"}
     active_statuses = {"pending", "starting", "running"}
 
-    with connect(db_path) as connection:
+    with connect_readonly(db_path) as connection:
         rows = connection.execute(
             """
             SELECT run_id, status, started_at, ended_at, interrupted_at, failure_code
@@ -622,7 +595,7 @@ def _verify_runtime_instance_integrity_bootstrapped(db_path: Path | str = DB_PAT
     terminal_statuses = {"stopped", "failed"}
     active_statuses = {"starting", "live", "stale"}
 
-    with connect(db_path) as connection:
+    with connect_readonly(db_path) as connection:
         rows = connection.execute(
             """
             SELECT runtime_instance_id, status, ended_at, failure_code,
@@ -756,8 +729,10 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
         if item_columns and "closed_reason" not in item_columns:
             connection.execute("ALTER TABLE items ADD COLUMN closed_reason TEXT")
 
+        _drop_event_append_only_triggers_for_maintenance(connection)
         _backfill_event_hashes(connection)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(event_hash)")
+        _install_event_append_only_triggers(connection)
 
         contradiction_columns = {
             row["name"]

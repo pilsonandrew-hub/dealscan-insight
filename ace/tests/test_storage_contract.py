@@ -8,13 +8,11 @@ import unittest
 from pathlib import Path
 
 from ace.storage import (
-    LegacyRaceRepairRejected,
     append_event,
     bootstrap_db,
     compute_event_hash,
     connect,
     new_id,
-    repair_event_hash_chain_for_legacy_races,
     utc_now,
     verify_audit_integrity,
     verify_evidence_consistency,
@@ -195,11 +193,13 @@ class StorageContractTests(unittest.TestCase):
         self.assertNotEqual(rows[0]["event_hash"], rows[1]["event_hash"])
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
 
-    def test_verify_event_hash_chain_detects_payload_tampering(self) -> None:
+    def test_verify_event_hash_chain_detects_payload_tampering_if_external_trigger_removed(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
             event_id = append_event(connection, event_type="item.first", payload={"n": 1})
             connection.commit()
+            # Simulate a hostile filesystem-level actor that removes DB triggers first.
+            connection.execute("DROP TRIGGER ace_events_no_update")
             connection.execute(
                 "UPDATE events SET payload_json = ? WHERE event_id = ?",
                 ('{"n":999}', event_id),
@@ -240,124 +240,45 @@ class StorageContractTests(unittest.TestCase):
 
         self.assertEqual(busy_timeout_ms, 30000)
 
-    def test_repair_event_hash_chain_repairs_legacy_concurrent_tail_race_only(self) -> None:
+    def test_events_table_rejects_direct_update_after_bootstrap(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
-            first_id = append_event(
-                connection,
-                event_type="item.first",
-                payload={"n": 1},
-                created_at="2026-05-13T00:00:00Z",
-            )
+            event_id = append_event(connection, event_type="item.first", payload={"n": 1})
             connection.commit()
-            first_hash = connection.execute(
-                "SELECT event_hash FROM events WHERE event_id = ?",
-                (first_id,),
-            ).fetchone()["event_hash"]
-            second_hash = compute_event_hash(
-                event_id="evt_second",
-                item_id=None,
-                event_type="item.second",
-                payload_json='{"n":2}',
-                actor=None,
-                source=None,
-                session_id=None,
-                created_at="2026-05-13T00:00:01Z",
-                previous_event_hash=first_hash,
-            )
-            third_hash = compute_event_hash(
-                event_id="evt_third",
-                item_id=None,
-                event_type="item.third",
-                payload_json='{"n":3}',
-                actor=None,
-                source=None,
-                session_id=None,
-                created_at="2026-05-13T00:00:02Z",
-                previous_event_hash=first_hash,
-            )
-            connection.execute(
-                """
-                INSERT INTO events (
-                    event_id, item_id, event_type, payload_json, actor, source, session_id,
-                    created_at, previous_event_hash, event_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                ("evt_second", None, "item.second", '{"n":2}', None, None, None, "2026-05-13T00:00:01Z", first_hash, second_hash),
-            )
-            connection.execute(
-                """
-                INSERT INTO events (
-                    event_id, item_id, event_type, payload_json, actor, source, session_id,
-                    created_at, previous_event_hash, event_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                ("evt_third", None, "item.third", '{"n":3}', None, None, None, "2026-05-13T00:00:02Z", first_hash, third_hash),
-            )
-            connection.commit()
+            with self.assertRaises(sqlite3.IntegrityError) as exc:
+                connection.execute(
+                    "UPDATE events SET payload_json = ? WHERE event_id = ?",
+                    ('{"n":999}', event_id),
+                )
 
-        ok, detail = verify_event_hash_chain(self.db_path)
-        self.assertFalse(ok)
-        self.assertEqual(detail, "event evt_third has broken previous_event_hash")
+        self.assertIn("events table is append-only", str(exc.exception))
 
-        with connect(self.db_path) as connection:
-            repaired = repair_event_hash_chain_for_legacy_races(connection)
-            connection.commit()
-
-        self.assertEqual(repaired, 1)
-        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
-
-    def test_repair_event_hash_chain_rejects_semantic_timestamp_inversion(self) -> None:
+    def test_events_table_rejects_direct_delete_after_bootstrap(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
-            first_id = append_event(
-                connection,
-                event_type="item.first",
-                payload={"n": 1},
-                created_at="2026-05-21T06:12:24Z",
-            )
+            event_id = append_event(connection, event_type="item.first", payload={"n": 1})
             connection.commit()
-            first_hash = connection.execute(
-                "SELECT event_hash FROM events WHERE event_id = ?",
-                (first_id,),
-            ).fetchone()["event_hash"]
-            backdated_hash = compute_event_hash(
-                event_id="evt_backdated",
-                item_id=None,
-                event_type="item.created",
-                payload_json='{"n":2}',
-                actor="verification.manual",
-                source="verification/manual",
-                session_id="breach-shape",
-                created_at="2026-05-20T05:13:27Z",
-                previous_event_hash=first_hash,
-            )
+            with self.assertRaises(sqlite3.IntegrityError) as exc:
+                connection.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
+
+        self.assertIn("events table is append-only", str(exc.exception))
+
+    def test_audit_verify_fails_loudly_when_schema_needs_maintenance(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as connection:
             connection.execute(
-                """
-                INSERT INTO events (
-                    event_id, item_id, event_type, payload_json, actor, source, session_id,
-                    created_at, previous_event_hash, event_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "evt_backdated",
-                    None,
-                    "item.created",
-                    '{"n":2}',
-                    "verification.manual",
-                    "verification/manual",
-                    "breach-shape",
-                    "2026-05-20T05:13:27Z",
-                    first_hash,
-                    backdated_hash,
-                ),
+                "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)"
             )
             connection.commit()
 
-            with self.assertRaises(LegacyRaceRepairRejected) as exc:
-                repair_event_hash_chain_for_legacy_races(connection)
+        results = verify_audit_integrity(self.db_path)
 
-        self.assertIn("refusing event hash repair across timestamp inversion", str(exc.exception))
+        self.assertFalse(all(ok for ok, _reason in results.values()))
+        for ok, reason in results.values():
+            self.assertFalse(ok)
+            self.assertIsNotNone(reason)
+            self.assertIn("schema maintenance required before audit verify", reason or "")
+            self.assertIn("run explicit ACE maintenance migration/bootstrap first", reason or "")
 
 
     def test_verify_evidence_consistency_passes_for_valid_evidence(self) -> None:
