@@ -9,7 +9,7 @@ import { CrosshairResults } from './CrosshairResults';
 import { useRealtimeOpportunities } from '@/hooks/useRealtimeOpportunities';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { CanonicalQuery, SearchResponse, CrosshairIntent, CanonicalListing } from '@/types/crosshair';
+import { CanonicalQuery, SearchOptions, SearchResponse, CrosshairIntent, CanonicalListing } from '@/types/crosshair';
 import { Zap, Activity, TrendingUp, Clock, Search, Crosshair } from 'lucide-react';
 import { roverAPI } from '@/services/roverAPI';
 
@@ -26,7 +26,7 @@ async function createListingWatchAlert(listing: CanonicalListing): Promise<strin
       title: `Watching: ${listing.year} ${listing.make} ${listing.model}`,
       message: `Price: ${listing.bid_current ? `$${listing.bid_current}` : 'N/A'} - ${listing.source}`,
       priority: 'medium',
-      opportunity_data: listing as any,
+      opportunity_data: listing as unknown as Record<string, unknown>,
       user_id: userId,
     });
 
@@ -104,7 +104,7 @@ export const CrosshairDashboard = () => {
       setSavedIntents((data || []).map(intent => ({
         ...intent,
         canonical_query: intent.canonical_query as CanonicalQuery,
-        search_options: intent.search_options as any
+        search_options: intent.search_options as SearchOptions
       })));
     } catch (error) {
       console.error('Error loading saved intents:', error);
@@ -182,7 +182,7 @@ export const CrosshairDashboard = () => {
     };
   }, [loadSavedIntents, toast, updateRealtimeStats]);
 
-  const handleSearch = useCallback(async (query: CanonicalQuery, options: any) => {
+  const handleSearch = useCallback(async (query: CanonicalQuery, options: SearchOptions) => {
     setIsSearching(true);
     clearNewCount();
 
@@ -230,7 +230,7 @@ export const CrosshairDashboard = () => {
     }
   }, [clearNewCount, logAndToastError, showCrosshairToast]);
 
-  const handleSaveIntent = useCallback(async (query: CanonicalQuery, options: any, title: string) => {
+  const handleSaveIntent = useCallback(async (query: CanonicalQuery, options: SearchOptions, title: string) => {
     try {
       await roverAPI.saveIntent(query, title, {
         dos_threshold: options?.dos_threshold,

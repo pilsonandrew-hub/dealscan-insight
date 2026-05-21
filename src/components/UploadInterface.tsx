@@ -27,11 +27,11 @@ interface UploadFile {
   validRecords?: number;
   warnings?: number;
   error?: string;
-  validationReport?: any;
+  validationReport?: unknown;
 }
 
 interface UploadInterfaceProps {
-  onUploadSuccess?: (result: any) => void;
+  onUploadSuccess?: (result: unknown) => void;
 }
 
 export const UploadInterface = ({ onUploadSuccess }: UploadInterfaceProps = {}) => {

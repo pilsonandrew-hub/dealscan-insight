@@ -10,6 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Crosshair, Search, Save, AlertCircle } from "lucide-react";
 import { CanonicalQuery, SearchOptions } from "@/types/crosshair";
 
+type TitleStatus = NonNullable<CanonicalQuery['title_status']>[number];
+type Condition = NonNullable<CanonicalQuery['condition']>[number];
+type Fuel = NonNullable<CanonicalQuery['fuel']>[number];
+
 interface CrosshairSearchFormProps {
   onSearch: (query: CanonicalQuery, options: SearchOptions) => void;
   onSaveIntent: (query: CanonicalQuery, options: SearchOptions, title: string) => void;
@@ -23,8 +27,8 @@ interface FormData extends CanonicalQuery, SearchOptions {
 
 export const CrosshairSearchForm = ({ onSearch, onSaveIntent, isLoading }: CrosshairSearchFormProps) => {
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>();
-  const [selectedTitleStatuses, setSelectedTitleStatuses] = useState<string[]>(['clean']);
-  const [selectedConditions, setSelectedConditions] = useState<string[]>(['running']);
+  const [selectedTitleStatuses, setSelectedTitleStatuses] = useState<TitleStatus[]>(['clean']);
+  const [selectedConditions, setSelectedConditions] = useState<Condition[]>(['running']);
   const [selectedSites, setSelectedSites] = useState<string[]>(['govdeals', 'publicsurplus', 'gsa']);
 
   const titleStatuses = [
@@ -53,19 +57,19 @@ export const CrosshairSearchForm = ({ onSearch, onSaveIntent, isLoading }: Cross
     { value: 'state_*', label: 'All State Sites' }
   ];
 
-  const onSubmit = (data: any) => {
+  const onSubmit = (data: FormData) => {
     const query: CanonicalQuery = {
       make: data.make || undefined,
       model: data.model || undefined,
-      year_min: data.year_min ? parseInt(data.year_min) : undefined,
-      year_max: data.year_max ? parseInt(data.year_max) : undefined,
-      mileage_max: data.mileage_max ? parseInt(data.mileage_max) : undefined,
-      price_max: data.price_max ? parseFloat(data.price_max) : undefined,
-      locations: data.locations?.split(',').map((l: string) => l.trim()).filter(Boolean) || ['US'],
-      title_status: selectedTitleStatuses as any,
-      condition: selectedConditions as any,
+      year_min: data.year_min ? Number(data.year_min) : undefined,
+      year_max: data.year_max ? Number(data.year_max) : undefined,
+      mileage_max: data.mileage_max ? Number(data.mileage_max) : undefined,
+      price_max: data.price_max ? Number(data.price_max) : undefined,
+      locations: typeof data.locations === 'string' ? data.locations.split(',').map((l) => l.trim()).filter(Boolean) : data.locations || ['US'],
+      title_status: selectedTitleStatuses,
+      condition: selectedConditions,
       fuel: data.fuel || undefined,
-      body_type: data.body_type ? [data.body_type] : undefined,
+      body_type: data.body_type ? data.body_type : undefined,
     };
 
     const options: SearchOptions = {
@@ -126,7 +130,7 @@ export const CrosshairSearchForm = ({ onSearch, onSaveIntent, isLoading }: Cross
             </div>
             <div className="space-y-2">
               <Label htmlFor="fuel">Fuel Type</Label>
-              <Select onValueChange={(value) => setValue('fuel', [value] as any)}>
+              <Select onValueChange={(value) => setValue('fuel', [value as Fuel])}>
                 <SelectTrigger>
                   <SelectValue placeholder="Any fuel type" />
                 </SelectTrigger>
@@ -281,7 +285,7 @@ export const CrosshairSearchForm = ({ onSearch, onSaveIntent, isLoading }: Cross
               </div>
               <div className="space-y-2">
                 <Label htmlFor="user_priority">Priority</Label>
-                <Select onValueChange={(value) => setValue('user_priority', value as any)}>
+                <Select onValueChange={(value) => setValue('user_priority', value as SearchOptions['user_priority'])}>
                   <SelectTrigger>
                     <SelectValue placeholder="Medium" />
                   </SelectTrigger>
@@ -309,7 +313,7 @@ export const CrosshairSearchForm = ({ onSearch, onSaveIntent, isLoading }: Cross
               </div>
               <div className="space-y-2">
                 <Label htmlFor="rescan_interval">Rescan Interval</Label>
-                <Select onValueChange={(value) => setValue('rescan_interval', value as any)}>
+                <Select onValueChange={(value) => setValue('rescan_interval', value as SearchOptions['rescan_interval'])}>
                   <SelectTrigger>
                     <SelectValue placeholder="Every 6 hours" />
                   </SelectTrigger>

@@ -40,12 +40,43 @@ interface SafeSummary {
   freshness: AnalyticsFreshness;
 }
 
+interface TrustEvent {
+  id: string | null;
+  level: string | null;
+  message: string | null;
+  event: string | null;
+  severity: 'low' | 'medium' | 'high' | null;
+  rule_ids: string[];
+  notes: string[];
+  degraded_sections: string[];
+  completeness_score: number | null;
+  summary_refreshed_at: string | null;
+  freshness_age: number | null;
+  paperclip: {
+    status: string | null;
+    issue_id: string | null;
+    identifier: string | null;
+    title: string | null;
+    issue_status: string | null;
+    correlation_key: string | null;
+    is_open: boolean;
+  };
+  timestamp: string | null;
+}
+
+interface AnalyticsOpenTrustCasesPanelProps {
+  recentTrustEventsLoading: boolean;
+  recentTrustEvents: TrustEvent[];
+  recentOpenTrustEvents: TrustEvent[];
+  recentNeedsActionCount: number;
+}
+
 interface AnalyticsSummarySectionProps {
   summaryLoading: boolean;
   safeSummary: SafeSummary | null;
   recentTrustEventsLoading: boolean;
-  recentTrustEvents: any[];
-  recentOpenTrustEvents: any[];
+  recentTrustEvents: TrustEvent[];
+  recentOpenTrustEvents: TrustEvent[];
   recentNeedsActionCount: number;
   fmt$: (n: number | null | undefined) => string;
   fmtPct: (n: number | null | undefined) => string;
@@ -55,7 +86,7 @@ interface AnalyticsSummarySectionProps {
     sub?: string;
     accent?: boolean;
   }>;
-  AnalyticsOpenTrustCasesPanel: React.ComponentType<any>;
+  AnalyticsOpenTrustCasesPanel: React.ComponentType<AnalyticsOpenTrustCasesPanelProps>;
 }
 
 function freshnessLabel(status: AnalyticsFreshnessStatus): string {

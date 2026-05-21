@@ -13,8 +13,21 @@ import { api } from "@/services/api";
 import { Search, Target, Plus, X, Settings, Bell } from "lucide-react";
 import { SniperButton } from "@/components/SniperButton";
 
+interface SearchResult {
+  id?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  current_bid?: number;
+  price?: number;
+  state?: string;
+  source_site?: string;
+  source?: string;
+  [key: string]: unknown;
+}
+
 interface CrosshairSearchProps {
-  onResultsFound?: (results: any[]) => void;
+  onResultsFound?: (results: SearchResult[]) => void;
 }
 
 interface SearchCriteria {
@@ -50,7 +63,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
   const [savedIntents, setSavedIntents] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveSearchName, setSaveSearchName] = useState("");
   const [saveDosThreshold, setSaveDosThreshold] = useState("65");
@@ -58,7 +71,7 @@ export const CrosshairSearch: React.FC<CrosshairSearchProps> = ({ onResultsFound
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
-  const updateCriteria = useCallback((key: keyof SearchCriteria, value: any) => {
+  const updateCriteria = useCallback((key: keyof SearchCriteria, value: SearchCriteria[keyof SearchCriteria]) => {
     setCriteria(prev => ({ ...prev, [key]: value }));
   }, []);
 
