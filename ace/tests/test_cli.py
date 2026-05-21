@@ -2888,6 +2888,9 @@ class AceCliTests(unittest.TestCase):
                         created_at,
                     ),
                 )
+                connection.commit()
+            bootstrap_db(db_path)
+            with closing(self.connect_db(db_path)) as connection:
                 append_event(
                     connection,
                     item_id=item_id,
@@ -2974,6 +2977,9 @@ class AceCliTests(unittest.TestCase):
                         created_at,
                     ),
                 )
+                connection.commit()
+            bootstrap_db(db_path)
+            with closing(self.connect_db(db_path)) as connection:
                 append_event(
                     connection,
                     item_id=item_id,
@@ -3042,6 +3048,12 @@ class AceCliTests(unittest.TestCase):
                         created_at,
                     ),
                 )
+                connection.commit()
+            bootstrap_db(db_path)
+            with closing(self.connect_db(db_path)) as connection:
+                connection.commit()
+            bootstrap_db(db_path)
+            with closing(self.connect_db(db_path)) as connection:
                 append_event(
                     connection,
                     item_id=item_id,
@@ -3119,6 +3131,9 @@ class AceCliTests(unittest.TestCase):
                         created_at,
                     ),
                 )
+                connection.commit()
+            bootstrap_db(db_path)
+            with closing(self.connect_db(db_path)) as connection:
                 append_event(
                     connection,
                     item_id=item_id,
@@ -13856,6 +13871,7 @@ class AceCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
             shutil.copy2(FIXTURES_DIR / "ace_modern_malformed_event_payload.db", db_path)
+            bootstrap_db(db_path)
 
             with closing(self.connect_db(db_path)) as connection:
                 append_event(
@@ -13895,6 +13911,7 @@ class AceCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
             shutil.copy2(FIXTURES_DIR / "ace_modern_malformed_event_payload.db", db_path)
+            bootstrap_db(db_path)
 
             with closing(self.connect_db(db_path)) as connection:
                 append_event(
@@ -13979,6 +13996,7 @@ class AceCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"
             shutil.copy2(FIXTURES_DIR / "ace_modern_malformed_event_payload.db", db_path)
+            bootstrap_db(db_path)
 
             with closing(self.connect_db(db_path)) as connection:
                 append_event(

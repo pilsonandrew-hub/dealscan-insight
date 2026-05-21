@@ -477,6 +477,23 @@ def _maintenance_required_results(reason: str) -> dict[str, tuple[bool, str | No
     }
 
 
+def _assert_no_hashless_events_before_append(connection: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+    if not {"previous_event_hash", "event_hash"}.issubset(columns):
+        raise RuntimeError(
+            "event hash maintenance required before append: events hash columns missing; "
+            "run explicit ACE maintenance migration/bootstrap first"
+        )
+    missing = connection.execute(
+        "SELECT event_id FROM events WHERE event_hash IS NULL ORDER BY id ASC LIMIT 1"
+    ).fetchone()
+    if missing is not None:
+        raise RuntimeError(
+            "event hash maintenance required before append: "
+            f"event {missing['event_id']} lacks event_hash; run explicit ACE maintenance migration/bootstrap first"
+        )
+
+
 def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
     """Return whether the append-only event hash chain is internally consistent."""
 
@@ -951,7 +968,7 @@ def append_event(
     if not connection.in_transaction:
         connection.execute("BEGIN IMMEDIATE")
     _ensure_event_hash_columns(connection)
-    _backfill_event_hashes(connection)
+    _assert_no_hashless_events_before_append(connection)
     previous_event_hash = connection.execute(
         "SELECT event_hash FROM events ORDER BY id DESC LIMIT 1"
     ).fetchone()
