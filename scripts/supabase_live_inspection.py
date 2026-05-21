@@ -157,6 +157,13 @@ def _recent_rows(base_url: str, service_key: str, table: str, select: str, order
     return rows if isinstance(rows, list) else []
 
 
+def _available_columns(base_url: str, service_key: str, table: str) -> set[str]:
+    _, _, rows = _request(base_url, service_key, table, {"select": "*", "limit": "1"})
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return set(rows[0].keys())
+    return set()
+
+
 def _summarize_recent_opportunity_truth(rows: list[dict[str, Any]]) -> dict[str, Any]:
     source_counts: Counter[str] = Counter()
     state_counts: Counter[str] = Counter()
@@ -227,11 +234,14 @@ def _summarize_recent_opportunity_truth(rows: list[dict[str, Any]]) -> dict[str,
 
 
 def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
-    opportunity_select = ",".join([
-        "created_at", "updated_at", "source_site", "state", "year", "score",
-        "current_bid", "estimated_sale_price", "potential_profit", "profit_margin",
-        "roi_percentage", "auction_end", "status", "is_active",
-    ])
+    desired_opportunity_columns = [
+        "created_at", "updated_at", "source_site", "source", "state", "year",
+        "dos_score", "score", "current_bid", "estimated_sale_price", "potential_profit",
+        "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
+        "status", "is_active", "max_bid", "listing_url", "url",
+    ]
+    opportunity_columns = _available_columns(base_url, service_key, "opportunities")
+    opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"
     recent_opportunities = _recent_rows(base_url, service_key, "opportunities", opportunity_select, "created_at", 200)
 
     alert_rows = _recent_rows(
