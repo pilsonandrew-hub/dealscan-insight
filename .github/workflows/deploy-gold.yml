@@ -49,9 +49,14 @@ jobs:
     outputs:
       security_status: ${{ steps.security.outputs.status }}
     steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ github.ref_name }}
+          show-progress: false
           
       - name: Security scan
         id: security
@@ -125,9 +130,14 @@ jobs:
       validation_status: ${{ steps.validate.outputs.status }}
       reports_generated: ${{ steps.validate.outputs.reports_generated }}
     steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ github.ref_name }}
+          show-progress: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -144,17 +154,17 @@ jobs:
       - name: Install dependencies
         run: |
           echo "Installing Python dependencies..."
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          if [ ! -f requirements.txt ]; then
+            echo "requirements.txt missing; skipping Python dependency install"
           else
-            echo "::warning::No requirements.txt found"
+            pip install -r requirements.txt
           fi
           
           echo "Installing Node.js dependencies..."
-          if [ -f package.json ]; then
-            npm ci
+          if [ ! -f package.json ]; then
+            echo "package.json missing; skipping Node.js dependency install"
           else
-            echo "::warning::No package.json found"
+            npm ci --loglevel=error
           fi
           
           # Verify critical tools
@@ -242,12 +252,19 @@ jobs:
     outputs:
       slo_status: ${{ steps.slo-check.outputs.status }}
     steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ github.ref_name }}
+          show-progress: false
           
       - name: Download validation reports
         uses: actions/download-artifact@v8
+        env:
+          NODE_OPTIONS: --no-deprecation
         if: needs.validate.outputs.reports_generated == 'true'
         with:
           name: gold-validation-reports
@@ -290,6 +307,8 @@ jobs:
     steps:
       - name: Download validation reports
         uses: actions/download-artifact@v8
+        env:
+          NODE_OPTIONS: --no-deprecation
         with:
           name: gold-validation-reports
           path: validation-reports
