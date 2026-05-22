@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .scope_guard import ScopeAction, ScopeDecision, ScopeDecisionType, ScopeGuard
 from .storage import DB_PATH, append_event, bootstrap_db, connect, new_id, utc_now
 from .drift import is_claim_supporting_evidence_uri
 from .workflow import (
@@ -197,9 +198,29 @@ def _contradiction_resolved_payload(
 
 
 class ItemRepository:
-    def __init__(self, db_path: Path | str = DB_PATH) -> None:
+    def __init__(
+        self,
+        db_path: Path | str = DB_PATH,
+        *,
+        scope_guard: ScopeGuard | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
+        self.scope_guard = scope_guard
         bootstrap_db(self.db_path)
+
+    def _authorize_db_mutation(self, description: str) -> ScopeDecision | None:
+        if self.scope_guard is None:
+            return None
+        decision = self.scope_guard.authorize(
+            ScopeAction(
+                "db_mutation",
+                paths=(str(self.db_path),),
+                description=description,
+            )
+        )
+        if decision.decision is not ScopeDecisionType.ALLOW:
+            return decision
+        return None
 
     def create_item(
         self,
@@ -274,6 +295,10 @@ class ItemRepository:
         }
         if created_payload_extra:
             event_payload.update(created_payload_extra)
+
+        blocked = self._authorize_db_mutation("repository.create_item")
+        if blocked is not None:
+            return blocked  # type: ignore[return-value]
 
         with connect(self.db_path) as connection:
             try:

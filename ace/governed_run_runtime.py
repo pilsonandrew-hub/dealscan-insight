@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .repository import ValidationError
+from .scope_guard import ScopeAction, ScopeDecision, ScopeDecisionType, ScopeGuard
 from .storage import DB_PATH, bootstrap_db, connect, new_id, utc_now
 
 
@@ -25,13 +26,49 @@ _ACTIVE_STATUSES = {STATUS_PENDING, STATUS_STARTING, STATUS_RUNNING}
 _TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_SKIPPED}
 
 
+def _authorize_db_mutation(
+    db_path: Path | str,
+    *,
+    description: str,
+    scope_guard: ScopeGuard | None = None,
+) -> ScopeDecision | None:
+    if scope_guard is None:
+        return None
+    decision = scope_guard.authorize(
+        ScopeAction(
+            "db_mutation",
+            paths=(str(Path(db_path)),),
+            description=description,
+        )
+    )
+    if decision.decision is not ScopeDecisionType.ALLOW:
+        return decision
+    return None
+
+
+def _blocked_run_result(decision: ScopeDecision) -> dict[str, Any]:
+    return {
+        "run_id": None,
+        "run_kind": RUN_KIND_CYCLE,
+        "trigger_kind": None,
+        "status": "scope_blocked",
+        "decision": decision.decision.value,
+        "failure_summary": decision.reason,
+        "scope_hash": decision.scope_hash,
+    }
+
+
 def create_governed_cycle_run(
     db_path: Path | str = DB_PATH,
     *,
     trigger_kind: str = TRIGGER_KIND_OPERATOR,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_trigger_kind = _normalize_required_text(trigger_kind, field_name="trigger_kind")
+    blocked = _authorize_db_mutation(db_path, description="governed_run_runtime.create_governed_cycle_run", scope_guard=scope_guard)
+    if blocked is not None:
+        return _blocked_run_result(blocked)
     run_id = new_id("run")
     created_at = utc_now()
 
@@ -72,6 +109,7 @@ def create_or_skip_governed_cycle_run(
     *,
     trigger_kind: str = TRIGGER_KIND_OPERATOR,
     active_run_stale_after_seconds: int = 24 * 60 * 60,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     """Create one governed ACE cycle run, or record a skipped run if one is already active.
 
@@ -84,6 +122,9 @@ def create_or_skip_governed_cycle_run(
     bootstrap_db(db_path)
     normalized_trigger_kind = _normalize_required_text(trigger_kind, field_name="trigger_kind")
     normalized_stale_after_seconds = _normalize_active_run_stale_after_seconds(active_run_stale_after_seconds)
+    blocked = _authorize_db_mutation(db_path, description="governed_run_runtime.create_or_skip_governed_cycle_run", scope_guard=scope_guard)
+    if blocked is not None:
+        return _blocked_run_result(blocked)
     run_id = new_id("run")
     created_at = utc_now()
 
@@ -189,6 +230,8 @@ def create_or_skip_governed_cycle_run(
 def start_governed_run(
     db_path: Path | str = DB_PATH,
     run_id: str | None = None,
+    *,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _transition_run(
         db_path,
@@ -196,18 +239,22 @@ def start_governed_run(
         expected_status=STATUS_PENDING,
         target_status=STATUS_STARTING,
         started_at=utc_now(),
+        scope_guard=scope_guard,
     )
 
 
 def mark_governed_run_running(
     db_path: Path | str = DB_PATH,
     run_id: str | None = None,
+    *,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _transition_run(
         db_path,
         run_id,
         expected_status=STATUS_STARTING,
         target_status=STATUS_RUNNING,
+        scope_guard=scope_guard,
     )
 
 
@@ -218,6 +265,7 @@ def complete_governed_run(
     briefing_path: str | None = None,
     notification_action_id: str | None = None,
     delivery_evidence_id: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _terminalize_run(
         db_path,
@@ -228,6 +276,7 @@ def complete_governed_run(
         delivery_evidence_id=delivery_evidence_id,
         failure_code=None,
         failure_summary=None,
+        scope_guard=scope_guard,
     )
 
 
@@ -240,6 +289,7 @@ def fail_governed_run(
     briefing_path: str | None = None,
     notification_action_id: str | None = None,
     delivery_evidence_id: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _terminalize_run(
         db_path,
@@ -250,6 +300,7 @@ def fail_governed_run(
         delivery_evidence_id=delivery_evidence_id,
         failure_code=_normalize_required_text(failure_code, field_name="failure_code"),
         failure_summary=_normalize_required_text(failure_summary, field_name="failure_summary"),
+        scope_guard=scope_guard,
     )
 
 
@@ -262,6 +313,7 @@ def interrupt_governed_run(
     briefing_path: str | None = None,
     notification_action_id: str | None = None,
     delivery_evidence_id: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _terminalize_run(
         db_path,
@@ -272,6 +324,7 @@ def interrupt_governed_run(
         delivery_evidence_id=delivery_evidence_id,
         failure_code=_normalize_required_text(failure_code, field_name="failure_code"),
         failure_summary=_normalize_required_text(failure_summary, field_name="failure_summary"),
+        scope_guard=scope_guard,
     )
 
 
@@ -314,6 +367,7 @@ def correct_governed_run_trigger_kind(
     source: str | None,
     source_session: str | None,
     reason: str,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_run_id = _normalize_required_text(run_id, field_name="run_id")
@@ -323,6 +377,9 @@ def correct_governed_run_trigger_kind(
     normalized_source = _normalize_optional_text(source)
     normalized_source_session = _normalize_optional_text(source_session)
     corrected_at = utc_now()
+    blocked = _authorize_db_mutation(db_path, description="governed_run_runtime.correct_governed_run_trigger_kind", scope_guard=scope_guard)
+    if blocked is not None:
+        return _blocked_run_result(blocked)
 
     with connect(db_path) as connection:
         row = _fetch_run_row(connection, normalized_run_id)
@@ -374,9 +431,13 @@ def _transition_run(
     expected_status: str,
     target_status: str,
     started_at: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_run_id = _normalize_required_text(run_id, field_name="run_id")
+    blocked = _authorize_db_mutation(db_path, description="governed_run_runtime.transition_run", scope_guard=scope_guard)
+    if blocked is not None:
+        return _blocked_run_result(blocked)
 
     with connect(db_path) as connection:
         row = _fetch_run_row(connection, normalized_run_id)
@@ -416,6 +477,7 @@ def _terminalize_run(
     delivery_evidence_id: str | None,
     failure_code: str | None,
     failure_summary: str | None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_run_id = _normalize_required_text(run_id, field_name="run_id")
@@ -423,6 +485,9 @@ def _terminalize_run(
     normalized_briefing_path = _normalize_optional_text(briefing_path)
     normalized_notification_action_id = _normalize_optional_text(notification_action_id)
     normalized_delivery_evidence_id = _normalize_optional_text(delivery_evidence_id)
+    blocked = _authorize_db_mutation(db_path, description="governed_run_runtime.terminalize_run", scope_guard=scope_guard)
+    if blocked is not None:
+        return _blocked_run_result(blocked)
 
     with connect(db_path) as connection:
         row = _fetch_run_row(connection, normalized_run_id)

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .repository import ItemRepository, ValidationError
+from .scope_guard import ScopeAction, ScopeGuard
 from .storage import DB_PATH, append_event, bootstrap_db, connect, new_id, utc_now
 from .telegram_runtime import load_ace_telegram_env_file, _telegram_ssl_context
 
@@ -136,6 +137,7 @@ def send_jace_status_message(
     message: str,
     chat_id: str | None = None,
     actor: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     """Send an independently attributable JACE status message via ACE's bot.
 
@@ -155,6 +157,24 @@ def send_jace_status_message(
     )
     if normalized_chat_id is None:
         raise JaceStatusDeliveryError("ACE_TELEGRAM_CHAT_ID is not configured")
+
+    if scope_guard is not None:
+        decision = scope_guard.authorize(
+            ScopeAction(
+                "external_send",
+                paths=(str(Path(db_path)),),
+                destination=f"telegram:{normalized_chat_id}",
+                description="action_runtime.send_jace_status_message",
+            )
+        )
+        if not decision.allowed:
+            return {
+                "item_id": normalized_item_id,
+                "status": "scope_blocked",
+                "decision": decision.decision.value,
+                "reason": decision.reason,
+                "scope_hash": decision.scope_hash,
+            }
 
     repo = ItemRepository(db_path)
     if repo.get_item(normalized_item_id) is None:
@@ -248,6 +268,7 @@ def enqueue_record_operator_followup(
     *,
     note: str,
     actor: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _enqueue_record_operator_action(
         db_path,
@@ -256,6 +277,7 @@ def enqueue_record_operator_followup(
         payload_field_name="note",
         payload_field_value=note,
         actor=actor,
+        scope_guard=scope_guard,
     )
 
 
@@ -265,6 +287,7 @@ def enqueue_record_operator_rejection(
     *,
     reason: str,
     actor: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     return _enqueue_record_operator_action(
         db_path,
@@ -273,6 +296,7 @@ def enqueue_record_operator_rejection(
         payload_field_name="reason",
         payload_field_value=reason,
         actor=actor,
+        scope_guard=scope_guard,
     )
 
 
@@ -641,10 +665,30 @@ def _enqueue_record_operator_action(
     payload_field_name: str,
     payload_field_value: str,
     actor: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_item_id = _normalize_required_text(item_id, field_name="item_id")
     normalized_value = _normalize_required_text(payload_field_value, field_name=payload_field_name)
+    if scope_guard is not None:
+        decision = scope_guard.authorize(
+            ScopeAction(
+                "db_mutation",
+                paths=(str(Path(db_path)),),
+                description=f"action_runtime.enqueue.{action_kind}",
+            )
+        )
+        if not decision.allowed:
+            return {
+                "action_id": None,
+                "item_id": normalized_item_id,
+                "action_type": action_kind,
+                "status": "scope_blocked",
+                "decision": decision.decision.value,
+                "reason": decision.reason,
+                "scope_hash": decision.scope_hash,
+                "evidence_written": False,
+            }
     repo = ItemRepository(db_path)
     queued_item_id = normalized_item_id if repo.get_item(normalized_item_id) is not None else None
     payload = {

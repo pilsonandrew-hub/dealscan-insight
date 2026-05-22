@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .repository import ValidationError
+from .scope_guard import ScopeAction, ScopeDecision, ScopeDecisionType, ScopeGuard
 from .storage import DB_PATH, append_event, bootstrap_db, connect, new_id, utc_now
 
 
@@ -108,6 +109,39 @@ _SUPERVISOR_SQLITE_WRITE_ATTEMPTS = 5
 _SUPERVISOR_SQLITE_WRITE_BACKOFF_SECONDS = 0.2
 
 
+def _authorize_db_mutation(
+    db_path: Path | str,
+    *,
+    description: str,
+    scope_guard: ScopeGuard | None = None,
+) -> ScopeDecision | None:
+    if scope_guard is None:
+        return None
+    decision = scope_guard.authorize(
+        ScopeAction(
+            "db_mutation",
+            paths=(str(Path(db_path)),),
+            description=description,
+        )
+    )
+    if decision.decision is not ScopeDecisionType.ALLOW:
+        return decision
+    return None
+
+
+def _blocked_runtime_result(decision: ScopeDecision) -> dict[str, Any]:
+    return {
+        "runtime_instance_id": None,
+        "runtime_family": None,
+        "status": "scope_blocked",
+        "decision": decision.decision.value,
+        "failure_summary": decision.reason,
+        "scope_hash": decision.scope_hash,
+        "created": False,
+        "duplicate_start": False,
+    }
+
+
 def _is_retryable_sqlite_write_error(exc: BaseException) -> bool:
     if not isinstance(exc, sqlite3.OperationalError):
         return False
@@ -146,12 +180,16 @@ def start_supervisor_runtime(
     stale_after_seconds: int = 60,
     host_identity: str | None = None,
     metadata: dict[str, Any] | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     normalized_runtime_family = _normalize_required_text(runtime_family, field_name="runtime_family")
     normalized_stale_after_seconds = _normalize_stale_after_seconds(stale_after_seconds)
     normalized_host_identity = _normalize_optional_text(host_identity)
     normalized_metadata = _normalize_metadata(metadata)
+    blocked = _authorize_db_mutation(db_path, description="supervisor_runtime.start_supervisor_runtime", scope_guard=scope_guard)
+    if blocked is not None:
+        return _blocked_runtime_result(blocked)
 
     with connect(db_path) as connection:
         existing = connection.execute(

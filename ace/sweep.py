@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .repository import Item, ItemRepository
+from .scope_guard import ScopeAction, ScopeDecisionType, ScopeGuard
 from .storage import DB_PATH, append_event, bootstrap_db, connect, utc_now
 
 SWEEP_EVENT_TYPE = "ace.sweep.completed"
@@ -90,12 +91,35 @@ def run_sweep(
     thresholds: SweepThresholds | None = None,
     actor: str | None = None,
     now: str | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> dict[str, Any]:
     bootstrap_db(db_path)
     repo = ItemRepository(db_path)
     thresholds = thresholds or SweepThresholds()
     run_started_at = now or utc_now()
     run_id = f"sweep:{run_started_at}"
+    if scope_guard is not None:
+        decision = scope_guard.authorize(
+            ScopeAction(
+                "db_mutation",
+                paths=(str(Path(db_path)),),
+                description="sweep.run_sweep",
+            )
+        )
+        if decision.decision is not ScopeDecisionType.ALLOW:
+            return {
+                "run_id": run_id,
+                "created_at": run_started_at,
+                "thresholds": thresholds.as_dict(),
+                "finding_count": 0,
+                "emitted_count": 0,
+                "suppressed_count": 0,
+                "findings": [],
+                "status": "scope_blocked",
+                "decision": decision.decision.value,
+                "reason": decision.reason,
+                "scope_hash": decision.scope_hash,
+            }
 
     findings = _collect_findings_from_repo(repo, thresholds=thresholds, now=run_started_at)
     emitted_count = 0

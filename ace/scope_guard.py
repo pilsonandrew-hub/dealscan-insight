@@ -114,9 +114,15 @@ class OperatorAuthorization:
     allowed_external_destinations: tuple[str, ...]
     scope_hash: str
     raw: Mapping[str, Any]
+    workspace_root: Path = WORKSPACE_ROOT
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> "OperatorAuthorization":
+    def from_mapping(
+        cls,
+        data: Mapping[str, Any],
+        *,
+        workspace_root: Path = WORKSPACE_ROOT,
+    ) -> "OperatorAuthorization":
         mode = _required_text(data, "mode")
         if mode not in APPROVED_MODES:
             raise ScopeAuthorizationInvalid(f"unknown mode: {mode}")
@@ -140,7 +146,7 @@ class OperatorAuthorization:
             raise ScopeAuthorizationInvalid("unknown action classes: " + ",".join(sorted(unknown_actions)))
         for field_name, patterns in (("allowed_paths", allowed_paths), ("denied_paths", denied_paths)):
             for pattern in patterns:
-                _validate_path_pattern(pattern, field_name=field_name)
+                _validate_path_pattern(pattern, field_name=field_name, workspace_root=workspace_root)
         _parse_timestamp(issued_at, field_name="issued_at")
         if expires_at is not None:
             _parse_timestamp(expires_at, field_name="expires_at")
@@ -161,6 +167,7 @@ class OperatorAuthorization:
             allowed_external_destinations=allowed_external_destinations,
             scope_hash=scope_hash,
             raw=dict(data),
+            workspace_root=workspace_root,
         )
 
     @property
@@ -211,7 +218,7 @@ class OperatorAuthorization:
                 mode=self.mode,
                 scope_hash=self.scope_hash,
             )
-        denied_path = _first_matching_path(action.paths, self.denied_paths)
+        denied_path = _first_matching_path(action.paths, self.denied_paths, workspace_root=self.workspace_root)
         if denied_path is not None:
             return ScopeDecision(
                 _denial_decision(action.action_class),
@@ -220,7 +227,7 @@ class OperatorAuthorization:
                 mode=self.mode,
                 scope_hash=self.scope_hash,
             )
-        if action.paths and not _all_paths_match(action.paths, self.allowed_paths):
+        if action.paths and not _all_paths_match(action.paths, self.allowed_paths, workspace_root=self.workspace_root):
             return ScopeDecision(
                 _denial_decision(action.action_class),
                 "path outside allowed scope",
@@ -267,9 +274,11 @@ class ScopeGuard:
         self,
         authorization_path: Path | str = DEFAULT_AUTHORIZATION_PATH,
         block_log_path: Path | str = DEFAULT_BLOCK_LOG_PATH,
+        workspace_root: Path | str = WORKSPACE_ROOT,
     ) -> None:
         self.authorization_path = Path(authorization_path)
         self.block_log_path = Path(block_log_path)
+        self.workspace_root = Path(workspace_root).resolve()
 
     def load(self) -> OperatorAuthorization:
         if not self.authorization_path.exists():
@@ -278,7 +287,7 @@ class ScopeGuard:
             data = json.load(handle)
         if not isinstance(data, dict):
             raise ScopeAuthorizationInvalid("authorization file must contain a JSON object")
-        return OperatorAuthorization.from_mapping(data)
+        return OperatorAuthorization.from_mapping(data, workspace_root=self.workspace_root)
 
     def authorize(self, action: ScopeAction, *, log_block: bool = True) -> ScopeDecision:
         authorization = self.load()
@@ -304,6 +313,49 @@ class ScopeGuard:
         }
         with self.block_log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def authorize_scope_action(
+    action_class: str,
+    *,
+    paths: Sequence[str] = (),
+    command: str | None = None,
+    destination: str | None = None,
+    description: str | None = None,
+    guard: ScopeGuard | None = None,
+) -> ScopeDecision:
+    active_guard = guard or ScopeGuard()
+    return active_guard.authorize(
+        ScopeAction(
+            action_class,
+            paths=tuple(paths),
+            command=command,
+            destination=destination,
+            description=description,
+        )
+    )
+
+
+def require_scope_action(
+    action_class: str,
+    *,
+    paths: Sequence[str] = (),
+    command: str | None = None,
+    destination: str | None = None,
+    description: str | None = None,
+    guard: ScopeGuard | None = None,
+) -> ScopeDecision:
+    decision = authorize_scope_action(
+        action_class,
+        paths=paths,
+        command=command,
+        destination=destination,
+        description=description,
+        guard=guard,
+    )
+    if not decision.allowed:
+        raise ScopeGuardError(f"{decision.decision.value}: {decision.reason}")
+    return decision
 
 
 def render_authorization(
@@ -391,17 +443,17 @@ def _parse_timestamp(value: str, *, field_name: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _validate_path_pattern(pattern: str, *, field_name: str) -> None:
-    normalized = _normalize_workspace_path(pattern)
+def _validate_path_pattern(pattern: str, *, field_name: str, workspace_root: Path = WORKSPACE_ROOT) -> None:
+    normalized = _normalize_workspace_path(pattern, workspace_root=workspace_root)
     if normalized.startswith("../") or normalized == ".." or Path(pattern).is_absolute():
         raise ScopeAuthorizationInvalid(f"{field_name} entry outside workspace: {pattern}")
 
 
-def _normalize_workspace_path(path: str) -> str:
+def _normalize_workspace_path(path: str, *, workspace_root: Path = WORKSPACE_ROOT) -> str:
     candidate = Path(path)
     if candidate.is_absolute():
         try:
-            return candidate.resolve().relative_to(WORKSPACE_ROOT).as_posix()
+            return candidate.resolve().relative_to(workspace_root).as_posix()
         except ValueError as exc:
             raise ScopeAuthorizationInvalid(f"path outside workspace: {path}") from exc
     parts: list[str] = []
@@ -418,19 +470,29 @@ def _normalize_workspace_path(path: str) -> str:
     return "/".join(parts)
 
 
-def _first_matching_path(paths: Sequence[str], patterns: Sequence[str]) -> str | None:
+def _first_matching_path(
+    paths: Sequence[str],
+    patterns: Sequence[str],
+    *,
+    workspace_root: Path = WORKSPACE_ROOT,
+) -> str | None:
     for path in paths:
-        normalized = _normalize_workspace_path(path)
+        normalized = _normalize_workspace_path(path, workspace_root=workspace_root)
         if any(fnmatch.fnmatch(normalized, pattern) for pattern in patterns):
             return normalized
     return None
 
 
-def _all_paths_match(paths: Sequence[str], patterns: Sequence[str]) -> bool:
+def _all_paths_match(
+    paths: Sequence[str],
+    patterns: Sequence[str],
+    *,
+    workspace_root: Path = WORKSPACE_ROOT,
+) -> bool:
     if not patterns:
         return False
     for path in paths:
-        normalized = _normalize_workspace_path(path)
+        normalized = _normalize_workspace_path(path, workspace_root=workspace_root)
         if not any(fnmatch.fnmatch(normalized, pattern) for pattern in patterns):
             return False
     return True
