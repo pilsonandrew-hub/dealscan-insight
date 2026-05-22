@@ -201,7 +201,7 @@ class StorageContractTests(unittest.TestCase):
 
         # Simulate a hostile filesystem-level actor that bypasses ACE's guarded
         # connection API and removes DB triggers first.
-        with closing(sqlite3.connect(self.db_path)) as connection:
+        with sqlite3.connect(self.db_path) as connection:
             connection.execute("DROP TRIGGER ace_events_no_update")
             connection.execute(
                 "UPDATE events SET payload_json = ? WHERE event_id = ?",
@@ -268,7 +268,7 @@ class StorageContractTests(unittest.TestCase):
 
     def test_audit_verify_fails_loudly_when_schema_needs_maintenance(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(sqlite3.connect(self.db_path)) as connection:
+        with sqlite3.connect(self.db_path) as connection:
             connection.execute(
                 "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)"
             )

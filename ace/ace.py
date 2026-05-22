@@ -34,17 +34,6 @@ from ace.cost_guardrails import (
 )
 from ace.action_runtime import send_jace_status_message
 from ace.jace_audit import audit_jace_delivery_history
-from ace.operator_scope import (
-    DEFAULT_AUTHORIZATION_PATH,
-    BLOCK_LOG_PATH,
-    OperatorAction,
-    OperatorScopeDenied,
-    OperatorScopeInvalid,
-    evaluate_action,
-    load_authorization,
-    render_authorization_template,
-    require_action,
-)
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -187,36 +176,6 @@ def build_parser() -> argparse.ArgumentParser:
         "gate4-inspection",
         help="Show bounded operator-facing Gate 4 inspection artifacts already governed on disk",
     )
-
-    scope = subparsers.add_parser("scope", help="Inspect and enforce durable operator scope authorization")
-    scope.set_defaults(command="scope")
-    scope_subparsers = scope.add_subparsers(dest="scope_command")
-    scope_show = scope_subparsers.add_parser("show", help="Show the active operator authorization")
-    scope_show.set_defaults(command="scope")
-    scope_show.add_argument("--authorization-path", default=str(DEFAULT_AUTHORIZATION_PATH))
-    scope_check = scope_subparsers.add_parser("check", help="Check whether a proposed action is allowed")
-    scope_check.set_defaults(command="scope")
-    scope_check.add_argument("action_class")
-    scope_check.add_argument("--path", dest="paths", action="append", default=[])
-    scope_check.add_argument("--command")
-    scope_check.add_argument("--destination")
-    scope_check.add_argument("--description")
-    scope_check.add_argument("--authorization-path", default=str(DEFAULT_AUTHORIZATION_PATH))
-    scope_check.add_argument("--block-log-path", default=str(BLOCK_LOG_PATH))
-    scope_check.add_argument("--log-denial", action="store_true", help="Append a block-log row before returning denied")
-    scope_template = scope_subparsers.add_parser("template", help="Render a hash-bound authorization JSON template")
-    scope_template.set_defaults(command="scope")
-    scope_template.add_argument("--mode", required=True)
-    scope_template.add_argument("--approval-ref", required=True)
-    scope_template.add_argument("--issued-by", required=True)
-    scope_template.add_argument("--issued-at", required=True)
-    scope_template.add_argument("--expires-at")
-    scope_template.add_argument("--allowed-action", dest="allowed_actions", action="append", default=[])
-    scope_template.add_argument("--allowed-path", dest="allowed_paths", action="append", default=[])
-    scope_template.add_argument("--denied-action", dest="denied_actions", action="append", default=[])
-    scope_template.add_argument("--denied-path", dest="denied_paths", action="append", default=[])
-    scope_template.add_argument("--allowed-command", dest="allowed_commands", action="append", default=[])
-    scope_template.add_argument("--allowed-external-destination", dest="allowed_external_destinations", action="append", default=[])
 
     audit = subparsers.add_parser("audit", help="Run first-class ACE audit checks")
     audit_subparsers = audit.add_subparsers(dest="audit_command")
@@ -885,69 +844,6 @@ def main(argv: list[str] | None = None) -> int:
         if command == "gate4-inspection":
             return _print_gate4_inspection_surface()
 
-        if command == "scope":
-            if args.scope_command == "show":
-                authorization = load_authorization(args.authorization_path)
-                print(f"scope.mode={authorization.mode}")
-                print(f"scope.approval_ref={authorization.approval_ref}")
-                print(f"scope.issued_by={authorization.issued_by}")
-                print(f"scope.issued_at={authorization.issued_at}")
-                print(f"scope.expires_at={authorization.expires_at}")
-                print(f"scope.expired={str(authorization.expired).lower()}")
-                print(f"scope.scope_hash={authorization.scope_hash}")
-                print(f"scope.allowed_actions={','.join(authorization.allowed_actions)}")
-                print(f"scope.allowed_paths={','.join(authorization.allowed_paths)}")
-                print(f"scope.denied_actions={','.join(authorization.denied_actions)}")
-                print(f"scope.denied_paths={','.join(authorization.denied_paths)}")
-                return 1 if authorization.expired else 0
-            if args.scope_command == "check":
-                action = OperatorAction(
-                    args.action_class,
-                    paths=tuple(args.paths),
-                    command=args.command,
-                    destination=args.destination,
-                    description=args.description,
-                )
-                if args.log_denial:
-                    try:
-                        decision = require_action(
-                            action,
-                            authorization_path=args.authorization_path,
-                            block_log_path=args.block_log_path,
-                        )
-                    except OperatorScopeDenied as exc:
-                        print("scope.allowed=false")
-                        print(f"scope.reason={exc}")
-                        return 1
-                else:
-                    decision = evaluate_action(action, authorization_path=args.authorization_path)
-                print(f"scope.allowed={str(decision.allowed).lower()}")
-                print(f"scope.reason={decision.reason}")
-                if decision.mode is not None:
-                    print(f"scope.mode={decision.mode}")
-                if decision.scope_hash is not None:
-                    print(f"scope.scope_hash={decision.scope_hash}")
-                return 0 if decision.allowed else 1
-            if args.scope_command == "template":
-                print(
-                    render_authorization_template(
-                        mode=args.mode,
-                        approval_ref=args.approval_ref,
-                        issued_by=args.issued_by,
-                        issued_at=args.issued_at,
-                        expires_at=args.expires_at,
-                        allowed_actions=args.allowed_actions,
-                        allowed_paths=args.allowed_paths,
-                        denied_actions=args.denied_actions,
-                        denied_paths=args.denied_paths,
-                        allowed_commands=args.allowed_commands,
-                        allowed_external_destinations=args.allowed_external_destinations,
-                    ),
-                    end="",
-                )
-                return 0
-            parser.error("scope requires a subcommand: show, check, or template")
-
         if command == "audit":
             if args.audit_command == "verify":
                 results = verify_audit_integrity(db_path)
@@ -1145,9 +1041,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_item(item)
             return 0
-    except OperatorScopeInvalid as exc:
-        print(f"error={exc}")
-        return 1
     except AceError as exc:
         print(f"error={exc}")
         return 1
