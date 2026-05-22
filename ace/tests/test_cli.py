@@ -118,37 +118,6 @@ class AceCliTests(unittest.TestCase):
             self.assertIn("audit.verify.runtime_instance_integrity=ok", output)
             self.assertIn(f"audit.verify.db_path={db_path}", output)
 
-    def test_constraints_cli_blocks_write_commands_but_allows_audit(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "ace.db"
-            code, output = self.run_cli(
-                "--db",
-                str(db_path),
-                "constraints",
-                "set",
-                "--mode",
-                "investigation_only",
-                "--reason",
-                "operator requested read-only investigation",
-                "--actor",
-                "test",
-            )
-            self.assertEqual(code, 0, output)
-            self.assertIn("constraint_count=1", output)
-
-            code, output = self.run_cli("--db", str(db_path), "audit", "verify")
-            self.assertEqual(code, 0, output)
-            self.assertIn("audit.verify.event_hash_chain=ok", output)
-
-            code, output = self.run_cli("--db", str(db_path), "intake", "task", "Blocked by constraint")
-            self.assertEqual(code, 1, output)
-            self.assertIn("OPERATOR_CONSTRAINT_BLOCKED", output)
-            self.assertIn("active_constraint=investigation_only", output)
-
-            code, output = self.run_cli("--db", str(db_path), "constraints", "status")
-            self.assertEqual(code, 0, output)
-            self.assertIn("constraint[0].mode=investigation_only", output)
-
     def test_audit_verify_returns_nonzero_when_integrity_check_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "ace.db"

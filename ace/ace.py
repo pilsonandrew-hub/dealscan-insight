@@ -34,13 +34,6 @@ from ace.cost_guardrails import (
 )
 from ace.action_runtime import send_jace_status_message
 from ace.jace_audit import audit_jace_delivery_history
-from ace.operator_constraints import (
-    OperatorConstraintViolation,
-    clear_operator_constraint,
-    enforce_operator_constraints,
-    list_operator_constraints,
-    set_operator_constraint,
-)
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -189,20 +182,6 @@ def build_parser() -> argparse.ArgumentParser:
     audit_subparsers.add_parser("verify", help="Verify append-only event hash chain integrity")
     jace_audit = audit_subparsers.add_parser("jace", help="Read-only cross-table JACE delivery audit")
     jace_audit.add_argument("--json", action="store_true", help="Emit full JSON audit records")
-
-    constraints = subparsers.add_parser("constraints", help="Manage runtime-enforced operator constraints")
-    constraint_subparsers = constraints.add_subparsers(dest="constraints_command")
-    constraints_status = constraint_subparsers.add_parser("status", help="Show operator constraints")
-    constraints_status.add_argument("--include-cleared", action="store_true")
-    constraints_set = constraint_subparsers.add_parser("set", help="Set an active operator constraint")
-    constraints_set.add_argument("--mode", required=True)
-    constraints_set.add_argument("--reason", required=True)
-    constraints_set.add_argument("--scope", default="session")
-    constraints_set.add_argument("--actor")
-    constraints_clear = constraint_subparsers.add_parser("clear", help="Clear an active operator constraint")
-    constraints_clear.add_argument("constraint_id")
-    constraints_clear.add_argument("--reason")
-    constraints_clear.add_argument("--actor")
 
     cost = subparsers.add_parser("cost", help="Inspect and record local ACE cost guardrails")
     cost_subparsers = cost.add_subparsers(dest="cost_command")
@@ -674,52 +653,12 @@ def _print_obligation_resolved(*, obligation_id: str, item_id: str, status: str)
     print(f"obligation_id={obligation_id} item_id={item_id} status={status}")
 
 
-def _print_constraints(constraints) -> None:
-    constraints = list(constraints)
-    print(f"constraint_count={len(constraints)}")
-    for index, constraint in enumerate(constraints):
-        print(f"constraint[{index}].id={constraint.constraint_id}")
-        print(f"constraint[{index}].mode={constraint.mode}")
-        print(f"constraint[{index}].scope={constraint.scope}")
-        print(f"constraint[{index}].status={constraint.status}")
-        print(f"constraint[{index}].reason={constraint.reason}")
-        print(f"constraint[{index}].created_at={constraint.created_at}")
-        if constraint.actor:
-            print(f"constraint[{index}].actor={constraint.actor}")
-        if constraint.cleared_at:
-            print(f"constraint[{index}].cleared_at={constraint.cleared_at}")
-        if constraint.cleared_by:
-            print(f"constraint[{index}].cleared_by={constraint.cleared_by}")
-
-
-def _command_constraint_key(args) -> str:
-    if args.command == "audit":
-        return "audit"
-    if args.command == "cost" and getattr(args, "cost_command", None) == "status":
-        return "cost:status"
-    if args.command == "constraints":
-        subcommand = getattr(args, "constraints_command", None) or "status"
-        return f"constraints:{subcommand}"
-    return args.command or "init"
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     db_path = Path(args.db)
 
     command = args.command or "init"
-    if command not in {"init", "bootstrap"}:
-        try:
-            enforce_operator_constraints(
-                db_path,
-                command_key=_command_constraint_key(args),
-                attempted_action=command,
-                actor=getattr(args, "actor", None),
-            )
-        except OperatorConstraintViolation as exc:
-            print(f"error={exc}")
-            return 1
     if command in {"init", "bootstrap"}:
         bootstrap_db(db_path)
         print(f"Initialized ACE state at {db_path}")
@@ -929,31 +868,6 @@ def main(argv: list[str] | None = None) -> int:
                     _print_jace_audit(audit_result)
                 return 0
             parser.error("audit requires a subcommand: verify or jace")
-
-        if command == "constraints":
-            if args.constraints_command == "status" or args.constraints_command is None:
-                _print_constraints(list_operator_constraints(db_path, include_cleared=args.include_cleared))
-                return 0
-            if args.constraints_command == "set":
-                constraint = set_operator_constraint(
-                    db_path,
-                    mode=_normalize_required_text(args.mode, field_name="mode"),
-                    scope=_normalize_required_text(args.scope, field_name="scope"),
-                    reason=_normalize_required_text(args.reason, field_name="reason"),
-                    actor=_normalize_optional_text(args.actor, field_name="actor"),
-                )
-                _print_constraints([constraint])
-                return 0
-            if args.constraints_command == "clear":
-                constraint = clear_operator_constraint(
-                    db_path,
-                    constraint_id=_normalize_required_text(args.constraint_id, field_name="constraint_id"),
-                    reason=_normalize_optional_text(args.reason, field_name="reason"),
-                    actor=_normalize_optional_text(args.actor, field_name="actor"),
-                )
-                _print_constraints([constraint])
-                return 0
-            parser.error("constraints requires a subcommand: status, set, or clear")
 
         if command == "cost":
             if args.cost_command == "status":
