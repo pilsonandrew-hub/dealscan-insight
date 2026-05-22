@@ -17,6 +17,7 @@ Per design d90fbbf (operator-scope-enforcement-design-v2.md). Five operator deci
 - ace/state/v1_1_required_items/operator-scope-block-log.jsonl (new file)
 - ace/state/v1_1_required_items/operator-scope-design-decisions.md (record the five decisions)
 - ace/bin/guarded/ (new directory, command wrappers per design v2 Section 1.3)*
+- ace/hooks/ — tracked Git hook source, hook library, installer, and documentation for Slice 3
 - .git/hooks/pre-commit, commit-msg, pre-push, pre-rebase, post-checkout (per design v2 Section 1.1)
 - Integration edits to existing ACE write paths: ace/repository.py, ace/action_runtime.py, ace/governed_run_runtime.py, ace/supervisor_runtime.py, ace/sweep.py — minimal edits only to route through scope guard
 ## Allowed actions
