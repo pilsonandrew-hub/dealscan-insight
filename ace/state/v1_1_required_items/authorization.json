@@ -1,0 +1,45 @@
+{
+  "allowed_actions": [
+    "file_write",
+    "file_edit",
+    "git_stage",
+    "git_commit",
+    "git_push",
+    "test_side_effecting"
+  ],
+  "allowed_commands": [
+    "PYTHONWARNINGS=error python3 -m unittest ace.tests.test_scope_guard",
+    "PYTHONWARNINGS=error python3 -m unittest discover ace/tests"
+  ],
+  "allowed_external_destinations": [],
+  "allowed_paths": [
+    "ace/scope_guard.py",
+    "ace/tests/test_scope_guard.py",
+    "ace/state/v1_1_required_items/authorization.json",
+    "ace/state/v1_1_required_items/operator-scope-block-log.jsonl"
+  ],
+  "approval_ref": "telegram-direct-2026-05-22-v1.1-item3-slice1",
+  "denied_actions": [
+    "db_mutation",
+    "external_send",
+    "credential_read",
+    "config_change",
+    "gateway_restart",
+    "git_rewrite",
+    "cron_mutation",
+    "subagent_mutating"
+  ],
+  "denied_paths": [
+    "ace/state/*.db",
+    "ace/state/*.sqlite",
+    "ace/state/telegram_runtime.db",
+    "ace/state/ace-telegram.env",
+    ".openclaw/**",
+    "projects/dealerscope/**"
+  ],
+  "expires_at": null,
+  "issued_at": "2026-05-22T20:30:00Z",
+  "issued_by": "Andrew Pilson",
+  "mode": "implementation_approved",
+  "scope_hash": "33f28e08f813e54e994c746f397e1bb018b8d4a7e66c62747b79371338a5d256"
+}
