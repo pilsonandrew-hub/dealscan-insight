@@ -34,6 +34,14 @@ from ace.cost_guardrails import (
 )
 from ace.action_runtime import send_jace_status_message
 from ace.jace_audit import audit_jace_delivery_history
+from ace.operator_constraints import (
+    OperatorConstraintBlocked,
+    clear_operator_constraint,
+    enforce_operator_constraints,
+    list_operator_constraints,
+    render_constraint_lines,
+    set_operator_constraint,
+)
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -211,6 +219,20 @@ def build_parser() -> argparse.ArgumentParser:
     jace_status.add_argument("message")
     jace_status.add_argument("--chat-id")
     jace_status.add_argument("--actor")
+
+    constraints = subparsers.add_parser("constraints", help="Manage runtime operator constraints")
+    constraints_subparsers = constraints.add_subparsers(dest="constraints_command")
+    constraints_status = constraints_subparsers.add_parser("status", help="Show operator constraints")
+    constraints_status.add_argument("--all", action="store_true", help="Include cleared constraints")
+    constraints_set = constraints_subparsers.add_parser("set", help="Set an active operator constraint")
+    constraints_set.add_argument("--mode", required=True)
+    constraints_set.add_argument("--scope", required=True)
+    constraints_set.add_argument("--reason", required=True)
+    constraints_set.add_argument("--actor")
+    constraints_clear = constraints_subparsers.add_parser("clear", help="Clear an operator constraint")
+    constraints_clear.add_argument("constraint_id")
+    constraints_clear.add_argument("--reason", required=True)
+    constraints_clear.add_argument("--actor", required=True)
 
     autonomy_eligible = subparsers.add_parser(
         "mark-autonomy-eligible",
@@ -664,6 +686,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Initialized ACE state at {db_path}")
         return 0
 
+    constraint_subcommand = getattr(args, "constraints_command", None)
+    cost_subcommand = getattr(args, "cost_command", None)
+    audit_subcommand = getattr(args, "audit_command", None)
+    enforcement_subcommand = constraint_subcommand or cost_subcommand or audit_subcommand
+    try:
+        enforce_operator_constraints(
+            db_path,
+            command=command,
+            subcommand=enforcement_subcommand,
+            actor=getattr(args, "actor", None),
+        )
+    except OperatorConstraintBlocked as exc:
+        print("OPERATOR_CONSTRAINT_BLOCKED:")
+        print(f"active_constraint={exc.constraint.mode}")
+        print(f"constraint_id={exc.constraint.id}")
+        print(f"attempted_action={exc.attempted_action}")
+        print("required_operator_action=explicit approval")
+        return 1
+
     repo = ItemRepository(db_path)
 
     try:
@@ -915,6 +956,39 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_jace_status_delivery(result)
             return 0
+
+        if command == "constraints":
+            if args.constraints_command == "status":
+                for line in render_constraint_lines(
+                    list_operator_constraints(db_path, active_only=not args.all)
+                ):
+                    print(line)
+                return 0
+            if args.constraints_command == "set":
+                constraint = set_operator_constraint(
+                    db_path,
+                    mode=args.mode,
+                    scope=args.scope,
+                    reason=args.reason,
+                    actor=args.actor,
+                )
+                print(f"operator_constraint.id={constraint.id}")
+                print(f"operator_constraint.mode={constraint.mode}")
+                print(f"operator_constraint.scope={constraint.scope}")
+                print(f"operator_constraint.status={constraint.status}")
+                return 0
+            if args.constraints_command == "clear":
+                constraint = clear_operator_constraint(
+                    db_path,
+                    args.constraint_id,
+                    reason=args.reason,
+                    actor=args.actor,
+                )
+                print(f"operator_constraint.id={constraint.id}")
+                print(f"operator_constraint.status={constraint.status}")
+                print(f"operator_constraint.cleared_by={constraint.cleared_by}")
+                return 0
+            parser.error("constraints requires a subcommand: status, set, or clear")
 
         if command == "mark-autonomy-eligible":
             evidence_id = mark_item_autonomy_eligible(

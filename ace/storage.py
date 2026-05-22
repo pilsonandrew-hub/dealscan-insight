@@ -225,6 +225,20 @@ SCHEMA_STATEMENTS = (
         updated_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS operator_constraints (
+        id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        actor TEXT,
+        created_at TEXT NOT NULL,
+        cleared_at TEXT,
+        cleared_by TEXT,
+        clear_reason TEXT
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_items_state ON items(state)",
     "CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)",
     """
@@ -241,6 +255,7 @@ SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_governed_runs_status_created_at ON governed_runs(status, created_at DESC, run_id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_alert_log_sent_at ON alert_log(sent_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_instances_family_status_created_at ON runtime_instances(runtime_family, status, created_at DESC, runtime_instance_id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_operator_constraints_status_scope ON operator_constraints(status, scope, created_at DESC)",
 )
 
 
