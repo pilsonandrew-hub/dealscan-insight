@@ -15,10 +15,18 @@ Phase B: event_sequence column
 - Migration logic backfills existing events with sequential numbers in (created_at, id) order, preserving current effective ordering
 - Hash chain verifier walks ORDER BY event_sequence
 - Tests prove deterministic ordering across rebuilds and that hash verification still passes for existing data
+Phase C: V1.1 item 1 INSERT gap closure
+- Add INSERT block to SQLite authorizer for events table
+- Add ace_events_no_insert trigger to events table
+- Allow exception path so append_event continues to work (e.g. via authorizer state flag or designated connection marker)
+- Update test fixtures that previously used direct INSERT to use append_event instead
+- Tests must prove: direct INSERT INTO events from any non-append_event path is refused, and append_event still functions normally
 ## Allowed write paths
 - ace/.py for normalization consolidation and event_sequence column implementation*
+- ace/storage.py
 - ace/normalization.py (new file)
 - ace/tests/.py for new and modified tests*
+- ace/tests/.py
 - .gitignore for pycache exclusion
 ## Allowed actions
 - File writes/edits to the above paths only
