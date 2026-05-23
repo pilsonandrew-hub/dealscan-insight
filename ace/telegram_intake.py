@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
 from .autonomy_lane import mark_item_autonomy_eligible
 from .repository import ItemRepository
-from .storage import DB_PATH
+from .storage import DB_PATH, connect_readonly
 from .telegram_parser import parse_telegram_message
 
 
@@ -42,23 +41,28 @@ def _canonical_source_session(chat_id: str, message_id: str) -> str:
 
 def _find_existing_semantic_direct_work(repo: ItemRepository, *, text: str) -> Any | None:
     semantic_key = _semantic_direct_work_key(text)
-    candidates = [
-        item for item in repo.list_items()
-        if item.source == TELEGRAM_DIRECT_SOURCE and item.state in _COALESCE_STATES
-    ]
-    for item in reversed(candidates):
-        for event in repo.list_item_events(item.id, event_type="item.created", limit=1):
-            if event.payload_json is None:
-                continue
-            try:
-                payload = json.loads(event.payload_json)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            if payload.get("semantic_direct_work_key") == semantic_key:
-                return item
-    return None
+    payload_needle = f'"semantic_direct_work_key":"{semantic_key}"'
+    with connect_readonly(repo.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT items.*
+            FROM events
+            JOIN items ON items.id = events.item_id
+            WHERE events.event_type = ?
+              AND events.payload_json LIKE ?
+              AND items.source = ?
+              AND items.state IN ({states})
+            ORDER BY items.created_at DESC, items.id DESC, events.id DESC
+            LIMIT 1
+            """.format(states=", ".join("?" for _ in _COALESCE_STATES)),
+            (
+                "item.created",
+                f"%{payload_needle}%",
+                TELEGRAM_DIRECT_SOURCE,
+                *_COALESCE_STATES,
+            ),
+        ).fetchone()
+    return repo._row_to_item(row) if row is not None else None
 
 
 def intake_inbound_telegram_work(

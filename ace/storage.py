@@ -273,6 +273,7 @@ SCHEMA_STATEMENTS = (
     WHERE source IS NOT NULL AND source_session IS NOT NULL
     """,
     "CREATE INDEX IF NOT EXISTS idx_events_item_id ON events(item_id)",
+    "CREATE INDEX IF NOT EXISTS idx_events_item_type_payload ON events(event_type, payload_json)",
     "CREATE INDEX IF NOT EXISTS idx_action_queue_status ON action_queue(status)",
     "CREATE INDEX IF NOT EXISTS idx_obligations_item_status ON obligations(item_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_resume_candidates_score ON resume_candidates(score DESC)",
@@ -292,29 +293,32 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
-def _event_hash_payload(
-    *,
-    event_id: str,
-    item_id: str | None,
-    event_type: str,
-    payload_json: str,
-    actor: str | None,
-    source: str | None,
-    session_id: str | None,
-    created_at: str,
-    previous_event_hash: str | None,
-) -> dict[str, Any]:
-    return {
-        "event_id": event_id,
-        "item_id": item_id,
-        "event_type": event_type,
-        "payload_json": payload_json,
-        "actor": actor,
-        "source": source,
-        "session_id": session_id,
-        "created_at": created_at,
-        "previous_event_hash": previous_event_hash,
-    }
+EVENT_HASH_FIELDS = (
+    "event_id",
+    "item_id",
+    "event_type",
+    "payload_json",
+    "actor",
+    "source",
+    "session_id",
+    "created_at",
+    "previous_event_hash",
+)
+
+
+def _event_hash_payload_from_mapping(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the canonical event hash payload from one shared field authority."""
+
+    return {field: row[field] for field in EVENT_HASH_FIELDS}
+
+
+def compute_event_hash_from_mapping(row: Mapping[str, Any]) -> str:
+    canonical_payload = json.dumps(
+        _event_hash_payload_from_mapping(row),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
 def compute_event_hash(
@@ -329,22 +333,19 @@ def compute_event_hash(
     created_at: str,
     previous_event_hash: str | None,
 ) -> str:
-    canonical_payload = json.dumps(
-        _event_hash_payload(
-            event_id=event_id,
-            item_id=item_id,
-            event_type=event_type,
-            payload_json=payload_json,
-            actor=actor,
-            source=source,
-            session_id=session_id,
-            created_at=created_at,
-            previous_event_hash=previous_event_hash,
-        ),
-        sort_keys=True,
-        separators=(",", ":"),
+    return compute_event_hash_from_mapping(
+        {
+            "event_id": event_id,
+            "item_id": item_id,
+            "event_type": event_type,
+            "payload_json": payload_json,
+            "actor": actor,
+            "source": source,
+            "session_id": session_id,
+            "created_at": created_at,
+            "previous_event_hash": previous_event_hash,
+        }
     )
-    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
 def _deny_event_direct_write_authorizer(action_code, arg1, arg2, _database_name, _trigger_name):
@@ -608,17 +609,7 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
         """
     ).fetchall()
     for row in rows:
-        expected_hash = compute_event_hash(
-            event_id=row["event_id"],
-            item_id=row["item_id"],
-            event_type=row["event_type"],
-            payload_json=row["payload_json"],
-            actor=row["actor"],
-            source=row["source"],
-            session_id=row["session_id"],
-            created_at=row["created_at"],
-            previous_event_hash=previous_hash,
-        )
+        expected_hash = compute_event_hash_from_mapping({**dict(row), "previous_event_hash": previous_hash})
         connection.execute(
             "UPDATE events SET previous_event_hash = ?, event_hash = ? WHERE id = ?",
             (previous_hash, expected_hash, row["id"]),
@@ -743,17 +734,7 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
     for row in rows:
         if row["previous_event_hash"] != previous_event_hash:
             return False, f"event {row['event_id']} has broken previous_event_hash"
-        expected_hash = compute_event_hash(
-            event_id=row["event_id"],
-            item_id=row["item_id"],
-            event_type=row["event_type"],
-            payload_json=row["payload_json"],
-            actor=row["actor"],
-            source=row["source"],
-            session_id=row["session_id"],
-            created_at=row["created_at"],
-            previous_event_hash=previous_event_hash,
-        )
+        expected_hash = compute_event_hash_from_mapping({**dict(row), "previous_event_hash": previous_event_hash})
         if row["event_hash"] != expected_hash:
             return False, f"event {row['event_id']} hash mismatch"
         previous_event_hash = row["event_hash"]
@@ -840,17 +821,7 @@ def post_cutover_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, 
     for row in rows:
         if row["previous_event_hash"] != previous_event_hash:
             return False, f"post-cutover event {row['event_id']} has broken previous_event_hash"
-        expected_hash = compute_event_hash(
-            event_id=row["event_id"],
-            item_id=row["item_id"],
-            event_type=row["event_type"],
-            payload_json=row["payload_json"],
-            actor=row["actor"],
-            source=row["source"],
-            session_id=row["session_id"],
-            created_at=row["created_at"],
-            previous_event_hash=previous_event_hash,
-        )
+        expected_hash = compute_event_hash_from_mapping({**dict(row), "previous_event_hash": previous_event_hash})
         if row["event_hash"] != expected_hash:
             return False, f"post-cutover event {row['event_id']} hash mismatch"
         previous_event_hash = row["event_hash"]
@@ -1092,6 +1063,7 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
         _ensure_event_sequence_column(connection)
         _backfill_event_hashes(connection)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_events_item_id ON events(item_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_events_item_type_payload ON events(event_type, payload_json)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(event_hash)")
         _install_event_append_only_triggers(connection)
 
@@ -1288,7 +1260,14 @@ def append_event(
     event_id: str | None = None,
     created_at: str | None = None,
 ) -> str:
-    """Write a single append-only event row and return its event id."""
+    """Write a single append-only event row and return its event id.
+
+    Transaction behavior is intentional and explicit: when append_event starts
+    the transaction, it opens `BEGIN IMMEDIATE` before reading the chain head.
+    If the caller already has an active transaction, append_event joins that
+    caller-owned transaction so multi-table repository operations remain atomic;
+    those callers own transaction start timing.
+    """
 
     if event_type == CUTOVER_EVENT_TYPE:
         raise ValueError(f"normal append_event cannot write {CUTOVER_EVENT_TYPE}; use append_cutover_genesis_event")
@@ -1322,16 +1301,18 @@ def append_event(
             (cutover["id"],),
         ).fetchone()
     previous_hash = previous_event_hash["event_hash"] if previous_event_hash else None
-    event_hash = compute_event_hash(
-        event_id=event_id,
-        item_id=item_id,
-        event_type=event_type,
-        payload_json=payload_json,
-        actor=actor,
-        source=source,
-        session_id=session_id,
-        created_at=created_at,
-        previous_event_hash=previous_hash,
+    event_hash = compute_event_hash_from_mapping(
+        {
+            "event_id": event_id,
+            "item_id": item_id,
+            "event_type": event_type,
+            "payload_json": payload_json,
+            "actor": actor,
+            "source": source,
+            "session_id": session_id,
+            "created_at": created_at,
+            "previous_event_hash": previous_hash,
+        }
     )
     _enable_event_insert(connection)
     try:
@@ -1420,16 +1401,18 @@ def append_cutover_genesis_event(
     )
     _validate_cutover_payload(cutover_payload)
     payload_json = json.dumps(cutover_payload, sort_keys=True, separators=(",", ":"))
-    event_hash = compute_event_hash(
-        event_id=event_id,
-        item_id=None,
-        event_type=CUTOVER_EVENT_TYPE,
-        payload_json=payload_json,
-        actor=actor,
-        source=source,
-        session_id=session_id,
-        created_at=created_at,
-        previous_event_hash=None,
+    event_hash = compute_event_hash_from_mapping(
+        {
+            "event_id": event_id,
+            "item_id": None,
+            "event_type": CUTOVER_EVENT_TYPE,
+            "payload_json": payload_json,
+            "actor": actor,
+            "source": source,
+            "session_id": session_id,
+            "created_at": created_at,
+            "previous_event_hash": None,
+        }
     )
     _enable_event_insert(connection)
     try:

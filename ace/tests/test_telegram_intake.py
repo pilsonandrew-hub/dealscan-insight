@@ -133,6 +133,43 @@ class TelegramIntakeTests(unittest.TestCase):
         self.assertEqual(item_count, 1)
         self.assertEqual(duplicate_count, 1)
 
+    def test_semantic_duplicate_lookup_uses_indexed_event_predicates(self) -> None:
+        intake_inbound_telegram_work(
+            self.db_path,
+            chat_id="7529788084",
+            message_id="msg-211",
+            text="Proceed + continue on indexed lookup.",
+            received_at="2026-05-08T17:01:00Z",
+        )
+        with connect(self.db_path) as connection:
+            indexes = {row[1] for row in connection.execute("PRAGMA index_list(events)").fetchall()}
+            plan_rows = connection.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT items.*
+                FROM events
+                JOIN items ON items.id = events.item_id
+                WHERE events.event_type = ?
+                  AND events.payload_json LIKE ?
+                  AND items.source = ?
+                  AND items.state IN (?, ?, ?, ?)
+                ORDER BY items.created_at DESC, items.id DESC, events.id DESC
+                LIMIT 1
+                """,
+                (
+                    "item.created",
+                    '%"semantic_direct_work_key":"%",',
+                    "telegram/direct",
+                    "TRIAGE",
+                    "APPROVED",
+                    "CLAIMED_DONE",
+                    "VERIFIED_DONE",
+                ),
+            ).fetchall()
+
+        self.assertIn("idx_events_item_type_payload", indexes)
+        self.assertTrue(any("idx_events_item_type_payload" in row[3] for row in plan_rows), [row[3] for row in plan_rows])
+
     def test_direct_work_without_bounded_continuation_is_not_autonomy_eligible(self) -> None:
         result = intake_inbound_telegram_work(
             self.db_path,

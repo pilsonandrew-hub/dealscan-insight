@@ -21,6 +21,7 @@ from ace.storage import (
     append_event,
     bootstrap_db,
     compute_event_hash,
+    compute_event_hash_from_mapping,
     connect,
     new_id,
     utc_now,
@@ -47,6 +48,38 @@ class StorageContractTests(unittest.TestCase):
         self.assertEqual(returned, self.db_path)
         self.assertTrue(self.db_path.parent.exists())
         self.assertTrue(self.db_path.exists())
+
+    def test_bootstrap_db_creates_semantic_event_lookup_index(self) -> None:
+        bootstrap_db(self.db_path)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            indexes = {row[1] for row in connection.execute("PRAGMA index_list(events)").fetchall()}
+        self.assertIn("idx_events_item_type_payload", indexes)
+
+    def test_compute_event_hash_mapping_adapter_matches_public_api(self) -> None:
+        event = {
+            "event_id": "evt_hash_contract",
+            "item_id": None,
+            "event_type": "item.hash_contract",
+            "payload_json": '{"a":1}',
+            "actor": "tester",
+            "source": "unit-test",
+            "session_id": "sess-1",
+            "created_at": "2026-05-23T00:00:00Z",
+            "previous_event_hash": None,
+        }
+        self.assertEqual(compute_event_hash_from_mapping(event), compute_event_hash(**event))
+
+    def test_append_event_joins_existing_caller_owned_transaction(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            connection.execute("BEGIN")
+            event_id = append_event(connection, event_type="item.caller_transaction")
+            connection.commit()
+
+        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
+        with connect(self.db_path) as connection:
+            row = connection.execute("SELECT event_type FROM events WHERE event_id = ?", (event_id,)).fetchone()
+        self.assertEqual(row["event_type"], "item.caller_transaction")
 
 
     def test_bootstrap_db_creates_local_alert_log_for_transport_proof(self) -> None:
