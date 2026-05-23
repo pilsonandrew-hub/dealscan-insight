@@ -79,3 +79,8 @@ continuity/continuity-state.json
 *.egg-info/
 .eggs/
 .coverage
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+*$py.class
+
