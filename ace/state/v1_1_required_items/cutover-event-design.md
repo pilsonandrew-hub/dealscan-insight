@@ -42,23 +42,25 @@ Required payload fields:
   - `concurrent_write_chain_breaks`: `2`
 - `post_cutover_chain_policy`: object describing the forward rules
   - `event_sequence_scope`: `post_cutover_only`
+  - `transition_window_policy`: `sequence_null_legacy_mode_until_cutover`
   - `previous_event_hash_policy`: `v1_1_genesis_null_with_legacy_head_in_payload`
   - `pre_cutover_verification_policy`: `inventory_only_disclosed_defects`
-  - `post_cutover_serialization`: `begin_immediate_required`
+  - `post_cutover_serialization`: `begin_immediate_required_before_head_read`
 - `forbidden_claims_reference`: short reminder that ACE must not claim full-history tamper-evidence
 
 ### `event_sequence` assignment
 
-Recommendation: the cutover event receives `event_sequence = 1` for the **post-cutover chain**, while pre-cutover events retain `NULL` in the V1.1 `event_sequence` column.
+Recommendation: the cutover event receives `event_sequence = 1` for the **post-cutover chain**. The cutover row is the first row that is allowed to receive a non-`NULL` V1.1 sequence value from the new implementation.
 
 This creates a clean namespace:
 
-- Pre-cutover rows: `event_sequence IS NULL`
-- Cutover row: `event_sequence = 1`
-- First normal post-cutover event: `event_sequence = 2`
-- Later post-cutover events: strict increment by one inside the serialized append transaction
+- Pre-cutover rows: outside the V1.1 sequence namespace. In a clean database they remain `event_sequence IS NULL`; in a B1-residue database they may already have non-`NULL` legacy values, which remain inert and ignored by V1.1 verification.
+- Transition-window rows after B-append but before B-cutover-execute: `event_sequence IS NULL`, treated exactly as pre-cutover legacy rows by the verifier.
+- Cutover row: `event_sequence = 1`.
+- First normal post-cutover event: `event_sequence = 2`.
+- Later post-cutover events: strict increment by one inside the serialized append transaction.
 
-This does not break the pre-cutover chain because V1.1 no longer attempts to reinterpret or renumber legacy rows. Legacy rows remain unchanged except for schema expansion if needed.
+This does not break the pre-cutover chain because V1.1 no longer attempts to reinterpret or renumber legacy rows. Legacy rows remain unchanged except for additive schema expansion if needed.
 
 ### `previous_event_hash`
 
@@ -107,9 +109,10 @@ Rows are classified as:
 
 - Pre-cutover: row `id` is less than the cutover row id, regardless of whether legacy/B1-residue `event_sequence` values are present
 - Cutover: the single `ace.chain.cutover.v1_1` row
-- Post-cutover: row `id` is greater than or equal to the cutover row id and `event_sequence >= 1`, including the cutover row
+- Transition-window legacy: rows appended after B-append lands but before B-cutover-execute. These rows have `event_sequence IS NULL`; once cutover exists they are still classified as pre-cutover because their row `id` is less than the cutover row id.
+- Post-cutover: row `id` is greater than or equal to the cutover row id and `event_sequence >= 1`, including the cutover row.
 
-If multiple cutover rows exist, no cutover row exists after B-cutover-execute, or rows after cutover have `NULL` sequence, audit must fail loudly. Pre-cutover B1-residue `event_sequence` values are inert legacy defects and must not be treated as post-cutover chain membership.
+If multiple cutover rows exist, no cutover row exists after B-cutover-execute, or rows after cutover have `NULL` sequence, audit must fail loudly. Pre-cutover and transition-window B1-residue/`NULL` sequence values are inert legacy defects and must not be treated as post-cutover chain membership.
 
 ### Does `event_sequence` reset to 1 or continue high?
 
@@ -172,23 +175,66 @@ Migration should support both cases:
 
 This follows the absolute checkpoint-forward rule: never mutate pre-cutover events for cosmetic cleanup. The verifier must identify post-cutover chain membership by the cutover row boundary, not by assuming every non-null `event_sequence` is post-cutover.
 
+### Pre-cutover transition behavior after B-append lands
+
+B-append and B-cutover-execute are separate slices. During the transition window after B-append is deployed but before the cutover event exists, live ACE may continue to append events. Those transition-window appends must behave as legacy/pre-cutover appends:
+
+- `event_sequence` is written as `NULL`.
+- `previous_event_hash` continues to link according to the existing legacy append-head behavior until cutover exists.
+- The rows are classified as legacy/pre-cutover once the cutover event is appended because their row `id` is less than the cutover row id.
+- The audit verifier must not treat transition-window rows as V1.1 post-cutover chain members.
+
+The cutover row is the first row written by the implementation with a non-`NULL` V1.1 `event_sequence` value. If a non-cutover row receives a post-cutover sequence before the cutover exists, B-append has failed its design contract.
+
+### B1 schema residue handling
+
+B-append must inspect schema state before changing the `events` table. Expected starting states:
+
+1. Clean database: no `event_sequence` column and no `event_sequence` indexes. Migration adds nullable `event_sequence INTEGER` and leaves all existing rows `NULL`.
+2. B1-residue database: `event_sequence` column already exists and pre-cutover rows may contain values. Migration leaves those row values unchanged as inert legacy residue.
+3. B1-residue schema with indexes/constraints: migration inspects `PRAGMA table_info(events)`, `PRAGMA index_list(events)`, and `PRAGMA index_info(<index>)` for `event_sequence` involvement before cutover. Any schema artifact that would block `event_sequence = 1` at cutover, forbid `NULL` transition rows, or enforce uniqueness globally across legacy and post-cutover rows must be neutralized by schema migration, not by mutating pre-cutover event rows.
+
+Implementation requirements:
+
+- The final `event_sequence` column must allow `NULL` so clean legacy rows and transition-window rows can remain sequence-less.
+- Any uniqueness rule must be post-cutover-aware. A global unique index on `event_sequence` is forbidden because B1 residue may already contain `1` and other values.
+- If uniqueness is added, it must not treat legacy rows as members of the V1.1 namespace. SQLite cannot express the dynamic cutover row id in a partial index, so correctness must primarily be enforced by serialized append code and audit verification rather than by a global schema constraint.
+
+### Transaction ownership rule
+
+B-append must use option (a): all write paths that can append events must acquire a write lock with `BEGIN IMMEDIATE` before any DML in that logical unit of work, and `append_event` must assert that the caller is already inside the approved immediate write transaction before it reads the chain head or assigns a sequence.
+
+Rationale:
+
+- ACE repository methods frequently write domain rows before calling `append_event`; a dedicated independent append connection would split item/evidence/action writes from their event record and could create cross-table inconsistency if one transaction succeeds and the other fails.
+- Therefore the unit of work must stay single-transaction, but the transaction must be immediate from the beginning.
+
+Implementation implications:
+
+- Connection helpers or repository/runtime entry points must provide an immediate-write transaction path for mutating operations.
+- Existing callers that currently enter a deferred transaction before calling `append_event` must be identified and converted before B-append lands. Known classes to inspect include `ItemRepository.create_item`, evidence/obligation/verdict/closeout paths, action runtime writes, governed-run runtime writes, supervisor runtime transitions, sweep writes, Telegram intake/runtime writes, and any tests that open raw SQLite write transactions.
+- `append_event` must not silently proceed if called from a deferred transaction where the head may have been read after another writer interleaved. It should fail loudly unless the connection was opened/marked through the approved immediate-write path.
+
+
 ### Should the cutover event be appended before or after B-append serialization fix?
 
-Recommendation: after B-append introduces serialized append behavior, but as the first event written through the new path.
+Recommendation: after B-append introduces serialized append behavior, and only in a separate B-cutover-execute slice after operator review.
 
 Reasoning:
 
 - The cutover row itself must be trustworthy under the new rules.
 - If appended before the serialization fix, it could be subject to the same stale-head concurrency defect disclosed in legacy history.
-- B-append should add the schema/serialization support, then append `ace.chain.cutover.v1_1` as `event_sequence = 1` in the same controlled implementation slice or an immediately subsequent cutover execution step.
+- B-append must add schema/serialization/audit support and tests only. It must not append the cutover row.
+- B-cutover-execute is the first slice allowed to write `ace.chain.cutover.v1_1` with `event_sequence = 1`.
 
 Safe ordering:
 
-1. B-append slice: implement nullable `event_sequence` support and serialized `BEGIN IMMEDIATE` append path.
+1. B-append slice: implement nullable `event_sequence` support and serialized append behavior.
 2. B-append slice: add audit verifier support for legacy inventory plus strict post-cutover verification.
-3. Stop and wait for operator approval.
-4. B-cutover-execute slice: append the cutover event with `event_sequence = 1`, `previous_event_hash = NULL`; do not mutate pre-cutover rows, including B1-residue `event_sequence` values.
-5. All later events get the next post-cutover `event_sequence` under the same serialized transaction.
+3. B-append slice: while no cutover row exists, normal appends must run in transition legacy mode and write `event_sequence = NULL`.
+4. Stop and wait for operator approval.
+5. B-cutover-execute slice: append the cutover event with `event_sequence = 1`, `previous_event_hash = NULL`; do not mutate pre-cutover rows, including B1-residue `event_sequence` values.
+6. All later events get the next post-cutover `event_sequence` under the same serialized transaction.
 
 ## 4. Audit verifier behavior
 
@@ -200,19 +246,20 @@ The new verifier should locate the cutover row first, then walk the post-cutover
 SELECT *
 FROM events
 WHERE id >= :cutover_row_id
-ORDER BY event_sequence ASC
+ORDER BY event_sequence ASC, id ASC
 ```
 
-Required checks:
+Required checks, in order:
 
-- Exactly one cutover event at `event_sequence = 1`.
-- Cutover event has `previous_event_hash IS NULL`.
-- No gaps in post-cutover `event_sequence` from the cutover row forward.
-- No duplicate post-cutover `event_sequence` values from the cutover row forward.
-- Pre-cutover rows with non-null B1-residue `event_sequence` values are ignored by the post-cutover verifier and reported only through legacy inventory/disclosure.
-- Each post-cutover row's `previous_event_hash` equals the prior post-cutover row's `event_hash`, except the cutover genesis row.
-- Each post-cutover `event_hash` recomputes correctly.
-- Any row with `id > cutover_row_id` and `event_sequence IS NULL` is an audit failure.
+1. Boundary uniqueness: exactly one cutover event matches `event_type = 'ace.chain.cutover.v1_1'`, `event_sequence = 1`, `previous_event_hash IS NULL`, and payload `cutover_version = 'v1.1'`. Failure message: `cutover boundary missing or ambiguous`.
+2. Post-cutover NULL guard: before sorting for hash verification, fail if any row with `id > cutover_row_id` has `event_sequence IS NULL`. Failure message: `post-cutover event <event_id> has NULL event_sequence`.
+3. Duplicate sequence guard: fail if any rows with `id >= cutover_row_id` share the same `event_sequence`. Failure message: `duplicate post-cutover event_sequence <n>`.
+4. Gap guard: fail unless post-cutover sequences are exactly `1..N`, with the cutover row at `1`. Failure message: `post-cutover event_sequence gap at <n>`.
+5. Ordered walk: only after the NULL/duplicate/gap guards pass, walk rows `WHERE id >= :cutover_row_id ORDER BY event_sequence ASC, id ASC`.
+6. Hash-link check: each post-cutover row's `previous_event_hash` equals the prior post-cutover row's `event_hash`, except the cutover genesis row. Failure message: `post-cutover event <event_id> has broken previous_event_hash`.
+7. Hash-content check: each post-cutover `event_hash` recomputes correctly. Failure message: `post-cutover event <event_id> hash mismatch`.
+
+Pre-cutover rows with non-null B1-residue `event_sequence` values are ignored by the post-cutover verifier and reported only through legacy inventory/disclosure.
 
 ### Pre-cutover options
 
@@ -306,9 +353,10 @@ Example payload shape with placeholder values:
   },
   "post_cutover_chain_policy": {
     "event_sequence_scope": "post_cutover_only",
-    "post_cutover_serialization": "begin_immediate_required",
+    "post_cutover_serialization": "begin_immediate_required_before_head_read",
     "pre_cutover_verification_policy": "inventory_only_disclosed_defects",
-    "previous_event_hash_policy": "v1_1_genesis_null_with_legacy_head_in_payload"
+    "previous_event_hash_policy": "v1_1_genesis_null_with_legacy_head_in_payload",
+    "transition_window_policy": "sequence_null_legacy_mode_until_cutover"
   }
 }
 ```
@@ -329,7 +377,98 @@ event_hash: compute_event_hash(...) over the normal event hash fields
 
 The concrete legacy head values above are examples from read-only observation during design, not authorized cutover values. Implementation must re-read the live legacy head inside the serialized cutover transaction immediately before appending the actual cutover event.
 
-## 7. Open questions / decisions needed from operator
+## 7. Append and sequencing algorithms
+
+### Normal append behavior
+
+Normal `append_event` must not be capable of producing a genesis row. It must never accept an option such as `previous_event_hash=None` to override chain linking.
+
+Behavior before cutover exists:
+
+```text
+BEGIN IMMEDIATE before any DML in the caller's unit of work
+read legacy head by row id
+write event with previous_event_hash = legacy head hash
+write event_sequence = NULL
+commit with caller's unit of work
+```
+
+Behavior after cutover exists:
+
+```sql
+SELECT id
+FROM events
+WHERE event_type = 'ace.chain.cutover.v1_1'
+ORDER BY id ASC;
+```
+
+Exactly one row must exist. Then sequence assignment must be segment-scoped:
+
+```sql
+SELECT COALESCE(MAX(event_sequence), 0) + 1 AS next_sequence
+FROM events
+WHERE id >= :cutover_row_id;
+```
+
+This query is intentionally scoped by `id >= :cutover_row_id`. A global `MAX(event_sequence)` is forbidden because B1-residue values live in the legacy segment and would poison post-cutover numbering.
+
+The post-cutover previous hash is also segment-scoped:
+
+```sql
+SELECT event_hash
+FROM events
+WHERE id >= :cutover_row_id
+ORDER BY event_sequence DESC, id DESC
+LIMIT 1;
+```
+
+The normal post-cutover append then writes that previous hash and the computed next sequence inside the same immediate transaction.
+
+### Genesis cutover append path
+
+Cutover requires a special, narrowly scoped function because it is the only allowed V1.1 genesis write.
+
+Proposed function:
+
+```python
+def append_cutover_genesis_event(
+    connection: sqlite3.Connection,
+    *,
+    payload: Mapping[str, Any],
+    actor: str,
+    source: str,
+    session_id: str,
+    event_id: str | None = None,
+    created_at: str | None = None,
+) -> str:
+    ...
+```
+
+Rules:
+
+- Allowed call site: B-cutover-execute command/script only, after separate operator approval.
+- Forbidden call sites: normal repository methods, sweep, cycle, supervisor runtime, Telegram runtime/intake, action runtime, and tests except targeted cutover tests.
+- Must run inside the approved immediate-write transaction before reading the live legacy head.
+- Must assert no existing cutover row exists.
+- Must read the live legacy head by `ORDER BY id DESC LIMIT 1` inside the transaction and include that head in payload.
+- Must write `event_type = 'ace.chain.cutover.v1_1'`, `event_sequence = 1`, and `previous_event_hash = NULL`.
+- Must compute `event_hash` using the normal hash function with `previous_event_hash = NULL`.
+- Must not mutate any pre-cutover row.
+
+Normal `append_event` must reject attempts to write `event_type = 'ace.chain.cutover.v1_1'`; only `append_cutover_genesis_event` may write it.
+
+## 8. Legacy inventory honesty
+
+Genesis `previous_event_hash = NULL` with the legacy head recorded in payload is a checkpoint record, not a cryptographic seal on legacy rows. It records what ACE observed as the legacy head at cutover time; it does not prove that every pre-cutover row is clean, deterministic, or forever protected by the post-cutover chain.
+
+Approved claim language remains strict:
+
+> ACE has a tamper-evident append-only event chain from the V1.1 cutover forward. Pre-cutover history is retained unchanged with disclosed legacy defects.
+
+If operationally useful, B-cutover-execute may include a legacy inventory digest snapshot in the cutover payload, such as event count, row-id range, legacy head id/hash, and a digest over selected legacy row identifiers. That digest is an inventory reference only. It must not be described as full-history tamper-evidence or used to wash the disclosed legacy defects into a pass.
+
+
+## 9. Open questions / decisions needed from operator
 
 1. Approve or revise the recommended event type: `ace.chain.cutover.v1_1`.
 2. Approve or reject the genesis policy: `previous_event_hash = NULL`, with legacy head recorded in payload.
@@ -346,3 +485,16 @@ Operator decisions recorded after this design draft:
 - Decision 4: Changed: do **not** clear B1-residue `event_sequence` values from pre-cutover rows. Leave them as inert documented legacy residue. The checkpoint-forward rule is absolute: never mutate pre-cutover events for convenient cleanup.
 - Decision 5: Approved Option C audit behavior: `legacy_chain_inventory` plus strict `post_cutover_event_hash_chain`.
 - Decision 6: Changed: B-append and B-cutover-execute must be separate slices. B-append lands schema/serialization/audit code and tests only. B-cutover-execute appends the one-time cutover event only after separate operator approval.
+
+
+## 10. Ja'rvontis pre-B-append findings resolved in this revision
+
+This revision addresses the seven pre-B-append implementation traps identified by Ja'rvontis:
+
+1. Transition-window appends after B-append and before B-cutover-execute are explicitly legacy-mode rows with `event_sequence = NULL`.
+2. Post-cutover sequence assignment is segment-scoped with `WHERE id >= :cutover_row_id`; global `MAX(event_sequence)` is forbidden.
+3. B1 schema residue must be inspected and neutralized at the schema level if needed, without mutating pre-cutover event rows.
+4. Cutover genesis uses a dedicated `append_cutover_genesis_event(...)` path; normal `append_event` cannot write a genesis event.
+5. Write serialization requires `BEGIN IMMEDIATE` before any DML, head read, or sequence assignment in the caller's unit of work.
+6. Verifier SQL and guards are explicit: NULL guard, duplicate guard, gap guard, then `ORDER BY event_sequence ASC, id ASC` hash walk.
+7. Legacy inventory is honest: genesis NULL is a checkpoint record, not a cryptographic seal; approved claims remain post-cutover only.
