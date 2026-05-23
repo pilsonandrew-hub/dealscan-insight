@@ -851,6 +851,8 @@ def main(argv: list[str] | None = None) -> int:
                 first_reason: str | None = None
                 for check_name, (ok, reason) in results.items():
                     print(f"audit.verify.{check_name}={'ok' if ok else 'failed'}")
+                    if reason is not None:
+                        print(f"audit.verify.{check_name}_detail={reason}")
                     if not ok:
                         all_ok = False
                         if first_reason is None:

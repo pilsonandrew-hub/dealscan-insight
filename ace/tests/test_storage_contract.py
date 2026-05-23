@@ -8,12 +8,16 @@ import unittest
 from pathlib import Path
 
 from ace.storage import (
+    CUTOVER_EVENT_TYPE,
+    append_cutover_genesis_event,
     append_event,
     bootstrap_db,
     compute_event_hash,
     connect,
     new_id,
     utc_now,
+    legacy_chain_inventory,
+    post_cutover_event_hash_chain,
     verify_audit_integrity,
     verify_evidence_consistency,
     verify_event_hash_chain,
@@ -201,7 +205,7 @@ class StorageContractTests(unittest.TestCase):
 
         # Simulate a hostile filesystem-level actor that bypasses ACE's guarded
         # connection API and removes DB triggers first.
-        with sqlite3.connect(self.db_path) as connection:
+        with closing(sqlite3.connect(self.db_path)) as connection:
             connection.execute("DROP TRIGGER ace_events_no_update")
             connection.execute(
                 "UPDATE events SET payload_json = ? WHERE event_id = ?",
@@ -236,6 +240,181 @@ class StorageContractTests(unittest.TestCase):
         self.assertRegex(row["event_hash"], r"^[0-9a-f]{64}$")
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
 
+    def test_bootstrap_adds_nullable_event_sequence_without_mutating_legacy_rows(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL UNIQUE,
+                    item_id TEXT,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    actor TEXT,
+                    source TEXT,
+                    session_id TEXT,
+                    created_at TEXT NOT NULL,
+                    previous_event_hash TEXT,
+                    event_hash TEXT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO events (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                ("evt_legacy", "item.legacy", "{}", "2026-05-13T00:00:00Z"),
+            )
+            connection.commit()
+
+        bootstrap_db(self.db_path)
+
+        with connect(self.db_path) as connection:
+            column = next(row for row in connection.execute("PRAGMA table_info(events)") if row["name"] == "event_sequence")
+            row = connection.execute("SELECT event_sequence FROM events WHERE event_id = ?", ("evt_legacy",)).fetchone()
+        self.assertEqual(column["notnull"], 0)
+        self.assertIsNone(row["event_sequence"])
+
+    def test_bootstrap_preserves_b1_residue_event_sequence_values_as_inert_legacy(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL UNIQUE,
+                    item_id TEXT,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    actor TEXT,
+                    source TEXT,
+                    session_id TEXT,
+                    created_at TEXT NOT NULL,
+                    previous_event_hash TEXT,
+                    event_hash TEXT,
+                    event_sequence INTEGER NOT NULL
+                )
+                """
+            )
+            connection.execute("CREATE UNIQUE INDEX idx_events_event_sequence ON events(event_sequence)")
+            connection.execute(
+                "INSERT INTO events (event_id, event_type, payload_json, created_at, event_sequence) VALUES (?, ?, ?, ?, ?)",
+                ("evt_b1_residue", "item.legacy", "{}", "2026-05-13T00:00:00Z", 99),
+            )
+            connection.commit()
+
+        bootstrap_db(self.db_path)
+
+        with connect(self.db_path) as connection:
+            column = next(row for row in connection.execute("PRAGMA table_info(events)") if row["name"] == "event_sequence")
+            row = connection.execute("SELECT event_sequence FROM events WHERE event_id = ?", ("evt_b1_residue",)).fetchone()
+            unique_sequence_indexes = [
+                row["name"]
+                for row in connection.execute("PRAGMA index_list(events)")
+                if row["unique"] and any(
+                    info["name"] == "event_sequence"
+                    for info in connection.execute(f"PRAGMA index_info({row['name']})")
+                )
+            ]
+        self.assertEqual(column["notnull"], 0)
+        self.assertEqual(row["event_sequence"], 99)
+        self.assertEqual(unique_sequence_indexes, [])
+
+    def test_append_event_transition_window_leaves_event_sequence_null_before_cutover(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            event_id = append_event(connection, event_type="item.transition", payload={"phase": "pre-cutover"})
+            connection.commit()
+
+        with connect(self.db_path) as connection:
+            row = connection.execute("SELECT event_sequence FROM events WHERE event_id = ?", (event_id,)).fetchone()
+        self.assertIsNone(row["event_sequence"])
+
+    def test_append_event_rejects_cutover_event_type_on_normal_path(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            with self.assertRaises(ValueError):
+                append_event(connection, event_type=CUTOVER_EVENT_TYPE, payload={"cutover_version": "v1.1"})
+
+    def test_append_cutover_genesis_event_creates_boundary_and_segment_scoped_sequence(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            legacy_id = append_event(connection, event_type="item.legacy", payload={"legacy": True})
+            connection.commit()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("DROP TRIGGER ace_events_no_update")
+            connection.execute("UPDATE events SET event_sequence = 42 WHERE event_id = ?", (legacy_id,))
+            connection.commit()
+
+        with connect(self.db_path) as connection:
+            cutover_id = append_cutover_genesis_event(
+                connection,
+                payload={"cutover_version": "v1.1"},
+                actor="test",
+                source="ace/tests/test_storage_contract.py",
+                session_id="v1.1-cutover:test",
+            )
+            post_id = append_event(connection, event_type="item.post_cutover", payload={"post": True})
+            connection.commit()
+
+        with connect(self.db_path) as connection:
+            rows = connection.execute(
+                "SELECT event_id, event_sequence, previous_event_hash FROM events ORDER BY id ASC"
+            ).fetchall()
+        self.assertEqual([row["event_id"] for row in rows], [legacy_id, cutover_id, post_id])
+        self.assertEqual(rows[0]["event_sequence"], 42)
+        self.assertEqual(rows[1]["event_sequence"], 1)
+        self.assertIsNone(rows[1]["previous_event_hash"])
+        self.assertEqual(rows[2]["event_sequence"], 2)
+        self.assertEqual(post_cutover_event_hash_chain(self.db_path), (True, None))
+
+    def test_post_cutover_verifier_fails_loudly_on_null_sequence_after_boundary(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            cutover_id = append_cutover_genesis_event(
+                connection,
+                payload={"cutover_version": "v1.1"},
+                actor="test",
+                source="ace/tests/test_storage_contract.py",
+                session_id="v1.1-cutover:test",
+            )
+            connection.execute("INSERT INTO events (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)", ("evt_bad", "item.bad", "{}", utc_now()))
+            connection.commit()
+
+        ok, detail = post_cutover_event_hash_chain(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "post-cutover event evt_bad has NULL event_sequence")
+
+    def test_post_cutover_verifier_fails_loudly_on_duplicate_sequence(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            append_cutover_genesis_event(
+                connection,
+                payload={"cutover_version": "v1.1"},
+                actor="test",
+                source="ace/tests/test_storage_contract.py",
+                session_id="v1.1-cutover:test",
+            )
+            post_id = append_event(connection, event_type="item.post", payload={"post": True})
+            connection.commit()
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute("DROP TRIGGER ace_events_no_update")
+            connection.execute("UPDATE events SET event_sequence = 1 WHERE event_id = ?", (post_id,))
+            connection.commit()
+
+        ok, detail = post_cutover_event_hash_chain(self.db_path)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "duplicate post-cutover event_sequence 1")
+
+    def test_legacy_chain_inventory_requires_disclosure_file(self) -> None:
+        bootstrap_db(self.db_path)
+
+        ok, detail = legacy_chain_inventory(self.db_path)
+
+        self.assertTrue(ok)
+        self.assertIn("disclosure_present=true", detail or "")
+
     def test_connect_sets_busy_timeout_for_live_supervisor_contention(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
@@ -268,7 +447,7 @@ class StorageContractTests(unittest.TestCase):
 
     def test_audit_verify_fails_loudly_when_schema_needs_maintenance(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as connection:
+        with closing(sqlite3.connect(self.db_path)) as connection:
             connection.execute(
                 "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)"
             )
@@ -295,7 +474,7 @@ class StorageContractTests(unittest.TestCase):
 
     def test_verify_evidence_consistency_detects_missing_item(self) -> None:
         bootstrap_db(self.db_path)
-        with connect(self.db_path) as connection:
+        with closing(sqlite3.connect(self.db_path)) as connection:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute(
                 """
@@ -315,7 +494,7 @@ class StorageContractTests(unittest.TestCase):
 
         repo = ItemRepository(self.db_path)
         item = repo.create_item(item_type="task", title="Evidence event consistency")
-        with connect(self.db_path) as connection:
+        with closing(sqlite3.connect(self.db_path)) as connection:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute(
                 """
@@ -454,7 +633,9 @@ class StorageContractTests(unittest.TestCase):
         self.assertEqual(
             set(results),
             {
+                "legacy_chain_inventory",
                 "event_hash_chain",
+                "post_cutover_event_hash_chain",
                 "evidence_consistency",
                 "governed_run_integrity",
                 "runtime_instance_integrity",

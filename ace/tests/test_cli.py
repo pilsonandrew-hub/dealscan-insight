@@ -112,7 +112,11 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "audit", "verify")
 
             self.assertEqual(code, 0, output)
+            self.assertIn("audit.verify.legacy_chain_inventory=ok", output)
+            self.assertIn("audit.verify.legacy_chain_inventory_detail=legacy_chain_inventory=pre_cutover disclosure_present=true cutover_event=absent", output)
             self.assertIn("audit.verify.event_hash_chain=ok", output)
+            self.assertIn("audit.verify.post_cutover_event_hash_chain=ok", output)
+            self.assertIn("audit.verify.post_cutover_event_hash_chain_detail=post_cutover_event_hash_chain=not_started cutover_event=absent", output)
             self.assertIn("audit.verify.evidence_consistency=ok", output)
             self.assertIn("audit.verify.governed_run_integrity=ok", output)
             self.assertIn("audit.verify.runtime_instance_integrity=ok", output)
@@ -136,7 +140,9 @@ class AceCliTests(unittest.TestCase):
             code, output = self.run_cli("--db", str(db_path), "audit", "verify")
 
             self.assertEqual(code, 1, output)
+            self.assertIn("audit.verify.legacy_chain_inventory=ok", output)
             self.assertIn("audit.verify.event_hash_chain=ok", output)
+            self.assertIn("audit.verify.post_cutover_event_hash_chain=ok", output)
             self.assertIn("audit.verify.evidence_consistency=failed", output)
             self.assertIn("audit.verify.governed_run_integrity=ok", output)
             self.assertIn("audit.verify.runtime_instance_integrity=ok", output)

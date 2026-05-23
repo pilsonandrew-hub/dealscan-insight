@@ -13,6 +13,9 @@ from typing import Any, Mapping
 ACE_DIR = Path(__file__).resolve().parent
 STATE_DIR = ACE_DIR / "state"
 DB_PATH = STATE_DIR / "ace.db"
+CUTOVER_EVENT_TYPE = "ace.chain.cutover.v1_1"
+LEGACY_CHAIN_DISCLOSURE_PATH = ACE_DIR / "state" / "v1_1_required_items" / "legacy-chain-defects.md"
+_IMMEDIATE_CONNECTION_IDS: set[int] = set()
 
 
 # Schema presence is not runtime proof. Some tables, including action_queue,
@@ -55,6 +58,7 @@ SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL,
         previous_event_hash TEXT,
         event_hash TEXT,
+        event_sequence INTEGER,
         FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
     )
     """,
@@ -321,6 +325,18 @@ def _clear_authorizer(connection: sqlite3.Connection) -> None:
     connection.set_authorizer(None)
 
 
+def _begin_immediate(connection: sqlite3.Connection) -> None:
+    if connection.in_transaction:
+        raise RuntimeError("BEGIN IMMEDIATE required before any DML in append-capable write path")
+    connection.execute("BEGIN IMMEDIATE")
+    _IMMEDIATE_CONNECTION_IDS.add(id(connection))
+
+
+def _assert_immediate_write_connection(connection: sqlite3.Connection) -> None:
+    if not connection.in_transaction:
+        _begin_immediate(connection)
+
+
 @contextmanager
 def connect(db_path: Path | str = DB_PATH):
     connection = sqlite3.connect(str(db_path), timeout=30.0)
@@ -331,6 +347,7 @@ def connect(db_path: Path | str = DB_PATH):
         _install_event_write_authorizer(connection)
         yield connection
     finally:
+        _IMMEDIATE_CONNECTION_IDS.discard(id(connection))
         connection.close()
 
 
@@ -372,8 +389,88 @@ def _drop_event_append_only_triggers_for_maintenance(connection: sqlite3.Connect
     connection.execute("DROP TRIGGER IF EXISTS ace_events_no_delete")
 
 
+def _event_columns(connection: sqlite3.Connection) -> set[str]:
+    return {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+
+
+def _event_sequence_column_nullable(connection: sqlite3.Connection) -> bool:
+    for row in connection.execute("PRAGMA table_info(events)").fetchall():
+        if row["name"] == "event_sequence":
+            return row["notnull"] == 0
+    return True
+
+
+def _event_sequence_indexes(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    indexes: list[sqlite3.Row] = []
+    for index_row in connection.execute("PRAGMA index_list(events)").fetchall():
+        index_name = index_row["name"]
+        indexed_columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA index_info({index_name})").fetchall()
+        }
+        if "event_sequence" in indexed_columns:
+            indexes.append(index_row)
+    return indexes
+
+
+def _rebuild_events_for_nullable_event_sequence(connection: sqlite3.Connection) -> None:
+    connection.execute("ALTER TABLE events RENAME TO events_legacy_event_sequence")
+    connection.execute(
+        """
+        CREATE TABLE events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            item_id TEXT,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            actor TEXT,
+            source TEXT,
+            session_id TEXT,
+            created_at TEXT NOT NULL,
+            previous_event_hash TEXT,
+            event_hash TEXT,
+            event_sequence INTEGER,
+            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
+        )
+        """
+    )
+    legacy_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(events_legacy_event_sequence)").fetchall()
+    }
+    event_sequence_select = "event_sequence" if "event_sequence" in legacy_columns else "NULL"
+    connection.execute(
+        f"""
+        INSERT INTO events (
+            id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+            created_at, previous_event_hash, event_hash, event_sequence
+        )
+        SELECT
+            id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+            created_at, previous_event_hash, event_hash, {event_sequence_select}
+        FROM events_legacy_event_sequence
+        ORDER BY id ASC
+        """
+    )
+    connection.execute("DROP TABLE events_legacy_event_sequence")
+
+
+def _ensure_event_sequence_column(connection: sqlite3.Connection) -> None:
+    columns = _event_columns(connection)
+    if not columns:
+        return
+    sequence_indexes = _event_sequence_indexes(connection) if "event_sequence" in columns else []
+    for index_row in sequence_indexes:
+        if index_row["unique"]:
+            connection.execute(f"DROP INDEX IF EXISTS {index_row['name']}")
+    if "event_sequence" not in columns:
+        connection.execute("ALTER TABLE events ADD COLUMN event_sequence INTEGER")
+    elif not _event_sequence_column_nullable(connection):
+        _rebuild_events_for_nullable_event_sequence(connection)
+
+
 def _ensure_event_hash_columns(connection: sqlite3.Connection) -> None:
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+    columns = _event_columns(connection)
     if not columns:
         return
     if "previous_event_hash" not in columns:
@@ -384,7 +481,7 @@ def _ensure_event_hash_columns(connection: sqlite3.Connection) -> None:
 
 def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
     _ensure_event_hash_columns(connection)
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+    columns = _event_columns(connection)
     if not {"previous_event_hash", "event_hash"}.issubset(columns):
         return
 
@@ -446,8 +543,8 @@ def _schema_ready_for_readonly_audit(connection: sqlite3.Connection) -> tuple[bo
             + "; run explicit ACE maintenance migration/bootstrap first"
         )
 
-    event_columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
-    required_event_columns = {"previous_event_hash", "event_hash"}
+    event_columns = _event_columns(connection)
+    required_event_columns = {"previous_event_hash", "event_hash", "event_sequence"}
     missing_event_columns = sorted(required_event_columns - event_columns)
     if missing_event_columns:
         return False, (
@@ -470,16 +567,49 @@ def _schema_ready_for_readonly_audit(connection: sqlite3.Connection) -> tuple[bo
 
 def _maintenance_required_results(reason: str) -> dict[str, tuple[bool, str | None]]:
     return {
+        "legacy_chain_inventory": (False, reason),
         "event_hash_chain": (False, reason),
+        "post_cutover_event_hash_chain": (False, reason),
         "evidence_consistency": (False, reason),
         "governed_run_integrity": (False, reason),
         "runtime_instance_integrity": (False, reason),
     }
 
 
+def _cutover_candidates(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    if "event_sequence" not in _event_columns(connection):
+        return []
+    rows = connection.execute(
+        """
+        SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+               created_at, previous_event_hash, event_hash, event_sequence
+        FROM events
+        WHERE event_type = ?
+        ORDER BY id ASC
+        """,
+        (CUTOVER_EVENT_TYPE,),
+    ).fetchall()
+    candidates: list[sqlite3.Row] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"])
+        except json.JSONDecodeError:
+            payload = None
+        if row["event_sequence"] == 1 and row["previous_event_hash"] is None and isinstance(payload, dict) and payload.get("cutover_version") == "v1.1":
+            candidates.append(row)
+    return candidates
+
+
+def _cutover_row(connection: sqlite3.Connection) -> sqlite3.Row | None:
+    candidates = _cutover_candidates(connection)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
 def _assert_no_hashless_events_before_append(connection: sqlite3.Connection) -> None:
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
-    if not {"previous_event_hash", "event_hash"}.issubset(columns):
+    columns = _event_columns(connection)
+    if not {"previous_event_hash", "event_hash", "event_sequence"}.issubset(columns):
         raise RuntimeError(
             "event hash maintenance required before append: events hash columns missing; "
             "run explicit ACE maintenance migration/bootstrap first"
@@ -535,6 +665,99 @@ def _verify_event_hash_chain_bootstrapped(db_path: Path | str = DB_PATH) -> tupl
     return verify_event_hash_chain(db_path)
 
 
+def legacy_chain_inventory(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Report disclosed legacy chain state without treating legacy defects as a pass."""
+
+    if not LEGACY_CHAIN_DISCLOSURE_PATH.exists():
+        return False, f"legacy chain disclosure missing: {LEGACY_CHAIN_DISCLOSURE_PATH}"
+    with connect_readonly(db_path) as connection:
+        candidates = _cutover_candidates(connection)
+        if len(candidates) == 0:
+            return True, "legacy_chain_inventory=pre_cutover disclosure_present=true cutover_event=absent"
+        if len(candidates) != 1:
+            return False, "cutover boundary missing or ambiguous"
+        cutover = candidates[0]
+        try:
+            payload = json.loads(cutover["payload_json"])
+        except json.JSONDecodeError:
+            return False, f"cutover event {cutover['event_id']} payload malformed"
+        legacy_head = connection.execute(
+            "SELECT id, event_id, event_hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1",
+            (cutover["id"],),
+        ).fetchone()
+        if legacy_head is None:
+            return False, f"cutover event {cutover['event_id']} has no legacy head to inventory"
+        if payload.get("legacy_chain_head_row_id") != legacy_head["id"]:
+            return False, f"cutover event {cutover['event_id']} legacy head row mismatch"
+        if payload.get("legacy_chain_head_event_id") != legacy_head["event_id"]:
+            return False, f"cutover event {cutover['event_id']} legacy head event mismatch"
+        if payload.get("legacy_chain_head_hash") != legacy_head["event_hash"]:
+            return False, f"cutover event {cutover['event_id']} legacy head hash mismatch"
+        return True, f"legacy_chain_inventory=disclosed cutover_event_id={cutover['event_id']} legacy_policy=inventory_only_disclosed_defects"
+
+
+def post_cutover_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:
+    """Strict V1.1+ hash-chain verification from the cutover boundary forward."""
+
+    with connect_readonly(db_path) as connection:
+        candidates = _cutover_candidates(connection)
+        if len(candidates) != 1:
+            return False, "cutover boundary missing or ambiguous"
+        cutover = candidates[0]
+        null_row = connection.execute(
+            "SELECT event_id FROM events WHERE id >= ? AND event_sequence IS NULL ORDER BY id ASC LIMIT 1",
+            (cutover["id"],),
+        ).fetchone()
+        if null_row is not None:
+            return False, f"post-cutover event {null_row['event_id']} has NULL event_sequence"
+        duplicate = connection.execute(
+            """
+            SELECT event_sequence
+            FROM events
+            WHERE id >= ?
+            GROUP BY event_sequence
+            HAVING COUNT(*) > 1
+            ORDER BY event_sequence ASC
+            LIMIT 1
+            """,
+            (cutover["id"],),
+        ).fetchone()
+        if duplicate is not None:
+            return False, f"duplicate post-cutover event_sequence {duplicate['event_sequence']}"
+        rows = connection.execute(
+            """
+            SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
+                   created_at, previous_event_hash, event_hash, event_sequence
+            FROM events
+            WHERE id >= ?
+            ORDER BY event_sequence ASC, id ASC
+            """,
+            (cutover["id"],),
+        ).fetchall()
+    for expected_sequence, row in enumerate(rows, start=1):
+        if row["event_sequence"] != expected_sequence:
+            return False, f"post-cutover event_sequence gap at expected {expected_sequence}"
+    previous_event_hash: str | None = None
+    for row in rows:
+        if row["previous_event_hash"] != previous_event_hash:
+            return False, f"post-cutover event {row['event_id']} has broken previous_event_hash"
+        expected_hash = compute_event_hash(
+            event_id=row["event_id"],
+            item_id=row["item_id"],
+            event_type=row["event_type"],
+            payload_json=row["payload_json"],
+            actor=row["actor"],
+            source=row["source"],
+            session_id=row["session_id"],
+            created_at=row["created_at"],
+            previous_event_hash=previous_event_hash,
+        )
+        if row["event_hash"] != expected_hash:
+            return False, f"post-cutover event {row['event_id']} hash mismatch"
+        previous_event_hash = row["event_hash"]
+    return True, None
+
+
 def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[bool, str | None]]:
     """Return read-only audit verification results for governed ACE integrity surfaces."""
 
@@ -548,9 +771,13 @@ def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[boo
         assert reason is not None
         return _maintenance_required_results(reason)
 
-    event_hash_chain_result = _verify_event_hash_chain_bootstrapped(db_path)
+    with connect_readonly(db_path) as connection:
+        cutover_present = bool(_cutover_candidates(connection))
+    event_hash_chain_result = post_cutover_event_hash_chain(db_path) if cutover_present else _verify_event_hash_chain_bootstrapped(db_path)
     return {
+        "legacy_chain_inventory": legacy_chain_inventory(db_path),
         "event_hash_chain": event_hash_chain_result,
+        "post_cutover_event_hash_chain": post_cutover_event_hash_chain(db_path) if cutover_present else (True, "post_cutover_event_hash_chain=not_started cutover_event=absent"),
         "evidence_consistency": _verify_evidence_consistency_bootstrapped(db_path),
         "governed_run_integrity": _verify_governed_run_integrity_bootstrapped(db_path),
         "runtime_instance_integrity": _verify_runtime_instance_integrity_bootstrapped(db_path),
@@ -763,7 +990,9 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
             connection.execute("ALTER TABLE items ADD COLUMN closed_reason TEXT")
 
         _drop_event_append_only_triggers_for_maintenance(connection)
+        _ensure_event_sequence_column(connection)
         _backfill_event_hashes(connection)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_events_item_id ON events(item_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(event_hash)")
         _install_event_append_only_triggers(connection)
 
@@ -962,16 +1191,37 @@ def append_event(
 ) -> str:
     """Write a single append-only event row and return its event id."""
 
+    if event_type == CUTOVER_EVENT_TYPE:
+        raise ValueError(f"normal append_event cannot write {CUTOVER_EVENT_TYPE}; use append_cutover_genesis_event")
+    _assert_immediate_write_connection(connection)
+
     event_id = event_id or new_id("evt")
     created_at = created_at or utc_now()
     payload_json = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
-    if not connection.in_transaction:
-        connection.execute("BEGIN IMMEDIATE")
+    _ensure_event_sequence_column(connection)
     _ensure_event_hash_columns(connection)
     _assert_no_hashless_events_before_append(connection)
-    previous_event_hash = connection.execute(
-        "SELECT event_hash FROM events ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    cutover = _cutover_row(connection)
+    event_sequence: int | None = None
+    if cutover is None:
+        previous_event_hash = connection.execute(
+            "SELECT event_hash FROM events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    else:
+        event_sequence = connection.execute(
+            "SELECT COALESCE(MAX(event_sequence), 0) + 1 AS next_sequence FROM events WHERE id >= ?",
+            (cutover["id"],),
+        ).fetchone()["next_sequence"]
+        previous_event_hash = connection.execute(
+            """
+            SELECT event_hash
+            FROM events
+            WHERE id >= ?
+            ORDER BY event_sequence DESC, id DESC
+            LIMIT 1
+            """,
+            (cutover["id"],),
+        ).fetchone()
     previous_hash = previous_event_hash["event_hash"] if previous_event_hash else None
     event_hash = compute_event_hash(
         event_id=event_id,
@@ -988,8 +1238,8 @@ def append_event(
         """
         INSERT INTO events (
             event_id, item_id, event_type, payload_json, actor, source, session_id,
-            created_at, previous_event_hash, event_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, previous_event_hash, event_hash, event_sequence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             event_id,
@@ -1002,6 +1252,65 @@ def append_event(
             created_at,
             previous_hash,
             event_hash,
+            event_sequence,
         ),
+    )
+    return event_id
+
+
+def append_cutover_genesis_event(
+    connection: sqlite3.Connection,
+    *,
+    payload: Mapping[str, Any],
+    actor: str,
+    source: str,
+    session_id: str,
+    event_id: str | None = None,
+    created_at: str | None = None,
+) -> str:
+    """Write the one-time V1.1 cutover genesis event.
+
+    Allowed call site: the separately approved B-cutover-execute command/script only.
+    Forbidden call sites: normal repository, sweep, cycle, supervisor, Telegram,
+    action runtime, and any non-targeted tests.
+    """
+
+    _assert_immediate_write_connection(connection)
+    _ensure_event_sequence_column(connection)
+    _ensure_event_hash_columns(connection)
+    _assert_no_hashless_events_before_append(connection)
+    if connection.execute("SELECT 1 FROM events WHERE event_type = ? LIMIT 1", (CUTOVER_EVENT_TYPE,)).fetchone() is not None:
+        raise ValueError(f"{CUTOVER_EVENT_TYPE} already exists")
+    legacy_head = connection.execute(
+        "SELECT id, event_id, event_hash FROM events ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    cutover_payload = dict(payload)
+    if legacy_head is not None:
+        cutover_payload.setdefault("legacy_chain_head_row_id", legacy_head["id"])
+        cutover_payload.setdefault("legacy_chain_head_event_id", legacy_head["event_id"])
+        cutover_payload.setdefault("legacy_chain_head_hash", legacy_head["event_hash"])
+    cutover_payload.setdefault("cutover_version", "v1.1")
+    event_id = event_id or new_id("evt")
+    created_at = created_at or utc_now()
+    payload_json = json.dumps(cutover_payload, sort_keys=True, separators=(",", ":"))
+    event_hash = compute_event_hash(
+        event_id=event_id,
+        item_id=None,
+        event_type=CUTOVER_EVENT_TYPE,
+        payload_json=payload_json,
+        actor=actor,
+        source=source,
+        session_id=session_id,
+        created_at=created_at,
+        previous_event_hash=None,
+    )
+    connection.execute(
+        """
+        INSERT INTO events (
+            event_id, item_id, event_type, payload_json, actor, source, session_id,
+            created_at, previous_event_hash, event_hash, event_sequence
+        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
+        """,
+        (event_id, CUTOVER_EVENT_TYPE, payload_json, actor, source, session_id, created_at, event_hash),
     )
     return event_id
