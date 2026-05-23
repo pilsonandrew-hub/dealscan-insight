@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import json
 from contextlib import closing
 import tempfile
 import unittest
@@ -9,6 +10,11 @@ from pathlib import Path
 
 from ace.storage import (
     CUTOVER_EVENT_TYPE,
+    CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+    DESIGN_COMMIT_HASH,
+    LEGACY_KNOWN_DEFECT_COUNTS,
+    POST_CUTOVER_CHAIN_POLICY,
+    REQUIRED_CUTOVER_PAYLOAD_FIELDS,
     append_cutover_genesis_event,
     append_event,
     bootstrap_db,
@@ -350,7 +356,8 @@ class StorageContractTests(unittest.TestCase):
         with connect(self.db_path) as connection:
             cutover_id = append_cutover_genesis_event(
                 connection,
-                payload={"cutover_version": "v1.1"},
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
                 actor="test",
                 source="ace/tests/test_storage_contract.py",
                 session_id="v1.1-cutover:test",
@@ -360,21 +367,86 @@ class StorageContractTests(unittest.TestCase):
 
         with connect(self.db_path) as connection:
             rows = connection.execute(
-                "SELECT event_id, event_sequence, previous_event_hash FROM events ORDER BY id ASC"
+                "SELECT event_id, event_sequence, previous_event_hash, payload_json, created_at FROM events ORDER BY id ASC"
             ).fetchall()
         self.assertEqual([row["event_id"] for row in rows], [legacy_id, cutover_id, post_id])
         self.assertEqual(rows[0]["event_sequence"], 42)
         self.assertEqual(rows[1]["event_sequence"], 1)
         self.assertIsNone(rows[1]["previous_event_hash"])
         self.assertEqual(rows[2]["event_sequence"], 2)
+        cutover_payload = json.loads(rows[1]["payload_json"])
+        self.assertEqual(set(cutover_payload), REQUIRED_CUTOVER_PAYLOAD_FIELDS)
+        self.assertEqual(rows[1]["created_at"], cutover_payload["cutover_timestamp"])
+        self.assertEqual(DESIGN_COMMIT_HASH, cutover_payload["design_commit_hash"])
+        self.assertEqual(1, cutover_payload["legacy_event_count"])
+        self.assertEqual(LEGACY_KNOWN_DEFECT_COUNTS, cutover_payload["legacy_known_defect_counts"])
+        self.assertEqual(POST_CUTOVER_CHAIN_POLICY, cutover_payload["post_cutover_chain_policy"])
         self.assertEqual(post_cutover_event_hash_chain(self.db_path), (True, None))
+
+    def test_append_cutover_genesis_event_overrides_caller_supplied_live_fields(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            legacy_id = append_event(connection, event_type="item.legacy", payload={"legacy": True})
+            legacy_head = connection.execute("SELECT id, event_hash FROM events WHERE event_id = ?", (legacy_id,)).fetchone()
+            cutover_id = append_cutover_genesis_event(
+                connection,
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
+                actor="test",
+                source="ace/tests/test_storage_contract.py",
+                session_id="v1.1-cutover:test",
+                payload={
+                    "legacy_chain_head_row_id": -1,
+                    "legacy_chain_head_event_id": "stale",
+                    "legacy_chain_head_hash": "stale",
+                    "legacy_event_count": -1,
+                    "cutover_timestamp": "stale",
+                    "design_commit_hash": "stale",
+                },
+            )
+            row = connection.execute("SELECT payload_json, created_at FROM events WHERE event_id = ?", (cutover_id,)).fetchone()
+            connection.commit()
+
+        payload = json.loads(row["payload_json"])
+        self.assertEqual(legacy_head["id"], payload["legacy_chain_head_row_id"])
+        self.assertEqual(legacy_id, payload["legacy_chain_head_event_id"])
+        self.assertEqual(legacy_head["event_hash"], payload["legacy_chain_head_hash"])
+        self.assertEqual(1, payload["legacy_event_count"])
+        self.assertEqual(row["created_at"], payload["cutover_timestamp"])
+        self.assertEqual(DESIGN_COMMIT_HASH, payload["design_commit_hash"])
+
+    def test_append_cutover_genesis_event_rejects_empty_payload_and_unauthorized_call(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            append_event(connection, event_type="item.legacy", payload={"legacy": True})
+            with self.assertRaises(ValueError):
+                append_cutover_genesis_event(
+                    connection,
+                    authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                    governing_decision_reference="test approval",
+                    actor="test",
+                    source="ace/tests/test_storage_contract.py",
+                    session_id="v1.1-cutover:test",
+                    payload={},
+                )
+            with self.assertRaises(PermissionError):
+                append_cutover_genesis_event(
+                    connection,
+                    authorization_token="wrong",
+                    governing_decision_reference="test approval",
+                    actor="test",
+                    source="ace/tests/test_storage_contract.py",
+                    session_id="v1.1-cutover:test",
+                )
 
     def test_post_cutover_verifier_fails_loudly_on_null_sequence_after_boundary(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
+            append_event(connection, event_type="item.legacy", payload={"legacy": True})
             cutover_id = append_cutover_genesis_event(
                 connection,
-                payload={"cutover_version": "v1.1"},
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
                 actor="test",
                 source="ace/tests/test_storage_contract.py",
                 session_id="v1.1-cutover:test",
@@ -389,9 +461,11 @@ class StorageContractTests(unittest.TestCase):
     def test_post_cutover_verifier_fails_loudly_on_duplicate_sequence(self) -> None:
         bootstrap_db(self.db_path)
         with connect(self.db_path) as connection:
+            append_event(connection, event_type="item.legacy", payload={"legacy": True})
             append_cutover_genesis_event(
                 connection,
-                payload={"cutover_version": "v1.1"},
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
                 actor="test",
                 source="ace/tests/test_storage_contract.py",
                 session_id="v1.1-cutover:test",

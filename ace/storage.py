@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -14,7 +15,41 @@ ACE_DIR = Path(__file__).resolve().parent
 STATE_DIR = ACE_DIR / "state"
 DB_PATH = STATE_DIR / "ace.db"
 CUTOVER_EVENT_TYPE = "ace.chain.cutover.v1_1"
+CUTOVER_EXECUTE_AUTHORIZATION_TOKEN = "B_CUTOVER_EXECUTE_OPERATOR_APPROVED"
+DESIGN_COMMIT_HASH = "58725a87f52a734c13e12c18e17e29534cd0fc72"
 LEGACY_CHAIN_DISCLOSURE_PATH = ACE_DIR / "state" / "v1_1_required_items" / "legacy-chain-defects.md"
+LEGACY_CHAIN_DIAGNOSIS_PATH = ACE_DIR / "state" / "v1_1_required_items" / "slice-b1-chain-diagnosis-readonly.md"
+LEGACY_KNOWN_DEFECT_COUNTS = {
+    "backdated_item_created_events": 4,
+    "concurrent_write_chain_breaks": 2,
+    "timestamp_id_inversions": 163,
+}
+POST_CUTOVER_CHAIN_POLICY = {
+    "event_sequence_scope": "post_cutover_only",
+    "post_cutover_serialization": "begin_immediate_required_before_head_read",
+    "pre_cutover_verification_policy": "inventory_only_disclosed_defects",
+    "previous_event_hash_policy": "v1_1_genesis_null_with_legacy_head_in_payload",
+    "transition_window_policy": "sequence_null_legacy_mode_until_cutover",
+}
+REQUIRED_CUTOVER_PAYLOAD_FIELDS = frozenset(
+    {
+        "anchor_commit_hash",
+        "cutover_timestamp",
+        "cutover_version",
+        "design_commit_hash",
+        "forbidden_claims_reference",
+        "governing_decision",
+        "governing_decision_reference",
+        "legacy_chain_head_event_id",
+        "legacy_chain_head_hash",
+        "legacy_chain_head_row_id",
+        "legacy_diagnosis_path",
+        "legacy_disclosure_path",
+        "legacy_event_count",
+        "legacy_known_defect_counts",
+        "post_cutover_chain_policy",
+    }
+)
 _IMMEDIATE_CONNECTION_IDS: set[int] = set()
 
 
@@ -335,6 +370,32 @@ def _begin_immediate(connection: sqlite3.Connection) -> None:
 def _assert_immediate_write_connection(connection: sqlite3.Connection) -> None:
     if not connection.in_transaction:
         _begin_immediate(connection)
+
+
+def _current_git_commit_hash() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ACE_DIR.parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("unable to resolve current git commit hash for cutover payload") from exc
+
+
+def _validate_cutover_payload(payload: Mapping[str, Any]) -> None:
+    missing = sorted(REQUIRED_CUTOVER_PAYLOAD_FIELDS.difference(payload))
+    if missing:
+        raise ValueError(f"cutover payload missing required fields: {', '.join(missing)}")
+    if payload.get("cutover_version") != "v1.1":
+        raise ValueError("cutover payload cutover_version must be v1.1")
+    if payload.get("design_commit_hash") != DESIGN_COMMIT_HASH:
+        raise ValueError("cutover payload design_commit_hash mismatch")
+    if payload.get("legacy_known_defect_counts") != LEGACY_KNOWN_DEFECT_COUNTS:
+        raise ValueError("cutover payload legacy_known_defect_counts mismatch")
+    if payload.get("post_cutover_chain_policy") != POST_CUTOVER_CHAIN_POLICY:
+        raise ValueError("cutover payload post_cutover_chain_policy mismatch")
 
 
 @contextmanager
@@ -1261,12 +1322,12 @@ def append_event(
 def append_cutover_genesis_event(
     connection: sqlite3.Connection,
     *,
-    payload: Mapping[str, Any],
+    authorization_token: str,
+    governing_decision_reference: str,
     actor: str,
     source: str,
     session_id: str,
-    event_id: str | None = None,
-    created_at: str | None = None,
+    payload: Mapping[str, Any] | None = None,
 ) -> str:
     """Write the one-time V1.1 cutover genesis event.
 
@@ -1274,6 +1335,11 @@ def append_cutover_genesis_event(
     Forbidden call sites: normal repository, sweep, cycle, supervisor, Telegram,
     action runtime, and any non-targeted tests.
     """
+
+    if authorization_token != CUTOVER_EXECUTE_AUTHORIZATION_TOKEN:
+        raise PermissionError("append_cutover_genesis_event requires B-cutover-execute authorization token")
+    if payload is not None and not payload:
+        raise ValueError("cutover payload must not be empty")
 
     _assert_immediate_write_connection(connection)
     _ensure_event_sequence_column(connection)
@@ -1284,14 +1350,33 @@ def append_cutover_genesis_event(
     legacy_head = connection.execute(
         "SELECT id, event_id, event_hash FROM events ORDER BY id DESC LIMIT 1"
     ).fetchone()
-    cutover_payload = dict(payload)
-    if legacy_head is not None:
-        cutover_payload.setdefault("legacy_chain_head_row_id", legacy_head["id"])
-        cutover_payload.setdefault("legacy_chain_head_event_id", legacy_head["event_id"])
-        cutover_payload.setdefault("legacy_chain_head_hash", legacy_head["event_hash"])
-    cutover_payload.setdefault("cutover_version", "v1.1")
-    event_id = event_id or new_id("evt")
-    created_at = created_at or utc_now()
+    if legacy_head is None:
+        raise ValueError("cutover requires at least one legacy event to inventory")
+    legacy_event_count = connection.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+
+    event_id = new_id("evt")
+    created_at = utc_now()
+    cutover_payload = dict(payload or {})
+    cutover_payload.update(
+        {
+            "anchor_commit_hash": _current_git_commit_hash(),
+            "cutover_timestamp": created_at,
+            "cutover_version": "v1.1",
+            "design_commit_hash": DESIGN_COMMIT_HASH,
+            "forbidden_claims_reference": "Do not claim full-history tamper-evidence; approved claim is cutover-forward only.",
+            "governing_decision": "checkpoint-forward; do not rewrite pre-cutover history",
+            "governing_decision_reference": governing_decision_reference,
+            "legacy_chain_head_event_id": legacy_head["event_id"],
+            "legacy_chain_head_hash": legacy_head["event_hash"],
+            "legacy_chain_head_row_id": legacy_head["id"],
+            "legacy_diagnosis_path": "ace/state/v1_1_required_items/slice-b1-chain-diagnosis-readonly.md",
+            "legacy_disclosure_path": "ace/state/v1_1_required_items/legacy-chain-defects.md",
+            "legacy_event_count": legacy_event_count,
+            "legacy_known_defect_counts": dict(LEGACY_KNOWN_DEFECT_COUNTS),
+            "post_cutover_chain_policy": dict(POST_CUTOVER_CHAIN_POLICY),
+        }
+    )
+    _validate_cutover_payload(cutover_payload)
     payload_json = json.dumps(cutover_payload, sort_keys=True, separators=(",", ":"))
     event_hash = compute_event_hash(
         event_id=event_id,
