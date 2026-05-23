@@ -4,23 +4,19 @@ Last updated: 2026-05-22 by operator authorization
 ## Mode
 implementation_approved — V1.1 cleanup + event_sequence precursor for item 2
 ## Scope
-Two bounded work items in sequence:
-Phase A: Cleanup from Ja’rvontis audit
-- Remove pycache directories from repo and add to .gitignore
-- Consolidate the three duplicate normalization functions (_normalize_required_human_text in repository.py, _normalize_required_text in telegram_intake.py, _normalize_required_text in action_runtime.py) into one shared utility in ace/normalization.py
-- Tests must prove all three callers still behave identically after consolidation
-Phase B: event_sequence column
-- Add event_sequence INTEGER NOT NULL column to events table
-- Populate via SELECT COALESCE(MAX(event_sequence), 0) + 1 inside append_event
-- Migration logic backfills existing events with sequential numbers in (created_at, id) order, preserving current effective ordering
-- Hash chain verifier walks ORDER BY event_sequence
-- Tests prove deterministic ordering across rebuilds and that hash verification still passes for existing data
+V1.1 cleanup, event_sequence checkpoint-forward implementation, V1.1 item 1 INSERT gap closure.
+Phase A: Cleanup from Ja’rvontis audit — COMPLETED (Slice A1)
+- pycache removal — done in 4364094
+- Duplicate normalization consolidation — canceled (functions not actually identical)
+Phase B: event_sequence column with checkpoint-forward design
+- Slice B1 (commit 600d65f) had a design bug: backfilled using (created_at, id) ordering which disagrees with the original implicit row-id chain. To be reverted and redone with checkpoint design.
+- B-revert: Revert Slice B1 cleanly
+- B-disclose: Document legacy chain defects: 163 timestamp/id inversions, 4 deliberately backdated proof events, 2 concurrent-write chain breaks from 2026-05-23, root cause analysis, decision to checkpoint forward not rewrite
+- B-cutover: Design and append a single cutover event marking the V1.1 chain boundary
+- B-append: Redesign append_event to assign event_sequence inside the transaction at write time, using BEGIN IMMEDIATE serialization, with head-hash recomputation inside the transaction
+- B-tests: Tests prove pre-cutover events stay unchanged, post-cutover events verify deterministically, concurrent writes produce clean chains
 Phase C: V1.1 item 1 INSERT gap closure
-- Add INSERT block to SQLite authorizer for events table
-- Add ace_events_no_insert trigger to events table
-- Allow exception path so append_event continues to work (e.g. via authorizer state flag or designated connection marker)
-- Update test fixtures that previously used direct INSERT to use append_event instead
-- Tests must prove: direct INSERT INTO events from any non-append_event path is refused, and append_event still functions normally
+- Slice C1 work already done locally but not committed (per prior diagnosis). To be revisited after Phase B completes — INSERT lockdown must coexist with the new cutover/append design
 ## Allowed write paths
 - ace/.py for normalization consolidation and event_sequence column implementation*
 - ace/storage.py
@@ -28,6 +24,8 @@ Phase C: V1.1 item 1 INSERT gap closure
 - ace/tests/.py for new and modified tests*
 - ace/tests/.py
 - .gitignore for pycache exclusion
+- ace/state/v1_1_required_items/legacy-chain-defects.md (new file for the disclosure)
+- ace/state/v1_1_required_items/cutover-event-design.md (new file for the cutover architecture record)
 ## Allowed actions
 - File writes/edits to the above paths only
 - Removing pycache directories from tracked files (git rm)
