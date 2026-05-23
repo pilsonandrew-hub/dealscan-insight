@@ -5,9 +5,10 @@ import hashlib
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
 
 class B2AttestationError(RuntimeError):
@@ -28,6 +29,10 @@ class B2ConflictError(B2AttestationError):
 
 class B2PostUploadVerificationError(B2AttestationError):
     """Raised when strict post-upload readback does not match expected bytes."""
+
+
+class B2ObjectNotVisibleError(B2PostUploadVerificationError):
+    """Raised when an uploaded object is not visible inside the bounded readback window."""
 
 
 @dataclass(frozen=True)
@@ -201,11 +206,14 @@ class UrllibB2Transport:
 
 
 class B2AttestationClient:
-    def __init__(self, config: B2Config, *, transport: B2Transport | None = None) -> None:
+    def __init__(self, config: B2Config, *, transport: B2Transport | None = None, readback_attempts: int = 3) -> None:
+        if readback_attempts < 1:
+            raise ValueError("readback_attempts must be >= 1")
         self.config = config
         self._transport = transport or UrllibB2Transport()
         self._authorization: B2Authorization | None = None
         self._bucket_id: str | None = None
+        self._readback_attempts = readback_attempts
 
     def __repr__(self) -> str:
         return f"B2AttestationClient(config={self.config!r}, authorized={self._authorization is not None})"
@@ -311,36 +319,60 @@ class B2AttestationClient:
         authorization = self.authorization
         encoded = urllib.parse.quote(file_name, safe="/")
         bucket = urllib.parse.quote(self.config.bucket, safe="")
-        return self._transport.get_bytes(f"{authorization.download_url}/file/{bucket}/{encoded}", authorization.authorization_token)
+        try:
+            return self._transport.get_bytes(f"{authorization.download_url}/file/{bucket}/{encoded}", authorization.authorization_token)
+        except B2ObjectNotVisibleError:
+            raise
+        except B2AttestationError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - sanitize arbitrary transport failures
+            raise B2ApiError(f"B2 transport read failed: error_type={type(exc).__name__}") from None
 
     def upload_if_absent(self, file_name: str, content: bytes, *, content_type: str = "application/json") -> B2Object:
         expected_sha1 = hashlib.sha1(content).hexdigest()
         existing = self.list_versions(file_name)
         matching_existing = [version for version in existing if version.file_name == file_name and version.action == "upload"]
         if matching_existing:
-            remote = self.read_object(file_name)
+            try:
+                remote = self.read_object(file_name)
+            except B2ObjectNotVisibleError as exc:
+                raise B2ConflictError("B2 object already exists but is not readable for content verification") from exc
             if remote != content:
                 raise B2ConflictError("B2 object already exists with different content")
             return B2Object(file_name=file_name, file_id=matching_existing[0].file_id, size=len(remote), content_sha1=hashlib.sha1(remote).hexdigest())
 
         upload_url = self._upload_url()
-        response = self._transport.post_bytes(
-            upload_url.upload_url,
-            upload_url.authorization_token,
-            file_name=file_name,
-            content=content,
-            content_type=content_type,
-            sha1=expected_sha1,
-            if_none_match=self._transport.supports_conditional_upload,
-        )
+        try:
+            response = self._transport.post_bytes(
+                upload_url.upload_url,
+                upload_url.authorization_token,
+                file_name=file_name,
+                content=content,
+                content_type=content_type,
+                sha1=expected_sha1,
+                if_none_match=self._transport.supports_conditional_upload,
+            )
+        except B2AttestationError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - sanitize arbitrary transport failures
+            raise B2ApiError(f"B2 transport upload failed: error_type={type(exc).__name__}") from None
         file_id = _required_response_text(response, "fileId")
         returned_name = _required_response_text(response, "fileName")
         if returned_name != file_name:
             raise B2ApiError("B2 upload response fileName mismatch")
-        readback = self.read_object(file_name)
+        readback = self._read_object_with_bounded_visibility_retry(file_name)
         if readback != content:
             raise B2PostUploadVerificationError("B2 post-upload readback mismatch")
         return B2Object(file_name=file_name, file_id=file_id, size=len(readback), content_sha1=hashlib.sha1(readback).hexdigest())
+
+    def _read_object_with_bounded_visibility_retry(self, file_name: str) -> bytes:
+        last_error: B2ObjectNotVisibleError | None = None
+        for _attempt in range(self._readback_attempts):
+            try:
+                return self.read_object(file_name)
+            except B2ObjectNotVisibleError as exc:
+                last_error = exc
+        raise B2ObjectNotVisibleError("B2 object not visible within bounded readback window") from last_error
 
     def _upload_url(self) -> B2UploadUrl:
         response = self._post_json("b2_get_upload_url", {"bucketId": self.bucket_id()})

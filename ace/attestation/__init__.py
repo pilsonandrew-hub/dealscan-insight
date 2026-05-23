@@ -8,6 +8,7 @@ from .backblaze import (
     B2ConfigurationError,
     B2ConflictError,
     B2Object,
+    B2ObjectNotVisibleError,
     B2ObjectVersion,
     B2PostUploadVerificationError,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "B2ConfigurationError",
     "B2ConflictError",
     "B2Object",
+    "B2ObjectNotVisibleError",
     "B2ObjectVersion",
     "B2PostUploadVerificationError",
     "attestation_record_from_event_row",

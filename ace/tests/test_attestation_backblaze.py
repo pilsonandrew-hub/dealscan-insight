@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import traceback
 import unittest
 from typing import Any, Mapping
 
@@ -10,6 +12,8 @@ from ace.attestation.backblaze import (
     B2Config,
     B2ConflictError,
     B2ConfigurationError,
+    B2ObjectNotVisibleError,
+    B2ObjectVersion,
     B2PostUploadVerificationError,
 )
 
@@ -22,9 +26,12 @@ class FakeB2Transport:
         self.post_json_calls: list[tuple[str, Mapping[str, Any]]] = []
         self.upload_calls: list[tuple[str, bytes, bool]] = []
         self.objects: dict[str, bytes] = {}
+        self.visible_after_reads: dict[str, int] = {}
+        self.read_counts: dict[str, int] = {}
         self.list_pages: list[Mapping[str, Any]] = []
         self.version_pages: list[Mapping[str, Any]] = []
         self.read_override: bytes | None = None
+        self.raise_with_secret_on_read = False
 
     def authorize(self, key_id: str, application_key: str) -> B2Authorization:
         self.authorize_calls.append((key_id, application_key))
@@ -63,9 +70,17 @@ class FakeB2Transport:
         return {"fileId": f"id-{len(self.upload_calls)}", "fileName": file_name, "contentSha1": sha1}
 
     def get_bytes(self, url: str, token: str | None = None) -> bytes:
+        file_name = url.split("/file/ace-bucket/", 1)[1]
+        self.read_counts[file_name] = self.read_counts.get(file_name, 0) + 1
+        if self.raise_with_secret_on_read:
+            raise AssertionError("transport leaked key-secret app-secret auth-token-secret")
+        visible_after = self.visible_after_reads.get(file_name, 0)
+        if self.read_counts[file_name] <= visible_after:
+            raise B2ObjectNotVisibleError("B2 object is not visible yet")
         if self.read_override is not None:
             return self.read_override
-        file_name = url.split("/file/ace-bucket/", 1)[1]
+        if file_name not in self.objects:
+            raise B2ObjectNotVisibleError("B2 object is not visible")
         return self.objects[file_name]
 
 
@@ -163,6 +178,41 @@ class B2AttestationClientTests(unittest.TestCase):
         self.assertEqual(version_calls[1]["startFileName"], "prefix/a.json")
         self.assertEqual(version_calls[1]["startFileId"], "id-a0")
 
+    def test_list_versions_returns_all_visible_versions_including_earliest_locked(self) -> None:
+        client, fake = self._client()
+        fake.version_pages = [
+            {
+                "files": [
+                    {"fileName": "prefix/a.json", "fileId": "id-new", "action": "upload", "uploadTimestamp": 300, "size": 3, "contentSha1": "sha-new"},
+                    {"fileName": "prefix/a.json", "fileId": "id-mid", "action": "upload", "uploadTimestamp": 200, "size": 3, "contentSha1": "sha-mid"},
+                ],
+                "nextFileName": "prefix/a.json",
+                "nextFileId": "id-old",
+            },
+            {
+                "files": [
+                    {"fileName": "prefix/a.json", "fileId": "id-old", "action": "upload", "uploadTimestamp": 100, "size": 3, "contentSha1": "sha-old"},
+                ],
+                "nextFileName": None,
+                "nextFileId": None,
+            },
+        ]
+
+        versions = client.list_versions("prefix/a.json")
+
+        self.assertEqual([version.file_id for version in versions], ["id-new", "id-mid", "id-old"])
+        self.assertEqual(
+            versions[-1],
+            B2ObjectVersion(
+                file_name="prefix/a.json",
+                file_id="id-old",
+                action="upload",
+                upload_timestamp=100,
+                content_sha1="sha-old",
+                size=3,
+            ),
+        )
+
     def test_upload_if_absent_uses_conditional_upload_and_strict_readback(self) -> None:
         client, fake = self._client()
 
@@ -208,6 +258,30 @@ class B2AttestationClientTests(unittest.TestCase):
         with self.assertRaisesRegex(B2PostUploadVerificationError, "readback mismatch"):
             client.upload_if_absent("prefix/one.json", b"expected")
 
+    def test_upload_if_absent_rejects_post_upload_readback_truncation(self) -> None:
+        client, fake = self._client()
+        fake.read_override = b"expect"
+
+        with self.assertRaisesRegex(B2PostUploadVerificationError, "readback mismatch"):
+            client.upload_if_absent("prefix/one.json", b"expected")
+
+    def test_upload_if_absent_retries_eventual_consistency_before_success(self) -> None:
+        client, fake = self._client()
+        fake.visible_after_reads["prefix/one.json"] = 2
+
+        uploaded = client.upload_if_absent("prefix/one.json", b"expected")
+
+        self.assertEqual(uploaded.file_name, "prefix/one.json")
+        self.assertEqual(fake.read_counts["prefix/one.json"], 3)
+
+    def test_upload_if_absent_fails_loudly_when_invisible_inside_bounded_window(self) -> None:
+        client, fake = self._client()
+        fake.visible_after_reads["prefix/one.json"] = 99
+
+        with self.assertRaisesRegex(B2ObjectNotVisibleError, "bounded readback window"):
+            client.upload_if_absent("prefix/one.json", b"expected")
+        self.assertEqual(fake.read_counts["prefix/one.json"], 3)
+
     def test_error_messages_do_not_leak_credentials(self) -> None:
         client, fake = self._client()
         fake.list_pages = [{"files": "not-a-list", "nextFileName": None}]
@@ -219,6 +293,35 @@ class B2AttestationClientTests(unittest.TestCase):
         self.assertNotIn("key-secret", message)
         self.assertNotIn("app-secret", message)
         self.assertNotIn("auth-token-secret", message)
+
+    def test_no_credentials_leak_through_exception_attributes_tracebacks_logs_or_client_strings(self) -> None:
+        client, fake = self._client()
+        fake.raise_with_secret_on_read = True
+        logger = logging.getLogger("ace.tests.attestation.backblaze")
+
+        with self.assertLogs(logger, level="ERROR") as logs:
+            try:
+                client.upload_if_absent("prefix/one.json", b"expected")
+            except Exception as exc:  # noqa: BLE001 - deliberately inspect all surfaces
+                logger.exception("sanitized B2 attestation failure")
+                surfaces = [
+                    str(exc),
+                    repr(exc),
+                    repr(client),
+                    str(client),
+                    repr(client.config),
+                    str(client.config),
+                    traceback.format_exc(),
+                    repr(getattr(exc, "__dict__", {})),
+                    "\n".join(logs.output),
+                ]
+            else:  # pragma: no cover - defensive
+                self.fail("expected upload to fail")
+
+        combined = "\n".join(surfaces)
+        self.assertNotIn("key-secret", combined)
+        self.assertNotIn("app-secret", combined)
+        self.assertNotIn("auth-token-secret", combined)
 
 
 if __name__ == "__main__":
