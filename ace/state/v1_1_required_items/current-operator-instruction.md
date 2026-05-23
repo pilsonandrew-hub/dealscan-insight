@@ -46,7 +46,10 @@ Slice 3: Git hooks per design v2 Section 1.1. Tests prove unauthorized commits/p
 Slice 4: Command wrappers in ace/bin/guarded/ per design v2 Section 1.3. Tests prove unauthorized commands refused before real binary runs.
 Slice 5: Record five decisions in ace/state/v1_1_required_items/operator-scope-design-decisions.md.
 ## Expiry
-This implementation_approved scope expires 4 hours after Slice 1 commit, OR when Slice 5 lands with all tests passing under PYTHONWARNINGS=error, whichever first.After expiry, scope reverts to investigation/consultation only.
+This implementation_approved scope was refreshed at 2026-05-22 by operator authorization. Expires 4 hours from this refresh OR when Slice 5 lands with all tests passing under PYTHONWARNINGS=error, whichever first.
+Slices completed before refresh: 1, 2, 3.
+Slices remaining under this refresh: 4 (command wrappers in ace/bin/guarded/), 5 (record five decisions in operator-scope-design-decisions.md).
+After expiry, scope reverts to investigation/consultation only.
 ## Tiered denial behavior
 If you encounter a need to do something outside this scope:
 - Do NOT extend scope yourself
