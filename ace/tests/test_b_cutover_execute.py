@@ -111,6 +111,22 @@ class BCutoverExecuteTests(unittest.TestCase):
         self.assertEqual("run.failed.pre_commit", records[-1]["step"])
         self.assertFalse(records[-1]["commit_completed"])
 
+    def test_before_commit_failure_rolls_back_cutover_and_logs_pre_commit_failure(self) -> None:
+        exit_code, cutover_id = self._execute(failpoint="before_commit")
+
+        self.assertEqual(EXIT_PRE_COMMIT_FAILURE, exit_code)
+        self.assertIsNone(cutover_id)
+        self.assertEqual(0, self._cutover_count())
+        records = self._log_records()
+        self.assertEqual("run.failed.pre_commit", records[-1]["step"])
+        self.assertFalse(records[-1]["commit_completed"])
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            row = connection.execute(
+                "SELECT event_id FROM events WHERE event_type = ?",
+                (CUTOVER_EVENT_TYPE,),
+            ).fetchone()
+        self.assertIsNone(row)
+
     def test_post_commit_failure_logs_manual_recovery_required(self) -> None:
         exit_code, cutover_id = self._execute(failpoint="post_commit")
 

@@ -5,6 +5,7 @@ import json
 import sqlite3
 import sys
 from pathlib import Path
+from contextlib import suppress
 from typing import Any, Callable
 
 if __package__ in {None, ""}:
@@ -211,13 +212,15 @@ def execute_cutover(
         return EXIT_SUCCESS, cutover_event_id
     except PreCommitFailure as exc:
         if connection is not None and not commit_completed:
-            connection.rollback()
+            with suppress(sqlite3.ProgrammingError):
+                connection.rollback()
         logger.write("run.failed.pre_commit", "failed", commit_completed=False, detail=str(exc))
         return EXIT_PRE_COMMIT_FAILURE, None
     except Exception as exc:
         if not commit_completed:
             if connection is not None:
-                connection.rollback()
+                with suppress(sqlite3.ProgrammingError):
+                    connection.rollback()
             try:
                 logger.write("run.failed.pre_commit", "failed", commit_completed=False, detail=str(exc))
             except Exception:
