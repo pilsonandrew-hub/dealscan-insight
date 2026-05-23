@@ -33,6 +33,7 @@ Known pre-cutover defects:
 - 2 concurrent-write chain breaks at approximately `2026-05-23T02:18:32-33Z`:
   - `evt_17bf5b3365aa42dd962a31b3cca3d0b7`
   - `evt_a93eda9ab0f84b1ca0622d166da027d2`
+- B1-residue `event_sequence` values may exist on pre-cutover rows in local/live state databases because Slice B1 briefly backfilled the column before the design was reverted. These values are documented inert residue. They are not authoritative chain order, must not be cleaned up by mutating pre-cutover events, and must be ignored by the V1.1 post-cutover verifier.
 
 ## 3. Root cause analysis
 
@@ -42,7 +43,7 @@ The original ACE chain was implicitly ordered by SQLite row `id` / auto-incremen
 
 `append_event` did not serialize concurrent writes with `BEGIN IMMEDIATE`. Concurrent appends could interleave such that `previous_event_hash` was computed against a stale head, producing the 2 known broken links from 2026-05-23.
 
-Slice B1, committed as `600d65f` and reverted as `19602e0`, attempted to fix ordering by backfilling `event_sequence` using `(created_at, id)`. That exposed the historical disagreement rather than resolving it.
+Slice B1, committed as `600d65f` and reverted as `19602e0`, attempted to fix ordering by backfilling `event_sequence` using `(created_at, id)`. That exposed the historical disagreement rather than resolving it. In databases already touched by B1/bootstrap, its `event_sequence` values can remain as schema/data residue even after source rollback. The V1.1 checkpoint-forward design treats that residue as legacy defect inventory, not as state to repair.
 
 ## 4. Governing decision
 
@@ -56,7 +57,7 @@ Re-hash was rejected because it repeats the same action pattern as the original 
 
 Accept-messy was rejected because it leaves V1.1 with an ambiguous guarantee.
 
-Checkpoint forward was selected. Legacy history stays unchanged with disclosed defects. The V1.1 guarantee starts after the cutover boundary.
+Checkpoint forward was selected. Legacy history stays unchanged with disclosed defects, including any B1-residue `event_sequence` values. The V1.1 guarantee starts after the cutover boundary.
 
 ## 5. Forward design preview
 
