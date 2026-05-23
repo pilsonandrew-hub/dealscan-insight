@@ -51,6 +51,7 @@ REQUIRED_CUTOVER_PAYLOAD_FIELDS = frozenset(
     }
 )
 _IMMEDIATE_CONNECTION_IDS: set[int] = set()
+_EVENT_INSERT_CONNECTION_IDS: set[int] = set()
 
 
 # Schema presence is not runtime proof. Some tables, including action_queue,
@@ -346,18 +347,42 @@ def compute_event_hash(
     return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
-def _deny_event_update_delete_authorizer(action_code, arg1, arg2, _database_name, _trigger_name):
-    if action_code in {sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE} and arg1 == "events":
+def _deny_event_direct_write_authorizer(action_code, arg1, arg2, _database_name, _trigger_name):
+    if action_code in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE} and arg1 == "events":
         return sqlite3.SQLITE_DENY
     return sqlite3.SQLITE_OK
 
 
+def _make_event_write_authorizer(connection: sqlite3.Connection):
+    connection_id = id(connection)
+
+    def _event_write_authorizer(action_code, arg1, arg2, database_name, trigger_name):
+        if (
+            action_code == sqlite3.SQLITE_INSERT
+            and arg1 == "events"
+            and connection_id in _EVENT_INSERT_CONNECTION_IDS
+        ):
+            return sqlite3.SQLITE_OK
+        return _deny_event_direct_write_authorizer(action_code, arg1, arg2, database_name, trigger_name)
+
+    return _event_write_authorizer
+
+
 def _install_event_write_authorizer(connection: sqlite3.Connection) -> None:
-    connection.set_authorizer(_deny_event_update_delete_authorizer)
+    connection.set_authorizer(_make_event_write_authorizer(connection))
 
 
 def _clear_authorizer(connection: sqlite3.Connection) -> None:
+    _EVENT_INSERT_CONNECTION_IDS.discard(id(connection))
     connection.set_authorizer(None)
+
+
+def _enable_event_insert(connection: sqlite3.Connection) -> None:
+    _EVENT_INSERT_CONNECTION_IDS.add(id(connection))
+
+
+def _disable_event_insert(connection: sqlite3.Connection) -> None:
+    _EVENT_INSERT_CONNECTION_IDS.discard(id(connection))
 
 
 def _begin_immediate(connection: sqlite3.Connection) -> None:
@@ -409,6 +434,7 @@ def connect(db_path: Path | str = DB_PATH):
         yield connection
     finally:
         _IMMEDIATE_CONNECTION_IDS.discard(id(connection))
+        _EVENT_INSERT_CONNECTION_IDS.discard(id(connection))
         connection.close()
 
 
@@ -425,6 +451,17 @@ def connect_readonly(db_path: Path | str = DB_PATH):
 
 
 def _install_event_append_only_triggers(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS ace_events_no_insert
+        BEFORE INSERT ON events
+        WHEN COALESCE(NEW.event_hash, '') = ''
+             OR (NEW.event_sequence IS NOT NULL AND NEW.event_sequence <= 0)
+        BEGIN
+            SELECT RAISE(ABORT, 'events table append requires append_event metadata; insert denied');
+        END
+        """
+    )
     connection.execute(
         """
         CREATE TRIGGER IF NOT EXISTS ace_events_no_update
@@ -446,6 +483,7 @@ def _install_event_append_only_triggers(connection: sqlite3.Connection) -> None:
 
 
 def _drop_event_append_only_triggers_for_maintenance(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TRIGGER IF EXISTS ace_events_no_insert")
     connection.execute("DROP TRIGGER IF EXISTS ace_events_no_update")
     connection.execute("DROP TRIGGER IF EXISTS ace_events_no_delete")
 
@@ -1295,27 +1333,31 @@ def append_event(
         created_at=created_at,
         previous_event_hash=previous_hash,
     )
-    connection.execute(
-        """
-        INSERT INTO events (
-            event_id, item_id, event_type, payload_json, actor, source, session_id,
-            created_at, previous_event_hash, event_hash, event_sequence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            event_id,
-            item_id,
-            event_type,
-            payload_json,
-            actor,
-            source,
-            session_id,
-            created_at,
-            previous_hash,
-            event_hash,
-            event_sequence,
-        ),
-    )
+    _enable_event_insert(connection)
+    try:
+        connection.execute(
+            """
+            INSERT INTO events (
+                event_id, item_id, event_type, payload_json, actor, source, session_id,
+                created_at, previous_event_hash, event_hash, event_sequence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                item_id,
+                event_type,
+                payload_json,
+                actor,
+                source,
+                session_id,
+                created_at,
+                previous_hash,
+                event_hash,
+                event_sequence,
+            ),
+        )
+    finally:
+        _disable_event_insert(connection)
     return event_id
 
 
@@ -1389,13 +1431,17 @@ def append_cutover_genesis_event(
         created_at=created_at,
         previous_event_hash=None,
     )
-    connection.execute(
-        """
-        INSERT INTO events (
-            event_id, item_id, event_type, payload_json, actor, source, session_id,
-            created_at, previous_event_hash, event_hash, event_sequence
-        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
-        """,
-        (event_id, CUTOVER_EVENT_TYPE, payload_json, actor, source, session_id, created_at, event_hash),
-    )
+    _enable_event_insert(connection)
+    try:
+        connection.execute(
+            """
+            INSERT INTO events (
+                event_id, item_id, event_type, payload_json, actor, source, session_id,
+                created_at, previous_event_hash, event_hash, event_sequence
+            ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
+            """,
+            (event_id, CUTOVER_EVENT_TYPE, payload_json, actor, source, session_id, created_at, event_hash),
+        )
+    finally:
+        _disable_event_insert(connection)
     return event_id

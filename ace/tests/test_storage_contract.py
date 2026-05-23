@@ -11,6 +11,8 @@ from pathlib import Path
 from ace.storage import (
     CUTOVER_EVENT_TYPE,
     CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+    _disable_event_insert,
+    _enable_event_insert,
     DESIGN_COMMIT_HASH,
     LEGACY_KNOWN_DEFECT_COUNTS,
     POST_CUTOVER_CHAIN_POLICY,
@@ -224,8 +226,23 @@ class StorageContractTests(unittest.TestCase):
         self.assertEqual(detail, f"event {event_id} hash mismatch")
 
     def test_bootstrap_backfills_legacy_event_hashes_without_claiming_external_provenance(self) -> None:
-        bootstrap_db(self.db_path)
-        with connect(self.db_path) as connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL UNIQUE,
+                    item_id TEXT,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    actor TEXT,
+                    source TEXT,
+                    session_id TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             connection.execute(
                 """
                 INSERT INTO events (event_id, item_id, event_type, payload_json, actor, source, session_id, created_at)
@@ -451,7 +468,28 @@ class StorageContractTests(unittest.TestCase):
                 source="ace/tests/test_storage_contract.py",
                 session_id="v1.1-cutover:test",
             )
-            connection.execute("INSERT INTO events (event_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)", ("evt_bad", "item.bad", "{}", utc_now()))
+            connection.commit()
+
+        bad_created_at = utc_now()
+        bad_hash = compute_event_hash(
+            event_id="evt_bad",
+            item_id=None,
+            event_type="item.bad",
+            payload_json="{}",
+            actor=None,
+            source=None,
+            session_id=None,
+            created_at=bad_created_at,
+            previous_event_hash="0" * 64,
+        )
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                INSERT INTO events (event_id, event_type, payload_json, created_at, previous_event_hash, event_hash)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("evt_bad", "item.bad", "{}", bad_created_at, "0" * 64, bad_hash),
+            )
             connection.commit()
 
         ok, detail = post_cutover_event_hash_chain(self.db_path)
@@ -480,6 +518,77 @@ class StorageContractTests(unittest.TestCase):
         ok, detail = post_cutover_event_hash_chain(self.db_path)
         self.assertFalse(ok)
         self.assertEqual(detail, "duplicate post-cutover event_sequence 1")
+
+    def test_append_cutover_genesis_event_insert_marker_removed_after_duplicate_failure(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            append_event(connection, event_type="item.legacy", payload={"legacy": True})
+            append_cutover_genesis_event(
+                connection,
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
+                actor="test",
+                source="ace/tests/test_storage_contract.py",
+                session_id="v1.1-cutover:test",
+            )
+            with self.assertRaises(ValueError):
+                append_cutover_genesis_event(
+                    connection,
+                    authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                    governing_decision_reference="test approval",
+                    actor="test",
+                    source="ace/tests/test_storage_contract.py",
+                    session_id="v1.1-cutover:test-second",
+                )
+            with self.assertRaises(sqlite3.DatabaseError) as exc:
+                connection.execute(
+                    """
+                    INSERT INTO events (event_id, event_type, payload_json, created_at, event_hash, event_sequence)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    ("evt_after_failed_cutover", "item.direct", "{}", utc_now(), "0" * 64, 2),
+                )
+
+        self.assertIn("not authorized", str(exc.exception))
+
+    def test_append_event_post_cutover_positive_sequence_still_works_under_insert_guard(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            append_event(connection, event_type="item.legacy", payload={"legacy": True})
+            append_cutover_genesis_event(
+                connection,
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
+                actor="test",
+                source="ace/tests/test_storage_contract.py",
+                session_id="v1.1-cutover:test",
+            )
+            event_id = append_event(connection, event_type="item.after_cutover", payload={"after": True})
+            connection.commit()
+
+        with connect(self.db_path) as connection:
+            row = connection.execute("SELECT event_sequence FROM events WHERE event_id = ?", (event_id,)).fetchone()
+
+        self.assertEqual(row["event_sequence"], 2)
+        self.assertEqual(post_cutover_event_hash_chain(self.db_path), (True, None))
+
+    def test_installing_insert_guard_does_not_mutate_existing_event_rows(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            first = append_event(connection, event_type="item.first", payload={"n": 1})
+            second = append_event(connection, event_type="item.second", payload={"n": 2})
+            connection.commit()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            before = [tuple(row) for row in connection.execute("SELECT * FROM events ORDER BY id ASC").fetchall()]
+
+        bootstrap_db(self.db_path)
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            after = [tuple(row) for row in connection.execute("SELECT * FROM events ORDER BY id ASC").fetchall()]
+
+        self.assertEqual(before, after)
+        self.assertEqual([row[1] for row in after], [first, second])
 
     def test_legacy_chain_inventory_requires_disclosure_file(self) -> None:
         bootstrap_db(self.db_path)
@@ -516,6 +625,50 @@ class StorageContractTests(unittest.TestCase):
             connection.commit()
             with self.assertRaises(sqlite3.DatabaseError) as exc:
                 connection.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
+
+        self.assertIn("not authorized", str(exc.exception))
+
+    def test_events_table_rejects_direct_insert_through_connect_after_bootstrap(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            with self.assertRaises(sqlite3.DatabaseError) as exc:
+                connection.execute(
+                    """
+                    INSERT INTO events (event_id, event_type, payload_json, created_at, event_hash)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    ("evt_direct", "item.direct", "{}", utc_now(), "0" * 64),
+                )
+
+        self.assertIn("not authorized", str(exc.exception))
+
+    def test_events_table_rejects_raw_insert_without_append_metadata_after_bootstrap(self) -> None:
+        bootstrap_db(self.db_path)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            with self.assertRaises(sqlite3.IntegrityError) as exc:
+                connection.execute(
+                    """
+                    INSERT INTO events (event_id, event_type, payload_json, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    ("evt_raw", "item.raw", "{}", utc_now()),
+                )
+
+        self.assertIn("events table append requires append_event metadata", str(exc.exception))
+
+    def test_event_insert_marker_is_removed_when_append_event_insert_fails(self) -> None:
+        bootstrap_db(self.db_path)
+        with connect(self.db_path) as connection:
+            with self.assertRaises(sqlite3.IntegrityError):
+                append_event(connection, event_type="item.bad_ref", item_id="missing-item")
+            with self.assertRaises(sqlite3.DatabaseError) as exc:
+                connection.execute(
+                    """
+                    INSERT INTO events (event_id, event_type, payload_json, created_at, event_hash)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    ("evt_after_failed_append", "item.direct", "{}", utc_now(), "0" * 64),
+                )
 
         self.assertIn("not authorized", str(exc.exception))
 

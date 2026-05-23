@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from ace.repository import ItemRepository, ValidationError
-from ace.storage import bootstrap_db, connect
+from ace.storage import _disable_event_insert, _enable_event_insert, bootstrap_db, connect
 from ace.workflow import CloseoutGateError
 
 
@@ -348,23 +348,28 @@ class ItemRepositoryContractTests(unittest.TestCase):
     def test_list_item_events_preserves_malformed_payload_truth(self) -> None:
         item = self.repo.create_item(item_type="task", title="Malformed payload target", actor="test")
         with connect(self.db_path) as connection:
-            connection.execute(
-                """
-                INSERT INTO events (
-                    event_id, item_id, event_type, payload_json, actor, source, session_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "evt_malformed",
-                    item.id,
-                    "item.evidence_added",
-                    '{"broken":',
-                    "test",
-                    None,
-                    None,
-                    "2026-04-26T00:00:00Z",
-                ),
-            )
+            _enable_event_insert(connection)
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO events (
+                        event_id, item_id, event_type, payload_json, actor, source, session_id, created_at, event_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "evt_malformed",
+                        item.id,
+                        "item.evidence_added",
+                        '{"broken":',
+                        "test",
+                        None,
+                        None,
+                        "2026-04-26T00:00:00Z",
+                        "0" * 64,
+                    ),
+                )
+            finally:
+                _disable_event_insert(connection)
             connection.commit()
 
         events = self.repo.list_item_events(item.id, event_type="item.evidence_added")

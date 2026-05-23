@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import json
 import shutil
 import sqlite3
@@ -13,7 +14,7 @@ from uuid import uuid4
 
 from ace.ace import main
 from ace.repository import ItemRepository
-from ace.storage import append_event, bootstrap_db, utc_now
+from ace.storage import _disable_event_insert, _enable_event_insert, append_event, bootstrap_db, utc_now
 
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -78,9 +79,26 @@ class AceCliTests(unittest.TestCase):
         def __getattr__(self, name: str):
             return getattr(self._connection, name)
 
+        def execute(self, sql: str, parameters=(), /):
+            if isinstance(sql, str) and "INSERT INTO events" in sql:
+                statement = sql
+                values_marker = ") VALUES"
+                normalized = " ".join(statement.split())
+                if "event_hash" not in normalized:
+                    statement = re.sub(r"\)\s*VALUES", ", event_hash, event_sequence) VALUES", statement, count=1, flags=re.IGNORECASE)
+                    values_tail = statement.rfind(")")
+                    statement = statement[:values_tail] + ", ?, ?" + statement[values_tail:]
+                    parameters = tuple(parameters) + ("0" * 64, 1)
+                _enable_event_insert(self._connection)
+                try:
+                    return self._connection.execute(statement, parameters)
+                finally:
+                    _disable_event_insert(self._connection)
+            return self._connection.execute(sql, parameters)
+
         def __enter__(self):
             self._connection.__enter__()
-            return self._connection
+            return self
 
         def __exit__(self, exc_type, exc, tb):
             try:
