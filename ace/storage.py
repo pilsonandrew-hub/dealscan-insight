@@ -55,7 +55,6 @@ SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL,
         previous_event_hash TEXT,
         event_hash TEXT,
-        event_sequence INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
     )
     """,
@@ -381,46 +380,10 @@ def _ensure_event_hash_columns(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE events ADD COLUMN previous_event_hash TEXT")
     if "event_hash" not in columns:
         connection.execute("ALTER TABLE events ADD COLUMN event_hash TEXT")
-    if "event_sequence" not in columns:
-        connection.execute("ALTER TABLE events ADD COLUMN event_sequence INTEGER NOT NULL DEFAULT 0")
-
-
-def _backfill_event_sequences(connection: sqlite3.Connection) -> None:
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
-    if "event_sequence" not in columns:
-        return
-
-    rows = connection.execute(
-        """
-        SELECT id
-        FROM events
-        WHERE event_sequence IS NULL OR event_sequence <= 0
-        ORDER BY created_at ASC, id ASC
-        """
-    ).fetchall()
-    if not rows:
-        return
-
-    next_sequence = connection.execute(
-        "SELECT COALESCE(MAX(event_sequence), 0) + 1 AS next_sequence FROM events WHERE event_sequence > 0"
-    ).fetchone()["next_sequence"]
-    for offset, row in enumerate(rows):
-        connection.execute(
-            "UPDATE events SET event_sequence = ? WHERE id = ?",
-            (next_sequence + offset, row["id"]),
-        )
-
-
-def _event_chain_order_clause(connection: sqlite3.Connection) -> str:
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
-    if "event_sequence" in columns:
-        return "event_sequence ASC"
-    return "id ASC"
 
 
 def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
     _ensure_event_hash_columns(connection)
-    _backfill_event_sequences(connection)
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
     if not {"previous_event_hash", "event_hash"}.issubset(columns):
         return
@@ -431,21 +394,13 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
     if not missing:
         return
 
-    chain_order = _event_chain_order_clause(connection)
     first_missing = connection.execute(
-        "SELECT event_sequence, id FROM events WHERE previous_event_hash IS NULL AND event_hash IS NULL "
-        f"ORDER BY {chain_order} LIMIT 1"
+        "SELECT MIN(id) AS id FROM events WHERE previous_event_hash IS NULL AND event_hash IS NULL"
+    ).fetchone()["id"]
+    previous_event_hash = connection.execute(
+        "SELECT event_hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1",
+        (first_missing,),
     ).fetchone()
-    if "event_sequence" in columns:
-        previous_event_hash = connection.execute(
-            "SELECT event_hash FROM events WHERE event_sequence < ? ORDER BY event_sequence DESC LIMIT 1",
-            (first_missing["event_sequence"],),
-        ).fetchone()
-    else:
-        previous_event_hash = connection.execute(
-            "SELECT event_hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1",
-            (first_missing["id"],),
-        ).fetchone()
     previous_hash = previous_event_hash["event_hash"] if previous_event_hash else None
     rows = connection.execute(
         """
@@ -453,8 +408,8 @@ def _backfill_event_hashes(connection: sqlite3.Connection) -> None:
                created_at
         FROM events
         WHERE previous_event_hash IS NULL AND event_hash IS NULL
+        ORDER BY id ASC
         """
-        f"ORDER BY {chain_order}"
     ).fetchall()
     for row in rows:
         expected_hash = compute_event_hash(
@@ -492,7 +447,7 @@ def _schema_ready_for_readonly_audit(connection: sqlite3.Connection) -> tuple[bo
         )
 
     event_columns = {row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
-    required_event_columns = {"previous_event_hash", "event_hash", "event_sequence"}
+    required_event_columns = {"previous_event_hash", "event_hash"}
     missing_event_columns = sorted(required_event_columns - event_columns)
     if missing_event_columns:
         return False, (
@@ -530,7 +485,7 @@ def _assert_no_hashless_events_before_append(connection: sqlite3.Connection) -> 
             "run explicit ACE maintenance migration/bootstrap first"
         )
     missing = connection.execute(
-        "SELECT event_id FROM events WHERE event_hash IS NULL ORDER BY event_sequence ASC LIMIT 1"
+        "SELECT event_id FROM events WHERE event_hash IS NULL ORDER BY id ASC LIMIT 1"
     ).fetchone()
     if missing is not None:
         raise RuntimeError(
@@ -550,9 +505,9 @@ def verify_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, str | 
         rows = connection.execute(
             """
             SELECT id, event_id, item_id, event_type, payload_json, actor, source, session_id,
-                   created_at, previous_event_hash, event_hash, event_sequence
+                   created_at, previous_event_hash, event_hash
             FROM events
-            ORDER BY event_sequence ASC
+            ORDER BY id ASC
             """
         ).fetchall()
 
@@ -808,8 +763,6 @@ def bootstrap_db(db_path: Path | str = DB_PATH) -> Path:
             connection.execute("ALTER TABLE items ADD COLUMN closed_reason TEXT")
 
         _drop_event_append_only_triggers_for_maintenance(connection)
-        _ensure_event_hash_columns(connection)
-        _backfill_event_sequences(connection)
         _backfill_event_hashes(connection)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(event_hash)")
         _install_event_append_only_triggers(connection)
@@ -1016,11 +969,8 @@ def append_event(
         connection.execute("BEGIN IMMEDIATE")
     _ensure_event_hash_columns(connection)
     _assert_no_hashless_events_before_append(connection)
-    event_sequence = connection.execute(
-        "SELECT COALESCE(MAX(event_sequence), 0) + 1 AS event_sequence FROM events"
-    ).fetchone()["event_sequence"]
     previous_event_hash = connection.execute(
-        "SELECT event_hash FROM events ORDER BY event_sequence DESC LIMIT 1"
+        "SELECT event_hash FROM events ORDER BY id DESC LIMIT 1"
     ).fetchone()
     previous_hash = previous_event_hash["event_hash"] if previous_event_hash else None
     event_hash = compute_event_hash(
@@ -1038,8 +988,8 @@ def append_event(
         """
         INSERT INTO events (
             event_id, item_id, event_type, payload_json, actor, source, session_id,
-            created_at, previous_event_hash, event_hash, event_sequence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, previous_event_hash, event_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             event_id,
@@ -1052,7 +1002,6 @@ def append_event(
             created_at,
             previous_hash,
             event_hash,
-            event_sequence,
         ),
     )
     return event_id

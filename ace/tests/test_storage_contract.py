@@ -179,120 +179,18 @@ class StorageContractTests(unittest.TestCase):
         with connect(self.db_path) as connection:
             rows = connection.execute(
                 """
-                SELECT event_id, previous_event_hash, event_hash, event_sequence
+                SELECT event_id, previous_event_hash, event_hash
                 FROM events
-                ORDER BY event_sequence ASC
+                ORDER BY id ASC
                 """
             ).fetchall()
 
         self.assertEqual([row["event_id"] for row in rows], [first_id, second_id])
-        self.assertEqual([row["event_sequence"] for row in rows], [1, 2])
         self.assertIsNone(rows[0]["previous_event_hash"])
         self.assertRegex(rows[0]["event_hash"], r"^[0-9a-f]{64}$")
         self.assertEqual(rows[1]["previous_event_hash"], rows[0]["event_hash"])
         self.assertRegex(rows[1]["event_hash"], r"^[0-9a-f]{64}$")
         self.assertNotEqual(rows[0]["event_hash"], rows[1]["event_hash"])
-        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
-
-    def test_bootstrap_backfills_event_sequence_in_effective_order(self) -> None:
-        bootstrap_db(self.db_path)
-        with closing(sqlite3.connect(self.db_path)) as connection:
-            connection.execute("DROP TRIGGER ace_events_no_update")
-            connection.execute("DROP TRIGGER ace_events_no_delete")
-            connection.execute("DROP INDEX IF EXISTS idx_events_event_sequence")
-            connection.execute("ALTER TABLE events RENAME TO events_legacy")
-            connection.execute(
-                """
-                CREATE TABLE events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id TEXT NOT NULL UNIQUE,
-                    item_id TEXT,
-                    event_type TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    actor TEXT,
-                    source TEXT,
-                    session_id TEXT,
-                    created_at TEXT NOT NULL,
-                    previous_event_hash TEXT,
-                    event_hash TEXT
-                )
-                """
-            )
-            connection.execute("DROP TABLE events_legacy")
-            for event_id, created_at in (
-                ("evt_late_low_id", "2026-05-13T00:00:02Z"),
-                ("evt_early_high_id", "2026-05-13T00:00:01Z"),
-                ("evt_same_timestamp", "2026-05-13T00:00:02Z"),
-            ):
-                connection.execute(
-                    """
-                    INSERT INTO events (event_id, event_type, payload_json, created_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (event_id, "item.legacy", "{}", created_at),
-                )
-            connection.commit()
-
-        bootstrap_db(self.db_path)
-
-        with connect(self.db_path) as connection:
-            rows = connection.execute(
-                """
-                SELECT event_id, event_sequence
-                FROM events
-                ORDER BY event_sequence ASC
-                """
-            ).fetchall()
-        self.assertEqual(
-            [(row["event_id"], row["event_sequence"]) for row in rows],
-            [("evt_early_high_id", 1), ("evt_late_low_id", 2), ("evt_same_timestamp", 3)],
-        )
-        self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
-
-    def test_append_event_continues_after_backfilled_sequence(self) -> None:
-        bootstrap_db(self.db_path)
-        with closing(sqlite3.connect(self.db_path)) as connection:
-            connection.execute("DROP TRIGGER ace_events_no_update")
-            connection.execute("DROP TRIGGER ace_events_no_delete")
-            connection.execute("DROP INDEX IF EXISTS idx_events_event_sequence")
-            connection.execute("ALTER TABLE events RENAME TO events_legacy")
-            connection.execute(
-                """
-                CREATE TABLE events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id TEXT NOT NULL UNIQUE,
-                    item_id TEXT,
-                    event_type TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    actor TEXT,
-                    source TEXT,
-                    session_id TEXT,
-                    created_at TEXT NOT NULL,
-                    previous_event_hash TEXT,
-                    event_hash TEXT
-                )
-                """
-            )
-            connection.execute("DROP TABLE events_legacy")
-            connection.execute(
-                """
-                INSERT INTO events (event_id, event_type, payload_json, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                ("evt_legacy", "item.legacy", "{}", "2026-05-13T00:00:00Z"),
-            )
-            connection.commit()
-
-        bootstrap_db(self.db_path)
-        with connect(self.db_path) as connection:
-            new_event_id = append_event(connection, event_type="item.new", payload={"n": 2})
-            connection.commit()
-
-        with connect(self.db_path) as connection:
-            rows = connection.execute(
-                "SELECT event_id, event_sequence FROM events ORDER BY event_sequence ASC"
-            ).fetchall()
-        self.assertEqual([(row["event_id"], row["event_sequence"]) for row in rows], [("evt_legacy", 1), (new_event_id, 2)])
         self.assertEqual(verify_event_hash_chain(self.db_path), (True, None))
 
     def test_verify_event_hash_chain_detects_payload_tampering_if_external_trigger_removed(self) -> None:
@@ -303,7 +201,7 @@ class StorageContractTests(unittest.TestCase):
 
         # Simulate a hostile filesystem-level actor that bypasses ACE's guarded
         # connection API and removes DB triggers first.
-        with closing(sqlite3.connect(self.db_path)) as connection:
+        with sqlite3.connect(self.db_path) as connection:
             connection.execute("DROP TRIGGER ace_events_no_update")
             connection.execute(
                 "UPDATE events SET payload_json = ? WHERE event_id = ?",
@@ -370,7 +268,7 @@ class StorageContractTests(unittest.TestCase):
 
     def test_audit_verify_fails_loudly_when_schema_needs_maintenance(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(sqlite3.connect(self.db_path)) as connection:
+        with sqlite3.connect(self.db_path) as connection:
             connection.execute(
                 "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)"
             )
