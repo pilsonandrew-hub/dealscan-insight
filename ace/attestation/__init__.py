@@ -33,6 +33,12 @@ from .sync import (
     expected_attestation_objects,
     sync_attestation_records,
 )
+from .verify import (
+    EXTERNAL_ATTESTATION_NOT_CONFIGURED,
+    ExternalAttestationCheckResult,
+    verify_external_attestation,
+    verify_external_attestation_with_client,
+)
 
 __all__ = [
     "ATTESTATION_CHAIN_ID",
@@ -41,6 +47,8 @@ __all__ = [
     "AttestationLocalChainError",
     "AttestationNamespaceError",
     "AttestationRecord",
+    "EXTERNAL_ATTESTATION_NOT_CONFIGURED",
+    "ExternalAttestationCheckResult",
     "AttestationRemoteSetMismatchError",
     "AttestationRemoteVersionError",
     "AttestationSchemaError",
@@ -62,4 +70,6 @@ __all__ = [
     "expected_attestation_objects",
     "parse_attestation_record",
     "sync_attestation_records",
+    "verify_external_attestation",
+    "verify_external_attestation_with_client",
 ]

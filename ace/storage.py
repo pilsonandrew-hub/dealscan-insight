@@ -828,7 +828,12 @@ def post_cutover_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, 
     return True, None
 
 
-def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[bool, str | None]]:
+def verify_audit_integrity(
+    db_path: Path | str = DB_PATH,
+    *,
+    include_external_attestation: bool = True,
+    external_attestation_client: Any | None = None,
+) -> dict[str, tuple[bool, str | None]]:
     """Return read-only audit verification results for governed ACE integrity surfaces."""
 
     try:
@@ -844,7 +849,7 @@ def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[boo
     with connect_readonly(db_path) as connection:
         cutover_present = bool(_cutover_candidates(connection))
     event_hash_chain_result = post_cutover_event_hash_chain(db_path) if cutover_present else _verify_event_hash_chain_bootstrapped(db_path)
-    return {
+    results = {
         "legacy_chain_inventory": legacy_chain_inventory(db_path),
         "event_hash_chain": event_hash_chain_result,
         "post_cutover_event_hash_chain": post_cutover_event_hash_chain(db_path) if cutover_present else (True, "post_cutover_event_hash_chain=not_started cutover_event=absent"),
@@ -852,6 +857,14 @@ def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[boo
         "governed_run_integrity": _verify_governed_run_integrity_bootstrapped(db_path),
         "runtime_instance_integrity": _verify_runtime_instance_integrity_bootstrapped(db_path),
     }
+    if include_external_attestation:
+        from ace.attestation.verify import verify_external_attestation
+
+        results["external_attestation"] = verify_external_attestation(
+            db_path,
+            client=external_attestation_client,
+        )
+    return results
 
 
 def _verify_evidence_consistency_bootstrapped(db_path: Path | str = DB_PATH) -> tuple[bool, str | None]:

@@ -129,7 +129,7 @@ class AceCliTests(unittest.TestCase):
 
             code, output = self.run_cli("--db", str(db_path), "audit", "verify")
 
-            self.assertEqual(code, 0, output)
+            self.assertEqual(code, 1, output)
             self.assertIn("audit.verify.legacy_chain_inventory=ok", output)
             self.assertIn("audit.verify.legacy_chain_inventory_detail=legacy_chain_inventory=pre_cutover disclosure_present=true cutover_event=absent", output)
             self.assertIn("audit.verify.event_hash_chain=ok", output)
@@ -138,6 +138,8 @@ class AceCliTests(unittest.TestCase):
             self.assertIn("audit.verify.evidence_consistency=ok", output)
             self.assertIn("audit.verify.governed_run_integrity=ok", output)
             self.assertIn("audit.verify.runtime_instance_integrity=ok", output)
+            self.assertIn("audit.verify.external_attestation=failed", output)
+            self.assertIn("external_attestation_not_configured", output)
             self.assertIn(f"audit.verify.db_path={db_path}", output)
 
     def test_audit_verify_returns_nonzero_when_integrity_check_fails(self) -> None:

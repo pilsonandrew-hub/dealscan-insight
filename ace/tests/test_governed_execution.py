@@ -296,7 +296,7 @@ class GovernedExecutionExecutorTests(unittest.TestCase):
             actor="test",
         )
         original_verify = governed_execution_module.verify_audit_integrity
-        governed_execution_module.verify_audit_integrity = lambda db_path: {
+        governed_execution_module.verify_audit_integrity = lambda db_path, **_kwargs: {
             "event_hash_chain": (False, "synthetic hash break")
         }
         try:
