@@ -175,7 +175,7 @@ def sync_attestation_records(
             f"existing={existing} event_sequence={item.record.event_sequence}",
         )
         if file_name in initial_remote_names:
-            _verify_remote_object(client, item)
+            _verify_remote_versions(client, item)
             existing += 1
             _emit_periodic_progress(
                 progress_callback,
@@ -243,11 +243,7 @@ def sync_attestation_records(
 
 
 def _verify_remote_object(client: AttestationClient, item: AttestationObject) -> None:
-    versions = [version for version in client.list_versions(item.file_name) if version.file_name == item.file_name]
-    upload_versions = [version for version in versions if version.action == "upload"]
-    if not upload_versions:
-        raise AttestationRemoteVersionError(f"remote object has no visible upload version: {item.file_name}")
-    earliest = min(upload_versions, key=lambda version: version.upload_timestamp if version.upload_timestamp is not None else -1)
+    _verify_remote_versions(client, item)
     remote_body = client.read_object(item.file_name)
     if remote_body != item.body:
         raise AttestationRemoteVersionError(f"remote object body mismatch: {item.file_name}")
@@ -261,6 +257,14 @@ def _verify_remote_object(client: AttestationClient, item: AttestationObject) ->
         raise AttestationRemoteVersionError(f"remote object schema mismatch: {item.file_name}") from exc
     if parsed != item.record:
         raise AttestationRemoteVersionError(f"remote object record mismatch: {item.file_name}")
+
+
+def _verify_remote_versions(client: AttestationClient, item: AttestationObject) -> None:
+    versions = [version for version in client.list_versions(item.file_name) if version.file_name == item.file_name]
+    upload_versions = [version for version in versions if version.action == "upload"]
+    if not upload_versions:
+        raise AttestationRemoteVersionError(f"remote object has no visible upload version: {item.file_name}")
+    earliest = min(upload_versions, key=lambda version: version.upload_timestamp if version.upload_timestamp is not None else -1)
     if len(upload_versions) > 1:
         for version in upload_versions:
             if version.file_id == earliest.file_id:

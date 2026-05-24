@@ -174,6 +174,22 @@ class AttestationSyncTests(unittest.TestCase):
         self.assertEqual(second.existing_count, 2)
         self.assertEqual(client.upload_calls, [])
 
+    def test_sync_does_not_read_existing_object_bodies_before_missing_uploads(self) -> None:
+        self._build_post_cutover_chain(post_events=2)
+        client = FakeSyncB2Client()
+        existing, missing = self._expected()[:2]
+        client.objects[existing.file_name] = existing.body
+        client.versions[existing.file_name] = [
+            B2ObjectVersion(existing.file_name, "id-existing", "upload", 1, content_sha1="sha", size=len(existing.body))
+        ]
+        client.read_override[existing.file_name] = b"stale-body-that-audit-must-catch-later"
+
+        with self.assertRaisesRegex(AttestationRemoteVersionError, "body mismatch"):
+            sync_attestation_records(client, self.db_path)
+
+        self.assertIn(missing.file_name, client.upload_calls)
+        self.assertIn(missing.file_name, client.objects)
+
     def test_sync_rejects_remote_extra_objects_before_upload(self) -> None:
         self._build_post_cutover_chain(post_events=1)
         client = FakeSyncB2Client()
