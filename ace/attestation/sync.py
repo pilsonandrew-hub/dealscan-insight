@@ -140,11 +140,14 @@ def sync_attestation_records(
     1. derive all local expected records from readonly post-cutover chain truth;
     2. list the entire remote prefix;
     3. fail on remote extras before upload;
-    4. verify versions for existing objects;
-    5. upload missing objects with client-level conflict/readback protection;
-    6. re-list the prefix;
-    7. require exact set equality;
-    8. verify every expected object's earliest upload version and body.
+    4. upload missing objects with client-level conflict/readback protection;
+    5. re-list the prefix;
+    6. require exact set equality.
+
+    Full per-object body/version verification is intentionally left to the
+    read-only attestation status/audit path. Sync's job is convergence; doing
+    one B2 version/read call for every already-existing object before uploads
+    makes large prefixes operator-hostile and can block missing-object repair.
     """
 
     if progress_every <= 0:
@@ -175,7 +178,6 @@ def sync_attestation_records(
             f"existing={existing} event_sequence={item.record.event_sequence}",
         )
         if file_name in initial_remote_names:
-            _verify_remote_versions_with_retry(client, item)
             existing += 1
             _emit_periodic_progress(
                 progress_callback,
@@ -213,25 +215,6 @@ def sync_attestation_records(
         )
 
     _emit_progress(progress_callback, f"remote_final count={len(final_remote_names)}")
-
-    for index, item in enumerate(expected_by_name.values(), start=1):
-        _emit_periodic_progress(
-            progress_callback,
-            index,
-            progress_every,
-            f"final_verify_progress checked={index - 1}/{len(expected_by_name)} "
-            f"event_sequence={item.record.event_sequence}",
-        )
-        _verify_remote_object_with_retry(client, item)
-        _emit_periodic_progress(
-            progress_callback,
-            index,
-            progress_every,
-            f"final_verify_progress checked={index}/{len(expected_by_name)} "
-            f"event_sequence={item.record.event_sequence}",
-        )
-
-    _emit_progress(progress_callback, f"final_verify_complete checked={len(expected_by_name)}")
 
     return AttestationSyncResult(
         expected_count=len(expected_by_name),

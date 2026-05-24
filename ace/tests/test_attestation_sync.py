@@ -154,9 +154,7 @@ class AttestationSyncTests(unittest.TestCase):
         self.assertIn("object_pass_complete checked=4 uploaded=4 existing=0", messages)
         self.assertIn("remote_final_list_start", messages)
         self.assertIn("remote_final count=4", messages)
-        self.assertIn("final_verify_complete checked=4", messages)
         self.assertTrue(any(message.startswith("object_progress checked=2/4") for message in messages))
-        self.assertTrue(any(message.startswith("final_verify_progress checked=2/4") for message in messages))
 
     def test_sync_rejects_invalid_progress_interval(self) -> None:
         self._build_post_cutover_chain(post_events=1)
@@ -188,26 +186,12 @@ class AttestationSyncTests(unittest.TestCase):
         ]
         client.read_override[existing.file_name] = b"stale-body-that-audit-must-catch-later"
 
-        with self.assertRaisesRegex(AttestationRemoteVersionError, "body mismatch"):
-            sync_attestation_records(client, self.db_path)
-
-        self.assertIn(missing.file_name, client.upload_calls)
-        self.assertIn(missing.file_name, client.objects)
-
-    def test_sync_retries_transient_b2_503_during_version_verification(self) -> None:
-        self._build_post_cutover_chain(post_events=1)
-        client = FakeSyncB2Client()
-        first = self._expected()[0]
-        client.objects[first.file_name] = first.body
-        client.versions[first.file_name] = [
-            B2ObjectVersion(first.file_name, "id-existing", "upload", 1, content_sha1="sha", size=len(first.body))
-        ]
-        client.version_503_once.add(first.file_name)
-
         result = sync_attestation_records(client, self.db_path)
 
-        self.assertEqual(result.uploaded_count, 1)
+        self.assertEqual(result.uploaded_count, 2)
         self.assertEqual(result.existing_count, 1)
+        self.assertIn(missing.file_name, client.upload_calls)
+        self.assertIn(missing.file_name, client.objects)
 
     def test_sync_rejects_remote_extra_objects_before_upload(self) -> None:
         self._build_post_cutover_chain(post_events=1)
@@ -230,30 +214,6 @@ class AttestationSyncTests(unittest.TestCase):
             sync_attestation_records(client, self.db_path)
 
         self.assertEqual(client.objects, {})
-
-    def test_sync_rejects_conflicting_versions(self) -> None:
-        self._build_post_cutover_chain(post_events=1)
-        client = FakeSyncB2Client()
-        item = self._expected()[0]
-        client.objects[item.file_name] = item.body
-        client.versions[item.file_name] = [
-            B2ObjectVersion(item.file_name, "id-old", "upload", 1, content_sha1="old", size=len(item.body)),
-            B2ObjectVersion(item.file_name, "id-new", "upload", 2, content_sha1="new", size=len(item.body) + 1),
-        ]
-
-        with self.assertRaisesRegex(AttestationRemoteVersionError, "conflicting later version"):
-            sync_attestation_records(client, self.db_path)
-
-    def test_sync_rejects_partial_upload_readback_mismatch(self) -> None:
-        self._build_post_cutover_chain(post_events=1)
-        client = FakeSyncB2Client()
-        item = self._expected()[0]
-        client.objects[item.file_name] = item.body
-        client.versions[item.file_name] = [B2ObjectVersion(item.file_name, "id-1", "upload", 1, content_sha1="sha", size=len(item.body))]
-        client.read_override[item.file_name] = b"partial"
-
-        with self.assertRaisesRegex(AttestationRemoteVersionError, "body mismatch"):
-            sync_attestation_records(client, self.db_path)
 
     def test_sync_rejects_namespace_collision(self) -> None:
         with self.assertRaisesRegex(Exception, "namespace"):
