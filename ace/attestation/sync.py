@@ -6,7 +6,7 @@ from typing import Callable, Mapping, Protocol
 
 from ace.storage import CUTOVER_EVENT_TYPE, DB_PATH, connect_readonly, post_cutover_event_hash_chain
 
-from .backblaze import B2AttestationClient, B2ConflictError, B2ObjectVersion
+from .backblaze import B2ApiError, B2AttestationClient, B2ConflictError, B2ObjectVersion
 from .manifest import (
     ATTESTATION_CHAIN_ID,
     AttestationRecord,
@@ -175,7 +175,7 @@ def sync_attestation_records(
             f"existing={existing} event_sequence={item.record.event_sequence}",
         )
         if file_name in initial_remote_names:
-            _verify_remote_versions(client, item)
+            _verify_remote_versions_with_retry(client, item)
             existing += 1
             _emit_periodic_progress(
                 progress_callback,
@@ -222,7 +222,7 @@ def sync_attestation_records(
             f"final_verify_progress checked={index - 1}/{len(expected_by_name)} "
             f"event_sequence={item.record.event_sequence}",
         )
-        _verify_remote_object(client, item)
+        _verify_remote_object_with_retry(client, item)
         _emit_periodic_progress(
             progress_callback,
             index,
@@ -259,6 +259,14 @@ def _verify_remote_object(client: AttestationClient, item: AttestationObject) ->
         raise AttestationRemoteVersionError(f"remote object record mismatch: {item.file_name}")
 
 
+def _verify_remote_object_with_retry(client: AttestationClient, item: AttestationObject) -> None:
+    _with_bounded_b2_503_retry(lambda: _verify_remote_object(client, item))
+
+
+def _verify_remote_versions_with_retry(client: AttestationClient, item: AttestationObject) -> None:
+    _with_bounded_b2_503_retry(lambda: _verify_remote_versions(client, item))
+
+
 def _verify_remote_versions(client: AttestationClient, item: AttestationObject) -> None:
     versions = [version for version in client.list_versions(item.file_name) if version.file_name == item.file_name]
     upload_versions = [version for version in versions if version.action == "upload"]
@@ -273,6 +281,17 @@ def _verify_remote_versions(client: AttestationClient, item: AttestationObject) 
                 raise AttestationRemoteVersionError(f"remote object has conflicting later version: {item.file_name}")
             if version.size is not None and earliest.size is not None and version.size != earliest.size:
                 raise AttestationRemoteVersionError(f"remote object has conflicting later version: {item.file_name}")
+
+
+def _with_bounded_b2_503_retry(operation):
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            return operation()
+        except B2ApiError as exc:
+            if "status=503" not in str(exc) or attempts >= 3:
+                raise
 
 
 def _list_remote_names(client: AttestationClient, prefix: str) -> set[str]:

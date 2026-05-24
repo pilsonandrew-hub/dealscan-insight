@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from typing import Any, Mapping
 
-from ace.attestation.backblaze import B2Config, B2ConflictError, B2Object, B2ObjectNotVisibleError, B2ObjectVersion
+from ace.attestation.backblaze import B2ApiError, B2Config, B2ConflictError, B2Object, B2ObjectNotVisibleError, B2ObjectVersion
 from ace.attestation.sync import (
     AttestationLocalChainError,
     AttestationRemoteSetMismatchError,
@@ -35,6 +35,7 @@ class FakeSyncB2Client:
         self.invisible_after_upload: set[str] = set()
         self.conflict_on_upload: set[str] = set()
         self.read_override: dict[str, bytes] = {}
+        self.version_503_once: set[str] = set()
 
     def list_prefix(self, prefix: str) -> list[B2Object]:
         self.list_prefix_calls.append(prefix)
@@ -45,6 +46,9 @@ class FakeSyncB2Client:
         ]
 
     def list_versions(self, prefix: str) -> list[B2ObjectVersion]:
+        if prefix in self.version_503_once:
+            self.version_503_once.remove(prefix)
+            raise B2ApiError("B2 HTTP error: status=503")
         versions: list[B2ObjectVersion] = []
         for name, name_versions in self.versions.items():
             if name.startswith(prefix):
@@ -189,6 +193,21 @@ class AttestationSyncTests(unittest.TestCase):
 
         self.assertIn(missing.file_name, client.upload_calls)
         self.assertIn(missing.file_name, client.objects)
+
+    def test_sync_retries_transient_b2_503_during_version_verification(self) -> None:
+        self._build_post_cutover_chain(post_events=1)
+        client = FakeSyncB2Client()
+        first = self._expected()[0]
+        client.objects[first.file_name] = first.body
+        client.versions[first.file_name] = [
+            B2ObjectVersion(first.file_name, "id-existing", "upload", 1, content_sha1="sha", size=len(first.body))
+        ]
+        client.version_503_once.add(first.file_name)
+
+        result = sync_attestation_records(client, self.db_path)
+
+        self.assertEqual(result.uploaded_count, 1)
+        self.assertEqual(result.existing_count, 1)
 
     def test_sync_rejects_remote_extra_objects_before_upload(self) -> None:
         self._build_post_cutover_chain(post_events=1)
