@@ -828,12 +828,7 @@ def post_cutover_event_hash_chain(db_path: Path | str = DB_PATH) -> tuple[bool, 
     return True, None
 
 
-def verify_audit_integrity(
-    db_path: Path | str = DB_PATH,
-    *,
-    include_external_attestation: bool = True,
-    external_attestation_client: Any | None = None,
-) -> dict[str, tuple[bool, str | None]]:
+def verify_audit_integrity(db_path: Path | str = DB_PATH) -> dict[str, tuple[bool, str | None]]:
     """Return read-only audit verification results for governed ACE integrity surfaces."""
 
     try:
@@ -857,13 +852,6 @@ def verify_audit_integrity(
         "governed_run_integrity": _verify_governed_run_integrity_bootstrapped(db_path),
         "runtime_instance_integrity": _verify_runtime_instance_integrity_bootstrapped(db_path),
     }
-    if include_external_attestation:
-        from ace.attestation.verify import verify_external_attestation
-
-        results["external_attestation"] = verify_external_attestation(
-            db_path,
-            client=external_attestation_client,
-        )
     return results
 
 

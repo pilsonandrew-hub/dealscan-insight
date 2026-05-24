@@ -885,7 +885,7 @@ class StorageContractTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(detail, "runtime_instance runtime_bad_shutdown has completed shutdown without shutdown_completed_at")
 
-    def test_verify_audit_integrity_returns_all_seven_checks(self) -> None:
+    def test_verify_audit_integrity_returns_only_six_local_checks(self) -> None:
         bootstrap_db(self.db_path)
 
         results = verify_audit_integrity(self.db_path)
@@ -899,12 +899,9 @@ class StorageContractTests(unittest.TestCase):
                 "evidence_consistency",
                 "governed_run_integrity",
                 "runtime_instance_integrity",
-                "external_attestation",
             },
         )
-        self.assertTrue(all(ok for name, (ok, _reason) in results.items() if name != "external_attestation"))
-        self.assertFalse(results["external_attestation"][0])
-        self.assertIn("external_attestation_not_configured", results["external_attestation"][1] or "")
+        self.assertTrue(all(ok for ok, _reason in results.values()))
 
     def test_append_event_respects_foreign_key_constraint_for_missing_item(self) -> None:
         bootstrap_db(self.db_path)

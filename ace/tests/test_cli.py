@@ -364,17 +364,56 @@ class AceCliTests(unittest.TestCase):
 
     def test_audit_verify_still_returns_failed_for_non_configuration_failure(self) -> None:
         original_verify = ace_cli_module._verify_audit_integrity_for_cli
+        original_external = ace_cli_module._verify_external_attestation_for_cli
         ace_cli_module._verify_audit_integrity_for_cli = lambda _db_path: {
-            "external_attestation": (False, "external_attestation_remote_extra file_name=extra")
+            "legacy_chain_inventory": (True, None),
+            "event_hash_chain": (True, None),
+            "post_cutover_event_hash_chain": (True, None),
+            "evidence_consistency": (True, None),
+            "governed_run_integrity": (True, None),
+            "runtime_instance_integrity": (True, None),
         }
+        ace_cli_module._verify_external_attestation_for_cli = lambda _db_path: (
+            False,
+            "external_attestation_remote_extra file_name=extra",
+        )
         try:
             code, output = self.run_cli("--db", "unused.db", "audit", "verify")
         finally:
             ace_cli_module._verify_audit_integrity_for_cli = original_verify
+            ace_cli_module._verify_external_attestation_for_cli = original_external
 
         self.assertEqual(code, 1, output)
         self.assertIn("audit.verify.external_attestation=failed", output)
         self.assertIn("external_attestation_remote_extra", output)
+
+    def test_audit_verify_skips_external_attestation_when_local_check_fails(self) -> None:
+        original_verify = ace_cli_module._verify_audit_integrity_for_cli
+        original_external = ace_cli_module._verify_external_attestation_for_cli
+        calls = {"external": 0}
+        ace_cli_module._verify_audit_integrity_for_cli = lambda _db_path: {
+            "legacy_chain_inventory": (True, None),
+            "event_hash_chain": (False, "synthetic local failure"),
+            "post_cutover_event_hash_chain": (True, None),
+            "evidence_consistency": (True, None),
+            "governed_run_integrity": (True, None),
+            "runtime_instance_integrity": (True, None),
+        }
+        def external(_db_path):
+            calls["external"] += 1
+            return True, "external_attestation=ok backend=b2 checked=1"
+        ace_cli_module._verify_external_attestation_for_cli = external
+        try:
+            code, output = self.run_cli("--db", "unused.db", "audit", "verify")
+        finally:
+            ace_cli_module._verify_audit_integrity_for_cli = original_verify
+            ace_cli_module._verify_external_attestation_for_cli = original_external
+
+        self.assertEqual(code, 1, output)
+        self.assertEqual(calls["external"], 0)
+        self.assertIn("audit.verify.event_hash_chain=failed", output)
+        self.assertIn("audit.verify.external_attestation=failed", output)
+        self.assertIn("external_attestation_skipped: local audit checks failed", output)
 
     def test_attestation_without_subcommand_exits_via_argparse(self) -> None:
         stderr = io.StringIO()

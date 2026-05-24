@@ -641,6 +641,10 @@ def _verify_audit_integrity_for_cli(db_path: Path | str):
     return verify_audit_integrity(db_path)
 
 
+def _verify_external_attestation_for_cli(db_path: Path | str):
+    return verify_external_attestation(db_path, client_factory=_attestation_client_from_env)
+
+
 def _exit_code_for_external_attestation(ok: bool, detail: str | None) -> int:
     if ok:
         return EXIT_OK
@@ -907,6 +911,18 @@ def main(argv: list[str] | None = None) -> int:
                         all_ok = False
                         if first_reason is None:
                             first_reason = reason
+                local_ok = all_ok
+                external_ok = False
+                external_detail: str | None = "external_attestation_skipped: local audit checks failed"
+                if local_ok:
+                    external_ok, external_detail = _verify_external_attestation_for_cli(db_path)
+                print(f"audit.verify.external_attestation={'ok' if external_ok else 'failed'}")
+                if external_detail is not None:
+                    print(f"audit.verify.external_attestation_detail={external_detail}")
+                if not external_ok:
+                    all_ok = False
+                    if first_reason is None:
+                        first_reason = external_detail
                 print(f"audit.verify.db_path={db_path}")
                 if first_reason is not None:
                     print(f"audit.verify.reason={first_reason}")

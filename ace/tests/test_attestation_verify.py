@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from ace.attestation.backblaze import B2ApiError, B2Config, B2Object, B2ObjectNotVisibleError, B2ObjectVersion
 from ace.attestation.sync import expected_attestation_objects
-from ace.attestation.verify import verify_external_attestation_with_client
+from ace.attestation.verify import verify_external_attestation, verify_external_attestation_with_client
 from ace.storage import (
     CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
     append_cutover_genesis_event,
@@ -17,7 +17,6 @@ from ace.storage import (
     bootstrap_db,
     compute_event_hash_from_mapping,
     connect,
-    verify_audit_integrity,
 )
 
 
@@ -118,33 +117,13 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         self.assertIn(f"checked={len(expected)}", result.detail)
         self.assertGreaterEqual(len(client.list_prefix_calls), 1)
 
-    def test_audit_verify_includes_external_attestation_as_seventh_check(self) -> None:
-        client = FakeAuditB2Client()
-        client.seed_expected(self.db_path)
-
-        results = verify_audit_integrity(self.db_path, external_attestation_client=client)
-
-        self.assertEqual(
-            list(results),
-            [
-                "legacy_chain_inventory",
-                "event_hash_chain",
-                "post_cutover_event_hash_chain",
-                "evidence_consistency",
-                "governed_run_integrity",
-                "runtime_instance_integrity",
-                "external_attestation",
-            ],
-        )
-        self.assertTrue(results["external_attestation"][0])
-
     def test_verify_external_attestation_fails_on_remote_extra(self) -> None:
         client = FakeAuditB2Client()
         expected = client.seed_expected(self.db_path)
         prefix = expected[0].file_name.rsplit("seq_", 1)[0]
         client.objects[prefix + "seq_999999999999__evt_extra.json"] = expected[0].body
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_remote_extra", detail)
@@ -158,7 +137,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
             connection.execute("DELETE FROM events WHERE event_id = ?", (truncated.record.event_id,))
             connection.commit()
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_remote_extra", detail)
@@ -171,7 +150,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
             B2ObjectVersion(item.file_name, "id-conflict", "upload", 999, content_sha1="different", size=len(item.body) + 1)
         )
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_conflicting_version", detail)
@@ -182,7 +161,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         item = expected[0]
         client.objects[item.file_name] = item.body.replace(b'"schema_version":"ace-b2-attestation-v1"', b'"schema_version":"future"')
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_mismatch", detail)
@@ -192,7 +171,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         client.seed_expected(self.db_path)
         client.fail_listing = True
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_listing_incomplete", detail)
@@ -202,7 +181,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         expected = client.seed_expected(self.db_path)
         client.invisible_reads.add(expected[0].file_name)
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_eventual_consistency_pending", detail)
@@ -213,7 +192,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         prefix = expected[0].file_name.rsplit("seq_", 1)[0]
         client.objects[prefix + "seq_999999999998__evt_collision.json"] = expected[0].body.replace(b'"instance_id":"andrew-prod"', b'"instance_id":"other-prod"')
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_namespace_collision", detail)
@@ -223,7 +202,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         expected = client.seed_expected(self.db_path)
         del client.objects[expected[0].file_name]
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_missing", detail)
@@ -233,7 +212,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         expected = client.seed_expected(self.db_path)
         client.objects[expected[0].file_name] = b"{"
 
-        ok, detail = verify_audit_integrity(self.db_path, external_attestation_client=client)["external_attestation"]
+        ok, detail = verify_external_attestation(self.db_path, client=client)
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_mismatch", detail)

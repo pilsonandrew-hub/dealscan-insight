@@ -325,7 +325,7 @@ def _attach_bounded_inspection_result(
     source_session: str,
 ) -> dict[str, Any]:
     repo = ItemRepository(db_path)
-    audit_result = verify_audit_integrity(db_path, include_external_attestation=False)
+    audit_result = verify_audit_integrity(db_path)
     failed_checks = {
         name: {"ok": status[0], "detail": status[1]}
         for name, status in audit_result.items()
