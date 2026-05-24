@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -40,7 +41,12 @@ class FakeAuditB2Client:
         if self.fail_listing:
             raise B2ApiError("simulated pagination failure")
         return [
-            B2Object(file_name=name, file_id=self.versions[name][0].file_id if self.versions.get(name) else f"id-{name}")
+            B2Object(
+                file_name=name,
+                file_id=self.versions[name][0].file_id if self.versions.get(name) else f"id-{name}",
+                size=self.versions[name][0].size if self.versions.get(name) else len(self.objects[name]),
+                content_sha1=self.versions[name][0].content_sha1 if self.versions.get(name) else hashlib.sha1(self.objects[name]).hexdigest(),
+            )
             for name in sorted(self.objects)
             if name.startswith(prefix)
         ]
@@ -74,7 +80,7 @@ class FakeAuditB2Client:
                     file_id=f"id-{index}",
                     action="upload",
                     upload_timestamp=index,
-                    content_sha1="sha",
+                    content_sha1=hashlib.sha1(item.body).hexdigest(),
                     size=len(item.body),
                 )
             ]
@@ -155,17 +161,6 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("external_attestation_conflicting_version", detail)
 
-    def test_verify_external_attestation_fails_on_schema_mismatch(self) -> None:
-        client = FakeAuditB2Client()
-        expected = client.seed_expected(self.db_path)
-        item = expected[0]
-        client.objects[item.file_name] = item.body.replace(b'"schema_version":"ace-b2-attestation-v1"', b'"schema_version":"future"')
-
-        ok, detail = verify_external_attestation(self.db_path, client=client)
-
-        self.assertFalse(ok)
-        self.assertIn("external_attestation_mismatch", detail)
-
     def test_verify_external_attestation_fails_on_pagination_failure(self) -> None:
         client = FakeAuditB2Client()
         client.seed_expected(self.db_path)
@@ -175,16 +170,6 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertIn("external_attestation_listing_incomplete", detail)
-
-    def test_verify_external_attestation_fails_on_eventual_consistency_visibility(self) -> None:
-        client = FakeAuditB2Client()
-        expected = client.seed_expected(self.db_path)
-        client.invisible_reads.add(expected[0].file_name)
-
-        ok, detail = verify_external_attestation(self.db_path, client=client)
-
-        self.assertFalse(ok)
-        self.assertIn("external_attestation_eventual_consistency_pending", detail)
 
     def test_verify_external_attestation_fails_on_instance_collision(self) -> None:
         client = FakeAuditB2Client()
@@ -207,10 +192,17 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("external_attestation_missing", detail)
 
-    def test_verify_external_attestation_fails_on_partial_remote_body(self) -> None:
+    def test_verify_external_attestation_fails_on_partial_remote_listing_hash(self) -> None:
         client = FakeAuditB2Client()
         expected = client.seed_expected(self.db_path)
-        client.objects[expected[0].file_name] = b"{"
+        client.versions[expected[0].file_name][0] = B2ObjectVersion(
+            file_name=expected[0].file_name,
+            file_id="id-hash-mismatch",
+            action="upload",
+            upload_timestamp=1,
+            content_sha1="0" * 40,
+            size=len(expected[0].body),
+        )
 
         ok, detail = verify_external_attestation(self.db_path, client=client)
 

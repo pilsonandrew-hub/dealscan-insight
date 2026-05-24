@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import json
@@ -73,11 +74,11 @@ class FakeCliB2Client:
                 file_id=f"id-{len(self.upload_calls)}",
                 action="upload",
                 upload_timestamp=len(self.upload_calls),
-                content_sha1="sha",
+                content_sha1=hashlib.sha1(content).hexdigest(),
                 size=len(content),
             )
         ]
-        return B2Object(file_name=file_name, file_id=f"id-{len(self.upload_calls)}", size=len(content), content_sha1="sha")
+        return B2Object(file_name=file_name, file_id=f"id-{len(self.upload_calls)}", size=len(content), content_sha1=hashlib.sha1(content).hexdigest())
 
     def seed_expected(self, db_path: Path) -> list:
         expected = expected_attestation_objects(
@@ -93,7 +94,7 @@ class FakeCliB2Client:
                     file_id=f"id-{index}",
                     action="upload",
                     upload_timestamp=index,
-                    content_sha1="sha",
+                    content_sha1=hashlib.sha1(item.body).hexdigest(),
                     size=len(item.body),
                 )
             ]

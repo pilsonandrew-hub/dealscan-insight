@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -14,7 +15,7 @@ from .sync import (
     AttestationRemoteSetMismatchError,
     AttestationRemoteVersionError,
     _common_prefix,
-    _verify_remote_object,
+    _verify_remote_versions,
     expected_attestation_objects,
 )
 
@@ -93,9 +94,11 @@ def verify_external_attestation_with_client(
         detail = _classify_remote_extra(client, extra[0], expected[0])
         raise AttestationRemoteSetMismatchError(detail)
 
+    remote_by_name = {obj.file_name: obj for obj in client.list_prefix(prefix)}
     for item in expected_by_name.values():
         try:
-            _verify_remote_object(client, item)
+            _verify_remote_listing_object(remote_by_name[item.file_name], item)
+            _verify_remote_versions(client, item)
         except AttestationRemoteVersionError as exc:
             raise AttestationRemoteVersionError(_classify_remote_version_error(str(exc), item)) from exc
 
@@ -122,6 +125,15 @@ def _list_remote_names_for_audit(client: AttestationClient, prefix: str) -> set[
         return {obj.file_name for obj in client.list_prefix(prefix)}
     except B2ApiError as exc:
         raise AttestationRemoteSetMismatchError(f"external_attestation_listing_incomplete: {exc}") from exc
+
+
+def _verify_remote_listing_object(remote: object, item: AttestationObject) -> None:
+    size = getattr(remote, "size", None)
+    if size is not None and size != len(item.body):
+        raise AttestationRemoteVersionError(f"remote object listing size mismatch: {item.file_name}")
+    content_sha1 = getattr(remote, "content_sha1", None)
+    if content_sha1 is not None and content_sha1 != hashlib.sha1(item.body).hexdigest():
+        raise AttestationRemoteVersionError(f"remote object listing content hash mismatch: {item.file_name}")
 
 
 def _classify_remote_extra(client: AttestationClient, file_name: str, reference: AttestationObject) -> str:

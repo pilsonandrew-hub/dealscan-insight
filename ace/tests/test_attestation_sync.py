@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -71,13 +72,13 @@ class FakeSyncB2Client:
                     file_id=f"id-{len(self.versions) + 1}",
                     action="upload",
                     upload_timestamp=1000 + len(self.versions),
-                    content_sha1="sha",
+                    content_sha1=hashlib.sha1(content).hexdigest(),
                     size=len(content),
                 )
             ]
         if file_name in self.invisible_after_upload:
             raise B2ObjectNotVisibleError("not visible after upload")
-        return B2Object(file_name=file_name, file_id=self.versions[file_name][0].file_id, size=len(content), content_sha1="sha")
+        return B2Object(file_name=file_name, file_id=self.versions[file_name][0].file_id, size=len(content), content_sha1=hashlib.sha1(content).hexdigest())
 
     def read_object(self, file_name: str) -> bytes:
         if file_name in self.read_override:
@@ -182,7 +183,7 @@ class AttestationSyncTests(unittest.TestCase):
         existing, missing = self._expected()[:2]
         client.objects[existing.file_name] = existing.body
         client.versions[existing.file_name] = [
-            B2ObjectVersion(existing.file_name, "id-existing", "upload", 1, content_sha1="sha", size=len(existing.body))
+            B2ObjectVersion(existing.file_name, "id-existing", "upload", 1, content_sha1=hashlib.sha1(existing.body).hexdigest(), size=len(existing.body))
         ]
         client.read_override[existing.file_name] = b"stale-body-that-audit-must-catch-later"
 
