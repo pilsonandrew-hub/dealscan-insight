@@ -33,6 +33,7 @@ class FakeAuditB2Client:
         self.objects: dict[str, bytes] = {}
         self.versions: dict[str, list[B2ObjectVersion]] = {}
         self.list_prefix_calls: list[str] = []
+        self.list_versions_calls: list[str] = []
         self.fail_listing = False
         self.invisible_reads: set[str] = set()
 
@@ -52,6 +53,7 @@ class FakeAuditB2Client:
         ]
 
     def list_versions(self, prefix: str) -> list[B2ObjectVersion]:
+        self.list_versions_calls.append(prefix)
         versions: list[B2ObjectVersion] = []
         for name, name_versions in self.versions.items():
             if name.startswith(prefix):
@@ -122,6 +124,7 @@ class ExternalAttestationVerifyTests(unittest.TestCase):
         self.assertIn("external_attestation=ok", result.detail)
         self.assertIn(f"checked={len(expected)}", result.detail)
         self.assertGreaterEqual(len(client.list_prefix_calls), 1)
+        self.assertEqual(len(client.list_versions_calls), 1)
 
     def test_verify_external_attestation_fails_on_remote_extra(self) -> None:
         client = FakeAuditB2Client()

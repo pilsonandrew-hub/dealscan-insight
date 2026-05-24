@@ -95,10 +95,11 @@ def verify_external_attestation_with_client(
         raise AttestationRemoteSetMismatchError(detail)
 
     remote_by_name = {obj.file_name: obj for obj in client.list_prefix(prefix)}
+    versions_by_name = _list_remote_versions_for_audit(client, prefix)
     for item in expected_by_name.values():
         try:
             _verify_remote_listing_object(remote_by_name[item.file_name], item)
-            _verify_remote_versions(client, item)
+            _verify_remote_versions_from_list(versions_by_name.get(item.file_name, []), item)
         except AttestationRemoteVersionError as exc:
             raise AttestationRemoteVersionError(_classify_remote_version_error(str(exc), item)) from exc
 
@@ -127,6 +128,16 @@ def _list_remote_names_for_audit(client: AttestationClient, prefix: str) -> set[
         raise AttestationRemoteSetMismatchError(f"external_attestation_listing_incomplete: {exc}") from exc
 
 
+def _list_remote_versions_for_audit(client: AttestationClient, prefix: str):
+    try:
+        versions_by_name: dict[str, list[object]] = {}
+        for version in client.list_versions(prefix):
+            versions_by_name.setdefault(version.file_name, []).append(version)
+        return versions_by_name
+    except B2ApiError as exc:
+        raise AttestationRemoteVersionError(f"external_attestation_version_listing_incomplete: {exc}") from exc
+
+
 def _verify_remote_listing_object(remote: object, item: AttestationObject) -> None:
     size = getattr(remote, "size", None)
     if size is not None and size != len(item.body):
@@ -134,6 +145,21 @@ def _verify_remote_listing_object(remote: object, item: AttestationObject) -> No
     content_sha1 = getattr(remote, "content_sha1", None)
     if content_sha1 is not None and content_sha1 != hashlib.sha1(item.body).hexdigest():
         raise AttestationRemoteVersionError(f"remote object listing content hash mismatch: {item.file_name}")
+
+
+def _verify_remote_versions_from_list(versions: list[object], item: AttestationObject) -> None:
+    upload_versions = [version for version in versions if getattr(version, "file_name", None) == item.file_name and getattr(version, "action", None) == "upload"]
+    if not upload_versions:
+        raise AttestationRemoteVersionError(f"remote object has no visible upload version: {item.file_name}")
+    earliest = min(upload_versions, key=lambda version: version.upload_timestamp if version.upload_timestamp is not None else -1)
+    if len(upload_versions) > 1:
+        for version in upload_versions:
+            if version.file_id == earliest.file_id:
+                continue
+            if version.content_sha1 is not None and version.content_sha1 != earliest.content_sha1:
+                raise AttestationRemoteVersionError(f"remote object has conflicting later version: {item.file_name}")
+            if version.size is not None and earliest.size is not None and version.size != earliest.size:
+                raise AttestationRemoteVersionError(f"remote object has conflicting later version: {item.file_name}")
 
 
 def _classify_remote_extra(client: AttestationClient, file_name: str, reference: AttestationObject) -> str:
