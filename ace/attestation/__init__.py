@@ -22,13 +22,30 @@ from .manifest import (
     canonical_attestation_json,
     parse_attestation_record,
 )
+from .sync import (
+    AttestationLocalChainError,
+    AttestationNamespaceError,
+    AttestationRemoteSetMismatchError,
+    AttestationRemoteVersionError,
+    AttestationSyncError,
+    AttestationSyncResult,
+    derive_attestation_prefix,
+    expected_attestation_objects,
+    sync_attestation_records,
+)
 
 __all__ = [
     "ATTESTATION_CHAIN_ID",
     "ATTESTATION_SCHEMA_VERSION",
     "MANIFEST_GENERATOR_VERSION",
+    "AttestationLocalChainError",
+    "AttestationNamespaceError",
     "AttestationRecord",
+    "AttestationRemoteSetMismatchError",
+    "AttestationRemoteVersionError",
     "AttestationSchemaError",
+    "AttestationSyncError",
+    "AttestationSyncResult",
     "B2ApiError",
     "B2AttestationClient",
     "B2AttestationError",
@@ -41,5 +58,8 @@ __all__ = [
     "B2PostUploadVerificationError",
     "attestation_record_from_event_row",
     "canonical_attestation_json",
+    "derive_attestation_prefix",
+    "expected_attestation_objects",
     "parse_attestation_record",
+    "sync_attestation_records",
 ]
