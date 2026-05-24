@@ -1,36 +1,52 @@
-Current Operator Instruction
+# Current Operator Instruction
 
-Authority: this file is the durable operator scope anchor. The bot does not edit this file. Operator (Andrew) updates it via explicit instruction. Chat-level conflicts lose to this file.
+Authority: this file is the durable operator scope anchor. The bot does not edit this file except by explicit operator instruction. Operator (Andrew) updates it via explicit instruction. Chat-level conflicts lose to this file.
 
-Last updated: 2026-05-23 by operator authorization. V1.1 closure sprint.
+Last updated: 2026-05-24 by operator authorization after V1.1 code-side acceptance.
 
-Mode
+## Mode
 
-mplementation_approved — V1.1 closure: dirty file cleanup, tech debt fixes, V1.1 item 2 (external attestation), operator activation checklist, breach log closure, then operator activation, then ACE 1.0 re-tag.
+investigation_only — paused for operator activation phase.
 
-Allowed write paths
+## Current state
 
-ace/.py and ace/tests/.py for tech debt fixes and item 2 implementation
- • ace/backblaze/* or ace/attestation/* (new module for item 2)
- • ace/state/v1_1_required_items/* for closure docs and item 2 design
- • ace/state/breach-log/* for lessons-learned closure
- • MEMORY.md to clean pre-existing dirty state
- • ace/state/v1_1_required_items/operator-scope-consultation-prompt.txt (commit or delete per operator decision)
- • Git tag operations for ACE 1.0 re-tag only after operator confirms activation complete
+V1.1 code-side work is complete and accepted:
 
-Editing this anchor file (operator-owned, one-time write above only)
- • Skipping the design phase for item 2
- • Skipping Ja’rvontis review at key checkpoints
- • Direct cutover event modification
- • Force-push or history rewrite
- • Tagging ACE 1.0 before operator confirms activation checklist is complete
- • DealerScope changes
- • SniperScope changes
+- Item 1 (three-layer event lockdown) — done
+- Item 2 (external attestation through Slice I6) — done
+- Item 3 (operator scope enforcement) — done
+- Cutover executed at `evt_58b80e6282374bf2b1a8611963817aa2`
+- 721 tests passing
+- CI green at `c8a08e7`
+- Working tree clean except pre-existing `unused.db`
 
-Required cadence
+## Authorized work
 
-Each numbered step is its own slice. Commit, push, confirm CI green, report, stop, wait for my approval before next slice.
+No code changes authorized.
 
-Expiry
+No scope work authorized.
 
-Scope refreshes per slice. If any slice takes more than 4 hours from approval, stop and request refresh.
+No implementation work authorized.
+
+The assistant is waiting for Andrew to complete operator activation on his own machine and report back.
+
+## Operator-only actions
+
+The assistant must not initiate operator activation work and must not modify:
+
+- hooks
+- PATH
+- OS accounts
+- environment files
+- GitHub settings
+- operator-owned configuration
+
+These are operator-only actions.
+
+## Remaining allowed future action
+
+After Andrew reports operator activation complete and explicitly authorizes it, the only remaining commit is the ACE 1.0 re-tag action.
+
+## Required behavior
+
+Stop after this anchor reset commit is pushed and CI is green.
