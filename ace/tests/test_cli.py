@@ -13,11 +13,91 @@ from pathlib import Path
 from uuid import uuid4
 
 from ace.ace import main
+import ace.ace as ace_cli_module
+from ace.attestation.backblaze import B2Config, B2Object, B2ObjectVersion
+from ace.attestation.sync import expected_attestation_objects
 from ace.repository import ItemRepository
-from ace.storage import _disable_event_insert, _enable_event_insert, append_event, bootstrap_db, utc_now
+from ace.storage import (
+    CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+    _disable_event_insert,
+    _enable_event_insert,
+    append_cutover_genesis_event,
+    append_event,
+    bootstrap_db,
+    connect,
+    utc_now,
+)
 
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+class FakeCliB2Client:
+    def __init__(self, *, object_prefix: str = "ace-attest", instance_id: str = "andrew-prod") -> None:
+        self.config = B2Config(
+            key_id="redacted-key",
+            application_key="redacted-app",
+            bucket="ace-bucket",
+            instance_id=instance_id,
+            object_prefix=object_prefix,
+        )
+        self.objects: dict[str, bytes] = {}
+        self.versions: dict[str, list[B2ObjectVersion]] = {}
+        self.upload_calls: list[str] = []
+        self.list_prefix_calls: list[str] = []
+
+    def list_prefix(self, prefix: str) -> list[B2Object]:
+        self.list_prefix_calls.append(prefix)
+        return [
+            B2Object(file_name=name, file_id=self.versions[name][0].file_id if self.versions.get(name) else f"id-{name}")
+            for name in sorted(self.objects)
+            if name.startswith(prefix)
+        ]
+
+    def list_versions(self, prefix: str) -> list[B2ObjectVersion]:
+        versions: list[B2ObjectVersion] = []
+        for name, name_versions in self.versions.items():
+            if name.startswith(prefix):
+                versions.extend(name_versions)
+        return versions
+
+    def read_object(self, file_name: str) -> bytes:
+        return self.objects[file_name]
+
+    def upload_if_absent(self, file_name: str, content: bytes, *, content_type: str = "application/json") -> B2Object:
+        self.upload_calls.append(file_name)
+        self.objects[file_name] = content
+        self.versions[file_name] = [
+            B2ObjectVersion(
+                file_name=file_name,
+                file_id=f"id-{len(self.upload_calls)}",
+                action="upload",
+                upload_timestamp=len(self.upload_calls),
+                content_sha1="sha",
+                size=len(content),
+            )
+        ]
+        return B2Object(file_name=file_name, file_id=f"id-{len(self.upload_calls)}", size=len(content), content_sha1="sha")
+
+    def seed_expected(self, db_path: Path) -> list:
+        expected = expected_attestation_objects(
+            db_path,
+            instance_id=self.config.instance_id,
+            object_prefix=self.config.object_prefix,
+        )
+        for index, item in enumerate(expected, start=1):
+            self.objects[item.file_name] = item.body
+            self.versions[item.file_name] = [
+                B2ObjectVersion(
+                    file_name=item.file_name,
+                    file_id=f"id-{index}",
+                    action="upload",
+                    upload_timestamp=index,
+                    content_sha1="sha",
+                    size=len(item.body),
+                )
+            ]
+        return expected
 
 
 class AceCliParserContractTests(unittest.TestCase):
@@ -120,6 +200,22 @@ class AceCliTests(unittest.TestCase):
         connection.row_factory = sqlite3.Row
         return self._ManagedConnection(connection)
 
+    def _build_post_cutover_chain(self, db_path: Path, post_events: int = 2) -> None:
+        bootstrap_db(db_path)
+        with connect(db_path) as connection:
+            append_event(connection, event_type="item.legacy", payload={"legacy": True})
+            append_cutover_genesis_event(
+                connection,
+                authorization_token=CUTOVER_EXECUTE_AUTHORIZATION_TOKEN,
+                governing_decision_reference="test approval",
+                actor="test",
+                source="ace/tests/test_cli.py",
+                session_id="v1.1-cutover:test",
+            )
+            for index in range(post_events):
+                append_event(connection, event_type="item.post", payload={"index": index})
+            connection.commit()
+
 
     def test_audit_verify_reports_valid_integrity_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -129,7 +225,7 @@ class AceCliTests(unittest.TestCase):
 
             code, output = self.run_cli("--db", str(db_path), "audit", "verify")
 
-            self.assertEqual(code, 1, output)
+            self.assertEqual(code, 2, output)
             self.assertIn("audit.verify.legacy_chain_inventory=ok", output)
             self.assertIn("audit.verify.legacy_chain_inventory_detail=legacy_chain_inventory=pre_cutover disclosure_present=true cutover_event=absent", output)
             self.assertIn("audit.verify.event_hash_chain=ok", output)
@@ -191,6 +287,102 @@ class AceCliTests(unittest.TestCase):
 
         self.assertEqual(exc.exception.code, 2)
         self.assertIn("audit requires a subcommand: verify or jace", stderr.getvalue())
+
+    def test_attestation_status_returns_not_configured_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+
+            code, output = self.run_cli("--db", str(db_path), "attestation", "status")
+
+            self.assertEqual(code, 2, output)
+            self.assertIn("attestation.status=failed", output)
+            self.assertIn("external_attestation_not_configured", output)
+            self.assertIn(f"attestation.db_path={db_path}", output)
+
+    def test_attestation_status_reports_ok_with_fake_b2_client(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            self._build_post_cutover_chain(db_path)
+            fake = FakeCliB2Client()
+            expected = fake.seed_expected(db_path)
+            original_factory = ace_cli_module._attestation_client_from_env
+            ace_cli_module._attestation_client_from_env = lambda: fake
+            try:
+                code, output = self.run_cli("--db", str(db_path), "attestation", "status")
+            finally:
+                ace_cli_module._attestation_client_from_env = original_factory
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("attestation.status=ok", output)
+            self.assertIn(f"checked={len(expected)}", output)
+
+    def test_attestation_sync_invokes_fake_b2_client_and_reports_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            self._build_post_cutover_chain(db_path)
+            fake = FakeCliB2Client()
+            expected_count = len(expected_attestation_objects(
+                db_path,
+                instance_id=fake.config.instance_id,
+                object_prefix=fake.config.object_prefix,
+            ))
+            original_factory = ace_cli_module._attestation_client_from_env
+            ace_cli_module._attestation_client_from_env = lambda: fake
+            try:
+                code, output = self.run_cli("--db", str(db_path), "attestation", "sync")
+            finally:
+                ace_cli_module._attestation_client_from_env = original_factory
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("attestation.sync=ok", output)
+            self.assertIn(f"attestation.sync.expected_count={expected_count}", output)
+            self.assertIn(f"attestation.sync.uploaded_count={expected_count}", output)
+            self.assertEqual(len(fake.upload_calls), expected_count)
+
+    def test_attestation_sync_missing_config_returns_not_configured_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+
+            code, output = self.run_cli("--db", str(db_path), "attestation", "sync")
+
+            self.assertEqual(code, 2, output)
+            self.assertIn("attestation.sync=failed", output)
+            self.assertIn("ACE_B2_KEY_ID", output)
+
+    def test_audit_verify_distinguishes_not_configured_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+
+            code, output = self.run_cli("--db", str(db_path), "audit", "verify")
+
+            self.assertEqual(code, 2, output)
+            self.assertIn("audit.verify.external_attestation=failed", output)
+            self.assertIn("external_attestation_not_configured", output)
+
+    def test_audit_verify_still_returns_failed_for_non_configuration_failure(self) -> None:
+        original_verify = ace_cli_module._verify_audit_integrity_for_cli
+        ace_cli_module._verify_audit_integrity_for_cli = lambda _db_path: {
+            "external_attestation": (False, "external_attestation_remote_extra file_name=extra")
+        }
+        try:
+            code, output = self.run_cli("--db", "unused.db", "audit", "verify")
+        finally:
+            ace_cli_module._verify_audit_integrity_for_cli = original_verify
+
+        self.assertEqual(code, 1, output)
+        self.assertIn("audit.verify.external_attestation=failed", output)
+        self.assertIn("external_attestation_remote_extra", output)
+
+    def test_attestation_without_subcommand_exits_via_argparse(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as exc, redirect_stderr(stderr):
+            main(["attestation"])
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("attestation requires a subcommand: status or sync", stderr.getvalue())
 
 
     def test_cost_record_and_status_report_local_guardrail_usage(self) -> None:

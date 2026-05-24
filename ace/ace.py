@@ -34,6 +34,14 @@ from ace.cost_guardrails import (
 )
 from ace.action_runtime import send_jace_status_message
 from ace.jace_audit import audit_jace_delivery_history
+from ace.attestation.backblaze import B2AttestationClient, B2Config, B2ConfigurationError
+from ace.attestation.sync import sync_attestation_records
+from ace.attestation.verify import EXTERNAL_ATTESTATION_NOT_CONFIGURED, verify_external_attestation
+
+
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_NOT_CONFIGURED = 2
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -182,6 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_subparsers.add_parser("verify", help="Verify append-only event hash chain integrity")
     jace_audit = audit_subparsers.add_parser("jace", help="Read-only cross-table JACE delivery audit")
     jace_audit.add_argument("--json", action="store_true", help="Emit full JSON audit records")
+
+    attestation = subparsers.add_parser("attestation", help="Operate ACE V1.1 external attestation")
+    attestation_subparsers = attestation.add_subparsers(dest="attestation_command")
+    attestation_subparsers.add_parser("status", help="Read-only external attestation status")
+    attestation_subparsers.add_parser("sync", help="Synchronize post-cutover hashes to configured B2 attestation store")
 
     cost = subparsers.add_parser("cost", help="Inspect and record local ACE cost guardrails")
     cost_subparsers = cost.add_subparsers(dest="cost_command")
@@ -620,6 +633,43 @@ def _print_jace_audit(audit_result: dict[str, object]) -> None:
     print(f"jace.audit.missing_message_ids={audit_result['missing_message_ids']}")
 
 
+def _attestation_client_from_env() -> B2AttestationClient:
+    return B2AttestationClient(B2Config.from_env())
+
+
+def _verify_audit_integrity_for_cli(db_path: Path | str):
+    return verify_audit_integrity(db_path)
+
+
+def _exit_code_for_external_attestation(ok: bool, detail: str | None) -> int:
+    if ok:
+        return EXIT_OK
+    if detail and EXTERNAL_ATTESTATION_NOT_CONFIGURED in detail:
+        return EXIT_NOT_CONFIGURED
+    return EXIT_FAILED
+
+
+def _print_attestation_status_result(ok: bool, detail: str | None, *, db_path: Path | str) -> None:
+    print(f"attestation.status={'ok' if ok else 'failed'}")
+    if detail is not None:
+        print(f"attestation.status_detail={detail}")
+    print(f"attestation.db_path={db_path}")
+
+
+def _print_attestation_sync_result(result) -> None:
+    print("attestation.sync=ok")
+    print(f"attestation.sync.expected_count={result.expected_count}")
+    print(f"attestation.sync.uploaded_count={result.uploaded_count}")
+    print(f"attestation.sync.existing_count={result.existing_count}")
+    print(f"attestation.sync.prefix={result.prefix}")
+    print(f"attestation.sync.cutover_event_id={result.cutover_event_id}")
+
+
+def _print_attestation_sync_failure(exc: Exception) -> None:
+    print("attestation.sync=failed")
+    print(f"attestation.sync_detail={exc}")
+
+
 def _print_autonomy_eligibility_marked(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} autonomy_eligibility_evidence_id={evidence_id}")
 
@@ -846,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if command == "audit":
             if args.audit_command == "verify":
-                results = verify_audit_integrity(db_path)
+                results = _verify_audit_integrity_for_cli(db_path)
                 all_ok = True
                 first_reason: str | None = None
                 for check_name, (ok, reason) in results.items():
@@ -860,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"audit.verify.db_path={db_path}")
                 if first_reason is not None:
                     print(f"audit.verify.reason={first_reason}")
-                return 0 if all_ok else 1
+                return EXIT_OK if all_ok else _exit_code_for_external_attestation(False, first_reason)
             if args.audit_command == "jace":
                 audit_result = audit_jace_delivery_history(db_path)
                 if args.json:
@@ -870,6 +920,24 @@ def main(argv: list[str] | None = None) -> int:
                     _print_jace_audit(audit_result)
                 return 0
             parser.error("audit requires a subcommand: verify or jace")
+
+        if command == "attestation":
+            if args.attestation_command == "status":
+                ok, detail = verify_external_attestation(db_path, client_factory=_attestation_client_from_env)
+                _print_attestation_status_result(ok, detail, db_path=db_path)
+                return _exit_code_for_external_attestation(ok, detail)
+            if args.attestation_command == "sync":
+                try:
+                    result = sync_attestation_records(_attestation_client_from_env(), db_path)
+                except B2ConfigurationError as exc:
+                    _print_attestation_sync_failure(exc)
+                    return EXIT_NOT_CONFIGURED
+                except Exception as exc:
+                    _print_attestation_sync_failure(exc)
+                    return EXIT_FAILED
+                _print_attestation_sync_result(result)
+                return EXIT_OK
+            parser.error("attestation requires a subcommand: status or sync")
 
         if command == "cost":
             if args.cost_command == "status":
