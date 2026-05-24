@@ -132,6 +132,35 @@ class AttestationSyncTests(unittest.TestCase):
         self.assertEqual(set(client.objects), {item.file_name for item in self._expected()})
         self.assertGreaterEqual(len(client.list_prefix_calls), 2)
 
+    def test_sync_emits_bounded_progress_for_large_remote_verification(self) -> None:
+        self._build_post_cutover_chain(post_events=3)
+        client = FakeSyncB2Client()
+        messages: list[str] = []
+
+        result = sync_attestation_records(
+            client,
+            self.db_path,
+            progress_callback=messages.append,
+            progress_every=2,
+        )
+
+        self.assertEqual(result.expected_count, 4)
+        self.assertTrue(messages[0].startswith("sync_start expected=4"))
+        self.assertIn("remote_initial count=0", messages)
+        self.assertIn("object_pass_complete checked=4 uploaded=4 existing=0", messages)
+        self.assertIn("remote_final_list_start", messages)
+        self.assertIn("remote_final count=4", messages)
+        self.assertIn("final_verify_complete checked=4", messages)
+        self.assertTrue(any(message.startswith("object_progress checked=2/4") for message in messages))
+        self.assertTrue(any(message.startswith("final_verify_progress checked=2/4") for message in messages))
+
+    def test_sync_rejects_invalid_progress_interval(self) -> None:
+        self._build_post_cutover_chain(post_events=1)
+        client = FakeSyncB2Client()
+
+        with self.assertRaisesRegex(ValueError, "progress_every"):
+            sync_attestation_records(client, self.db_path, progress_every=0)
+
     def test_sync_is_idempotent_and_retries_without_duplicate_uploads(self) -> None:
         self._build_post_cutover_chain(post_events=1)
         client = FakeSyncB2Client()

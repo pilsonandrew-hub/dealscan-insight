@@ -338,6 +338,8 @@ class AceCliTests(unittest.TestCase):
             self.assertIn("attestation.sync=ok", output)
             self.assertIn(f"attestation.sync.expected_count={expected_count}", output)
             self.assertIn(f"attestation.sync.uploaded_count={expected_count}", output)
+            self.assertIn("attestation.sync.progress=sync_start", output)
+            self.assertIn("attestation.sync.progress=final_verify_complete", output)
             self.assertEqual(len(fake.upload_calls), expected_count)
 
     def test_attestation_sync_missing_config_returns_not_configured_exit_code(self) -> None:

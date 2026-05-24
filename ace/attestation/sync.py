@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 
 from ace.storage import CUTOVER_EVENT_TYPE, DB_PATH, connect_readonly, post_cutover_event_hash_chain
 
@@ -130,6 +130,9 @@ def expected_attestation_objects(
 def sync_attestation_records(
     client: B2AttestationClient,
     db_path: Path | str = DB_PATH,
+    *,
+    progress_callback: Callable[[str], None] | None = None,
+    progress_every: int = 100,
 ) -> AttestationSyncResult:
     """Synchronize local post-cutover hashes to B2 using the approved V1.1 sequence.
 
@@ -144,6 +147,9 @@ def sync_attestation_records(
     8. verify every expected object's earliest upload version and body.
     """
 
+    if progress_every <= 0:
+        raise ValueError("progress_every must be positive")
+
     instance_id = getattr(client.config, "instance_id")
     object_prefix = getattr(client.config, "object_prefix", "")
     expected = expected_attestation_objects(db_path, instance_id=instance_id, object_prefix=object_prefix)
@@ -152,15 +158,32 @@ def sync_attestation_records(
     expected_by_name = {item.file_name: item for item in expected}
     prefix = _common_prefix(expected_by_name)
 
+    _emit_progress(progress_callback, f"sync_start expected={len(expected_by_name)} prefix={prefix}")
+
     initial_remote_names = _list_remote_names(client, prefix)
     _assert_no_remote_extras(initial_remote_names, set(expected_by_name))
+    _emit_progress(progress_callback, f"remote_initial count={len(initial_remote_names)}")
 
     uploaded = 0
     existing = 0
-    for file_name, item in expected_by_name.items():
+    for index, (file_name, item) in enumerate(expected_by_name.items(), start=1):
+        _emit_periodic_progress(
+            progress_callback,
+            index,
+            progress_every,
+            f"object_progress checked={index - 1}/{len(expected_by_name)} uploaded={uploaded} "
+            f"existing={existing} event_sequence={item.record.event_sequence}",
+        )
         if file_name in initial_remote_names:
             _verify_remote_object(client, item)
             existing += 1
+            _emit_periodic_progress(
+                progress_callback,
+                index,
+                progress_every,
+                f"object_progress checked={index}/{len(expected_by_name)} uploaded={uploaded} "
+                f"existing={existing} event_sequence={item.record.event_sequence}",
+            )
             continue
         try:
             client.upload_if_absent(file_name, item.body)
@@ -168,7 +191,19 @@ def sync_attestation_records(
             raise AttestationRemoteVersionError(f"conflicting remote object during upload: {file_name}") from exc
         uploaded += 1
         _verify_remote_object(client, item)
+        _emit_periodic_progress(
+            progress_callback,
+            index,
+            progress_every,
+            f"object_progress checked={index}/{len(expected_by_name)} uploaded={uploaded} "
+            f"existing={existing} event_sequence={item.record.event_sequence}",
+        )
 
+    _emit_progress(
+        progress_callback,
+        f"object_pass_complete checked={len(expected_by_name)} uploaded={uploaded} existing={existing}",
+    )
+    _emit_progress(progress_callback, "remote_final_list_start")
     final_remote_names = _list_remote_names(client, prefix)
     if final_remote_names != set(expected_by_name):
         missing = sorted(set(expected_by_name) - final_remote_names)
@@ -177,8 +212,26 @@ def sync_attestation_records(
             f"remote attestation set mismatch after sync: missing={missing[:3]} extra={extra[:3]}"
         )
 
-    for item in expected_by_name.values():
+    _emit_progress(progress_callback, f"remote_final count={len(final_remote_names)}")
+
+    for index, item in enumerate(expected_by_name.values(), start=1):
+        _emit_periodic_progress(
+            progress_callback,
+            index,
+            progress_every,
+            f"final_verify_progress checked={index - 1}/{len(expected_by_name)} "
+            f"event_sequence={item.record.event_sequence}",
+        )
         _verify_remote_object(client, item)
+        _emit_periodic_progress(
+            progress_callback,
+            index,
+            progress_every,
+            f"final_verify_progress checked={index}/{len(expected_by_name)} "
+            f"event_sequence={item.record.event_sequence}",
+        )
+
+    _emit_progress(progress_callback, f"final_verify_complete checked={len(expected_by_name)}")
 
     return AttestationSyncResult(
         expected_count=len(expected_by_name),
@@ -226,6 +279,21 @@ def _assert_no_remote_extras(remote_names: set[str], expected_names: set[str]) -
     extras = sorted(remote_names - expected_names)
     if extras:
         raise AttestationRemoteSetMismatchError(f"remote attestation prefix contains unexpected objects: {extras[:3]}")
+
+
+def _emit_progress(progress_callback: Callable[[str], None] | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
+
+
+def _emit_periodic_progress(
+    progress_callback: Callable[[str], None] | None,
+    index: int,
+    progress_every: int,
+    message: str,
+) -> None:
+    if index == 1 or index % progress_every == 0:
+        _emit_progress(progress_callback, message)
 
 
 def _common_prefix(expected_by_name: Mapping[str, AttestationObject]) -> str:

@@ -194,7 +194,16 @@ def build_parser() -> argparse.ArgumentParser:
     attestation = subparsers.add_parser("attestation", help="Operate ACE V1.1 external attestation")
     attestation_subparsers = attestation.add_subparsers(dest="attestation_command")
     attestation_subparsers.add_parser("status", help="Read-only external attestation status")
-    attestation_subparsers.add_parser("sync", help="Synchronize post-cutover hashes to configured B2 attestation store")
+    attestation_sync = attestation_subparsers.add_parser(
+        "sync",
+        help="Synchronize post-cutover hashes to configured B2 attestation store",
+    )
+    attestation_sync.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="Print attestation sync progress every N objects",
+    )
 
     cost = subparsers.add_parser("cost", help="Inspect and record local ACE cost guardrails")
     cost_subparsers = cost.add_subparsers(dest="cost_command")
@@ -674,6 +683,10 @@ def _print_attestation_sync_failure(exc: Exception) -> None:
     print(f"attestation.sync_detail={exc}")
 
 
+def _print_attestation_sync_progress(message: str) -> None:
+    print(f"attestation.sync.progress={message}", flush=True)
+
+
 def _print_autonomy_eligibility_marked(*, item_id: str, evidence_id: str) -> None:
     print(f"item_id={item_id} autonomy_eligibility_evidence_id={evidence_id}")
 
@@ -944,7 +957,12 @@ def main(argv: list[str] | None = None) -> int:
                 return _exit_code_for_external_attestation(ok, detail)
             if args.attestation_command == "sync":
                 try:
-                    result = sync_attestation_records(_attestation_client_from_env(), db_path)
+                    result = sync_attestation_records(
+                        _attestation_client_from_env(),
+                        db_path,
+                        progress_callback=_print_attestation_sync_progress,
+                        progress_every=args.progress_every,
+                    )
                 except B2ConfigurationError as exc:
                     _print_attestation_sync_failure(exc)
                     return EXIT_NOT_CONFIGURED
