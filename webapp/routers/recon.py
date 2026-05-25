@@ -80,9 +80,12 @@ async def get_retail_market_value(year: int, make: str, model: str, mileage: int
                         "model": model.lower(),
                         "miles_min": miles_min,
                         "miles_max": miles_max,
+                        "has_price": "true",
+                        "has_miles": "true",
                         "rows": 50,
                         "fields": "price,miles"
-                    }
+                    },
+                    headers={"x-version": "v4.6.0"},
                 )
                 if resp.status_code == 200:
                     break

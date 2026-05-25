@@ -204,13 +204,15 @@ async function getMarketcheckPrice(year, make, model, odometer) {
         rows: '20',
         start: '0',
         fields: 'price,miles',
+        has_price: 'true',
+        has_miles: 'true',
     });
 
     try {
         marketcheckCallsThisRun++; // count every actual API call (success or error)
         const resp = await fetch(`${MARKETCHECK_URL}?${params}`, {
             signal: AbortSignal.timeout(10000),
-            headers: { 'Accept': 'application/json' },
+            headers: { 'Accept': 'application/json', 'x-version': 'v4.6.0' },
         });
 
         if (!resp.ok) {
