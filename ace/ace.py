@@ -100,6 +100,22 @@ def build_parser() -> argparse.ArgumentParser:
     digest.add_argument("--actor")
     digest.add_argument("--dry-run", action="store_true", help="Print the formatted digest message without sending Telegram")
 
+    contradictions = subparsers.add_parser(
+        "contradictions",
+        help="Compare high-value ACE documentation claims to verifiable CLI, git, and CI state",
+    )
+    contradictions.add_argument(
+        "--repo-root",
+        help="Repository root for git tags, workflow paths, and optional CI probes (default: parent of ace/)",
+    )
+    contradictions.add_argument("--readme", help="README path (default: <repo-root>/ace/README.md)")
+    contradictions.add_argument("--status", help="STATUS path (default: <repo-root>/ace/STATUS.md)")
+    contradictions.add_argument(
+        "--skip-ci",
+        action="store_true",
+        help="Skip CI badge comparison (offline runs and tests)",
+    )
+
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
     show.add_argument("--event-type")
@@ -1108,6 +1124,20 @@ def main(argv: list[str] | None = None) -> int:
     if command == "loose-ends":
         _print_loose_end_rows(_loose_end_rows(db_path))
         return 0
+
+    if command == "contradictions":
+        from ace.doc_contradictions import default_repo_root, run_contradictions_command
+
+        repo_root = Path(args.repo_root) if args.repo_root else default_repo_root()
+        readme_path = Path(args.readme) if args.readme else None
+        status_path = Path(args.status) if args.status else None
+        return run_contradictions_command(
+            repo_root=repo_root,
+            readme_path=readme_path,
+            status_path=status_path,
+            parser=parser,
+            skip_ci=args.skip_ci,
+        )
 
     if command == "digest":
         try:
