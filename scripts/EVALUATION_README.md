@@ -1,5 +1,7 @@
 # DealerScope AI Evaluation Suite
 
+> Historical/non-authoritative evaluation harness note, 2026-05-26: this README describes a legacy and partially synthetic evaluation stack. Do not use this file, its example scores, or its completeness labels as proof that DealerScope is production-ready, enterprise-ready, green, or live-confirmed. Current product truth must come from live runtime evidence, source code, CI/check-run truth, and the authority registers under `docs/authority/`.
+
 A comprehensive testing framework that evaluates the completeness and functionality of the DealerScope application against multiple AI models and performance criteria.
 
 ## 🚀 Quick Start
