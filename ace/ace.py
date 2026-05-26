@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -21,7 +22,7 @@ from ace.supervisor_runtime import (
     run_supervisor_runtime,
 )
 from ace.supervisor_acceptance_monitor import run_supervisor_acceptance_monitor
-from ace.storage import DB_PATH, bootstrap_db, verify_audit_integrity
+from ace.storage import DB_PATH, bootstrap_db, connect_readonly, verify_audit_integrity
 from ace.sweep import SweepThresholds, run_sweep
 from ace.briefing import generate_briefing, render_briefing_text
 from ace.cycle import BRIEFING_PATH, run_cycle
@@ -83,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_cmd = subparsers.add_parser("list", help="List items")
     list_cmd.add_argument("--state")
+
+    stale = subparsers.add_parser("stale", help="List work items idle longer than N days")
+    stale.add_argument("--days", type=int, default=7)
 
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
@@ -400,6 +404,63 @@ def _print_items(items: Iterable) -> None:
                 state=item.state,
                 title=item.title,
             )
+        )
+
+
+def _parse_ace_timestamp(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _stale_rows(db_path: Path | str, *, days: int) -> list[dict[str, object]]:
+    if days < 0:
+        raise ValidationError("days must be greater than or equal to 0")
+    now = datetime.now(timezone.utc)
+    with connect_readonly(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                items.id AS item_id,
+                items.state AS state,
+                events.event_type AS last_event_type,
+                events.created_at AS last_event_at
+            FROM items
+            LEFT JOIN events ON events.event_id = items.last_event_id
+            WHERE events.created_at IS NOT NULL
+            ORDER BY events.created_at ASC, items.id ASC
+            """
+        ).fetchall()
+    stale: list[dict[str, object]] = []
+    for row in rows:
+        last_event_at = _parse_ace_timestamp(row["last_event_at"])
+        age_seconds = max(0.0, (now - last_event_at).total_seconds())
+        days_idle = int(age_seconds // 86400)
+        if days_idle >= days:
+            stale.append(
+                {
+                    "item_id": row["item_id"],
+                    "state": row["state"],
+                    "days_idle": days_idle,
+                    "last_event_type": row["last_event_type"],
+                }
+            )
+    stale.sort(key=lambda item: (-int(item["days_idle"]), str(item["item_id"])))
+    return stale
+
+
+def _print_stale_rows(rows: list[dict[str, object]]) -> None:
+    print(f"{'item_id':<36} {'current_state':<14} {'days_idle':>9} {'last_event_type':<32}")
+    for row in rows:
+        print(
+            f"{str(row['item_id']):<36} "
+            f"{str(row['state']):<14} "
+            f"{int(row['days_idle']):>9} "
+            f"{str(row['last_event_type']):<32}"
         )
 
 
@@ -730,6 +791,14 @@ def main(argv: list[str] | None = None) -> int:
         bootstrap_db(db_path)
         print(f"Initialized ACE state at {db_path}")
         return 0
+
+    if command == "stale":
+        try:
+            _print_stale_rows(_stale_rows(db_path, days=args.days))
+            return 0
+        except ValidationError as exc:
+            print(f"error={exc}")
+            return 1
 
     repo = ItemRepository(db_path)
 

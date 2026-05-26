@@ -152,6 +152,132 @@ class AceCliParserContractTests(unittest.TestCase):
         self.assertIn("the following arguments are required: title", stderr.getvalue())
 
 
+class AceCliStaleTests(unittest.TestCase):
+    def run_cli(self, *argv: str) -> tuple[int, str]:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(list(argv))
+        return code, buffer.getvalue()
+
+    def test_stale_lists_idle_open_items_sorted_by_days_idle_descending(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            now = datetime.now(timezone.utc)
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.row_factory = sqlite3.Row
+                items = [
+                    ("item_very_old", "task", "Very old", "ACTIVE", (now - timedelta(days=14, hours=2)).isoformat().replace("+00:00", "Z"), "item.touched"),
+                    ("item_recent", "task", "Recent", "ACTIVE", (now - timedelta(days=2)).isoformat().replace("+00:00", "Z"), "item.touched"),
+                    ("item_old", "task", "Old", "TRIAGE", (now - timedelta(days=8, minutes=5)).isoformat().replace("+00:00", "Z"), "item.created"),
+                ]
+                for item_id, item_type, title, state, created_at, event_type in items:
+                    event_id = f"evt_{item_id}"
+                    connection.execute(
+                        """
+                        INSERT INTO items (
+                            id, item_type, title, state, created_at, updated_at, last_event_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (item_id, item_type, title, state, created_at, created_at, event_id),
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO events (
+                            event_id, item_id, event_type, payload_json, created_at, event_hash
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (event_id, item_id, event_type, "{}", created_at, "0" * 64),
+                    )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "stale", "--days", "7")
+
+            self.assertEqual(code, 0, output)
+            lines = output.strip().splitlines()
+            self.assertEqual(lines[0], "item_id                              current_state  days_idle last_event_type                 ")
+            self.assertIn("item_very_old", lines[1])
+            self.assertIn("ACTIVE", lines[1])
+            self.assertIn("item.touched", lines[1])
+            self.assertIn("item_old", lines[2])
+            self.assertIn("TRIAGE", lines[2])
+            self.assertIn("item.created", lines[2])
+            self.assertNotIn("item_recent", output)
+
+    def test_stale_uses_last_event_timestamp_even_when_item_updated_at_is_newer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            old_event_at = (datetime.now(timezone.utc) - timedelta(days=9)).isoformat().replace("+00:00", "Z")
+            newer_updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute(
+                    "INSERT INTO items (id, item_type, title, state, created_at, updated_at, last_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("item_last_event_old", "task", "Old event", "ACTIVE", old_event_at, newer_updated_at, "evt_last_event_old"),
+                )
+                connection.execute(
+                    "INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                    ("evt_last_event_old", "item_last_event_old", "item.state_changed", "{}", old_event_at, "0" * 64),
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "stale", "--days", "7")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("item_last_event_old", output)
+            self.assertIn("item.state_changed", output)
+
+    def test_stale_default_threshold_is_seven_days(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            old_at = (datetime.now(timezone.utc) - timedelta(days=7, hours=1)).isoformat().replace("+00:00", "Z")
+            recent_at = (datetime.now(timezone.utc) - timedelta(days=6, hours=23)).isoformat().replace("+00:00", "Z")
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute(
+                    "INSERT INTO items (id, item_type, title, state, created_at, updated_at, last_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("item_old", "task", "Old", "ACTIVE", old_at, old_at, "evt_old"),
+                )
+                connection.execute(
+                    "INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                    ("evt_old", "item_old", "item.touched", "{}", old_at, "0" * 64),
+                )
+                connection.execute(
+                    "INSERT INTO items (id, item_type, title, state, created_at, updated_at, last_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("item_recent", "task", "Recent", "ACTIVE", recent_at, recent_at, "evt_recent"),
+                )
+                connection.execute(
+                    "INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                    ("evt_recent", "item_recent", "item.touched", "{}", recent_at, "0" * 64),
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "stale")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("item_old", output)
+            self.assertNotIn("item_recent", output)
+
+    def test_stale_rejects_negative_days(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+
+            code, output = self.run_cli("--db", str(db_path), "stale", "--days", "-1")
+
+            self.assertEqual(code, 1, output)
+            self.assertEqual(output.strip(), "error=days must be greater than or equal to 0")
+
+    def test_stale_does_not_bootstrap_missing_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "missing.db"
+
+            with self.assertRaises(sqlite3.OperationalError):
+                self.run_cli("--db", str(db_path), "stale")
+
+            self.assertFalse(db_path.exists())
+
+
 class AceCliTests(unittest.TestCase):
     class _ManagedConnection:
         def __init__(self, connection: sqlite3.Connection) -> None:
