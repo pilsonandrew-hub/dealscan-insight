@@ -325,7 +325,7 @@ All 4 phases of roadmap completed. Key additions:
 - Status: ✅ Live — wired to Railway, deals will auto-sync on ingest
 
 ### Cursor
-- API Key: `crsr_5711f6fab646e32c33cb1daf607187ba48ab7dc8d8d23880eec893b5ca815491`
+- API Key: `[REDACTED_CURSOR_KEY]`
 - Status: ✅ Saved — cursor-review.yml is business rule validation only (no API calls needed)
 
 ### DeepSeek
