@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -87,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     stale = subparsers.add_parser("stale", help="List work items idle longer than N days")
     stale.add_argument("--days", type=int, default=7)
+
+    subparsers.add_parser("loose-ends", help="List recent ACE evidence and workflow gaps")
 
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
@@ -464,6 +467,141 @@ def _print_stale_rows(rows: list[dict[str, object]]) -> None:
         )
 
 
+def _event_payload(row: object) -> dict[str, object]:
+    try:
+        raw = row["payload_json"]  # type: ignore[index]
+    except (KeyError, TypeError):
+        raw = None
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _is_supporting_evidence_row(row: object) -> bool:
+    try:
+        evidence_uri = row["evidence_uri"]  # type: ignore[index]
+        evidence_text = row["evidence_text"]  # type: ignore[index]
+    except (KeyError, TypeError):
+        return False
+    payload: dict[str, object] = {}
+    if evidence_text:
+        try:
+            parsed = json.loads(str(evidence_text))
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            payload = parsed
+    from ace.drift import is_claim_supporting_evidence_uri
+
+    return is_claim_supporting_evidence_uri(evidence_uri, payload=payload)
+
+
+def _transition_states(row: object) -> tuple[str | None, str | None]:
+    payload = _event_payload(row)
+    from_state = payload.get("from_state")
+    to_state = payload.get("to_state")
+    return (str(from_state) if from_state is not None else None, str(to_state) if to_state is not None else None)
+
+
+def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    with connect_readonly(db_path) as connection:
+        claimed_items = connection.execute(
+            "SELECT id, updated_at FROM items WHERE state = 'CLAIMED_DONE' ORDER BY updated_at DESC, id ASC"
+        ).fetchall()
+        for item in claimed_items:
+            evidence_rows = connection.execute(
+                "SELECT evidence_uri, evidence_text FROM evidence WHERE item_id = ?",
+                (item["id"],),
+            ).fetchall()
+            if not any(_is_supporting_evidence_row(row) for row in evidence_rows):
+                findings.append(
+                    {
+                        "pattern_name": "claimed_done_missing_evidence",
+                        "item_id": str(item["id"]),
+                        "detected_at": str(item["updated_at"]),
+                        "evidence_gap": "no_supporting_evidence",
+                    }
+                )
+
+        transition_rows = connection.execute(
+            """
+            SELECT id, event_id, item_id, event_type, payload_json, created_at
+            FROM events
+            WHERE item_id IS NOT NULL AND event_type = 'item.state_changed'
+            ORDER BY item_id ASC, created_at ASC, id ASC
+            """
+        ).fetchall()
+        previous_transition_by_item: dict[str, object] = {}
+        for row in transition_rows:
+            item_id = str(row["item_id"])
+            from_state, to_state = _transition_states(row)
+            previous = previous_transition_by_item.get(item_id)
+            if previous is None:
+                if from_state != "TRIAGE":
+                    findings.append(
+                        {
+                            "pattern_name": "state_predecessor_gap",
+                            "item_id": item_id,
+                            "detected_at": str(row["created_at"]),
+                            "evidence_gap": f"missing_predecessor_for_{from_state or 'unknown'}",
+                        }
+                    )
+            else:
+                _prev_from, previous_to = _transition_states(previous)
+                if from_state != previous_to:
+                    findings.append(
+                        {
+                            "pattern_name": "state_predecessor_gap",
+                            "item_id": item_id,
+                            "detected_at": str(row["created_at"]),
+                            "evidence_gap": f"expected_from_{previous_to or 'unknown'}_got_{from_state or 'unknown'}",
+                        }
+                    )
+            previous_transition_by_item[item_id] = row
+
+        item_rows = connection.execute(
+            "SELECT id, state, updated_at FROM items WHERE state != 'TRIAGE' ORDER BY updated_at DESC, id ASC"
+        ).fetchall()
+        for item in item_rows:
+            approval = connection.execute(
+                """
+                SELECT 1
+                FROM events
+                WHERE item_id = ? AND event_type = 'operator_approval'
+                LIMIT 1
+                """,
+                (item["id"],),
+            ).fetchone()
+            if approval is None:
+                findings.append(
+                    {
+                        "pattern_name": "missing_operator_approval",
+                        "item_id": str(item["id"]),
+                        "detected_at": str(item["updated_at"]),
+                        "evidence_gap": "moved_past_triage_without_operator_approval",
+                    }
+                )
+
+    findings.sort(key=lambda row: (row["detected_at"], row["pattern_name"], row["item_id"]), reverse=True)
+    return findings
+
+
+def _print_loose_end_rows(rows: list[dict[str, str]]) -> None:
+    print(f"{'pattern_name':<31} {'item_id':<36} {'detected_at':<27} {'evidence_gap':<48}")
+    for row in rows:
+        print(
+            f"{row['pattern_name']:<31} "
+            f"{row['item_id']:<36} "
+            f"{row['detected_at']:<27} "
+            f"{row['evidence_gap']:<48}"
+        )
+
+
 def _print_sweep_result(result: dict[str, object]) -> None:
     print(f"run_id={result['run_id']}")
     print(f"created_at={result['created_at']}")
@@ -799,6 +937,10 @@ def main(argv: list[str] | None = None) -> int:
         except ValidationError as exc:
             print(f"error={exc}")
             return 1
+
+    if command == "loose-ends":
+        _print_loose_end_rows(_loose_end_rows(db_path))
+        return 0
 
     repo = ItemRepository(db_path)
 

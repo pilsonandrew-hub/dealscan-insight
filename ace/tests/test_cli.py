@@ -278,6 +278,206 @@ class AceCliStaleTests(unittest.TestCase):
             self.assertFalse(db_path.exists())
 
 
+class AceCliLooseEndsTests(unittest.TestCase):
+    def run_cli(self, *argv: str) -> tuple[int, str]:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(list(argv))
+        return code, buffer.getvalue()
+
+    def _insert_item(self, connection: sqlite3.Connection, item_id: str, state: str, updated_at: str) -> None:
+        connection.execute(
+            "INSERT INTO items (id, item_type, title, state, created_at, updated_at, last_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item_id, "task", item_id, state, updated_at, updated_at, f"evt_{item_id}"),
+        )
+
+    def _insert_event(
+        self,
+        connection: sqlite3.Connection,
+        event_id: str,
+        item_id: str,
+        event_type: str,
+        created_at: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (event_id, item_id, event_type, json.dumps(payload or {}, sort_keys=True), created_at, "0" * 64),
+        )
+
+    def test_loose_ends_flags_claimed_done_without_supporting_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_claimed_gap", "CLAIMED_DONE", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_item_claimed_gap",
+                    "item_claimed_gap",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "ACTIVE", "to_state": "CLAIMED_DONE"},
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("claimed_done_missing_evidence", output)
+            self.assertIn("item_claimed_gap", output)
+            self.assertIn("no_supporting_evidence", output)
+
+    def test_loose_ends_ignores_claimed_done_with_supporting_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_claimed_supported", "CLAIMED_DONE", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_item_claimed_supported",
+                    "item_claimed_supported",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "ACTIVE", "to_state": "CLAIMED_DONE"},
+                )
+                connection.execute(
+                    "INSERT INTO evidence (id, item_id, evidence_text, evidence_uri, created_at) VALUES (?, ?, ?, ?, ?)",
+                    ("evidence_support", "item_claimed_supported", "proof", "ace://manual/proof", detected_at),
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertNotIn("claimed_done_missing_evidence", output)
+
+    def test_loose_ends_flags_state_transition_predecessor_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            first_at = "2026-05-26T01:00:00Z"
+            second_at = "2026-05-26T02:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_order_gap", "CLAIMED_DONE", second_at)
+                self._insert_event(
+                    connection,
+                    "evt_order_1",
+                    "item_order_gap",
+                    "item.state_changed",
+                    first_at,
+                    {"from_state": "TRIAGE", "to_state": "ACTIVE"},
+                )
+                self._insert_event(
+                    connection,
+                    "evt_order_2",
+                    "item_order_gap",
+                    "item.state_changed",
+                    second_at,
+                    {"from_state": "APPROVED", "to_state": "CLAIMED_DONE"},
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("state_predecessor_gap", output)
+            self.assertIn("item_order_gap", output)
+            self.assertIn("expected_from_ACTIVE_got_APPROVED", output)
+
+    def test_loose_ends_flags_item_moved_past_triage_without_operator_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T03:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_no_approval", "ACTIVE", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_no_approval",
+                    "item_no_approval",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "TRIAGE", "to_state": "ACTIVE"},
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("missing_operator_approval", output)
+            self.assertIn("item_no_approval", output)
+            self.assertIn("moved_past_triage_without_operator_approval", output)
+
+    def test_loose_ends_ignores_item_with_operator_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T03:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_with_approval", "ACTIVE", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_approval",
+                    "item_with_approval",
+                    "operator_approval",
+                    "2026-05-26T02:59:00Z",
+                    {"approved_by": "Andrew"},
+                )
+                self._insert_event(
+                    connection,
+                    "evt_with_approval",
+                    "item_with_approval",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "TRIAGE", "to_state": "ACTIVE"},
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertNotIn("missing_operator_approval", output)
+
+    def test_loose_ends_sorts_by_detected_at_descending(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            older_at = "2026-05-25T01:00:00Z"
+            newer_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_older_gap", "ACTIVE", older_at)
+                self._insert_event(
+                    connection,
+                    "evt_older_gap",
+                    "item_older_gap",
+                    "item.state_changed",
+                    older_at,
+                    {"from_state": "TRIAGE", "to_state": "ACTIVE"},
+                )
+                self._insert_item(connection, "item_newer_gap", "ACTIVE", newer_at)
+                self._insert_event(
+                    connection,
+                    "evt_newer_gap",
+                    "item_newer_gap",
+                    "item.state_changed",
+                    newer_at,
+                    {"from_state": "TRIAGE", "to_state": "ACTIVE"},
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertLess(output.index("item_newer_gap"), output.index("item_older_gap"))
+
+
 class AceCliTests(unittest.TestCase):
     class _ManagedConnection:
         def __init__(self, connection: sqlite3.Connection) -> None:
