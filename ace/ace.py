@@ -35,6 +35,8 @@ from ace.cost_guardrails import (
     record_cost_usage,
 )
 from ace.action_runtime import send_jace_status_message
+from ace.telegram_runtime import load_ace_telegram_env_file
+import ace.action_runtime as action_runtime
 from ace.jace_audit import audit_jace_delivery_history
 from ace.attestation.backblaze import B2AttestationClient, B2Config, B2ConfigurationError
 from ace.attestation.sync import sync_attestation_records
@@ -44,6 +46,7 @@ from ace.attestation.verify import EXTERNAL_ATTESTATION_NOT_CONFIGURED, verify_e
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_NOT_CONFIGURED = 2
+TELEGRAM_MESSAGE_LIMIT = 4096
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -90,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     stale.add_argument("--days", type=int, default=7)
 
     subparsers.add_parser("loose-ends", help="List recent ACE evidence and workflow gaps")
+
+    digest = subparsers.add_parser("digest", help="Send weekly ACE stale and loose-ends digest via JACE Telegram")
+    digest.add_argument("--days", type=int, default=7)
+    digest.add_argument("--chat-id")
+    digest.add_argument("--actor")
 
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
@@ -602,6 +610,95 @@ def _print_loose_end_rows(rows: list[dict[str, str]]) -> None:
         )
 
 
+def _render_stale_table(rows: list[dict[str, object]]) -> str:
+    lines = [f"{'item_id':<36} {'current_state':<14} {'days_idle':>9} {'last_event_type':<32}"]
+    for row in rows:
+        lines.append(
+            f"{str(row['item_id']):<36} "
+            f"{str(row['state']):<14} "
+            f"{int(row['days_idle']):>9} "
+            f"{str(row['last_event_type']):<32}"
+        )
+    return "\n".join(lines)
+
+
+def _render_loose_end_table(rows: list[dict[str, str]]) -> str:
+    lines = [f"{'pattern_name':<31} {'item_id':<36} {'detected_at':<27} {'evidence_gap':<48}"]
+    for row in rows:
+        lines.append(
+            f"{row['pattern_name']:<31} "
+            f"{row['item_id']:<36} "
+            f"{row['detected_at']:<27} "
+            f"{row['evidence_gap']:<48}"
+        )
+    return "\n".join(lines)
+
+
+def _truncate_telegram_message(message: str, *, total_count: int, cap: int = TELEGRAM_MESSAGE_LIMIT) -> str:
+    if len(message) <= cap:
+        return message
+    note = f"\n\n[truncated for Telegram 4096-char cap; total findings={total_count}]"
+    if len(note) >= cap:
+        return note[:cap]
+    return message[: cap - len(note)].rstrip() + note
+
+
+def _format_digest_message(
+    *,
+    stale_rows: list[dict[str, object]],
+    loose_rows: list[dict[str, str]],
+    generated_at: datetime | None = None,
+) -> str:
+    generated_at = generated_at or datetime.now(timezone.utc)
+    date_label = generated_at.astimezone().strftime("%Y-%m-%d")
+    total_count = len(stale_rows) + len(loose_rows)
+    if total_count == 0:
+        return f"ACE weekly digest — {date_label}\n\nNo stale work items or loose-end findings."
+
+    sections = [
+        f"ACE weekly digest — {date_label}",
+        f"Total findings: {total_count}",
+        "",
+        f"Stale items ({len(stale_rows)})",
+        _render_stale_table(stale_rows) if stale_rows else "none",
+        "",
+        f"Loose ends ({len(loose_rows)})",
+        _render_loose_end_table(loose_rows) if loose_rows else "none",
+    ]
+    return _truncate_telegram_message("\n".join(sections), total_count=total_count)
+
+
+def _send_jace_digest_message(message: str, *, chat_id: str | None = None) -> dict[str, object]:
+    load_ace_telegram_env_file()
+    token = os.environ.get("ACE_TELEGRAM_BOT_TOKEN")
+    if not token or not token.strip():
+        raise ValidationError("ACE_TELEGRAM_BOT_TOKEN is not configured")
+    target_chat_id = (chat_id or os.environ.get("ACE_TELEGRAM_CHAT_ID") or "").strip()
+    if not target_chat_id:
+        raise ValidationError("ACE_TELEGRAM_CHAT_ID is not configured")
+    delivery = action_runtime._telegram_bot_api_send_message(  # type: ignore[attr-defined]
+        token=token.strip(),
+        chat_id=target_chat_id,
+        text=message,
+    )
+    result = delivery.get("result") if isinstance(delivery, dict) else None
+    message_id = result.get("message_id") if isinstance(result, dict) else None
+    return {"chat_id": target_chat_id, "message_id": message_id, "delivery_state": "sent"}
+
+
+def _send_digest(db_path: Path | str, *, days: int, chat_id: str | None = None) -> dict[str, object]:
+    stale_rows = _stale_rows(db_path, days=days)
+    loose_rows = _loose_end_rows(db_path)
+    message = _format_digest_message(stale_rows=stale_rows, loose_rows=loose_rows)
+    delivery = _send_jace_digest_message(message, chat_id=chat_id)
+    return {
+        "stale_count": len(stale_rows),
+        "loose_end_count": len(loose_rows),
+        "message_length": len(message),
+        "delivery": delivery,
+    }
+
+
 def _print_sweep_result(result: dict[str, object]) -> None:
     print(f"run_id={result['run_id']}")
     print(f"created_at={result['created_at']}")
@@ -940,6 +1037,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "loose-ends":
         _print_loose_end_rows(_loose_end_rows(db_path))
+        return 0
+
+    if command == "digest":
+        try:
+            result = _send_digest(
+                db_path,
+                days=args.days,
+                chat_id=_normalize_optional_text(args.chat_id, field_name="chat_id"),
+            )
+        except ValidationError as exc:
+            print(f"error={exc}")
+            return 1
+        print(f"digest.stale_count={result['stale_count']}")
+        print(f"digest.loose_end_count={result['loose_end_count']}")
+        print(f"digest.message_length={result['message_length']}")
+        delivery = result["delivery"]
+        if isinstance(delivery, dict):
+            print(f"digest.delivery_state={delivery.get('delivery_state')}")
+            if delivery.get("message_id") is not None:
+                print(f"digest.message_id={delivery.get('message_id')}")
         return 0
 
     repo = ItemRepository(db_path)

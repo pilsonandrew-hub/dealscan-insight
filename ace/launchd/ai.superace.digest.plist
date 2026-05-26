@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.superace.digest</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/andrewpilson/.openclaw/workspace/ace/launchd/run-ace-digest.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/andrewpilson/.openclaw/workspace</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ACE_DB_PATH</key>
+    <string>/Users/andrewpilson/.openclaw/workspace/ace/state/ace.db</string>
+    <key>ACE_DIGEST_DAYS</key>
+    <string>7</string>
+    <key>ACE_TELEGRAM_CHAT_ID</key>
+    <string>7529788084</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>0</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/andrewpilson/.openclaw/logs/ace-digest.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/andrewpilson/.openclaw/logs/ace-digest.err.log</string>
+</dict>
+</plist>

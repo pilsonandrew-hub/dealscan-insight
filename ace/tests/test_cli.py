@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
+import os
 import re
 import json
+import plistlib
 import shutil
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from contextlib import closing, redirect_stdout, redirect_stderr
 from pathlib import Path
@@ -476,6 +480,120 @@ class AceCliLooseEndsTests(unittest.TestCase):
 
             self.assertEqual(code, 0, output)
             self.assertLess(output.index("item_newer_gap"), output.index("item_older_gap"))
+
+
+class AceCliDigestTests(unittest.TestCase):
+    def run_cli(self, *argv: str) -> tuple[int, str]:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(list(argv))
+        return code, buffer.getvalue()
+
+    def _insert_item(self, connection: sqlite3.Connection, item_id: str, state: str, updated_at: str) -> None:
+        connection.execute(
+            "INSERT INTO items (id, item_type, title, state, created_at, updated_at, last_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item_id, "task", item_id, state, updated_at, updated_at, f"evt_{item_id}"),
+        )
+
+    def _insert_event(
+        self,
+        connection: sqlite3.Connection,
+        event_id: str,
+        item_id: str,
+        event_type: str,
+        created_at: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (event_id, item_id, event_type, json.dumps(payload or {}, sort_keys=True), created_at, "0" * 64),
+        )
+
+    def test_digest_sends_no_findings_message_when_empty(self) -> None:
+        sent: list[dict[str, str]] = []
+
+        def fake_send(*, token: str, chat_id: str, text: str) -> dict[str, object]:
+            sent.append({"token": token, "chat_id": chat_id, "text": text})
+            return {"ok": True, "result": {"message_id": 101}}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            with mock.patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "token", "ACE_TELEGRAM_CHAT_ID": "chat"}, clear=False), \
+                 mock.patch.object(ace_cli_module.action_runtime, "_telegram_bot_api_send_message", fake_send), \
+                 mock.patch.object(ace_cli_module, "load_ace_telegram_env_file", lambda: None):
+                code, output = self.run_cli("--db", str(db_path), "digest")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("No stale work items or loose-end findings.", sent[0]["text"])
+        self.assertIn("digest.stale_count=0", output)
+        self.assertIn("digest.loose_end_count=0", output)
+
+    def test_digest_sends_populated_findings_message(self) -> None:
+        sent: list[dict[str, str]] = []
+
+        def fake_send(*, token: str, chat_id: str, text: str) -> dict[str, object]:
+            sent.append({"token": token, "chat_id": chat_id, "text": text})
+            return {"ok": True, "result": {"message_id": 202}}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            old_at = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat().replace("+00:00", "Z")
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_digest_stale", "ACTIVE", old_at)
+                self._insert_event(connection, "evt_item_digest_stale", "item_digest_stale", "item.state_changed", old_at, {"from_state": "TRIAGE", "to_state": "ACTIVE"})
+                connection.commit()
+            with mock.patch.dict(os.environ, {"ACE_TELEGRAM_BOT_TOKEN": "token", "ACE_TELEGRAM_CHAT_ID": "chat"}, clear=False), \
+                 mock.patch.object(ace_cli_module.action_runtime, "_telegram_bot_api_send_message", fake_send), \
+                 mock.patch.object(ace_cli_module, "load_ace_telegram_env_file", lambda: None):
+                code, output = self.run_cli("--db", str(db_path), "digest", "--days", "7")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("ACE weekly digest", sent[0]["text"])
+        self.assertIn("Stale items (1)", sent[0]["text"])
+        self.assertIn("item_digest_stale", sent[0]["text"])
+        self.assertIn("Loose ends (1)", sent[0]["text"])
+        self.assertIn("missing_operator_approval", sent[0]["text"])
+        self.assertIn("digest.delivery_state=sent", output)
+        self.assertIn("digest.message_id=202", output)
+
+    def test_digest_truncates_at_telegram_limit_with_total_count(self) -> None:
+        stale_rows = [
+            {"item_id": f"item_{index:032d}", "state": "ACTIVE", "days_idle": 10 + index, "last_event_type": "item.state_changed"}
+            for index in range(80)
+        ]
+        loose_rows = [
+            {
+                "pattern_name": "missing_operator_approval",
+                "item_id": f"item_gap_{index:028d}",
+                "detected_at": "2026-05-26T00:00:00Z",
+                "evidence_gap": "moved_past_triage_without_operator_approval",
+            }
+            for index in range(80)
+        ]
+
+        message = ace_cli_module._format_digest_message(stale_rows=stale_rows, loose_rows=loose_rows)
+
+        self.assertLessEqual(len(message), 4096)
+        self.assertIn("truncated for Telegram 4096-char cap", message)
+        self.assertIn("total findings=160", message)
+
+    def test_digest_launchd_plist_parses_and_schedules_sunday_9am(self) -> None:
+        plist_path = Path("ace/launchd/ai.superace.digest.plist")
+        with plist_path.open("rb") as f:
+            parsed = plistlib.load(f)
+
+        self.assertEqual(parsed["Label"], "ai.superace.digest")
+        self.assertIn("/Users/andrewpilson/.openclaw/workspace/ace/launchd/run-ace-digest.sh", parsed["ProgramArguments"])
+        self.assertEqual(parsed["StartCalendarInterval"]["Weekday"], 0)
+        self.assertEqual(parsed["StartCalendarInterval"]["Hour"], 9)
+        self.assertEqual(parsed["StartCalendarInterval"]["Minute"], 0)
 
 
 class AceCliTests(unittest.TestCase):
