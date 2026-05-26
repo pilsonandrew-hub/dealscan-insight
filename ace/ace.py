@@ -98,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     digest.add_argument("--days", type=int, default=7)
     digest.add_argument("--chat-id")
     digest.add_argument("--actor")
+    digest.add_argument("--dry-run", action="store_true", help="Print the formatted digest message without sending Telegram")
 
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
@@ -443,6 +444,7 @@ def _stale_rows(db_path: Path | str, *, days: int) -> list[dict[str, object]]:
             FROM items
             LEFT JOIN events ON events.event_id = items.last_event_id
             WHERE events.created_at IS NOT NULL
+              AND items.state IN ('TRIAGE', 'APPROVED', 'CLAIMED_DONE')
             ORDER BY events.created_at ASC, items.id ASC
             """
         ).fetchall()
@@ -515,6 +517,23 @@ def _transition_states(row: object) -> tuple[str | None, str | None]:
     return (str(from_state) if from_state is not None else None, str(to_state) if to_state is not None else None)
 
 
+def _is_operator_initiated_source(source: object) -> bool:
+    if source is None:
+        return False
+    normalized = str(source).strip().lower()
+    if not normalized:
+        return False
+    if normalized in {"ace.internal", "ace.self-test", "ace.sweep"}:
+        return False
+    return normalized.startswith("telegram") or normalized.startswith("jace") or normalized in {
+        "cli",
+        "manual",
+        "manual/cli",
+        "cli/manual",
+        "ace.cli",
+    }
+
+
 def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     with connect_readonly(db_path) as connection:
@@ -573,9 +592,16 @@ def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
             previous_transition_by_item[item_id] = row
 
         item_rows = connection.execute(
-            "SELECT id, state, updated_at FROM items WHERE state != 'TRIAGE' ORDER BY updated_at DESC, id ASC"
+            """
+            SELECT id, state, source, updated_at
+            FROM items
+            WHERE state IN ('APPROVED', 'CLAIMED_DONE')
+            ORDER BY updated_at DESC, id ASC
+            """
         ).fetchall()
         for item in item_rows:
+            if not _is_operator_initiated_source(item["source"]):
+                continue
             approval = connection.execute(
                 """
                 SELECT 1
@@ -686,11 +712,21 @@ def _send_jace_digest_message(message: str, *, chat_id: str | None = None) -> di
     return {"chat_id": target_chat_id, "message_id": message_id, "delivery_state": "sent"}
 
 
-def _send_digest(db_path: Path | str, *, days: int, chat_id: str | None = None) -> dict[str, object]:
+def _send_digest(
+    db_path: Path | str,
+    *,
+    days: int,
+    chat_id: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, object]:
     stale_rows = _stale_rows(db_path, days=days)
     loose_rows = _loose_end_rows(db_path)
     message = _format_digest_message(stale_rows=stale_rows, loose_rows=loose_rows)
-    delivery = _send_jace_digest_message(message, chat_id=chat_id)
+    delivery: dict[str, object]
+    if dry_run:
+        delivery = {"delivery_state": "dry_run", "message": message}
+    else:
+        delivery = _send_jace_digest_message(message, chat_id=chat_id)
     return {
         "stale_count": len(stale_rows),
         "loose_end_count": len(loose_rows),
@@ -1045,6 +1081,7 @@ def main(argv: list[str] | None = None) -> int:
                 db_path,
                 days=args.days,
                 chat_id=_normalize_optional_text(args.chat_id, field_name="chat_id"),
+                dry_run=args.dry_run,
             )
         except ValidationError as exc:
             print(f"error={exc}")
@@ -1055,6 +1092,9 @@ def main(argv: list[str] | None = None) -> int:
         delivery = result["delivery"]
         if isinstance(delivery, dict):
             print(f"digest.delivery_state={delivery.get('delivery_state')}")
+            if args.dry_run:
+                print("digest.message:")
+                print(delivery.get("message", ""))
             if delivery.get("message_id") is not None:
                 print(f"digest.message_id={delivery.get('message_id')}")
         return 0
