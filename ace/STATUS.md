@@ -1,132 +1,143 @@
-# ACE 1.0 Status
+# ACE Status
 
-Date: 2026-05-21
-Current status: V1 incomplete pending integrity remediation
-Previously verified endurance proof source: `049e3c9 ace: exclude accepted historical health debt`
+Date: 2026-05-26
+Current status: operational work-tracking CLI, not tagged ACE 1.0
+Current mission: `ace stale`, `ace loose-ends`, and `ace digest`
 
-ACE 1.0 is a local governed resident foundation for turning bounded operator work into auditable item lifecycle records. It runs under launchd, keeps a local SQLite-backed item/event ledger, records append-only event hashes, ingests direct Telegram work through the bounded OpenClaw session-stream path, routes ACE/JACE outbound operator status through the dedicated JACE Telegram Bot API path, and can move explicitly eligible or narrowly bounded internal work through the governed lifecycle to verified completion.
+ACE is currently an operational local work-tracking layer for Andrew. Its active value is helping track idle work, catch loose ends, and send a weekly operator digest through the existing JACE Telegram path.
 
-ACE remains a governed-foundation system, not a broad V1 platform/runtime fabric. The current direction is broad autonomous operating-layer hardening through narrow, proven, durable seams.
+The current active mission is the three-command operating surface:
 
-## V1 incomplete pending integrity remediation
+- `ace stale`
+- `ace loose-ends`
+- `ace digest`
 
-On 2026-05-21, the audit chain was directly modified outside the governed API and re-hashed to pass audit verify. The original pre-modification event record is unrecoverable. V1 cannot be tagged until the direct-DB-mutation seam is closed and external audit attestation is in place.
+V1.1 cryptographic work, Backblaze attestation, event-sequence/checkpoint work, and scope-enforcement machinery exist in the codebase, but they are not the active operating mission and are not activated as the current product posture. ACE 1.0 is not tagged, and there is no current plan to tag ACE 1.0.
 
-The event row for `item_978c25008f054f918cef4a1fdbb5e9b2` / `evt_2cea161db6fe4f4796e582021b3aaaeb` was modified, and downstream hashes were rewrote to restore internal hash-chain consistency. That makes the affected live-chain segment contaminated for append-only proof claims.
+## Current operational commands
 
-Breach log: `ace/state/breach-log/2026-05-21-hash-chain-modification.md`.
+### `ace stale`
 
-The `ace-1.0` tag has been removed locally and from remote pending integrity remediation.
+`ace stale` lists idle active work items whose latest event is older than a configurable threshold.
 
-## What ACE 1.0 does
+Current behavior:
 
-ACE 1.0 can:
+- default threshold: 7 days
+- reads existing `items` and `events` rows only
+- uses latest event timestamp, not merely `items.updated_at`
+- outputs a fixed-width table with:
+  - `item_id`
+  - `current_state`
+  - `days_idle`
+  - `last_event_type`
+- sorts by `days_idle` descending
+- reports only operational work states, not closed historical residue
 
-- create and track governed work items with item state, source, session, evidence, obligations, contradictions, confidence tier, verdict metadata, and closeout metadata;
-- enforce database-level provenance uniqueness for non-null `(source, source_session)` and re-read existing rows on duplicate provenance instead of creating duplicate item/event rows;
-- ingest bounded direct-work messages from Telegram through the OpenClaw session stream with bounded tail reads (`ACE_OPENCLAW_SESSION_TAIL_LINES`) to avoid unbounded session-history scans;
-- coalesce duplicate semantic Telegram direct-work messages and record duplicate evidence without creating repeated work items;
-- parse operator-directive style Telegram work with a deterministic bounded marker corpus;
-- default broad Telegram direct work to governed execution instead of automatic autonomy; only bounded operator-continuation directives receive automatic autonomy eligibility;
-- preserve Telegram intake evidence, parser evidence, autonomy-eligibility evidence, execution evidence, correction evidence, closeout evidence, and JACE delivery evidence;
-- plan governed execution for non-autonomy broad direct work and keep it blocked until execution result or escalation evidence exists;
-- autonomously execute only bounded ACE-owned internal inspection work through `run_governed_execution`, writing `ace://governed-execution/result` evidence, resolving the governed-execution obligation, and closing only passing inspections;
-- drain a bounded local action queue for safe local evidence-recording actions (`record_operator_followup`, `record_operator_rejection`) while intentionally excluding external notification delivery actions from automatic dispatch;
-- run a launchd-managed local cycle that ingests, processes eligible work, executes bounded governed inspections, drains bounded local queue actions, sweeps, briefs, and records governed run status;
-- prevent concurrent governed cycles from silently overlapping;
-- reconcile stale launchd cycle runs after interruption;
-- route ACE operator notifications through the dedicated JACE-owned Telegram Bot API path when `ACE_NOTIFICATION_CHANNEL=jace`, with local `alert_log` and evidence proof;
-- maintain a resident supervisor runtime with heartbeat/status inspection and recorded restart recovery evidence;
-- accept explicit supervisor shutdown during `starting` as well as `live`, so early-start resident runtimes can terminalize cleanly;
-- survive a bounded machine sleep/wake proof while preserving supervisor continuity, hash-chain integrity, cycle integrity, state integrity, and post-wake cycle execution;
-- enforce closeout gates requiring supporting evidence, no open blocking obligations/contradictions, and acceptable verdicts;
-- persist terminal closeout metadata (`closed_at`, `closed_by`, `closed_reason`) for `VERIFIED_DONE` items;
-- compute drift dimensions currently surfaced as `loop_depth`, `decision_drift`, and `claim_drift`;
-- compute autonomy verdicts from composite drift score using bounded `ship`, `monitor`, `review`, and `block` thresholds;
-- enforce first-pass local cost guardrails using a SQLite-backed usage ledger and deterministic local cost/token/session limits;
-- verify governed audit integrity with `ace audit verify`, including event hash chain, evidence-row consistency, governed-run integrity, and runtime-instance integrity.
+Purpose: surface neglected work without pretending to solve governance or cryptographic integrity.
 
-## What ACE 1.0 does not do
+### `ace loose-ends`
 
-ACE 1.0 does not provide broad natural-language understanding. Telegram direct-work intake is parser-bounded and keyword-bounded.
+`ace loose-ends` scans existing item/event history for operational slop patterns.
 
-ACE 1.0 parser breadth is scoped to operator-directive messages sent to ACE. Commitment self-statements such as “I’ll X” / “need to Y” and deadline-only patterns such as “by Friday” are not in the current 1.0 parser scope. If ACE later ingests non-operator conversations such as Slack channels or multi-party chats, those markers should be added as a separate slice.
+Current patterns include:
 
-ACE 1.0 does not treat raw Telegram Bot API polling as a broad inbound ownership claim. Current inbound intake remains the bounded OpenClaw session-stream path; outbound JACE/operator status delivery is independently owned by ACE/JACE through `@JACEthaACE_Bot` and local `ace/state/ace-telegram.env` token material.
+- state transition predecessor gaps
+- `CLAIMED_DONE` items without supporting evidence
+- operator-initiated items that moved forward without an operator authorization marker
 
-ACE 1.0 does not integrate with external billing providers or automatically measure model-provider spend. The current cost guardrails are local deterministic guardrails only.
+Current behavior:
 
-ACE 1.0 does not claim broad platform autonomy, broad source authenticity, distributed runtime fabric, or general-purpose agent orchestration. It is a local governed foundation with bounded proven seams.
+- reads existing tables only
+- outputs a fixed-width table with:
+  - `pattern_name`
+  - `item_id`
+  - `detected_at`
+  - `evidence_gap`
+- filters known terminal cleanup residue so historical cleanup closure does not create false active work
 
-## Current hardening proof status
+Purpose: catch loose ends and code/process slop that matter to the operator.
 
-- JACE outbound status ownership: PASS. Dedicated `ace jace-status-send` uses the JACE Telegram Bot API token from ignored local env, records `alert_log` transport proof, and writes `ace://jace/outbound-status-delivery` evidence. Live proof delivered Telegram `message_id=8` from `JACEthaACE_Bot`.
-- JACE notification routing: PASS. `ACE_NOTIFICATION_CHANNEL=jace` routes operator notification execution through the dedicated JACE Bot API path instead of the OpenClaw-mediated sender, while preserving durable evidence.
-- Telegram direct-work duplicate coalescing: PASS. Semantic direct-work keying prevents repeated identical operator directives from creating duplicate work items and records `ace://telegram/duplicate-direct-work` evidence.
-- Telegram autonomy boundary: PASS. Broad direct work is governed by default; only bounded continuation directives are automatically autonomy-eligible.
-- Governed execution planning/resolution: PASS. Broad governed work receives plan evidence and remains blocked until result or escalation evidence exists.
-- Bounded governed inspection executor: PASS. Commit `b0f7085 ace: execute bounded governed inspections`; live launchd proof item `item_c72e9f1f2ba44ecc8b6abd6b72336ac6`, obligation `obligation_acd5c8d01c0a4ddd91aa80988afaa681`, run `run_94444bfd55974d62b42d86bfeaae85e6`, result evidence `evidence_01b90bfe2ad947b5b6714dc43a61d0b0`, no noisy JACE notification.
-- Bounded local action queue dispatcher: PASS. Commit `214be78 ace: dispatch bounded local action queue`; live launchd proof item `item_3c05e6ffd4244701b06537e721a32624`, action `action_66d3458bb86002aabc10fa918081d9f27f3dd506ba37f4fd438bfd44b6c7a4b3`, run `run_1d355b376e9e436eb222b392a4618d4a`, evidence `evidence_85b6acc41eb94c14aef1fb95a4699aae`, zero notification delivery evidence and zero `alert_log` rows in the proof window.
-- Item provenance uniqueness: PASS. Commit `0eace9e ace: enforce item provenance uniqueness`; SQLite partial unique index `idx_items_source_session_unique` enforces non-null `(source, source_session)` uniqueness and repository duplicate creation re-reads the existing row without duplicate item/event writes.
-- Supervisor starting-shutdown seam: PASS. Explicit shutdown is accepted while a runtime is `starting`, not only after `live`.
-- Local cost guardrails: PASS for deterministic local ledger / cycle fail-closed guardrails.
-- Bounded network-loss proof on the current OpenClaw session-stream path: PASS for the accepted current path; this is not a raw Bot API or broad platform-network claim.
-- Sleep/wake resilience: PASS. Evidence commit: `b9921fe ace: record item 3 sleep wake proof rerun`; artifact: `/tmp/ace-item3-sleep-wake-proof-20260515T055227Z.json`.
-- Bounded Telegram parser breadth: PASS. Evidence commit: `f88cdeb ace: widen bounded telegram parser breadth`.
-- Audit verify integrity extension: PASS. Evidence commit: `9fb349e ace: extend audit verify integrity checks`.
+### `ace digest`
 
-## Ledger contamination disclosure — 2026-05-21
+`ace digest` combines `ace stale` and `ace loose-ends` into one weekly operator message.
 
-After the ACE 1.0 closeout/tag work, a later synthetic JACE auto E2E proof item contaminated the live ACE event ledger. Event `evt_2cea161db6fe4f4796e582021b3aaaeb` for item `item_978c25008f054f918cef4a1fdbb5e9b2` was directly backdated and the hash chain was rehashed forward outside the governed append-only pipeline.
+Current behavior:
 
-This does not invalidate the separately documented pre-incident ACE 1.0 endurance proof at source commit `049e3c9`, but it means the live post-incident `ace/state/ace.db` hash chain must not be treated as clean append-only proof across the contaminated segment. The contaminated proof item is not valid natural post-tag launchd/JACE automatic-delivery proof.
+- sends through the existing JACE Telegram outbound path
+- supports dry-run output for inspection without sending
+- includes stale and loose-end sections
+- truncates safely for Telegram message limits
+- has a launchd plist scheduled for Sundays at 9am
 
-Disclosure artifact: `ace/reports/breach/ace-ledger-contamination-disclosure-2026-05-21.md`.
+Purpose: make ACE useful without requiring Andrew to remember to poll it manually.
 
-Required V1.1 follow-up items are recorded as file-backed required items under `ace/state/v1_1_required_items/` rather than inserted into the contaminated ACE SQLite state.
+## Activated vs non-activated surfaces
 
-## Deferred to 1.x
+Activated and operational:
 
-Deferred work includes:
+- SQLite-backed ACE state database
+- work item/event reading for the three commands
+- `ace stale`
+- `ace loose-ends`
+- `ace digest`
+- JACE outbound Telegram path used by digest
+- Sunday 9am digest launchd plist
+- tests covering the three command surfaces
+- GitHub Actions ACE CI for pushed changes
 
-- adding a `retry_rate` drift dimension;
-- extending cost guardrails beyond the local ledger into real provider spend attribution and richer runaway-session controls;
-- broadening or replacing the keyword-bounded Telegram parser beyond operator-directive messages;
-- deciding whether future ingestion expansion should use an OpenClaw-mediated queue/webhook or another owned intake surface;
-- resolving raw Telegram Bot API inbound ownership without shared-token `getUpdates` conflict;
-- reviewing deprecated Phase 1 / recovery / resume modules before removal or replacement.
+Present in code but not the active mission:
 
-## Current verification posture
+- V1.1 cryptographic foundation work
+- event-sequence/checkpoint-forward work
+- Backblaze/external attestation machinery
+- scope-enforcement/operator-activation machinery
+- broad governance foundation claims
+- ACE 1.0 tagging
 
-As of this status file, the prior endurance proof source remains `049e3c9 ace: exclude accepted historical health debt`, but V1 is incomplete pending integrity remediation because the later live ACE audit chain was modified outside the governed API and re-hashed.
+## What ACE is right now
 
-Latest verification observed for ACE 1.0 closeout:
+ACE is a practical operational assistant layer for local work hygiene.
 
-- Commit hash: `049e3c90362efc4d51a325fc68c25252395268ef`.
-- Git status boundary: ACE source clean at verification time; workspace root may show unrelated private memory/skill changes outside ACE.
-- Endurance proof: PASS, artifact path `ace/state/endurance/24h-proof-20260520T042532Z.md`.
-  - Proof window: `2026-05-20T04:25:32Z` → `2026-05-21T04:25:32Z`.
-  - End snapshot classification: `PASS`.
-  - Resident runtime: `runtime_e5ec064dd5ff4db0848291f6ab9111be`, `status=live`, no restart performed, same runtime row across the window.
-  - Launchd cycle: 48 completed launchd-triggered cycles after proof start; `failed_interrupted_skipped_runs_since_start=0`.
-- Health summary at end of endurance window: `health.ok=true`, `health.issue_count=0`, `failed_action_count=0`, `failed_run_count=0`, `skipped_run_count=0`, `active_runtime_count=1`, `stale_runtime_count=0`, `failed_runtime_count=0`, `failed_alert_count=0`, `alert_gap_count=0`.
-- Audit verify status: PASS across all four named dimensions:
-  - `event_hash_chain=ok`
-  - `evidence_consistency=ok`
-  - `governed_run_integrity=ok`
-  - `runtime_instance_integrity=ok`
-- Full ACE local suite: `PYTHONWARNINGS=error python3 -m unittest discover ace/tests -t .` → `Ran 606 tests in 69.217s — OK`.
-- ACE CI for proof source: run `26140889116`, head `049e3c90362efc4d51a325fc68c25252395268ef`, `status=completed`, `conclusion=success`, URL `https://github.com/pilsonandrew-hub/dealscan-insight/actions/runs/26140889116`.
-- ACE CI for closeout/taggable HEAD: run `26206618235`, head `94d3ebc1e295e1f7845e290e09990469338314aa`, `status=completed`, `conclusion=success`; log scan found 0 `::error`, 0 `::warning`, 0 Node20 deprecation hits, and 0 default-branch hints.
-- Latest re-verification after the endurance closeout confirmed:
-  - `python3 -m ace.ace --db ace/state/ace.db audit verify` still reports the four dimensions above as `ok`.
-  - Current resident runtime remains `runtime_e5ec064dd5ff4db0848291f6ab9111be`, `status=live`, `startup_status=completed`, `shutdown_status=not_requested`, `recovery_status=not_requested`.
-  - Latest terminal launchd cycle observed: `run_1963fb515dc84ba6a12e741943cd378e`, `trigger_kind=launchd`, `status=completed`, `failure_code=None`, `failure_summary=None`.
+It helps answer:
 
-## ACE 1.0 proof boundary
+- What work has gone stale?
+- What lifecycle/history gaps look suspicious?
+- What should Andrew see in a weekly digest?
 
-The prior endurance artifact supports the bounded local launchd + resident-supervisor + governed-cycle endurance slice for proof source commit `049e3c9`; it is not sufficient for V1 closure while the direct-DB-mutation seam remains open. Specifically, it proves local resident supervisor continuity, launchd cycle continuity, governed ledger/audit integrity, green health summary, accepted historical-health-debt handling, and full local/CI test health for that commit.
+That is the current product truth.
 
-ACE 1.0 does not prove broad natural-language understanding, raw Telegram Bot API inbound ownership, distributed/high-availability runtime fabric, external billing/model-provider spend attribution, multi-tenant production operation, broad platform autonomy, or ACE 1.1 scope. Those remain outside the ACE 1.0 closeout boundary.
+## What ACE is not currently claiming
 
-Going forward, ACE clean-commit claims require five pieces of evidence: commit hash, git status, full local test suite, hash/audit verification, and live runtime/cycle status. CI status should be included when the change is pushed and CI is available.
+ACE is not currently claiming:
+
+- tagged ACE 1.0 completion
+- activated V1.1 cryptographic integrity
+- external Backblaze attestation as an active proof boundary
+- active scope-enforcement governance as the operator-facing product
+- broad autonomous runtime fabric
+- broad natural-language work ownership
+- production-grade distributed agent orchestration
+
+Those may exist as code paths, historical artifacts, or future options, but they are not the current operational posture.
+
+## Verification posture
+
+The operational posture should be proven by:
+
+- focused tests for `ace stale`, `ace loose-ends`, and `ace digest`
+- full ACE test suite before push
+- CI green after push
+- live command smoke output when behavior changes
+- explicit confirmation of changed files per commit
+
+For documentation-only changes, the proof boundary is:
+
+- diff review
+- commit containing only the approved documentation file
+- CI green after push
+
+## Current priority
+
+Keep ACE useful and honest.
+
+Near-term work should improve the three-command operating surface unless Andrew explicitly reopens cryptographic foundation, attestation, or scope-enforcement work.
