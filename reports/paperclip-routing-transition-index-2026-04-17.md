@@ -1,6 +1,8 @@
 # Paperclip Routing Transition Index - 2026-04-17
 
-Status: Active navigation index
+Status: historical routing-transition navigation index — not current routing authority
+
+> Current authority note, 2026-05-26: this index preserves April 2026 routing-transition file navigation. Do not use it as proof of current model lanes, active runtime policy, cost posture, or production readiness. Current truth must come from live routing code/config, active OpenClaw/DealerScope configuration, CI/check-run evidence, and `docs/authority/DEALERSCOPE-CURRENT-AUTHORITY-INDEX.md`.
 
 ## Purpose
 
@@ -10,12 +12,12 @@ Use it when you want to find the right file quickly without remembering exact fi
 
 ## Read in this order
 
-### 1. Current active policy
+### 1. Historical active-policy bundle at time of writing
 - `reports/dealerscope-model-governor-spec-2026-04-17.md`
 - `reports/dealerscope-model-role-map-2026-04-17.md`
 - `reports/paperclip-routing-governor-config-v2-2026-04-16.json`
 
-### 2. Live implementation
+### 2. Historical implementation references at time of writing
 - `scripts/paperclip-routing-governor.js`
 - `scripts/paperclip-routing-governor.test.js`
 - `scripts/paperclip-openrouter-bridge.js`
@@ -39,13 +41,7 @@ Use it when you want to find the right file quickly without remembering exact fi
 
 ## Operating rule
 
-If a historical file conflicts with:
-- the active governor spec
-- the active role map
-- the active governor config
-- the live governor/bridge scripts
-
-then trust the active governor spec, role map, config, and live scripts.
+If this historical index conflicts with current live code/config, current OpenClaw/DealerScope configuration, CI/check-run evidence, or `docs/authority/*`, trust the current live evidence and authority registers.
 
 ## Why this index exists
 
