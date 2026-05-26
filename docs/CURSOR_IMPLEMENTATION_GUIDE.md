@@ -1,12 +1,17 @@
-# DealerScope × Cursor — Master Implementation Guide
+# DealerScope × Cursor — Historical Implementation Guide
 Created: 2026-03-19 | Owner: Andrew Pilson
+Status: historical/superseded planning artifact — not current authority
+
+> Current authority note, 2026-05-26: this guide describes an earlier Cursor integration plan and contains stale file/workflow assumptions. Use `docs/authority/DEALERSCOPE-CURRENT-AUTHORITY-INDEX.md` and `docs/authority/DEALERSCOPE-WORKFLOW-AUTHORITY-REGISTER.md` for current authority. Do not treat this file as proof that Cursor workflows, MCP config, or business-rule CI are currently active.
 
 ---
 
 ## WHAT THIS IS
 
-This document is the complete blueprint for integrating Cursor into DealerScope as a
+This document was a March 2026 blueprint for integrating Cursor into DealerScope as a
 **Protocol OS + Repo Intelligence + Engineering Manager + PR Quality Gate.**
+
+It is preserved for historical context. Its current claims must be re-verified against live repo files and GitHub Actions before use.
 
 Cursor is NOT a code editor for you. You don't code.
 Cursor is your **visual command center** between strategy and deployment.
@@ -71,7 +76,7 @@ When an AI reviews your code and gives 15-20 findings:
 
 ---
 
-## WHAT'S ALREADY BUILT (In The Repo Right Now)
+## HISTORICAL CLAIMS FROM MARCH 2026 — VERIFY BEFORE USE
 
 ### `.cursorrules` — 105 lines of DealerScope Constitutional Law
 Location: `dealscan-insight/.cursorrules`
@@ -88,7 +93,7 @@ Contains permanently:
 - Security rules (no hardcoded secrets, SECRET_KEY must be set)
 - What NEVER to do
 
-Every AI that opens this repo reads these rules first. Automatically. Forever.
+Historical claim only: current repo inspection on 2026-05-26 did not find `.cursorrules` at this path, so do not rely on this as active enforcement without re-verification.
 
 ### `.cursor/mcp.json` — Live Data Integration
 Location: `dealscan-insight/.cursor/mcp.json`
@@ -102,7 +107,7 @@ Connects Cursor to:
 Location: `.github/workflows/cursor-review.yml`
 Committed: `9be840b`
 
-Runs on EVERY commit. Blocks merge if:
+Historical claim only: current repo inspection on 2026-05-26 did not find `.github/workflows/cursor-review.yml` at this path. If restored later, verify its actual trigger/path behavior. The historical intended checks were:
 - Bid ceiling constant (0.88) is changed
 - localhost appears in frontend services
 - API keys are hardcoded in source
@@ -126,13 +131,16 @@ Runs on EVERY commit. Blocks merge if:
 - Cursor automatically reads `.cursorrules`
 - Click "Connect MCP" in settings — Supabase + GitHub connect automatically
 
-### Step 4 — Set Local Environment Variables
-Cursor MCP needs these in your shell environment:
-```bash
-export SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxibnh6dnFwcGNjYWpsbHNxYWF3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzIwMTQ3MSwiZXhwIjoyMDg4Nzc3NDcxfQ.gLFMWuEVDbwMMHYL1CPRwNv1oGukhBTFYZGYTuXftSg"
-export GITHUB_PERSONAL_ACCESS_TOKEN="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"
-```
-Add to `~/.zshrc` to make permanent.
+### Step 4 — Credentials / environment
+
+Historical note: this guide previously embedded real credential examples here. That is no longer acceptable.
+
+If Cursor MCP or another Cursor integration is re-enabled later:
+
+- use newly rotated credentials;
+- store them through the current approved secret-management path for that tool;
+- do not paste real tokens into tracked docs, shell history, screenshots, or chat;
+- verify the current repo actually contains the expected Cursor config before using this guide.
 
 ### Step 5 — First Commands to Try
 In Cursor's AI chat (Cmd+L):
