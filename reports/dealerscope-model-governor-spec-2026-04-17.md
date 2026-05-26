@@ -1,13 +1,15 @@
 # DealerScope Model Governor Spec
 
 Date: 2026-04-17
-Status: Active implementation source of truth
+Status: historical routing-governor design artifact — not current implementation authority
+
+> Current authority note, 2026-05-26: this document reflects an April 2026 routing-governor design and may name stale model/provider lanes. Do not use it as current routing, cost, sensitivity, or production-authority proof. Current truth must come from live routing code, active OpenClaw/DealerScope config, current CI/check-run evidence, and `docs/authority/DEALERSCOPE-CURRENT-AUTHORITY-INDEX.md`.
 
 ## Purpose
 
-This document defines the recommended routing-governor model stack for DealerScope based on live bridge validation, production history, operational constraints, and task sensitivity.
+This document described the recommended routing-governor model stack for DealerScope based on bridge validation, production history, operational constraints, and task sensitivity known on 2026-04-17.
 
-It is intended to be the implementation source of truth for Claude, Codex, and any runtime/governor work that follows.
+It is preserved for historical design context, not as the implementation source of truth for current model/runtime work.
 
 For comparison history and old-to-new lane mapping, also see:
 - `reports/paperclip-routing-policy-change-log-2026-04-17.md`

@@ -1,6 +1,8 @@
 # Paperclip Routing Policy Change Log - 2026-04-17
 
-Status: Active reference for April 17 routing-policy transition
+Status: historical routing-policy transition record — not current routing authority
+
+> Current authority note, 2026-05-26: this file preserves April 2026 routing-policy transition history. Do not use it as proof of current model lanes, active runtime policy, cost posture, or production readiness. Current truth must come from live routing code/config, active OpenClaw/DealerScope configuration, CI/check-run evidence, and `docs/authority/DEALERSCOPE-CURRENT-AUTHORITY-INDEX.md`.
 
 ## Purpose
 
@@ -10,16 +12,16 @@ It exists to preserve:
 - comparison history
 - rationale for the change
 - old-to-new lane mapping
-- source-of-truth guidance
+- historical source-bundle guidance
 
-It should be read alongside the live implementation files, not instead of them.
+It should be read as historical transition context and checked against live implementation files before use.
 
 See also:
 - `reports/paperclip-routing-transition-index-2026-04-17.md`
 
-## Current source of truth
+## Historical source bundle at time of writing
 
-Policy and runtime truth now live in:
+At the time this transition record was written, policy and runtime references included:
 - `reports/dealerscope-model-governor-spec-2026-04-17.md`
 - `reports/dealerscope-model-role-map-2026-04-17.md`
 - `reports/paperclip-routing-governor-config-v2-2026-04-16.json`
