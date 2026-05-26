@@ -2,51 +2,57 @@
 
 Authority: this file is the durable operator scope anchor. The bot does not edit this file except by explicit operator instruction. Operator (Andrew) updates it via explicit instruction. Chat-level conflicts lose to this file.
 
-Last updated: 2026-05-24 by operator authorization after V1.1 code-side acceptance.
+Last updated: 2026-05-26 by explicit operator reset instruction.
 
 ## Mode
 
-investigation_only — paused for operator activation phase.
+operational_ongoing — normal ACE use, not a sprint.
 
-## Current state
+## Current operational reality
 
-V1.1 code-side work is complete and accepted:
+ACE is in ongoing operational use for its original mission: helping Andrew track work, catch loose ends, and prevent code slop.
 
-- Item 1 (three-layer event lockdown) — done
-- Item 2 (external attestation through Slice I6) — done
-- Item 3 (operator scope enforcement) — done
-- Cutover executed at `evt_58b80e6282374bf2b1a8611963817aa2`
-- 721 tests passing
-- CI green at `c8a08e7`
-- Working tree clean except pre-existing `unused.db`
+The active operational surface is limited to three CLI commands:
+
+- `ace stale` — track idle work items.
+- `ace loose-ends` — catch state-transition and evidence/authorization loose ends.
+- `ace digest` — send a weekly Telegram digest through the existing JACE bot path.
+
+V1.1 cryptographic, attestation, scope-enforcement, and related foundation code may exist in the repository, but it is not the active mission and is not authorized for new work under this anchor.
 
 ## Authorized work
 
-No code changes authorized.
+Only the following writes are authorized:
 
-No scope work authorized.
+- Bug fixes to `ace stale` when Andrew reports issues.
+- Bug fixes to `ace loose-ends` when Andrew reports issues.
+- Bug fixes to `ace digest` when Andrew reports issues.
+- Filter refinements for those three commands when Andrew reports noise.
+- Documentation updates explicitly requested by Andrew for the operational reset.
 
-No implementation work authorized.
+## Forbidden work
 
-The assistant is waiting for Andrew to complete operator activation on his own machine and report back.
+The following are forbidden unless Andrew gives a new explicit instruction that supersedes this anchor:
 
-## Operator-only actions
-
-The assistant must not initiate operator activation work and must not modify:
-
-- hooks
-- PATH
-- OS accounts
-- environment files
-- GitHub settings
-- operator-owned configuration
-
-These are operator-only actions.
-
-## Remaining allowed future action
-
-After Andrew reports operator activation complete and explicitly authorizes it, the only remaining commit is the ACE 1.0 re-tag action.
+- New V1.1 work.
+- V1.2 work.
+- Item 4 work.
+- Backblaze sync work.
+- Attestation activation.
+- ACE 1.0 re-tag work.
+- Scope guard activation.
+- Operator activation checklist execution.
+- Infrastructure work outside the three CLI commands.
+- Investigation or remediation of inactive cryptographic/attestation/scope-enforcement code unless Andrew explicitly asks for it.
 
 ## Required behavior
 
-Stop after this anchor reset commit is pushed and CI is green.
+After the operational reset documentation commit is pushed and CI is green, stop.
+
+Do not start V1.2 work.
+Do not propose new features.
+Do not generate roadmaps.
+Do not investigate existing cryptographic code.
+Do not recommend reactivation.
+
+Wait for explicit instruction from Andrew before any further ACE work.
