@@ -344,13 +344,29 @@ class AceCliLooseEndsTests(unittest.TestCase):
         event_type: str,
         created_at: str,
         payload: dict[str, object] | None = None,
+        *,
+        source: str | None = None,
     ) -> None:
         connection.execute(
             """
-            INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, source, event_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (event_id, item_id, event_type, json.dumps(payload or {}, sort_keys=True), created_at, "0" * 64),
+            (event_id, item_id, event_type, json.dumps(payload or {}, sort_keys=True), created_at, source, "0" * 64),
+        )
+
+    def _insert_cleanup_evidence(
+        self,
+        connection: sqlite3.Connection,
+        item_id: str,
+        created_at: str,
+        *,
+        evidence_uri: str = "ace://cleanup/stale-legacy-reclassification",
+        evidence_text: str = "Historical residue cleanup evidence",
+    ) -> None:
+        connection.execute(
+            "INSERT INTO evidence (id, item_id, evidence_text, evidence_uri, created_at) VALUES (?, ?, ?, ?, ?)",
+            (f"evidence_{item_id}", item_id, evidence_text, evidence_uri, created_at),
         )
 
     def test_loose_ends_flags_claimed_done_without_supporting_evidence(self) -> None:
@@ -435,6 +451,105 @@ class AceCliLooseEndsTests(unittest.TestCase):
             self.assertIn("state_predecessor_gap", output)
             self.assertIn("item_order_gap", output)
             self.assertIn("expected_from_ACTIVE_got_APPROVED", output)
+
+    def test_loose_ends_filters_terminal_cleanup_residue_state_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_cleanup_residue", "VERIFIED_DONE", detected_at)
+                self._insert_cleanup_evidence(connection, "item_cleanup_residue", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_cleanup_gap",
+                    "item_cleanup_residue",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "ACTIVE", "to_state": "CLAIMED_DONE"},
+                    source="ace/self-supervision",
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertNotIn("item_cleanup_residue", output)
+            self.assertNotIn("state_predecessor_gap", output)
+
+    def test_loose_ends_cleanup_residue_requires_verified_done_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_cleanup_not_terminal", "CLAIMED_DONE", detected_at)
+                self._insert_cleanup_evidence(connection, "item_cleanup_not_terminal", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_cleanup_not_terminal_gap",
+                    "item_cleanup_not_terminal",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "ACTIVE", "to_state": "CLAIMED_DONE"},
+                    source="ace/self-supervision",
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("state_predecessor_gap", output)
+            self.assertIn("item_cleanup_not_terminal", output)
+
+    def test_loose_ends_cleanup_residue_requires_cleanup_evidence_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_cleanup_missing_evidence", "VERIFIED_DONE", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_cleanup_missing_evidence_gap",
+                    "item_cleanup_missing_evidence",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "ACTIVE", "to_state": "CLAIMED_DONE"},
+                    source="ace/self-supervision",
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("state_predecessor_gap", output)
+            self.assertIn("item_cleanup_missing_evidence", output)
+
+    def test_loose_ends_cleanup_residue_requires_self_supervision_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ace.db"
+            bootstrap_db(db_path)
+            detected_at = "2026-05-26T01:00:00Z"
+            with closing(sqlite3.connect(db_path)) as connection:
+                self._insert_item(connection, "item_cleanup_wrong_source", "VERIFIED_DONE", detected_at)
+                self._insert_cleanup_evidence(connection, "item_cleanup_wrong_source", detected_at)
+                self._insert_event(
+                    connection,
+                    "evt_cleanup_wrong_source_gap",
+                    "item_cleanup_wrong_source",
+                    "item.state_changed",
+                    detected_at,
+                    {"from_state": "ACTIVE", "to_state": "CLAIMED_DONE"},
+                    source="manual/cli",
+                )
+                connection.commit()
+
+            code, output = self.run_cli("--db", str(db_path), "loose-ends")
+
+            self.assertEqual(code, 0, output)
+            self.assertIn("state_predecessor_gap", output)
+            self.assertIn("item_cleanup_wrong_source", output)
 
     def test_loose_ends_flags_item_moved_past_triage_without_operator_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -620,13 +735,29 @@ class AceCliDigestTests(unittest.TestCase):
         event_type: str,
         created_at: str,
         payload: dict[str, object] | None = None,
+        *,
+        source: str | None = None,
     ) -> None:
         connection.execute(
             """
-            INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, event_hash)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO events (event_id, item_id, event_type, payload_json, created_at, source, event_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (event_id, item_id, event_type, json.dumps(payload or {}, sort_keys=True), created_at, "0" * 64),
+            (event_id, item_id, event_type, json.dumps(payload or {}, sort_keys=True), created_at, source, "0" * 64),
+        )
+
+    def _insert_cleanup_evidence(
+        self,
+        connection: sqlite3.Connection,
+        item_id: str,
+        created_at: str,
+        *,
+        evidence_uri: str = "ace://cleanup/stale-legacy-reclassification",
+        evidence_text: str = "Historical residue cleanup evidence",
+    ) -> None:
+        connection.execute(
+            "INSERT INTO evidence (id, item_id, evidence_text, evidence_uri, created_at) VALUES (?, ?, ?, ?, ?)",
+            (f"evidence_{item_id}", item_id, evidence_text, evidence_uri, created_at),
         )
 
     def test_digest_sends_no_findings_message_when_empty(self) -> None:

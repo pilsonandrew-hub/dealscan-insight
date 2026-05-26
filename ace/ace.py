@@ -534,6 +534,39 @@ def _is_operator_initiated_source(source: object) -> bool:
     }
 
 
+def _is_cleanup_residue_evidence_row(row: object) -> bool:
+    try:
+        evidence_uri = row["evidence_uri"]  # type: ignore[index]
+        evidence_text = row["evidence_text"]  # type: ignore[index]
+    except (KeyError, TypeError):
+        return False
+    marker_text = f"{evidence_uri or ''} {evidence_text or ''}".lower().replace("-", "_")
+    return "cleanup" in marker_text or "historical_residue" in marker_text or "historical residue" in marker_text
+
+
+def _state_predecessor_gap_suppressed_item_ids(connection: object) -> set[str]:
+    rows = connection.execute(
+        """
+        SELECT DISTINCT items.id AS item_id
+        FROM items
+        JOIN events ON events.item_id = items.id
+        JOIN evidence ON evidence.item_id = items.id
+        WHERE items.state = 'VERIFIED_DONE'
+          AND events.event_type = 'item.state_changed'
+          AND events.source = 'ace/self-supervision'
+        """
+    ).fetchall()
+    suppressed: set[str] = set()
+    for row in rows:
+        evidence_rows = connection.execute(
+            "SELECT evidence_uri, evidence_text FROM evidence WHERE item_id = ?",
+            (row["item_id"],),
+        ).fetchall()
+        if any(_is_cleanup_residue_evidence_row(evidence_row) for evidence_row in evidence_rows):
+            suppressed.add(str(row["item_id"]))
+    return suppressed
+
+
 def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     with connect_readonly(db_path) as connection:
@@ -555,9 +588,10 @@ def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
                     }
                 )
 
+        state_gap_suppressed_item_ids = _state_predecessor_gap_suppressed_item_ids(connection)
         transition_rows = connection.execute(
             """
-            SELECT id, event_id, item_id, event_type, payload_json, created_at
+            SELECT id, event_id, item_id, event_type, payload_json, created_at, source
             FROM events
             WHERE item_id IS NOT NULL AND event_type = 'item.state_changed'
             ORDER BY item_id ASC, created_at ASC, id ASC
@@ -569,7 +603,7 @@ def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
             from_state, to_state = _transition_states(row)
             previous = previous_transition_by_item.get(item_id)
             if previous is None:
-                if from_state != "TRIAGE":
+                if from_state != "TRIAGE" and item_id not in state_gap_suppressed_item_ids:
                     findings.append(
                         {
                             "pattern_name": "state_predecessor_gap",
@@ -580,7 +614,7 @@ def _loose_end_rows(db_path: Path | str) -> list[dict[str, str]]:
                     )
             else:
                 _prev_from, previous_to = _transition_states(previous)
-                if from_state != previous_to:
+                if from_state != previous_to and item_id not in state_gap_suppressed_item_ids:
                     findings.append(
                         {
                             "pattern_name": "state_predecessor_gap",
