@@ -261,6 +261,7 @@ const crawler = new PlaywrightCrawler({
                     make: make.charAt(0).toUpperCase() + make.slice(1),
                     model: model ?? null,
                     current_bid: bid,
+                    mileage: mileage ?? null,
                     state,
                     location: card.location,
                     listing_url: card.listingUrl,

@@ -362,7 +362,7 @@ for (const searchText of searchTerms) {
                     year: year || null,
                     make: make || null,
                     model: item.model || null,
-                    mileage: null, // not available from search list API
+                    mileage: !isNaN(mileageNum) && mileageNum > 0 ? mileageNum : null,
                     title_status: 'Unknown', // not in list API
                     auction_source: 'AllSurplus',
                     source_site: 'allsurplus',

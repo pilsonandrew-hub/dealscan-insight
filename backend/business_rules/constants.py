@@ -43,11 +43,11 @@ HOT_DEAL_MIN_TRUST_SCORE = 0.25
 # Production contract: alerts on unless explicitly disabled in non-prod.
 ALERTS_ENABLED_PRODUCTION_DEFAULT = "true"
 
-# Pricing maturity values allowed through alert gate (proxy allowed but governed).
-PRICING_MATURITY_ALERT_ALLOWED = frozenset({"proxy", "market_comp", "live_market"})
+# Pricing maturity values allowed through hot-alert gate (no proxy).
+PRICING_MATURITY_ALERT_ALLOWED = frozenset({"market_comp", "live_market"})
 
-# Proxy-priced deals may enter alert pipeline only when explicitly allowed.
-PROXY_PRICING_ALERT_ALLOWED = True
+# Proxy-priced deals are blocked from hot alerts unless policy is deliberately relaxed.
+PROXY_PRICING_ALERT_ALLOWED = False
 
 # Minimum confidence (0-100 scale) for proxy-priced hot alerts when allowed.
 PROXY_ALERT_MIN_CONFIDENCE = 55.0

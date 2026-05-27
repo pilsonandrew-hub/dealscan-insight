@@ -16,6 +16,15 @@ from backend.business_rules.pricing import pricing_allows_hot_alert
 
 ALERT_ALLOWED_PRICING_MATURITIES = PRICING_MATURITY_ALERT_ALLOWED
 ALERT_ALLOWED_GRADES = frozenset({"Premium", "Standard", "Gold", "Platinum", "Silver"})
+UNKNOWN_OR_WEAK_CONDITION_GRADES = frozenset({"", "unknown", "poor"})
+VIN_PLACEHOLDER_VALUES = frozenset({
+    "00000000000000000",
+    "11111111111111111",
+    "12345678901234567",
+    "ABCDEFGHIJKLMNOPQ",
+    "UNKNOWNUNKNOWNUNK",
+})
+VIN_FORBIDDEN_CHARACTERS = frozenset({"I", "O", "Q"})
 
 
 @dataclass(frozen=True)
@@ -52,6 +61,21 @@ def _pick_text(*values: Any) -> Optional[str]:
         if normalized:
             return normalized
     return None
+
+
+def _valid_vin_shape(value: Any) -> bool:
+    vin = str(value or "").strip().upper()
+    if len(vin) != 17:
+        return False
+    if not vin.isalnum():
+        return False
+    if any(char in vin for char in VIN_FORBIDDEN_CHARACTERS):
+        return False
+    if vin in VIN_PLACEHOLDER_VALUES:
+        return False
+    if len(set(vin)) <= 2:
+        return False
+    return True
 
 
 def _score_breakdown(record: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -122,6 +146,14 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
             breakdown.get("expected_close_bid"),
         ),
         "expected_close_source": expected_close_source,
+        "vin": _pick_text(record.get("vin"), breakdown.get("vin")),
+        "mileage": _pick_numeric(record.get("mileage"), breakdown.get("mileage")),
+        "condition_grade": _pick_text(
+            record.get("condition_grade"),
+            breakdown.get("condition_grade"),
+            record.get("condition"),
+            breakdown.get("condition"),
+        ),
     }
 
 
@@ -140,6 +172,13 @@ def evaluate_alert_gate(
         reasons.append(f"grade={signals['investment_grade']}")
     if signals["pricing_maturity"] not in ALERT_ALLOWED_PRICING_MATURITIES:
         reasons.append(f"pricing_maturity={signals['pricing_maturity']}")
+    if not _valid_vin_shape(signals["vin"]):
+        reasons.append("vin_unverified")
+    if signals["mileage"] is None or signals["mileage"] <= 0:
+        reasons.append("mileage_missing")
+    condition_grade = str(signals["condition_grade"] or "").strip().lower()
+    if condition_grade in UNKNOWN_OR_WEAK_CONDITION_GRADES:
+        reasons.append("condition_unverified")
 
     confidence = signals["confidence"]
     if confidence is not None and confidence < config.min_confidence:

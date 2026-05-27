@@ -44,3 +44,13 @@ def test_proxy_pricing_classification():
     result = classify_pricing_confidence({"mmr_estimated": 18000, "pricing_maturity": "proxy"})
     assert result.confidence == PricingConfidence.PROXY_ESTIMATE
     assert result.maturity == "proxy"
+
+
+def test_hot_alert_policy_blocks_proxy_maturity():
+    assert "proxy" not in PRICING_MATURITY_ALERT_ALLOWED
+    assert PROXY_PRICING_ALERT_ALLOWED is False
+    allowed, reason = pricing_allows_hot_alert(
+        {"mmr_estimated": 20000, "pricing_maturity": "proxy", "mmr_confidence_proxy": 90}
+    )
+    assert allowed is False
+    assert reason

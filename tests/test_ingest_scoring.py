@@ -157,6 +157,67 @@ def test_alert_gate_blocks_proxy_only_low_confidence_rows():
     assert "confidence<55" in gate["blocking_reasons"]
 
 
+def test_alert_gate_blocks_proxy_pricing_even_with_otherwise_strong_signals():
+    record = {
+        "dos_score": 95,
+        "investment_grade": "Platinum",
+        "pricing_maturity": "proxy",
+        "current_bid_trust_score": 0.9,
+        "mmr_confidence_proxy": 90.0,
+        "bid_headroom": 5000,
+        "roi_per_day": 100,
+        "vin": "1HGCM82633A004352",
+        "mileage": 42000,
+        "condition_grade": "Good",
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is False
+    assert "pricing_maturity=proxy" in gate["blocking_reasons"]
+
+
+def test_alert_gate_requires_vin_mileage_and_verified_condition():
+    record = {
+        "dos_score": 95,
+        "investment_grade": "Platinum",
+        "pricing_maturity": "market_comp",
+        "current_bid_trust_score": 0.9,
+        "mmr_confidence_proxy": 90.0,
+        "bid_headroom": 5000,
+        "roi_per_day": 100,
+        "condition_grade": "Poor",
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is False
+    assert "vin_unverified" in gate["blocking_reasons"]
+    assert "mileage_missing" in gate["blocking_reasons"]
+    assert "condition_unverified" in gate["blocking_reasons"]
+
+
+def test_alert_gate_rejects_zero_mileage_sentinel_and_placeholder_vin():
+    record = {
+        "dos_score": 95,
+        "investment_grade": "Platinum",
+        "pricing_maturity": "market_comp",
+        "current_bid_trust_score": 0.9,
+        "mmr_confidence_proxy": 90.0,
+        "bid_headroom": 5000,
+        "roi_per_day": 100,
+        "vin": "00000000000000000",
+        "mileage": 0,
+        "condition_grade": "Good",
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is False
+    assert "vin_unverified" in gate["blocking_reasons"]
+    assert "mileage_missing" in gate["blocking_reasons"]
+
+
 def test_score_deal_subtracts_recon_reserve_from_margin():
     result = score_deal(
         bid=10000,

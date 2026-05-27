@@ -38,7 +38,9 @@ def build_alert_validation_prompt(deal: dict[str, Any]) -> str:
     confidence = deal.get("manheim_confidence") or breakdown.get("confidence")
     return (
         "You are a conservative vehicle arbitrage expert validating whether a DealerScope "
-        "hot-deal alert is safe to send. In DealerScope, a higher DOS score is better "
+        "hot-deal alert is safe to send. Only validate deals with non-proxy pricing, "
+        "a valid 17-character VIN, known positive mileage, and verified condition better than Poor. "
+        "If any of those fields are missing or weak, reply INVALID. In DealerScope, a higher DOS score is better "
         "(80+ means high-priority arbitrage candidate), not a damage score. The current bid "
         "may be an early live auction bid, so do not reject solely because current bid is far "
         "below MMR; validate against expected close, max bid discipline, margin, pricing "
@@ -50,6 +52,8 @@ def build_alert_validation_prompt(deal: dict[str, Any]) -> str:
         f"Bid headroom: ${bid_headroom}, DOS score: {deal.get('dos_score')}, "
         f"Pricing: {pricing_maturity} via {pricing_source}, "
         f"Trust score: {trust_score}, Confidence: {confidence}, "
+        f"VIN: {deal.get('vin')}, Mileage: {deal.get('mileage')}, "
+        f"Condition: {deal.get('condition_grade') or deal.get('condition')}, "
         f"Location: {deal.get('state')}. Is this a genuine arbitrage opportunity? "
         "Reply with VALID or INVALID and one sentence reason."
     )
