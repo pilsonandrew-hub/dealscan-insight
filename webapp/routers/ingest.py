@@ -1127,6 +1127,12 @@ async def _process_webhook_items(
 
         if hot_deals:
             validated_deals = await ai_validate_hot_deals(hot_deals)
+            logger.info(
+                "[ALERT_PIPELINE] eligible=%s validated=%s rejected=%s",
+                len(hot_deals),
+                len(validated_deals),
+                len(hot_deals) - len(validated_deals),
+            )
             await send_telegram_alerts(validated_deals)
 
         logger.info(
@@ -2207,7 +2213,12 @@ def _build_alert_validation_prompt(deal: dict) -> str:
 
 
 async def ai_validate_hot_deals(deals: list) -> list:
-    """Validate hot deals with OpenRouter DeepSeek R1 before alerting."""
+    """Deterministically validate alert-gated hot deals before delivery.
+
+    The model lane is now advisory only. A missing/invalid OpenRouter route or
+    upstream API outage must not silently suppress every deterministic alert;
+    the inspectable alert gate is the safety boundary.
+    """
     if not deals:
         return []
 
@@ -2215,7 +2226,17 @@ async def ai_validate_hot_deals(deals: list) -> list:
 
     validated_deals: list = []
     url = "https://openrouter.ai/api/v1/chat/completions"
-    api_key = OPENROUTER_API_KEY or DEEPSEEK_API_KEY
+    api_key = OPENROUTER_API_KEY
+    if not api_key and _openrouter_legacy_deepseek_fallback_enabled():
+        api_key = DEEPSEEK_API_KEY
+
+    if not api_key:
+        logger.warning(
+            "[AI_VALIDATE] result=BYPASS reason=missing_openrouter_api_key count=%s",
+            len(deals),
+        )
+        return deals
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -2223,27 +2244,17 @@ async def ai_validate_hot_deals(deals: list) -> list:
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        api_key = OPENROUTER_API_KEY
-        if not api_key and _openrouter_legacy_deepseek_fallback_enabled():
-            api_key = DEEPSEEK_API_KEY
-        if not api_key:
-            logger.warning(
-                "[AI_VALIDATE] result=SKIP reason=missing_openrouter_api_key"
-            )
-            return []
-
-        headers["Authorization"] = f"Bearer {api_key}"
-
         for deal in deals:
             deal_id = deal.get("id") or deal.get("opportunity_id") or deal.get("listing_id") or "unknown"
             try:
                 lane, model = _resolve_openrouter_lane_model(deal, str(deal_id))
             except Exception as exc:
                 logger.warning(
-                    "[AI_VALIDATE] deal_id=%s result=SKIP reason=invalid_route error=%s",
+                    "[AI_VALIDATE] deal_id=%s result=BYPASS reason=invalid_route error=%s",
                     deal_id,
                     exc,
                 )
+                validated_deals.append(deal)
                 continue
 
             prompt = _build_alert_validation_prompt(deal)
@@ -2295,20 +2306,22 @@ async def ai_validate_hot_deals(deals: list) -> list:
                     )
                 else:
                     logger.warning(
-                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=SKIP reason=unparseable_response content=%s",
+                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=BYPASS reason=unparseable_response content=%s",
                         deal_id,
                         lane,
                         model,
                         content,
                     )
+                    validated_deals.append(deal)
             except Exception as exc:
                 logger.warning(
-                    "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=SKIP reason=api_error error=%s",
+                    "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=BYPASS reason=api_error error=%s",
                     deal_id,
                     lane,
                     model,
                     exc,
                 )
+                validated_deals.append(deal)
 
     return validated_deals
 
