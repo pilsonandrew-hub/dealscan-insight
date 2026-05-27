@@ -144,6 +144,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     propose.add_argument("--actor", help="Actor label for accept/reject decisions")
 
+    filter_health = subparsers.add_parser(
+        "filter-health",
+        help="Monthly signal-to-noise summary for ACE intake and proposal filters",
+    )
+    filter_health.add_argument("--month", help="Report month as YYYY-MM (default: current UTC month)")
+    filter_health.add_argument(
+        "--decisions-log",
+        help="Proposal decision log path (default: ace/state/propose_filter_decisions.jsonl)",
+    )
+
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
     show.add_argument("--event-type")
@@ -1201,6 +1211,16 @@ def main(argv: list[str] | None = None) -> int:
             item_id=getattr(args, "item_id", None),
             session_file=session_file,
             actor=getattr(args, "actor", None),
+        )
+
+    if command == "filter-health":
+        from ace.filter_health import run_filter_health_command
+
+        decisions_log = Path(args.decisions_log) if getattr(args, "decisions_log", None) else None
+        return run_filter_health_command(
+            db_path=db_path,
+            month=getattr(args, "month", None),
+            decisions_log=decisions_log,
         )
 
     if command == "digest":
