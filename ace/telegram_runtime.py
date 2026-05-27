@@ -395,6 +395,19 @@ def _load_inbound_messages_from_openclaw_session(path: Path) -> list[dict[str, A
     return messages
 
 
+def load_openclaw_session_messages(*, session_file: Path | str | None = None) -> list[dict[str, Any]]:
+    """Load normalized inbound user messages from the OpenClaw main session stream."""
+    if session_file is not None:
+        path = Path(session_file)
+        if not path.is_file():
+            return []
+        return _load_inbound_messages_from_openclaw_session(path)
+    resolved = _resolve_openclaw_session_file()
+    if resolved is None:
+        return []
+    return _load_inbound_messages_from_openclaw_session(resolved)
+
+
 def _telegram_ssl_context() -> ssl.SSLContext:
     cafile = os.environ.get("ACE_TELEGRAM_CA_BUNDLE", "").strip()
     if cafile:

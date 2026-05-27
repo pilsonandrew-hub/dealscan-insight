@@ -127,6 +127,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hooks_subparsers.add_parser("status", help="Show whether operational ACE hooks are installed")
 
+    propose = subparsers.add_parser(
+        "propose",
+        help="Scan OpenClaw Telegram session stream for first-person commitment proposals",
+    )
+    propose.add_argument(
+        "propose_action",
+        nargs="?",
+        choices=["accept", "reject"],
+        help="accept or reject a TRIAGE commitment proposal item",
+    )
+    propose.add_argument("item_id", nargs="?", help="Proposal item id for accept/reject")
+    propose.add_argument(
+        "--session-file",
+        help="OpenClaw session JSONL path (default: resolve from ACE_OPENCLAW_SESSION_FILE or sessions index)",
+    )
+    propose.add_argument("--actor", help="Actor label for accept/reject decisions")
+
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
     show.add_argument("--event-type")
@@ -1173,6 +1190,18 @@ def main(argv: list[str] | None = None) -> int:
             print("error=hooks command required (install, status)", file=sys.stderr)
             return 1
         return run_hooks_command(hooks_command)
+
+    if command == "propose":
+        from ace.propose_commitments import run_propose_command
+
+        session_file = Path(args.session_file) if getattr(args, "session_file", None) else None
+        return run_propose_command(
+            db_path=db_path,
+            propose_action=getattr(args, "propose_action", None),
+            item_id=getattr(args, "item_id", None),
+            session_file=session_file,
+            actor=getattr(args, "actor", None),
+        )
 
     if command == "digest":
         try:
