@@ -70,7 +70,9 @@ jobs:
             echo "❌ Bid ceiling missing from backend/business_rules/constants.py"
             FAILED=1
           fi
-          if grep -rn "HIGH_RUST_STATES" backend/business_rules/constants.py | grep -q "OH\|MI"; then
+          if grep -q "HIGH_RUST_STATES" backend/business_rules/constants.py \
+             && grep -q '"OH"' backend/business_rules/constants.py \
+             && grep -q '"MI"' backend/business_rules/constants.py; then
             echo "✅ Rust state filter present in business_rules"
           else
             echo "❌ Rust state filter missing from business_rules"
