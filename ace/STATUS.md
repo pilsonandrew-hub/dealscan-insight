@@ -131,6 +131,12 @@ For documentation-only changes:
 - CI green after push
 - git label `ace-2.0` points at the release commit on `master`
 
+Post-release smoke:
+
+```sh
+sh ace/scripts/verify_operational_release.sh
+```
+
 ## Current priority
 
 Keep the ACE 2.0 operational surface useful and honest. Do not reopen V1.1 cryptographic, attestation, or scope-enforcement work unless Andrew explicitly directs it.

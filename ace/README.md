@@ -80,3 +80,9 @@ Not currently authorized:
 ## Verification expectation
 
 Do not treat README claims as proof. Current truth must come from live command output, `ace contradictions`, real test runs, and real GitHub Actions results when CI status is claimed.
+
+Quick post-release smoke (offline contradictions + operational pytest subset):
+
+```sh
+sh ace/scripts/verify_operational_release.sh
+```

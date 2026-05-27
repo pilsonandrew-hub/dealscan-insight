@@ -15,6 +15,7 @@ state/supervisor_acceptance.log
 state/supervisor_acceptance.err
 state/supervisor_acceptance.pid
 state/proofs/
+state/propose_filter_decisions.jsonl
 
 # Test/runtime scratch
 .pytest_cache/
