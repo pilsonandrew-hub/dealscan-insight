@@ -754,6 +754,8 @@ async def _process_webhook_items(
         sonar_write_fail_count = 0
         skipped = 0
         hot_deals = []
+        alert_blocked_count = 0
+        alert_blocked_reasons: dict[str, int] = {}
         dataset_item_count = len(items)
         skip_reasons: dict[str, int] = {}
         save_outcomes: dict[str, int] = {}
@@ -1118,10 +1120,14 @@ async def _process_webhook_items(
                     vehicle["dos_score"] >= hot_deal_min_score(os.environ, log=logger)
                     or score_result.get("investment_grade") in {"Gold", "Platinum"}
                 ):
+                    blocking_reasons = alert_gate.get("blocking_reasons") or ["unknown"]
+                    alert_blocked_count += 1
+                    for reason in blocking_reasons:
+                        increment_reason_counter(alert_blocked_reasons, str(reason))
                     logger.info(
                         "[ALERT_GATE] blocked | %s | reasons=%s | %s",
                         alert_gate.get("summary"),
-                        ",".join(alert_gate.get("blocking_reasons") or ["unknown"]),
+                        ",".join(blocking_reasons),
                         vehicle.get("title", "?")[:80],
                     )
 
@@ -1164,6 +1170,8 @@ async def _process_webhook_items(
             duplicate_count=duplicate_count,
             notion_sync_count=notion_sync_count,
             hot_deals_count=len(hot_deals),
+            alert_blocked_count=alert_blocked_count,
+            alert_blocked_reasons=alert_blocked_reasons,
         )
         detail_message = (
             None

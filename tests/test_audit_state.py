@@ -49,7 +49,29 @@ def test_format_ingest_run_summary_preserves_funnel_shape():
         duplicate_count=5,
         notion_sync_count=6,
         hot_deals_count=7,
-    ) == "funnel=items:10,evaluated:9,saved:8,existing:1,failed:2,sonar_write_failures:3,skipped:4,duplicates:5,notion_sync:6,hot_deals:7"
+    ) == "funnel=items:10,evaluated:9,saved:8,existing:1,failed:2,sonar_write_failures:3,skipped:4,duplicates:5,notion_sync:6,hot_deals:7,alert_blocked:0"
+
+
+def test_format_ingest_run_summary_includes_blocked_alert_reasons_by_count():
+    assert format_ingest_run_summary(
+        dataset_item_count=10,
+        evaluated=9,
+        saved_count=8,
+        duplicate_existing=1,
+        failed_save_count=2,
+        sonar_write_failures=3,
+        skipped=4,
+        duplicate_count=5,
+        notion_sync_count=6,
+        hot_deals_count=7,
+        alert_blocked_count=4,
+        alert_blocked_reasons={"vin_unverified": 2, "mileage_missing": 4},
+    ) == (
+        "funnel=items:10,evaluated:9,saved:8,existing:1,failed:2,"
+        "sonar_write_failures:3,skipped:4,duplicates:5,notion_sync:6,"
+        "hot_deals:7,alert_blocked:4,"
+        "alert_blocked_reasons:mileage_missing:4,vin_unverified:2"
+    )
 
 
 def test_attach_audit_state_marks_ok_or_fallback():

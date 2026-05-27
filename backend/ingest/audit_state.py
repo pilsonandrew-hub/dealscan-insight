@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Optional
 
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
@@ -62,8 +63,10 @@ def format_ingest_run_summary(
     duplicate_count: int,
     notion_sync_count: int,
     hot_deals_count: int,
+    alert_blocked_count: int = 0,
+    alert_blocked_reasons: Optional[Mapping[str, int]] = None,
 ) -> str:
-    return (
+    summary = (
         "funnel="
         f"items:{dataset_item_count},"
         f"evaluated:{evaluated},"
@@ -74,8 +77,17 @@ def format_ingest_run_summary(
         f"skipped:{skipped},"
         f"duplicates:{duplicate_count},"
         f"notion_sync:{notion_sync_count},"
-        f"hot_deals:{hot_deals_count}"
+        f"hot_deals:{hot_deals_count},"
+        f"alert_blocked:{alert_blocked_count}"
     )
+    reasons = alert_blocked_reasons or {}
+    if reasons:
+        reason_summary = ",".join(
+            f"{reason}:{count}"
+            for reason, count in sorted(reasons.items(), key=lambda item: (-item[1], item[0]))[:10]
+        )
+        summary = f"{summary},alert_blocked_reasons:{reason_summary}"
+    return summary
 
 
 def attach_audit_state(response: dict[str, Any], audit_state: Optional[dict[str, Any]]) -> None:
