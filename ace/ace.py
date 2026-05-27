@@ -723,6 +723,7 @@ def _format_digest_message(
     *,
     stale_rows: list[dict[str, object]],
     loose_rows: list[dict[str, str]],
+    stale_resume_context: str = "",
     generated_at: datetime | None = None,
 ) -> str:
     generated_at = generated_at or datetime.now(timezone.utc)
@@ -737,10 +738,16 @@ def _format_digest_message(
         "",
         f"Stale items ({len(stale_rows)})",
         _render_stale_table(stale_rows) if stale_rows else "none",
-        "",
-        f"Loose ends ({len(loose_rows)})",
-        _render_loose_end_table(loose_rows) if loose_rows else "none",
     ]
+    if stale_resume_context:
+        sections.append(stale_resume_context)
+    sections.extend(
+        [
+            "",
+            f"Loose ends ({len(loose_rows)})",
+            _render_loose_end_table(loose_rows) if loose_rows else "none",
+        ]
+    )
     return _truncate_telegram_message("\n".join(sections), total_count=total_count)
 
 
@@ -769,9 +776,17 @@ def _send_digest(
     chat_id: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, object]:
+    from ace.digest_resume_context import load_stale_resume_contexts, render_stale_resume_context
+
     stale_rows = _stale_rows(db_path, days=days)
     loose_rows = _loose_end_rows(db_path)
-    message = _format_digest_message(stale_rows=stale_rows, loose_rows=loose_rows)
+    resume_contexts = load_stale_resume_contexts(db_path, stale_rows)
+    stale_resume_context = render_stale_resume_context(stale_rows, resume_contexts)
+    message = _format_digest_message(
+        stale_rows=stale_rows,
+        loose_rows=loose_rows,
+        stale_resume_context=stale_resume_context,
+    )
     delivery: dict[str, object]
     if dry_run:
         delivery = {"delivery_state": "dry_run", "message": message}
