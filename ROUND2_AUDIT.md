@@ -1,4 +1,6 @@
 # Round 2 Audit — Remaining 7 Files
+
+> Historical audit note, 2026-05-26: this March 2026 audit is not current vulnerability or production-readiness authority. Treat findings as historical leads only; verify against current files, current tests, live CI/check-run evidence, and `docs/authority/DEALERSCOPE-PRODUCT-TRUTH-REGISTER.md` before acting or claiming status.
 _Claude (direct read) + Gemini 3.1 Pro | 2026-03-26_
 _Files: auth.py, sniper.py, opportunities.py, admin.py, heuristic_scorer.py, normalize.py, alert_gating.py_
 

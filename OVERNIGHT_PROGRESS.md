@@ -1,4 +1,6 @@
 # OVERNIGHT PROGRESS — DealerScope Full Audit + Roadmap
+
+> Historical progress-log note, 2026-05-26: this March 2026 progress log is preserved for chronology only. Do not use its “complete,” “already done,” or roadmap status language as current DealerScope product truth, production readiness, or live operational proof. Current truth must come from live code/runtime evidence, CI/check-run truth, and `docs/authority/DEALERSCOPE-CURRENT-AUTHORITY-INDEX.md`.
 Started: 2026-03-18 ~3:05 AM PT
 Completed: 2026-03-18 ~3:45 AM PT
 Status: ✅ ALL 5 TASKS COMPLETE

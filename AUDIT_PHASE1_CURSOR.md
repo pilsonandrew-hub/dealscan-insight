@@ -1,5 +1,7 @@
 # DealerScope — Phase 1 Forensic Reconnaissance (Cursor)
 
+> Historical audit note, 2026-05-26: this is a static audit artifact, not current production or route authority. Do not use its “canonical,” router, integration, or fracture language as present-tense DealerScope truth without re-verifying live code, live route/OpenAPI behavior, current CI/check-run evidence, and `docs/authority/DEALERSCOPE-CURRENT-AUTHORITY-INDEX.md`.
+
 **Scope:** Read-only audit of repository state as of static analysis. **No code was changed.** Nothing herein claims remediation.
 
 **Evidence standard:** Each item is labeled **CONFIRMED** (directly read in source), **HYPOTHESIS** (strong inference, not fully provable without runtime/infra), or **UNKNOWN** (cannot establish from repo alone).
