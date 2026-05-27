@@ -301,19 +301,20 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     # ── FIX 2f: DOS (using v2 scoring engine) ────────────────────────────
     # Import v2 scoring components
     try:
-        from backend.ingest.score import (
-            _compute_dos_v2, _compute_max_bid_v2, _compute_gross_margin_v2
-        )
-        # Use pessimistic as MMR proxy for recon evaluations
+        from backend.ingest.score import score_deal
+
         mmr_proxy = pessimistic if pessimistic else 0
-        gross_margin = _compute_gross_margin_v2(mmr_proxy, req.asking_price or 0, req.state) if mmr_proxy > 0 else 0
-        vehicle_dict = {
-            "make": req.make or "",
-            "model": req.model or "",
-            "source_site": req.source or "",
-            "auction_end": None,  # recon doesn't have auction_end
-        }
-        dos = _compute_dos_v2(vehicle_dict, gross_margin)
+        scored = score_deal(
+            bid=req.asking_price or 0,
+            mmr_ca=mmr_proxy,
+            state=req.state or "",
+            source_site=req.source or "recon",
+            model=req.model or "",
+            make=req.make or "",
+            year=req.year,
+            mileage=req.mileage,
+        )
+        dos = float(scored.get("dos_score") or 0)
     except ImportError:
         # Fallback to old calculation if import fails
         if auction_mode or pessimistic is None:

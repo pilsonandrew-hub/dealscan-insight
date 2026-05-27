@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -134,8 +135,21 @@ def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = Non
     if not opportunities:
         raise HTTPException(status_code=404, detail="Opportunity not found")
     opp = opportunities[0]
-    if require_user_id and opp.get("user_id") != require_user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this opportunity")
+    if require_user_id:
+        opp_user_id = opp.get("user_id")
+        operator_user_id = os.getenv("DEALERSCOPE_OPERATOR_USER_ID", "").strip()
+        if opp_user_id:
+            if opp_user_id != require_user_id:
+                raise HTTPException(status_code=403, detail="Not authorized to modify this opportunity")
+        elif operator_user_id:
+            if require_user_id != operator_user_id:
+                raise HTTPException(status_code=403, detail="Not authorized to modify system opportunity")
+        else:
+            logger.warning(
+                "[OUTCOMES] system opportunity %s has no user_id and DEALERSCOPE_OPERATOR_USER_ID unset",
+                opportunity_id,
+            )
+            raise HTTPException(status_code=403, detail="System opportunity ownership not configured")
     return opp
 
 

@@ -17,13 +17,7 @@ on:
           - full
           - minimal
           - security-only
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - 'validation-reports/**'
-      - 'docs/**'
+  # Intentionally not on push: use ci.yml for merge gates. This workflow is advisory/artifact only.
   schedule:
     - cron: '0 6 * * *'
 

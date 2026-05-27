@@ -5,6 +5,12 @@ from __future__ import annotations
 from logging import Logger
 from typing import Mapping, Optional
 
+from backend.business_rules.constants import (
+    HOT_DEAL_ALERT_THRESHOLD,
+    HOT_DEAL_MIN_CONFIDENCE,
+    HOT_DEAL_MIN_TRUST_SCORE,
+    PLATINUM_MIN_ROI_PER_DAY,
+)
 from backend.ingest.alert_gating import AlertThresholds
 from backend.ingest.env_utils import env_float
 
@@ -15,11 +21,11 @@ def build_alert_thresholds(
     log: Optional[Logger] = None,
 ) -> AlertThresholds:
     return AlertThresholds(
-        min_score=env_float(env, "HOT_DEAL_MIN_SCORE", 70.0, log=log, context="ALERT_GATE"),
-        platinum_min_roi_day=env_float(env, "PLATINUM_MIN_ROI_DAY", 75.0, log=log, context="ALERT_GATE"),
+        min_score=env_float(env, "HOT_DEAL_MIN_SCORE", HOT_DEAL_ALERT_THRESHOLD, log=log, context="ALERT_GATE"),
+        platinum_min_roi_day=env_float(env, "PLATINUM_MIN_ROI_DAY", PLATINUM_MIN_ROI_PER_DAY, log=log, context="ALERT_GATE"),
         min_bid_headroom=env_float(env, "ALERT_MIN_BID_HEADROOM", 0.0, log=log, context="ALERT_GATE"),
-        min_trust_score=env_float(env, "ALERT_MIN_TRUST_SCORE", 0.25, log=log, context="ALERT_GATE"),
-        min_confidence=env_float(env, "ALERT_MIN_CONFIDENCE", 55.0, log=log, context="ALERT_GATE"),
+        min_trust_score=env_float(env, "ALERT_MIN_TRUST_SCORE", HOT_DEAL_MIN_TRUST_SCORE, log=log, context="ALERT_GATE"),
+        min_confidence=env_float(env, "ALERT_MIN_CONFIDENCE", HOT_DEAL_MIN_CONFIDENCE, log=log, context="ALERT_GATE"),
     )
 
 
@@ -28,4 +34,4 @@ def hot_deal_min_score(
     *,
     log: Optional[Logger] = None,
 ) -> float:
-    return env_float(env, "HOT_DEAL_MIN_SCORE", 70.0, log=log, context="ALERT_GATE")
+    return env_float(env, "HOT_DEAL_MIN_SCORE", HOT_DEAL_ALERT_THRESHOLD, log=log, context="ALERT_GATE")

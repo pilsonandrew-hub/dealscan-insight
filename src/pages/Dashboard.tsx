@@ -970,9 +970,11 @@ const RoverTab = () => {
         <div>
           <h2 className="text-xl font-bold text-white">Rover</h2>
           <p className="text-sm text-gray-400">
-            {isFallback
-              ? 'Top deals while Rover learns from your activity'
-              : 'Personalized recommendations based on your activity'}
+            {roverDebug.startsWith('HTTP') || roverDebug.startsWith('Error')
+              ? 'Rover API unavailable — refresh or check backend health'
+              : isFallback
+              ? 'Top DOS deals (fallback pool — not personalized)'
+              : 'Personalized recommendations from your Rover activity'}
           </p>
         </div>
         <button onClick={load} disabled={loading} className="text-gray-400 hover:text-white">

@@ -2,6 +2,20 @@ from datetime import datetime, timezone
 import re
 from typing import Optional
 
+from backend.business_rules.constants import (
+    HIGH_RUST_STATES,
+    PREMIUM_BID_CEILING_PCT,
+    PREMIUM_MIN_MARGIN,
+    STANDARD_BID_CEILING_PCT,
+    STANDARD_MIN_MARGIN,
+)
+from backend.business_rules.gates import (
+    bid_ceiling_pct_for_tier,
+    current_calendar_year,
+    determine_vehicle_tier,
+    is_high_rust_state_rejected,
+    min_margin_for_tier,
+)
 from backend.ingest.transport import calc_transport_cost
 
 try:
@@ -12,18 +26,13 @@ except ImportError:  # pragma: no cover - exercised in minimal local environment
 
 
 def _current_year() -> int:
-    return datetime.now().year
+    return current_calendar_year()
 
 
 CURRENT_YEAR = _current_year()
 
 SCORE_ENGINE_VERSION = "v3_two_lane"
 SCORE_ENGINE_IMPL = "score_deal_v3_two_lane"
-
-HIGH_RUST_STATES = {
-    "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD", "NE", "KS", "WV",
-    "ME", "NH", "VT", "MA", "RI", "CT", "NJ", "MD", "DE",
-}
 
 HIGH_DEMAND_MODELS = {
     "camry",
@@ -153,54 +162,6 @@ def _parse_datetime(value: object) -> Optional[datetime]:
         return datetime.fromisoformat(text)
     except Exception:
         return None
-
-
-def is_high_rust_state_rejected(state: object, year: object) -> bool:
-    """Return True when rust-state origin is a hard business-rule rejection.
-
-    DealerScope allows only the explicit new-vehicle exception for high-rust states:
-    model year >= current_year - 2. Missing/unparseable year is not eligible for the
-    exception because we cannot prove the vehicle is new enough.
-    """
-    normalized_state = str(state or "").upper().strip()
-    if normalized_state not in HIGH_RUST_STATES:
-        return False
-    model_year = _coerce_year(year)
-    return model_year is None or model_year < _current_year() - 2
-
-
-def determine_vehicle_tier(year, mileage) -> str:
-    current_year = _current_year()
-    # Two-lane system:
-    # Premium: 1-4 years old (model_year >= current_year - 4)
-    # Standard: 5-10 years old (model_year >= current_year - 10)
-    # Rejected: >10 years old
-    premium_year_cutoff = current_year - 4   # model_year >= this -> premium
-    standard_year_cutoff = current_year - 10  # model_year >= this -> standard, else rejected
-    model_year = _coerce_year(year)
-    if model_year is None:
-        return "rejected"
-
-    if model_year < standard_year_cutoff:
-        return "rejected"
-
-    if model_year >= premium_year_cutoff:
-        vehicle_tier = "premium"
-    else:
-        vehicle_tier = "standard"
-
-    mileage_value = _coerce_float(mileage)
-    if mileage_value is not None:
-        if vehicle_tier == "premium" and mileage_value > 50000:
-            return "rejected"
-        if vehicle_tier == "standard":
-            if mileage_value > 100000:
-                return "rejected"
-            age_years = max(1, current_year - model_year)
-            if mileage_value / age_years > 18000:
-                return "rejected"
-
-    return vehicle_tier
 
 
 def _mileage_per_year(vehicle: dict) -> Optional[float]:
@@ -678,7 +639,7 @@ def _compute_max_bid_v2(
     del state
     if mmr is None or mmr <= 0:
         return 0.0
-    ceiling = 0.80 if tier == "standard" else 0.88
+    ceiling = bid_ceiling_pct_for_tier(tier) or PREMIUM_BID_CEILING_PCT
     bid_value = _coerce_float(bid) if bid is not None else mmr * ceiling
     if bid_value is None or bid_value <= 0:
         bid_value = mmr * ceiling
@@ -760,7 +721,7 @@ def score_deal(
         recon_reserve += 300.0
     if bid_value is None or bid_value <= 0:
         buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
-        bid_ceiling_pct = 0.80 if vehicle_tier == "standard" else 0.88 if vehicle_tier == "premium" else None
+        bid_ceiling_pct = bid_ceiling_pct_for_tier(vehicle_tier)
         score_provenance = _build_score_provenance(
             lane=vehicle_tier,
             bid=bid_value,
@@ -829,7 +790,7 @@ def score_deal(
             "bid_ceiling_pct": bid_ceiling_pct,
             "max_bid": 0.0,
             "bid_headroom": 0.0,
-            "min_margin_target": 2500.0 if vehicle_tier == "standard" else 1500.0 if vehicle_tier == "premium" else None,
+            "min_margin_target": min_margin_for_tier(vehicle_tier),
             "ceiling_reason": "zero_bid",
             "ceiling_pass": False,
             "designated_lane": vehicle_tier,
@@ -920,7 +881,7 @@ def score_deal(
 
     trust_score = _current_bid_trust_score(auction_stage_hours_remaining, pricing_maturity)
 
-    bid_ceiling_pct = None if vehicle_tier == "rejected" else 0.80 if vehicle_tier == "standard" else 0.88
+    bid_ceiling_pct = bid_ceiling_pct_for_tier(vehicle_tier)
     max_bid = 0.0 if vehicle_tier == "rejected" else _compute_max_bid_v2(
         mmr,
         bid=bid_value,
@@ -930,7 +891,7 @@ def score_deal(
         tier=vehicle_tier,
     )
     bid_headroom = max_bid - bid_value
-    min_margin_target = None if vehicle_tier == "rejected" else 2500.0 if vehicle_tier == "standard" else 1500.0
+    min_margin_target = min_margin_for_tier(vehicle_tier)
     bid_ceiling_exceeded = vehicle_tier != "rejected" and max_bid > 0 and bid_value > max_bid
     margin_floor_failed = vehicle_tier != "rejected" and min_margin_target is not None and gross_margin < min_margin_target
     hard_rejected_by_economics = bid_ceiling_exceeded or margin_floor_failed

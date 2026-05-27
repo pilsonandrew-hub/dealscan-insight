@@ -45,14 +45,17 @@ Margin×0.35 + Velocity×0.25 + Segment×0.20 + Model×0.12 + Source×0.08
 - Every exception handler must log before returning generic error
 - Never swallow DB write failures silently
 
+## Canonical Business Rules Source
+- All money-path constants and gates live in `backend/business_rules/` — import from there; do not duplicate.
+- `.cursorrules` summarizes policy; `backend/business_rules/constants.py` is authoritative for CI and code.
+
 ## Known Issues Being Fixed (Don't Regress)
-- Standard lane bid ceiling must be 0.80, NOT 0.88
-- CURRENT_YEAR must be computed dynamically, not frozen at import time
-- score.py: STANDARD_YEAR_CUTOFF must be CURRENT_YEAR - 4, not CURRENT_YEAR - 10
-- score.py: Standard mileage max must be 50k, not 100k
+- Standard lane bid ceiling must be 0.80, NOT 0.88 (enforced in business_rules)
 - outcomes.py: get_outcomes_summary MUST filter by user_id
-- rover.py: Recommendations must enforce business rules before returning
+- rover.py: Recommendations must enforce business rules before returning (passes_rover_economics)
 - ds-allsurplus: webhook secret must come from env var, not hardcoded
+- Telegram callbacks require TELEGRAM_WEBHOOK_SECRET + TELEGRAM_OPERATOR_MAP
+- lifecycle/expire requires INTERNAL_API_SECRET or LIFECYCLE_CRON_SECRET
 
 ## Repo
 https://github.com/pilsonandrew-hub/dealscan-insight
