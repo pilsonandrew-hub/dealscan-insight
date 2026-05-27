@@ -2,10 +2,13 @@ from backend.business_rules.constants import (
     HOT_DEAL_ALERT_THRESHOLD,
     PREMIUM_BID_CEILING_PCT,
     PREMIUM_MIN_MARGIN,
+    PRICING_MATURITY_ALERT_ALLOWED,
+    PROXY_PRICING_ALERT_ALLOWED,
     STANDARD_BID_CEILING_PCT,
     STANDARD_MIN_MARGIN,
     STANDARD_MAX_MILEAGE,
 )
+from backend.business_rules.pricing import pricing_allows_hot_alert
 from backend.business_rules.gates import (
     bid_ceiling_pct_for_tier,
     determine_vehicle_tier,
