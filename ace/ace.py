@@ -116,6 +116,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip CI badge comparison (offline runs and tests)",
     )
 
+    hooks = subparsers.add_parser(
+        "hooks",
+        help="Install operational ACE git hooks (false-closure advisory)",
+    )
+    hooks_subparsers = hooks.add_subparsers(dest="hooks_command")
+    hooks_subparsers.add_parser(
+        "install",
+        help="Set core.hooksPath to ace/hooks/operational (non-blocking commit-msg advisory)",
+    )
+    hooks_subparsers.add_parser("status", help="Show whether operational ACE hooks are installed")
+
     show = subparsers.add_parser("show", help="Show a single item")
     show.add_argument("item_id")
     show.add_argument("--event-type")
@@ -1153,6 +1164,15 @@ def main(argv: list[str] | None = None) -> int:
             parser=parser,
             skip_ci=args.skip_ci,
         )
+
+    if command == "hooks":
+        from ace.hooks_install import run_hooks_command
+
+        hooks_command = getattr(args, "hooks_command", None)
+        if not hooks_command:
+            print("error=hooks command required (install, status)", file=sys.stderr)
+            return 1
+        return run_hooks_command(hooks_command)
 
     if command == "digest":
         try:
