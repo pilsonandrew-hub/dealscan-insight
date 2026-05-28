@@ -1,0 +1,147 @@
+"""Internal read-only DealerScope truth surfaces for governed operators."""
+from __future__ import annotations
+
+import logging
+import os
+from collections import Counter
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from fastapi import APIRouter, Header, HTTPException
+
+from webapp.database import supabase_client
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/internal", tags=["internal"])
+
+
+def _internal_secret() -> str:
+    return (
+        os.getenv("INTERNAL_API_SECRET", "").strip()
+        or os.getenv("LIFECYCLE_CRON_SECRET", "").strip()
+    )
+
+
+def verify_internal_secret(x_internal_secret: Optional[str]) -> None:
+    expected = _internal_secret()
+    if not expected:
+        logger.error("[INTERNAL_AUTH] INTERNAL_API_SECRET or LIFECYCLE_CRON_SECRET not configured")
+        raise HTTPException(status_code=503, detail="Internal authorization not configured")
+    if not x_internal_secret or x_internal_secret.strip() != expected:
+        logger.warning("[INTERNAL_AUTH] rejected unauthorized internal request")
+        raise HTTPException(status_code=401, detail="Invalid internal authorization")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _safe_count(table: str, filters: Optional[list[tuple[str, str, Any]]] = None) -> int:
+    query = supabase_client.table(table).select("id", count="exact")
+    for method, column, value in filters or []:
+        query = getattr(query, method)(column, value)
+    result = query.limit(1).execute()
+    return int(getattr(result, "count", None) or 0)
+
+
+def _safe_rows(table: str, select: str, *, order: Optional[tuple[str, bool]] = None, limit: int = 200, filters: Optional[list[tuple[str, str, Any]]] = None) -> list[dict[str, Any]]:
+    query = supabase_client.table(table).select(select)
+    for method, column, value in filters or []:
+        query = getattr(query, method)(column, value)
+    if order:
+        column, desc = order
+        query = query.order(column, desc=desc)
+    result = query.limit(limit).execute()
+    rows = getattr(result, "data", None) or []
+    return rows if isinstance(rows, list) else []
+
+
+def _status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for row in rows:
+        value = row.get(key)
+        if value is not None:
+            counter[str(value)] += 1
+    return dict(counter.most_common(20))
+
+
+def build_pipeline_truth() -> dict[str, Any]:
+    if supabase_client is None:
+        raise HTTPException(status_code=503, detail="Supabase service client unavailable")
+
+    opp_rows = _safe_rows(
+        "opportunities",
+        "id,is_active,dos_score,score,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date",
+        order=("created_at", True),
+        limit=1000,
+    )
+    active_rows = [row for row in opp_rows if row.get("is_active") is True]
+    active_dos80 = [
+        row for row in active_rows
+        if float(row.get("dos_score") or row.get("score") or 0) >= 80
+    ]
+
+    webhook_rows = _safe_rows(
+        "webhook_log",
+        "id,received_at,source,run_id,item_count,processing_status,error_message",
+        order=("received_at", True),
+        limit=25,
+    )
+    alert_rows = _safe_rows(
+        "alert_log",
+        "id,sent_at,channel,delivery_state,alert_type,dos_score",
+        order=("sent_at", True),
+        limit=25,
+    )
+    delivery_rows = _safe_rows(
+        "ingest_delivery_log",
+        "id,created_at,channel,status,error_message",
+        order=("created_at", True),
+        limit=200,
+    )
+
+    total_opportunities = _safe_count("opportunities")
+    active_total = _safe_count("opportunities", [("eq", "is_active", True)])
+    alerts_total = _safe_count("alert_log")
+
+    return {
+        "status": "ok",
+        "generated_at": _now_iso(),
+        "opportunities": {
+            "total": total_opportunities,
+            "active": active_total,
+            "sample_size": len(opp_rows),
+            "active_dos80_sample": len(active_dos80),
+            "active_dos80_missing_mileage_sample": sum(1 for row in active_dos80 if row.get("mileage") in (None, "", 0)),
+            "active_dos80_proxy_pricing_sample": sum(1 for row in active_dos80 if row.get("pricing_maturity") == "proxy"),
+            "active_dos80_missing_vin_sample": sum(1 for row in active_dos80 if not row.get("vin")),
+            "active_dos80_condition_unverified_sample": sum(1 for row in active_dos80 if str(row.get("condition_grade") or "").lower() in {"", "poor", "unknown"}),
+            "source_counts_sample": _status_counts(active_dos80, "source_site"),
+        },
+        "webhooks": {
+            "recent_count": len(webhook_rows),
+            "status_counts": _status_counts(webhook_rows, "processing_status"),
+            "latest": webhook_rows[:10],
+        },
+        "alerts": {
+            "total": alerts_total,
+            "recent_count": len(alert_rows),
+            "latest_sent_at": alert_rows[0].get("sent_at") if alert_rows else None,
+            "delivery_state_counts": _status_counts(alert_rows, "delivery_state"),
+            "latest": alert_rows[:10],
+        },
+        "deliveries": {
+            "recent_count": len(delivery_rows),
+            "channel_counts": _status_counts(delivery_rows, "channel"),
+            "status_counts": _status_counts(delivery_rows, "status"),
+            "latest_telegram_alert_created_at": next((row.get("created_at") for row in delivery_rows if row.get("channel") == "telegram_alert"), None),
+        },
+    }
+
+
+@router.get("/pipeline-truth", include_in_schema=False)
+def pipeline_truth(x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret")) -> dict[str, Any]:
+    """Return aggregate-only pipeline truth for governed internal operators."""
+    verify_internal_secret(x_internal_secret)
+    return build_pipeline_truth()
