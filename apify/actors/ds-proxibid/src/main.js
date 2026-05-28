@@ -133,8 +133,14 @@ function parseBid(text) {
 }
 
 function parseMileage(text) {
-    const m = normalize(text).replace(/,/g, '').match(/(\d[\d,]*)\s*(?:miles?|mi\.?)\b/i);
-    return m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
+    const normalized = normalize(text).replace(/,/g, '');
+    const direct = normalized.match(/\b(?:mileage|odometer(?:\s+shows)?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i)
+        ?? normalized.match(/\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)/i);
+    if (!direct) return null;
+    const value = parseFloat(direct[1]);
+    if (Number.isNaN(value) || value <= 0) return null;
+    const mileage = direct[2] ? Math.round(value * 1000) : Math.round(value);
+    return mileage > 0 && mileage <= 1000000 ? mileage : null;
 }
 
 function parseVin(text) {
@@ -296,6 +302,15 @@ const crawler = new PlaywrightCrawler({
     },
 });
 
+function stripHtmlToText(html) {
+    return normalize(String(html ?? '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&'));
+}
+
 async function enrichFromDetailPages(log) {
     const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
     const toScrape = lotsNeedingDetail.slice(0, Number(maxDetailPages) || 10);
@@ -304,63 +319,51 @@ async function enrichFromDetailPages(log) {
         return;
     }
 
-    log.info(`[DETAIL ENRICH] Scraping ${toScrape.length} Proxibid detail pages for VIN/mileage (bounded to avoid actor timeout)`);
+    log.info(`[DETAIL ENRICH] Fetching ${toScrape.length} Proxibid detail pages for VIN/mileage (bounded to avoid actor timeout)`);
     let vinFound = 0;
     let mileageFound = 0;
 
-    const lotByIndex = new Map(toScrape.map((lot, index) => [String(index), lot]));
-    const detailCrawler = new PlaywrightCrawler({
-        maxRequestsPerCrawl: toScrape.length,
-        maxConcurrency: 1,
-        requestHandlerTimeoutSecs: 60,
-        async requestHandler({ page, request, log: detailLog }) {
-            const lot = lotByIndex.get(String(request.userData.index));
-            if (!lot) {
-                detailLog.warning(`[DETAIL ENRICH] No lot mapping for index=${request.userData.index} url=${request.url}`);
-                return;
+    for (const lot of toScrape) {
+        try {
+            const response = await fetch(lot.listing_url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; DealerScopeBot/1.0; +https://dealscan-insight-production.up.railway.app)',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                },
+            });
+            if (!response.ok) {
+                log.warning(`[DETAIL ENRICH] HTTP ${response.status} for ${lot.listing_url}`);
+                continue;
             }
-            await page.waitForLoadState('domcontentloaded').catch(() => {});
-            await page.waitForTimeout(2000);
-            const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+            const bodyText = stripHtmlToText(await response.text());
 
             if (!lot.vin) {
                 const vinMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
-                    ?? bodyText.match(/Vehicle Identification Number[:\s]*([A-HJ-NPR-Z0-9]{17})\b/i)
+                    ?? bodyText.match(/\bVehicle Identification Number[:\s]*([A-HJ-NPR-Z0-9]{17})\b/i)
                     ?? bodyText.match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
                 if (vinMatch) {
                     lot.vin = vinMatch[1].toUpperCase();
                     vinFound++;
-                    detailLog.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
+                    log.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
                 }
             }
 
             if (!lot.mileage) {
-                const mileageMatch = bodyText.match(/\bMileage[:\s#\-]*([\d,]+)/i)
-                    ?? bodyText.match(/\bOdometer[:\s#\-]*([\d,]+)/i)
-                    ?? bodyText.match(/\b([\d,]{2,6})\s*(?:miles?|mi\b)/i);
-                if (mileageMatch) {
-                    const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
-                    if (!Number.isNaN(mileage) && mileage > 0 && mileage <= 1000000) {
-                        lot.mileage = mileage;
-                        mileageFound++;
-                        detailLog.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
-                    }
+                const mileage = parseMileage(bodyText);
+                if (mileage) {
+                    lot.mileage = mileage;
+                    mileageFound++;
+                    log.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
                 }
             }
 
-            await page.waitForTimeout(1000);
-        },
-        failedRequestHandler({ request, log: detailLog }) {
-            detailLog.warning(`[DETAIL ENRICH] Failed for ${request.url}`);
-        },
-    });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (err) {
+            log.warning(`[DETAIL ENRICH] Failed for ${lot.listing_url}: ${err.message}`);
+        }
+    }
 
-    await detailCrawler.run(toScrape.map((lot, index) => ({
-        url: lot.listing_url,
-        uniqueKey: `proxibid-detail-${index}-${lot.listing_url}`,
-        userData: { index: String(index) },
-    })));
-    log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages`);
+    log.info(`[DETAIL ENRICH] Complete: fetched ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
 try {
