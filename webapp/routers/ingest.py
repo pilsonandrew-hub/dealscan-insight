@@ -40,7 +40,11 @@ from backend.business_rules.constants import (
     DOS_SAVE_THRESHOLD,
     HIGH_RUST_STATES,
 )
-from backend.business_rules.gates import passes_ingest_margin_floor
+from backend.business_rules.gates import (
+    bid_ceiling_pct_for_tier,
+    min_margin_for_tier,
+    passes_ingest_margin_floor,
+)
 from backend.ingest.telegram_auth import resolve_operator_user_id, verify_telegram_secret_header
 from backend.ingest.gates import (
     LOW_RUST_STATES,
@@ -1549,8 +1553,8 @@ def normalize_apify_vehicle(
             "dos_premium": None,
             "dos_standard": None,
             "risk_flags": [],
-            "bid_ceiling_pct": 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None,
-            "min_margin_target": 1500 if vehicle_tier == "premium" else 2500 if vehicle_tier == "standard" else None,
+            "bid_ceiling_pct": bid_ceiling_pct_for_tier(vehicle_tier),
+            "min_margin_target": min_margin_for_tier(vehicle_tier),
             "run_id": run_id,
             "source_run_id": run_id,
         }

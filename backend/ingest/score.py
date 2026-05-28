@@ -587,7 +587,7 @@ def _compute_margin_score_v2(gross_margin: float) -> float:
         return 0.7
     if gross_margin >= 2000:
         return 0.55
-    if gross_margin >= 1500:
+    if gross_margin >= PREMIUM_MIN_MARGIN:
         return 0.45
     if gross_margin >= 500:
         return 0.35

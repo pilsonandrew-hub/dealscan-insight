@@ -22,6 +22,10 @@ ALLOWED_PREFIXES = (
 
 FORBIDDEN_PATTERNS = [
     (re.compile(r"wholesale_margin.*<\s*1500"), "flat $1500 margin gate"),
+    (re.compile(r"min_margin_target\s*=\s*1500\s+if"), "inline min_margin_target premium literal"),
+    (re.compile(r"bid_ceiling_pct\s*=\s*0\.88\s+if"), "inline bid_ceiling_pct premium literal"),
+    (re.compile(r'"min_margin_target":\s*1500\s+if'), "dict min_margin_target premium literal"),
+    (re.compile(r'"bid_ceiling_pct":\s*0\.88\s+if'), "dict bid_ceiling_pct premium literal"),
     (re.compile(r'HOT_DEAL_MIN_SCORE",\s*70'), "hot deal threshold 70"),
     (re.compile(r"min_score=env_float\([^)]*70\.0"), "alert min_score default 70"),
     (re.compile(r"ANDREW_UUID"), "hardcoded operator UUID"),
