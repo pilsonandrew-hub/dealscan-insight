@@ -65,6 +65,7 @@ def test_auction_mode_with_market_value_does_not_pass_fake_zero_bid_to_score_dea
     assert result["auction_mode"] is True
     assert result["verdict"] == "INSUFFICIENT_BID_DATA"
     assert result["dos"] is None
+    assert result["adjusted_dos"] is None
     assert result["retail_market_value"] == 30000
     assert "insufficient bid data" in result["verdict_reason"].lower()
 
