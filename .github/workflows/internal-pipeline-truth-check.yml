@@ -1,0 +1,68 @@
+name: Internal Pipeline Truth Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL || 'https://dealscan-insight-production.up.railway.app' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch sanitized internal pipeline truth
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          backend_base_url = os.environ["BACKEND_BASE_URL"].rstrip("/")
+
+          req = urllib.request.Request(
+              f"{supabase_url}/rest/v1/app_config?select=key,value&key=eq.INTERNAL_API_SECRET",
+              headers={
+                  "apikey": service_key,
+                  "Authorization": f"Bearer {service_key}",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              rows = json.loads(resp.read().decode())
+
+          internal_secret = ""
+          if rows and isinstance(rows[0], dict):
+              internal_secret = str(rows[0].get("value") or "").strip()
+          if not internal_secret:
+              print("INTERNAL_API_SECRET missing from app_config", file=sys.stderr)
+              raise SystemExit(1)
+
+          truth_req = urllib.request.Request(
+              f"{backend_base_url}/api/internal/pipeline-truth",
+              headers={"X-Internal-Secret": internal_secret},
+          )
+          try:
+              with urllib.request.urlopen(truth_req, timeout=45) as resp:
+                  truth = json.loads(resp.read().decode())
+          except urllib.error.HTTPError as exc:
+              print(f"pipeline-truth HTTP {exc.code}", file=sys.stderr)
+              print(exc.read().decode(errors="replace")[:500], file=sys.stderr)
+              raise
+
+          sanitized = {
+              "alerts_runtime": truth.get("alerts_runtime"),
+              "alerts": truth.get("alerts"),
+              "deliveries": truth.get("deliveries"),
+          }
+          print(json.dumps(sanitized, indent=2, sort_keys=True))
+          PY
