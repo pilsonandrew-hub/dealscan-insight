@@ -70,6 +70,14 @@
       "description": "Vehicle search keyword (e.g. Tesla Model 3)",
       "editor": "textfield",
       "default": ""
+    },
+    "runtimeBudgetMs": {
+      "title": "Runtime Budget Milliseconds",
+      "type": "integer",
+      "description": "Soft wall-clock budget used to stop pagination/detail enrichment before the actor times out",
+      "default": 330000,
+      "minimum": 60000,
+      "maximum": 540000
     }
   }
 }

@@ -24,6 +24,7 @@ import { randomUUID } from 'crypto';
 
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
+import { createRuntimeBudget } from './runtime_budget.js';
 
 const HIGH_RUST_STATES = new Set([
     'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA',
@@ -43,6 +44,10 @@ const GOVDEALS_FACET_FIELDS = [
 ];
 const DEFAULT_DISPLAY_ROWS = 50;
 const HARD_MAX_PAGES = 200;
+const DEFAULT_RUNTIME_BUDGET_MS = 330000;
+const NAVIGATION_BUDGET_REQUIRED_MS = 90000;
+const PAGINATION_PAGE_REQUIRED_MS = 12000;
+const DETAIL_PAGE_REQUIRED_MS = 45000;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -72,7 +77,8 @@ const CONDITION_REJECT_PATTERNS = [
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = HARD_MAX_PAGES, minBid = 500, maxBid = 75000, searchQuery = "" } = input;
+const { maxPages = HARD_MAX_PAGES, minBid = 500, maxBid = 75000, searchQuery = "", runtimeBudgetMs = DEFAULT_RUNTIME_BUDGET_MS } = input;
+const runtimeBudget = createRuntimeBudget({ totalMs: runtimeBudgetMs });
 
 const GOVDEALS_VEHICLE_SEARCH_URL = searchQuery
     ? `${GOVDEALS_VEHICLE_SEARCH_URL_BASE}&kWord=${encodeURIComponent(searchQuery)}`
@@ -245,6 +251,7 @@ const crawler = new PlaywrightCrawler({
         } else {
             for (const categoryUrl of VEHICLE_CATEGORY_URLS) {
                 if (capturedApi.interceptedLots.length >= 20) break;
+                if (!runtimeBudget.shouldContinue(NAVIGATION_BUDGET_REQUIRED_MS, `navigation to ${categoryUrl}`)) break;
                 log.info(`Navigating to: ${categoryUrl}`);
                 await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
                 await page.waitForTimeout(6000);
@@ -323,7 +330,7 @@ const crawler = new PlaywrightCrawler({
             }
 
             // Step 3: Detail enrichment for VIN/mileage before pushing lots.
-            await enrichFromDetailPages(page, passingLots, log);
+            await enrichFromDetailPages(page, passingLots, log, runtimeBudget);
 
             // Step 4: Push all passing lots after detail enrichment completes
             for (const lot of passingLots) {
@@ -414,7 +421,7 @@ function isBroadVehiclePayload(candidate, reference = null) {
  * Visit GovDeals detail pages for lots missing VIN or mileage.
  * Caps at MAX_DETAIL_PAGES to keep scheduled runs bounded and rate-limited.
  */
-async function enrichFromDetailPages(page, lots, log) {
+async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage));
     const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
 
@@ -428,6 +435,7 @@ async function enrichFromDetailPages(page, lots, log) {
     let mileageFound = 0;
 
     for (const lot of toScrape) {
+        if (!budget.shouldContinue(DETAIL_PAGE_REQUIRED_MS, 'GovDeals detail enrichment')) break;
         try {
             await page.goto(lot.listing_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
             // GovDeals is Angular SPA — wait for content to render
@@ -486,6 +494,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
 
     // Paginate the REST endpoint directly using the Maestro `page` parameter.
     for (let pageNum = 1; pageNum <= Math.min(totalPages, HARD_MAX_PAGES); pageNum++) {
+        if (!runtimeBudget.shouldContinue(PAGINATION_PAGE_REQUIRED_MS, `GovDeals pagination page ${pageNum}`)) break;
         const payload = {
             ...ensureBroadVehiclePayload(searchPayload),
             page: pageNum,
