@@ -9,20 +9,28 @@ Endpoints:
 import json
 import logging
 import uuid
+import os
 from datetime import datetime, timezone
 
-import redis.asyncio as redis
-from fastapi import APIRouter, HTTPException
+try:
+    import redis.asyncio as redis
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal test envs
+    redis = None
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
-from supabase import create_client
+from supabase import Client, create_client
 
 from config.settings import settings
+from supabase.lib.client_options import ClientOptions
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sonar", tags=["sonar"])
 
 JOB_TTL_SECONDS = 300
+
+SUPABASE_URL = settings.supabase_url
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -56,15 +64,64 @@ class SonarResult(BaseModel):
     photoUrl: str = ""
 
 
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    token = authorization.replace("Bearer ", "", 1).strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+    return token
+
+
+def _get_auth_client(token: str) -> Client:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(status_code=503, detail="Authentication service unavailable")
+    return create_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=ClientOptions(headers={"Authorization": f"Bearer {token}"}),
+    )
+
+
+def _extract_user_id(user_response) -> str | None:
+    user = getattr(user_response, "user", None)
+    if user is None and isinstance(user_response, dict):
+        user = user_response.get("user") or (user_response.get("data") or {}).get("user")
+    if user is None:
+        return None
+    if isinstance(user, dict):
+        return user.get("id") or user.get("sub")
+    return getattr(user, "id", None) or getattr(user, "sub", None)
+
+
+def require_sonar_user_id(authorization: str | None = Header(None, alias="Authorization")) -> str:
+    """Validate the caller Supabase JWT and return the authenticated user id."""
+    token = _extract_bearer_token(authorization)
+    try:
+        user_response = _get_auth_client(token).auth.get_user(token)
+        user_id = _extract_user_id(user_response)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("[SONAR_AUTH] JWT validation failed: %s", exc)
+        raise HTTPException(status_code=401, detail="Authentication failed") from exc
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+    return str(user_id)
+
 # ── Redis helper ──────────────────────────────────────────────────────────────
 
-_redis_pool: redis.Redis | None = None
+_redis_pool = None
 
 
-async def _get_redis() -> redis.Redis | None:
+async def _get_redis():
     global _redis_pool
     if _redis_pool is not None:
         return _redis_pool
+    if redis is None:
+        return None
     try:
         _redis_pool = redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2)
         await _redis_pool.ping()
@@ -182,8 +239,9 @@ def _get_supabase():
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/search")
-async def sonar_search(req: SearchRequest):
+async def sonar_search(req: SearchRequest, authorization: str | None = Header(None, alias="Authorization")):
     """Query the Supabase opportunities index and return results instantly."""
+    user_id = require_sonar_user_id(authorization)
     sb = _get_supabase()
     job_id = uuid.uuid4().hex
 
@@ -217,6 +275,7 @@ async def sonar_search(req: SearchRequest):
     # Cache in Redis for status endpoint
     job_data = {
         "job_id": job_id,
+        "user_id": user_id,
         "status": "complete",
         "results": results,
         "sources": {"Database": "done"},
@@ -224,7 +283,7 @@ async def sonar_search(req: SearchRequest):
     }
     await _store_job(job_id, job_data)
 
-    logger.info(f"[SONAR] Search complete job={job_id} query={req.query!r} results={len(results)}")
+    logger.info(f"[SONAR] Search complete job={job_id} user={user_id} query={req.query!r} results={len(results)}")
 
     return {
         "job_id": job_id,
@@ -236,11 +295,14 @@ async def sonar_search(req: SearchRequest):
 
 
 @router.get("/status/{job_id}")
-async def sonar_status(job_id: str):
+async def sonar_status(job_id: str, authorization: str | None = Header(None, alias="Authorization")):
     """Retrieve cached search results by job ID."""
+    user_id = require_sonar_user_id(authorization)
     job = await _load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
+    if str(job.get("user_id") or "") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
 
     return {
         "status": job.get("status", "complete"),

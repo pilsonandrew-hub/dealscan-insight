@@ -1,8 +1,21 @@
 // Sonar API — real Apify backend via /api/sonar/*
 
 import { settings } from '@/config/settings';
+import { supabase } from '@/integrations/supabase/client';
 
 const API_BASE = settings.api.baseUrl;
+
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
+
+function buildAuthHeaders(token: string | null, extra?: Record<string, string>): Record<string, string> {
+  return {
+    ...(extra || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 export interface SonarResult {
   id: string;
@@ -85,10 +98,15 @@ export async function sonarSearchStreaming(
   params: SonarSearchParams,
   onBatch: (batch: SonarBatch) => void,
 ): Promise<void> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw new Error('You must be logged in to use Sonar.');
+  }
+
   // 1. Start search
   const startResp = await fetch(`${API_BASE}/api/sonar/search`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildAuthHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       query: params.query,
       min_price: params.minPrice,
@@ -118,7 +136,9 @@ export async function sonarSearchStreaming(
         }
 
         try {
-          const statusResp = await fetch(`${API_BASE}/api/sonar/status/${job_id}`);
+          const statusResp = await fetch(`${API_BASE}/api/sonar/status/${job_id}`, {
+            headers: buildAuthHeaders(token),
+          });
           if (!statusResp.ok) {
             throw new Error(`Status poll failed: ${statusResp.status}`);
           }
