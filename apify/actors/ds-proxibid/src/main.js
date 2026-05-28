@@ -79,6 +79,7 @@ const {
     minBid = 500,
     maxBid = 50000,
     minYear = new Date().getFullYear() - 10,
+    maxDetailPages = 100,
 } = input;
 
 const CATEGORY_URLS = searchQuery
@@ -97,6 +98,7 @@ let totalFound = 0;
 let totalPassed = 0;
 const seenLotIds = new Set();
 const sampleLocations = [];
+const passingLots = [];
 
 function normalize(text) {
     return String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -188,7 +190,7 @@ const crawler = new PlaywrightCrawler({
 
             log.info(`[Proxibid] Found ${lotLinks.length} lot links on ${url}`);
 
-            // Extract card data directly from list page (faster than visiting each detail)
+            // Extract card data directly from list page, then enrich missing buyer-grade truth from detail pages.
             const cards = await page.evaluate(() => {
                 const articles = [...document.querySelectorAll('article')];
                 return articles.map(article => {
@@ -255,7 +257,7 @@ const crawler = new PlaywrightCrawler({
 
                 log.info(`[PASS] ${card.title} | $${bid} | ${state}`);
 
-                await Actor.pushData({
+                passingLots.push({
                     title: card.title,
                     year,
                     make: make.charAt(0).toUpperCase() + make.slice(1),
@@ -294,10 +296,72 @@ const crawler = new PlaywrightCrawler({
     },
 });
 
+async function enrichFromDetailPages(log) {
+    const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
+    const toScrape = lotsNeedingDetail.slice(0, Number(maxDetailPages) || 100);
+    if (toScrape.length === 0) {
+        log.info('[DETAIL ENRICH] All Proxibid lots already have VIN/mileage or no detail URLs — skipping');
+        return;
+    }
+
+    log.info(`[DETAIL ENRICH] Scraping ${toScrape.length} Proxibid detail pages for VIN/mileage`);
+    let vinFound = 0;
+    let mileageFound = 0;
+
+    const detailCrawler = new PlaywrightCrawler({
+        maxRequestsPerCrawl: toScrape.length,
+        maxConcurrency: 1,
+        requestHandlerTimeoutSecs: 60,
+        async requestHandler({ page, request, log: detailLog }) {
+            const lot = request.userData.lot;
+            await page.waitForLoadState('domcontentloaded').catch(() => {});
+            await page.waitForTimeout(2000);
+            const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+
+            if (!lot.vin) {
+                const vinMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
+                    ?? bodyText.match(/Vehicle Identification Number[:\s]*([A-HJ-NPR-Z0-9]{17})\b/i)
+                    ?? bodyText.match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
+                if (vinMatch) {
+                    lot.vin = vinMatch[1].toUpperCase();
+                    vinFound++;
+                    detailLog.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
+                }
+            }
+
+            if (!lot.mileage) {
+                const mileageMatch = bodyText.match(/\bMileage[:\s#\-]*([\d,]+)/i)
+                    ?? bodyText.match(/\bOdometer[:\s#\-]*([\d,]+)/i)
+                    ?? bodyText.match(/\b([\d,]{2,6})\s*(?:miles?|mi\b)/i);
+                if (mileageMatch) {
+                    const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
+                    if (!Number.isNaN(mileage) && mileage > 0 && mileage <= 1000000) {
+                        lot.mileage = mileage;
+                        mileageFound++;
+                        detailLog.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
+                    }
+                }
+            }
+
+            await page.waitForTimeout(1000);
+        },
+        failedRequestHandler({ request, log: detailLog }) {
+            detailLog.warning(`[DETAIL ENRICH] Failed for ${request.url}`);
+        },
+    });
+
+    await detailCrawler.run(toScrape.map(lot => ({ url: lot.listing_url, userData: { lot } })));
+    log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages`);
+}
+
 try {
     await crawler.run(CATEGORY_URLS.map(url => ({ url, userData: { label: 'LIST', page: 1 } })));
+    await enrichFromDetailPages(console);
+    for (const lot of passingLots) {
+        await Actor.pushData(lot);
+    }
     console.log('[Proxibid] Sample locations:', sampleLocations);
-    console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed}`);
+    console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed} | Pushed: ${passingLots.length}`);
 } catch (err) {
     console.error(`[PROXIBID] Fatal error: ${err.message}`);
 } finally {
