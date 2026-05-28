@@ -46,6 +46,7 @@ from backend.business_rules.gates import (
     passes_ingest_margin_floor,
 )
 from backend.ingest.telegram_auth import resolve_operator_user_id, verify_telegram_secret_header
+from backend.ingest.tavily_enrichment import apply_tavily_enrichment
 from backend.ingest.gates import (
     LOW_RUST_STATES,
     TARGET_STATES,
@@ -1574,6 +1575,7 @@ def normalize_apify_vehicle(
         normalized["is_duplicate"] = False
         normalized["canonical_record_id"] = None
         normalized["duplicate_count"] = 0
+        normalized = apply_tavily_enrichment(normalized)
         return normalized
     except Exception as e:
         logger.error(f"[INGEST] Normalize error: {e}")
