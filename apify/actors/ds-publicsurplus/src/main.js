@@ -444,6 +444,16 @@ const crawler = new PlaywrightCrawler({
                     vehicle.vin = vin;
                     log.info(`[VIN DETAIL] Found VIN ${vin} for: ${vehicle.title}`);
                 }
+                const mileageMatch = bodyText.match(/Mileage[:\s#\-]*([\d,]+)/i)
+                    ?? bodyText.match(/Odometer[:\s#\-]*([\d,]+)/i)
+                    ?? bodyText.match(/([\d,]{2,6})\s*(?:miles?|mi)/i);
+                if (!vehicle.mileage && mileageMatch) {
+                    const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
+                    if (!Number.isNaN(mileage) && mileage > 0) {
+                        vehicle.mileage = mileage;
+                        log.info(`[MILEAGE DETAIL] Found mileage ${mileage} for: ${vehicle.title}`);
+                    }
+                }
             } catch (err) {
                 log.warning(`[VIN DETAIL] Failed for ${request.url}: ${err.message}`);
             }

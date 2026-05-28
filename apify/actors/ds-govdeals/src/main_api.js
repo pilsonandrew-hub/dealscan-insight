@@ -322,14 +322,10 @@ const crawler = new PlaywrightCrawler({
                 log.warning('Cannot paginate — searchPayload or searchUrl missing');
             }
 
-            // Step 3: VIN enrichment — only run for Sonar searches, skip for scheduled scrapes
-            if (searchQuery) {
-                await scrapeDetailPagesForVin(page, passingLots, log);
-            } else {
-                log.info("[VIN DETAIL] Skipping detail scrape for scheduled run (no searchQuery)");
-            }
+            // Step 3: Detail enrichment for VIN/mileage before pushing lots.
+            await enrichFromDetailPages(page, passingLots, log);
 
-            // Step 4: Push all passing lots after VIN enrichment completes
+            // Step 4: Push all passing lots after detail enrichment completes
             for (const lot of passingLots) {
                 await Actor.pushData(lot);
             }
@@ -415,21 +411,21 @@ function isBroadVehiclePayload(candidate, reference = null) {
 }
 
 /**
- * Visit GovDeals detail pages for lots missing a VIN.
- * Caps at MAX_DETAIL_PAGES (200) to stay within Apify free tier limits.
- * Rate-limited to ~1 req/sec.
+ * Visit GovDeals detail pages for lots missing VIN or mileage.
+ * Caps at MAX_DETAIL_PAGES to keep scheduled runs bounded and rate-limited.
  */
-async function scrapeDetailPagesForVin(page, lots, log) {
-    const lotsWithoutVin = lots.filter(l => !l.vin && l.listing_url);
-    const toScrape = lotsWithoutVin.slice(0, MAX_DETAIL_PAGES);
+async function enrichFromDetailPages(page, lots, log) {
+    const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage));
+    const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
 
     if (toScrape.length === 0) {
-        log.info('[VIN DETAIL] All lots already have VINs or no detail URLs — skipping detail scrape');
+        log.info('[DETAIL ENRICH] All lots already have VIN/mileage or no detail URLs — skipping detail scrape');
         return;
     }
 
-    log.info(`[VIN DETAIL] Scraping detail pages for ${toScrape.length} lots without VIN`);
+    log.info(`[DETAIL ENRICH] Scraping detail pages for ${toScrape.length} lots missing VIN/mileage`);
     let vinFound = 0;
+    let mileageFound = 0;
 
     for (const lot of toScrape) {
         try {
@@ -444,20 +440,32 @@ async function scrapeDetailPagesForVin(page, lots, log) {
                 ?? bodyText.match(/Vehicle Identification Number[:\s]*([A-HJ-NPR-Z0-9]{17})\b/i);
             const rawMatch = vinLabelMatch ?? bodyText.match(VIN_PATTERN);
 
-            if (rawMatch) {
+            if (!lot.vin && rawMatch) {
                 lot.vin = rawMatch[1].toUpperCase();
                 vinFound++;
                 log.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
             }
 
+            const mileageMatch = bodyText.match(/\bMileage[:\s#\-]*([\d,]+)/i)
+                ?? bodyText.match(/\bOdometer[:\s#\-]*([\d,]+)/i)
+                ?? bodyText.match(/\b([\d,]{2,6})\s*(?:miles?|mi\b)/i);
+            if (!lot.mileage && mileageMatch) {
+                const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
+                if (!Number.isNaN(mileage) && mileage > 0) {
+                    lot.mileage = mileage;
+                    mileageFound++;
+                    log.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
+                }
+            }
+
             // ~1 req/sec
             await page.waitForTimeout(1000);
         } catch (err) {
-            log.warning(`[VIN DETAIL] Failed for ${lot.listing_url}: ${err.message}`);
+            log.warning(`[DETAIL ENRICH] Failed for ${lot.listing_url}: ${err.message}`);
         }
     }
 
-    log.info(`[VIN DETAIL] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs`);
+    log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
 
