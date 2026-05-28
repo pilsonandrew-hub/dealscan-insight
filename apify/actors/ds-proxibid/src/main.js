@@ -66,6 +66,8 @@ const CONDITION_REJECT_PATTERNS = [
     /\bwreck(?:ed)?\b/i,
     /\btotal(?:ed|led)\b/i,
     /\bnot\s+running\b/i,
+    /\bdo\s+not\s+operate\b/i,
+    /\bnot\s+operable\b/i,
     /\bnon[\s-]?running\b/i,
     /\bbad\s+transmission\b/i,
     /\btransmission\s+(?:bad|issue|issues|problem|problems)\b/i,
@@ -165,7 +167,7 @@ function applyBuyerGradeFilters(lot) {
     const reasons = [];
     const text = `${lot.title ?? ''} ${lot.detail_text ?? ''}`;
     if (hasConditionReject(text)) reasons.push('condition_reject');
-    if (lot.mileage !== null && lot.mileage !== undefined && lot.mileage > 100000) reasons.push('mileage_over_100k');
+    if (lot.mileage !== null && lot.mileage !== undefined && lot.mileage > 50000) reasons.push('mileage_over_50k');
     return reasons;
 }
 
