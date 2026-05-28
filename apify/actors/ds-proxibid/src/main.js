@@ -79,7 +79,7 @@ const {
     minBid = 500,
     maxBid = 50000,
     minYear = new Date().getFullYear() - 10,
-    maxDetailPages = 100,
+    maxDetailPages = 10,
 } = input;
 
 const CATEGORY_URLS = searchQuery
@@ -298,13 +298,13 @@ const crawler = new PlaywrightCrawler({
 
 async function enrichFromDetailPages(log) {
     const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
-    const toScrape = lotsNeedingDetail.slice(0, Number(maxDetailPages) || 100);
+    const toScrape = lotsNeedingDetail.slice(0, Number(maxDetailPages) || 10);
     if (toScrape.length === 0) {
         log.info('[DETAIL ENRICH] All Proxibid lots already have VIN/mileage or no detail URLs — skipping');
         return;
     }
 
-    log.info(`[DETAIL ENRICH] Scraping ${toScrape.length} Proxibid detail pages for VIN/mileage`);
+    log.info(`[DETAIL ENRICH] Scraping ${toScrape.length} Proxibid detail pages for VIN/mileage (bounded to avoid actor timeout)`);
     let vinFound = 0;
     let mileageFound = 0;
 
