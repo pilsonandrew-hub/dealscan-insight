@@ -153,6 +153,14 @@ function hasConditionReject(text) {
     return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower));
 }
 
+function applyBuyerGradeFilters(lot) {
+    const reasons = [];
+    const text = `${lot.title ?? ''} ${lot.detail_text ?? ''}`;
+    if (hasConditionReject(text)) reasons.push('condition_reject');
+    if (lot.mileage !== null && lot.mileage !== undefined && lot.mileage > 100000) reasons.push('mileage_over_100k');
+    return reasons;
+}
+
 function parseLotId(url) {
     const m = url.match(/\/lotInformation\/(\d+)/i);
     return m ? m[1] : null;
@@ -245,11 +253,10 @@ const crawler = new PlaywrightCrawler({
                 if (seenLotIds.has(card.lotId)) continue;
                 seenLotIds.add(card.lotId);
 
-                if (hasConditionReject(card.title)) continue;
                 if (!make) continue;
                 if (!year || year < minYear) continue;
                 if (bid > 0 && (bid < minBid || bid > maxBid)) continue;
-                if (mileage !== null && mileage > 100000) continue;
+                if (applyBuyerGradeFilters({ title: card.title, mileage }).length > 0) continue;
                 if (!state || !US_STATES.has(state)) continue;
                 if (HIGH_RUST.has(state)) {
                     const currentYear = new Date().getFullYear();
@@ -322,6 +329,7 @@ async function enrichFromDetailPages(log) {
     log.info(`[DETAIL ENRICH] Fetching ${toScrape.length} Proxibid detail pages for VIN/mileage (bounded to avoid actor timeout)`);
     let vinFound = 0;
     let mileageFound = 0;
+    let rejectedAfterDetail = 0;
 
     for (const lot of toScrape) {
         try {
@@ -336,6 +344,7 @@ async function enrichFromDetailPages(log) {
                 continue;
             }
             const bodyText = stripHtmlToText(await response.text());
+            lot.detail_text = bodyText;
 
             if (!lot.vin) {
                 const vinMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
@@ -357,23 +366,38 @@ async function enrichFromDetailPages(log) {
                 }
             }
 
+            const rejectReasons = applyBuyerGradeFilters(lot);
+            if (rejectReasons.length > 0) {
+                lot.rejected_after_detail = true;
+                lot.reject_reasons = rejectReasons;
+                rejectedAfterDetail++;
+                log.info(`[DETAIL REJECT] ${rejectReasons.join(',')} — ${lot.title}`);
+            }
+
             await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (err) {
             log.warning(`[DETAIL ENRICH] Failed for ${lot.listing_url}: ${err.message}`);
         }
     }
 
-    log.info(`[DETAIL ENRICH] Complete: fetched ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages`);
+    log.info(`[DETAIL ENRICH] Complete: fetched ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages, rejected ${rejectedAfterDetail}`);
+}
+
+function publishableLots() {
+    return passingLots
+        .filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)
+        .map(({ detail_text, rejected_after_detail, reject_reasons, ...lot }) => lot);
 }
 
 try {
     await crawler.run(CATEGORY_URLS.map(url => ({ url, userData: { label: 'LIST', page: 1 } })));
     await enrichFromDetailPages(console);
-    for (const lot of passingLots) {
+    const lotsToPush = publishableLots();
+    for (const lot of lotsToPush) {
         await Actor.pushData(lot);
     }
     console.log('[Proxibid] Sample locations:', sampleLocations);
-    console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed} | Pushed: ${passingLots.length}`);
+    console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed list filters: ${totalPassed} | Pushed: ${lotsToPush.length}`);
 } catch (err) {
     console.error(`[PROXIBID] Fatal error: ${err.message}`);
 } finally {
