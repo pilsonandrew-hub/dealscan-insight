@@ -89,7 +89,7 @@ const {
     minBid = 500,
     maxBid = 50000,
     minYear = new Date().getFullYear() - 10,
-    maxDetailPages = 10,
+    maxDetailPages = 50,
 } = input;
 
 const CATEGORY_URLS = searchQuery
@@ -330,7 +330,8 @@ function stripHtmlToText(html) {
 
 async function enrichFromDetailPages(log) {
     const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
-    const toScrape = lotsNeedingDetail.slice(0, Number(maxDetailPages) || 10);
+    const detailLimit = Number(maxDetailPages) || 50;
+    const toScrape = lotsNeedingDetail.slice(0, detailLimit);
     if (toScrape.length === 0) {
         log.info('[DETAIL ENRICH] All Proxibid lots already have VIN/mileage or no detail URLs — skipping');
         return;

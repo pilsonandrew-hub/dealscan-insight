@@ -11,4 +11,10 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('do\\s+not\\s+operate');
     expect(source).toContain('not\\s+operable');
   });
+
+  test('defaults detail enrichment to 50 pages while preserving input override', () => {
+    expect(source).toContain('maxDetailPages = 50');
+    expect(source).toContain('const detailLimit = Number(maxDetailPages) || 50;');
+    expect(source).toContain('lotsNeedingDetail.slice(0, detailLimit)');
+  });
 });

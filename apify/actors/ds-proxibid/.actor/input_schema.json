@@ -17,6 +17,15 @@
       "description": "Vehicle search keyword (e.g. Tesla Model 3)",
       "editor": "textfield",
       "default": ""
+    },
+    "maxDetailPages": {
+      "title": "Max Detail Pages",
+      "type": "integer",
+      "description": "Maximum Proxibid detail pages to fetch per run for VIN/mileage enrichment before pushing rows",
+      "default": 50,
+      "minimum": 0,
+      "maximum": 150,
+      "editor": "number"
     }
   }
 }
