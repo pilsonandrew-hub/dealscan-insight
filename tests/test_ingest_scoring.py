@@ -731,3 +731,45 @@ def test_near_ceiling_bid_still_requires_ai_confidence():
     # Just assert it doesn't crash and returns valid structure
     assert "ceiling_pass" in result
     assert "dos_score" in result
+
+
+def test_normalize_apify_vehicle_preserves_detail_condition_fields_for_scoring():
+    item = {
+        "title": "2024 Ford F-150 XL",
+        "year": 2024,
+        "make": "Ford",
+        "model": "F-150 XL",
+        "state": "CA",
+        "current_bid": 12000,
+        "mileage": 24000,
+        "listing_url": "https://example.com/lot/detail-fields",
+        "description": "Clean title. Runs and drives fine.",
+        "photos": ["https://example.com/photo.jpg"],
+        "damage_type": "none",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="run-detail-fields")
+
+    assert normalized is not None
+    assert normalized["description"] == "Clean title. Runs and drives fine."
+    assert normalized["photos"] == ["https://example.com/photo.jpg"]
+    assert normalized["damage_type"] == "none"
+
+
+def test_normalize_apify_vehicle_uses_detail_text_description_alias():
+    item = {
+        "title": "2024 Toyota Tacoma",
+        "year": 2024,
+        "make": "Toyota",
+        "model": "Tacoma",
+        "state": "CA",
+        "current_bid": 15000,
+        "mileage": 22000,
+        "listing_url": "https://example.com/lot/detail-text",
+        "detail_text": "Vehicle does not start. No start condition.",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="run-detail-text")
+
+    assert normalized is not None
+    assert normalized["description"] == "Vehicle does not start. No start condition."

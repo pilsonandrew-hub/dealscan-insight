@@ -1542,6 +1542,9 @@ def normalize_apify_vehicle(
             "doc_fee": doc_fee,
             "auction_fees": auction_fees,
             "mileage": mileage,
+            "description": item.get("description") or item.get("detail_text") or item.get("assetLongDesc") or "",
+            "photos": photos,
+            "damage_type": item.get("damage_type") or item.get("damageType") or "",
             "state": state,
             "location": (
                 item.get("location") or
