@@ -46,7 +46,11 @@ const App = () => (
                     <Dashboard />
                   </ProtectedRoute>
                 } />
-                <Route path="/deal/:id" element={<DealDetail />} />
+                <Route path="/deal/:id" element={
+                  <ProtectedRoute>
+                    <DealDetail />
+                  </ProtectedRoute>
+                } />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
