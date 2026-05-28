@@ -304,7 +304,9 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     # a current bid/acquisition estimate are explicitly insufficient instead of
     # being silently scored as DOS=0.
     if auction_mode:
-        reason = "Current bid or acquisition estimate required for Recon scoring"
+        reason = (
+            "Insufficient bid data: current bid or acquisition estimate required for Recon scoring"
+        )
         return {
             "id": None,
             "auction_mode": True,

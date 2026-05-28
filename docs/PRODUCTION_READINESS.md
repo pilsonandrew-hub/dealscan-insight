@@ -30,8 +30,9 @@ SUPABASE_DB_URL='postgresql://...' python3 scripts/audit_supabase_rls.py
 
 Expected behavior:
 
-- `status: "PASS"` exits `0` only when `public.opportunities` exists, table-level RLS is enabled, and no `public`/`anon` SELECT or ALL policy is present.
-- `status: "FAIL"` exits non-zero when RLS is disabled, the table is missing, or any public/anon read policy exists, including permissive `USING (true)`.
+- **PASS** — exit code `0`, JSON `"status": "PASS"`, `table.rls_enabled` is true, and no `public`/`anon` `SELECT` or `ALL` policy.
+- **FAIL** — exit code `1`, JSON `"status": "FAIL"` with `failures` (RLS disabled, missing table, public/anon read policy, permissive `USING (true)`, missing env, or DB connection error).
+- Missing `SUPABASE_DB_URL` / `DATABASE_URL` is **FAIL**, not skip.
 
 Apply migration `supabase/migrations/20260525_opportunities_rls_single_operator.sql` if the audit fails on public read policies or disabled RLS.
 

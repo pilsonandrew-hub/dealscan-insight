@@ -125,7 +125,16 @@ def main() -> int:
         print(json.dumps({"status": "FAIL", "failures": ["Set SUPABASE_DB_URL or DATABASE_URL to audit live RLS."]}, indent=2))
         return 1
 
-    report = audit_from_dsn(dsn)
+    try:
+        report = audit_from_dsn(dsn)
+    except Exception as exc:
+        report = {
+            "status": "FAIL",
+            "failures": [f"RLS audit query failed: {exc}"],
+        }
+        print(json.dumps(report, indent=2, default=str))
+        return 1
+
     print(json.dumps(report, indent=2, default=str))
     return 0 if report.get("status") == "PASS" else 1
 

@@ -66,4 +66,63 @@ def test_auction_mode_with_market_value_does_not_pass_fake_zero_bid_to_score_dea
     assert result["verdict"] == "INSUFFICIENT_BID_DATA"
     assert result["dos"] is None
     assert result["retail_market_value"] == 30000
-    assert "required" in result["verdict_reason"]
+    assert "insufficient bid data" in result["verdict_reason"].lower()
+
+
+class _SupabaseWithInsert(_Supabase):
+    def __init__(self, comp_rows):
+        super().__init__(comp_rows)
+        self.insert_result = SimpleNamespace(data=[{"id": "eval-1"}])
+
+    def table(self, name):
+        if name == "dealer_sales":
+            return super().table(name)
+        if name == "recon_evaluations":
+            query = _Query([])
+            query.insert = lambda *_a, **_k: query
+            query.execute = lambda: self.insert_result
+            return query
+        raise AssertionError(name)
+
+
+def test_evaluate_with_asking_price_calls_score_deal_with_actual_bid(monkeypatch):
+    monkeypatch.setattr(recon, "_verify_auth", lambda _authorization: "operator-user")
+    monkeypatch.setattr(recon, "_supabase_client", _SupabaseWithInsert([]))
+
+    async def fake_retail_market_value(*_args, **_kwargs):
+        return {
+            "retail_value": 28000,
+            "retail_low": 26000,
+            "retail_high": 30000,
+            "retail_count": 12,
+            "retail_source": "marketcheck",
+        }
+
+    monkeypatch.setattr(recon, "get_retail_market_value", fake_retail_market_value)
+
+    score_calls = []
+
+    def capture_score_deal(**kwargs):
+        score_calls.append(kwargs)
+        return {"dos_score": 72.0, "vehicle_tier": "premium", "wholesale_margin": 2500.0}
+
+    monkeypatch.setattr("backend.ingest.score.score_deal", capture_score_deal)
+
+    req = recon.EvaluateRequest(
+        mileage=45000,
+        year=2021,
+        make="Toyota",
+        model="Camry",
+        asking_price=12000.0,
+        title_status="clean",
+        condition="Good",
+        source="govdeals",
+        state="TX",
+    )
+
+    result = asyncio.run(recon.evaluate_vehicle(req, authorization="Bearer test"))
+
+    assert len(score_calls) == 1
+    assert score_calls[0]["bid"] == 12000.0
+    assert score_calls[0]["bid"] != 0
+    assert result["dos"] == 72.0
