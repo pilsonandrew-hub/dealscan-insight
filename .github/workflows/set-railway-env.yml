@@ -41,6 +41,8 @@ jobs:
               "NOTION_DEALS_DB_ID",
               "FIRECRAWL_API_KEY",
               "SLACK_BOT_TOKEN",
+              "INTERNAL_API_SECRET",
+              "DEALERSCOPE_OPERATOR_USER_ID",
           ]
 
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
