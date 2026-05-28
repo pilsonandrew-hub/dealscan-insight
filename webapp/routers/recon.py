@@ -298,14 +298,42 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
     transport = 800  # default
     total_cost = condition_penalty + fleet_penalty + sell_fee + transport
 
-    # ── FIX 2f: DOS (using v2 scoring engine) ────────────────────────────
-    # Import v2 scoring components
+    # ── FIX 2f: DOS (canonical score engine only) ─────────────────────────
+    # Recon must not invent a zero acquisition price. ``score_deal`` treats
+    # bid<=0 as a hard zero-bid rejection, so auction-mode evaluations without
+    # a current bid/acquisition estimate are explicitly insufficient instead of
+    # being silently scored as DOS=0.
+    if auction_mode:
+        reason = "Current bid or acquisition estimate required for Recon scoring"
+        return {
+            "id": None,
+            "auction_mode": True,
+            "verdict": "INSUFFICIENT_BID_DATA",
+            "verdict_reason": reason,
+            "reason": reason,
+            "reliability_grade": grade,
+            "comp_count": comp_count,
+            "pessimistic_sale": pessimistic,
+            "pessimistic_sale_price": pessimistic,
+            "dos": None,
+            "adjusted_dos": None,
+            "max_bid": None,
+            "asking_price": None,
+            "pricing_source": "Manheim" if comp_count >= 3 else "Estimated",
+            "promoted_to_pipeline": False,
+            "retail_market_value": retail_data.get("retail_value"),
+            "retail_low": retail_data.get("retail_low"),
+            "retail_high": retail_data.get("retail_high"),
+            "retail_count": retail_data.get("retail_count"),
+            "retail_source": retail_data.get("retail_source"),
+        }
+
     try:
         from backend.ingest.score import score_deal
 
         mmr_proxy = pessimistic if pessimistic else 0
         scored = score_deal(
-            bid=req.asking_price or 0,
+            bid=req.asking_price,
             mmr_ca=mmr_proxy,
             state=req.state or "",
             source_site=req.source or "recon",
@@ -316,8 +344,10 @@ async def evaluate_vehicle(req: EvaluateRequest, authorization: Optional[str] = 
         )
         dos = float(scored.get("dos_score") or 0)
     except ImportError:
-        # Fallback to old calculation if import fails
-        if auction_mode or pessimistic is None:
+        # Fallback to old calculation if import fails, only for non-auction mode
+        # with a real asking/acquisition price. Do not reintroduce an independent
+        # auction-mode DOS formula.
+        if pessimistic is None:
             margin_score = 50.0
         else:
             margin_pct = max(0.0, (pessimistic - req.asking_price) / pessimistic) if pessimistic > 0 else 0.0
