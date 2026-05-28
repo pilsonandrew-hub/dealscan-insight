@@ -12,7 +12,7 @@ class DummyLog:
 def test_build_alert_thresholds_uses_defaults():
     thresholds = build_alert_thresholds({})
 
-    assert thresholds.min_score == 70.0
+    assert thresholds.min_score == 80.0
     assert thresholds.platinum_min_roi_day == 75.0
     assert thresholds.min_bid_headroom == 0.0
     assert thresholds.min_trust_score == 0.25
@@ -42,12 +42,12 @@ def test_build_alert_thresholds_warns_and_defaults_invalid_values():
 
     thresholds = build_alert_thresholds({"HOT_DEAL_MIN_SCORE": "bad"}, log=log)
 
-    assert thresholds.min_score == 70.0
-    assert log.messages == ["[ALERT_GATE] Invalid HOT_DEAL_MIN_SCORE='bad'; using 70.0"]
+    assert thresholds.min_score == 80.0
+    assert log.messages == ["[ALERT_GATE] Invalid HOT_DEAL_MIN_SCORE='bad'; using 80.0"]
 
 
 def test_hot_deal_min_score_matches_threshold_default_and_context():
     log = DummyLog()
 
-    assert hot_deal_min_score({"HOT_DEAL_MIN_SCORE": "bad"}, log=log) == 70.0
-    assert log.messages == ["[ALERT_GATE] Invalid HOT_DEAL_MIN_SCORE='bad'; using 70.0"]
+    assert hot_deal_min_score({"HOT_DEAL_MIN_SCORE": "bad"}, log=log) == 80.0
+    assert log.messages == ["[ALERT_GATE] Invalid HOT_DEAL_MIN_SCORE='bad'; using 80.0"]

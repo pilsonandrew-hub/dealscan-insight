@@ -21,6 +21,12 @@ import time
 import os
 import logging
 import uuid
+from backend.business_rules.constants import (
+    HIGH_RUST_STATES,
+    ROVER_RECOMMENDATION_THRESHOLD,
+    RUST_STATE_NEW_VEHICLE_YEARS,
+)
+from backend.business_rules.gates import passes_rover_economics
 from backend.rover.heuristic_scorer import build_preference_vector, score_item, rank_opportunities
 
 router = APIRouter(prefix="/api/rover", tags=["rover"])
@@ -341,15 +347,10 @@ async def get_recommendations(
         fetch_limit = min(effective_limit * 3, 60)
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         current_year = datetime.now(timezone.utc).year
-        premium_year_cutoff = current_year - 4
         standard_year_cutoff = current_year - 10
-        HIGH_RUST_STATES_ROVER = {
-            "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD",
-            "NE", "KS", "WV", "ME", "NH", "VT", "MA", "RI", "CT", "NJ", "MD", "DE",
-        }
         opps_resp = supabase_client.table("opportunities")\
-            .select("id,make,model,year,mileage,state,current_bid,mmr,dos_score,vehicle_tier,auction_end_date,source_site,investment_grade,gross_margin,roi,max_bid,risk_flags")\
-            .gte("dos_score", 65)\
+            .select("id,make,model,year,mileage,state,current_bid,mmr,dos_score,vehicle_tier,auction_end_date,source_site,investment_grade,gross_margin,roi,max_bid,risk_flags,ceiling_pass")\
+            .gte("dos_score", ROVER_RECOMMENDATION_THRESHOLD)\
             .neq("vehicle_tier", "rejected")\
             .gte("year", standard_year_cutoff)\
             .order("dos_score", desc=True)\
@@ -358,12 +359,21 @@ async def get_recommendations(
             .execute()
 
         logger.info(f"[ROVER] Supabase query returned {len(opps_resp.data or [])} rows")
-        # Post-fetch: filter rust states (DB can't do set membership easily)
         all_rows = opps_resp.data or []
         raw_rows = []
         for r in all_rows:
             year_value = _coerce_number(r.get("year"), 0.0)
-            if str(r.get("state") or "").upper() in HIGH_RUST_STATES_ROVER and not (year_value >= current_year - 2):
+            if str(r.get("state") or "").upper() in HIGH_RUST_STATES and not (
+                year_value >= current_year - RUST_STATE_NEW_VEHICLE_YEARS
+            ):
+                continue
+            economics_ok, economics_reasons = passes_rover_economics(r)
+            if not economics_ok:
+                logger.debug(
+                    "[ROVER] filtered opportunity %s: %s",
+                    r.get("id"),
+                    ",".join(economics_reasons),
+                )
                 continue
             raw_rows.append(r)
         personalized = False

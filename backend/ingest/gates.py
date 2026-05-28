@@ -13,9 +13,9 @@ LOW_RUST_STATES = {
     "AZ", "CA", "NV", "CO", "NM", "UT", "TX", "FL", "GA", "SC", "TN", "NC", "VA", "WA", "OR", "HI"
 }
 
-HIGH_RUST_STATES = {
-    "OH", "MI", "PA", "NY", "WI", "MN", "IL", "IN", "MO", "IA", "ND", "SD", "NE", "KS", "WV", "ME", "NH", "VT", "MA", "RI", "CT", "NJ", "MD", "DE"
-}
+from backend.business_rules.constants import HIGH_RUST_STATES as _CANONICAL_HIGH_RUST_STATES
+
+HIGH_RUST_STATES = set(_CANONICAL_HIGH_RUST_STATES)
 
 US_STATES = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA",

@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from backend.business_rules.gates import bid_ceiling_pct_for_tier, min_margin_for_tier
+
 
 def _resolve_buyer_premium(score_result: dict[str, Any], current_bid: float) -> tuple[float, float]:
     buyer_premium = score_result.get("buyer_premium_amount")
@@ -81,10 +83,10 @@ def build_opportunity_row(
     designated_lane = score_result.get("designated_lane") or vehicle.get("designated_lane") or vehicle_tier
     bid_ceiling_pct = score_result.get("bid_ceiling_pct")
     if bid_ceiling_pct is None:
-        bid_ceiling_pct = 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None
+        bid_ceiling_pct = bid_ceiling_pct_for_tier(vehicle_tier)
     min_margin_target = score_result.get("min_margin_target")
     if min_margin_target is None:
-        min_margin_target = 1500 if vehicle_tier == "premium" else 2500 if vehicle_tier == "standard" else None
+        min_margin_target = min_margin_for_tier(vehicle_tier)
     now = now_utc or (lambda: datetime.now(timezone.utc))
     return {
         "listing_id": compute_listing_id(source_site, vehicle.get("listing_url") or ""),

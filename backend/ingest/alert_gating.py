@@ -5,8 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from backend.business_rules.constants import (
+    HOT_DEAL_ALERT_THRESHOLD,
+    HOT_DEAL_MIN_CONFIDENCE,
+    HOT_DEAL_MIN_TRUST_SCORE,
+    PLATINUM_MIN_ROI_PER_DAY,
+    PRICING_MATURITY_ALERT_ALLOWED,
+)
+from backend.business_rules.pricing import pricing_allows_hot_alert
 
-ALERT_ALLOWED_PRICING_MATURITIES = frozenset({"market_comp", "live_market"})
+ALERT_ALLOWED_PRICING_MATURITIES = PRICING_MATURITY_ALERT_ALLOWED
 ALERT_ALLOWED_GRADES = frozenset({"Premium", "Standard", "Gold", "Platinum", "Silver"})
 UNKNOWN_OR_WEAK_CONDITION_GRADES = frozenset({"", "unknown", "poor"})
 VIN_PLACEHOLDER_VALUES = frozenset({
@@ -21,11 +29,11 @@ VIN_FORBIDDEN_CHARACTERS = frozenset({"I", "O", "Q"})
 
 @dataclass(frozen=True)
 class AlertThresholds:
-    min_score: float = 80.0
-    platinum_min_roi_day: float = 75.0
+    min_score: float = HOT_DEAL_ALERT_THRESHOLD
+    platinum_min_roi_day: float = PLATINUM_MIN_ROI_PER_DAY
     min_bid_headroom: float = 0.0
-    min_trust_score: float = 0.25
-    min_confidence: float = 55.0
+    min_trust_score: float = HOT_DEAL_MIN_TRUST_SCORE
+    min_confidence: float = HOT_DEAL_MIN_CONFIDENCE
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -183,6 +191,10 @@ def evaluate_alert_gate(
     bid_headroom = signals["bid_headroom"]
     if bid_headroom is not None and bid_headroom < config.min_bid_headroom:
         reasons.append(f"headroom<{config.min_bid_headroom:.0f}")
+
+    pricing_ok, pricing_reason = pricing_allows_hot_alert(record)
+    if not pricing_ok and pricing_reason:
+        reasons.append(pricing_reason)
 
     alert_type = None
     if not reasons:

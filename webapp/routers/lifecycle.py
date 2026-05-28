@@ -5,8 +5,9 @@ import os
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from fastapi.responses import JSONResponse
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,26 @@ def expire_stale_deals(max_age_days: int = 7) -> dict:
         return {"expired": 0, "error": str(e)}
 
 
+def _verify_lifecycle_secret(x_internal_secret: Optional[str]) -> None:
+    expected = (
+        os.getenv("INTERNAL_API_SECRET", "").strip()
+        or os.getenv("LIFECYCLE_CRON_SECRET", "").strip()
+    )
+    if not expected:
+        logger.error("[LIFECYCLE_AUTH] INTERNAL_API_SECRET or LIFECYCLE_CRON_SECRET not configured")
+        raise HTTPException(status_code=503, detail="Lifecycle authorization not configured")
+    if not x_internal_secret or x_internal_secret.strip() != expected:
+        logger.warning("[LIFECYCLE_AUTH] rejected unauthorized expire request")
+        raise HTTPException(status_code=401, detail="Invalid lifecycle authorization")
+
+
 @router.post("/expire")
-async def expire_deals_endpoint(background_tasks: BackgroundTasks):
+async def expire_deals_endpoint(
+    background_tasks: BackgroundTasks,
+    x_internal_secret: Optional[str] = Header(None),
+):
     """Expire deals older than 7 days. Runs in background."""
+    _verify_lifecycle_secret(x_internal_secret)
     background_tasks.add_task(expire_stale_deals)
     return JSONResponse(
         status_code=202,

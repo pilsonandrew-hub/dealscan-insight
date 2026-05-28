@@ -40,7 +40,7 @@ export interface RoverRecommendations {
   items: DealItem[];
   totalCount: number;
   confidence: number;
-  source?: 'personalized' | 'fallback';
+  source?: 'personalized' | 'fallback' | 'degraded';
 }
 
 export type SavedSearchFilters = Record<string, unknown>;
@@ -183,18 +183,30 @@ class RoverAPIService {
       const resp = await this.fetchRecommendationsFromApi(userId, token, limit);
       if (!resp.ok) {
         const body = await resp.text();
-        const fallback = await this.getFallbackRecommendations(limit);
-        return { ...fallback, _debug: `HTTP ${resp.status}: ${body.slice(0,80)}` };
+        return {
+          precomputedAt: null,
+          items: [],
+          totalCount: 0,
+          confidence: 0,
+          source: 'degraded',
+          _debug: `HTTP ${resp.status}: ${body.slice(0, 80)}`,
+        };
       }
       const data = await resp.json() as RoverRecommendations;
       if ((data.items?.length ?? 0) === 0) {
         const fallback = await this.getFallbackRecommendations(limit);
-        return { ...fallback, _debug: `OK 0 items` };
+        return { ...fallback, source: 'fallback', _debug: 'API returned 0 items — showing top DOS pool' };
       }
       return { ...data, source: 'personalized', _debug: `OK ${data.items?.length ?? 0} items` };
     } catch (error) {
-      const fallback = await this.getFallbackRecommendations(limit);
-      return { ...fallback, _debug: `Error: ${String(error).slice(0,80)}` };
+      return {
+        precomputedAt: null,
+        items: [],
+        totalCount: 0,
+        confidence: 0,
+        source: 'degraded',
+        _debug: `Error: ${String(error).slice(0, 80)}`,
+      };
     }
   }
 

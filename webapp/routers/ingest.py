@@ -35,8 +35,18 @@ from backend.ingest.alert_thresholds import build_alert_thresholds, hot_deal_min
 from backend.ingest.apify_metadata import extract_apify_webhook_metadata
 from backend.ingest.config_loader import get_config
 from backend.ingest.fallback_score import build_fallback_score
-from backend.ingest.gates import (
+from backend.business_rules.constants import (
+    ALERTS_ENABLED_PRODUCTION_DEFAULT,
+    DOS_SAVE_THRESHOLD,
     HIGH_RUST_STATES,
+)
+from backend.business_rules.gates import (
+    bid_ceiling_pct_for_tier,
+    min_margin_for_tier,
+    passes_ingest_margin_floor,
+)
+from backend.ingest.telegram_auth import resolve_operator_user_id, verify_telegram_secret_header
+from backend.ingest.gates import (
     LOW_RUST_STATES,
     TARGET_STATES,
     US_STATES,
@@ -152,7 +162,6 @@ WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
 WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-ANDREW_UUID = "ff8425cd-0596-470b-b2b8-3a7a30ef4e37"
 
 
 OPENROUTER_API_KEY = (get_config("OPENROUTER_API_KEY") or "").strip()
@@ -905,10 +914,16 @@ async def _process_webhook_items(
             vehicle["ingested_at"] = datetime.now(timezone.utc).isoformat()
             evaluated += 1
 
-            if score_result.get("wholesale_margin", 0) < 1500:
+            vehicle_tier = score_result.get("vehicle_tier") or "rejected"
+            if not passes_ingest_margin_floor(
+                score_result.get("wholesale_margin", 0),
+                vehicle_tier,
+            ):
                 logger.info(
-                    f"[MARGIN] below $1500 wholesale floor (${score_result.get('wholesale_margin', 0):,.0f}): "
-                    f"{vehicle.get('title','?')[:60]}"
+                    "[MARGIN] below lane floor (tier=%s margin=$%s): %s",
+                    vehicle_tier,
+                    score_result.get("wholesale_margin", 0),
+                    vehicle.get("title", "?")[:60],
                 )
                 skipped += 1
                 increment_reason_counter(skip_reasons, "margin_below_floor")
@@ -959,7 +974,7 @@ async def _process_webhook_items(
                 continue
 
             dedup = {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
-            if vehicle["dos_score"] >= 50:
+            if vehicle["dos_score"] >= DOS_SAVE_THRESHOLD:
                 try:
                     dedup = check_and_handle_duplicate(supabase_client, vehicle)
                 except Exception as dedup_err:
@@ -1546,8 +1561,8 @@ def normalize_apify_vehicle(
             "dos_premium": None,
             "dos_standard": None,
             "risk_flags": [],
-            "bid_ceiling_pct": 0.88 if vehicle_tier == "premium" else 0.80 if vehicle_tier == "standard" else None,
-            "min_margin_target": 1500 if vehicle_tier == "premium" else 2500 if vehicle_tier == "standard" else None,
+            "bid_ceiling_pct": bid_ceiling_pct_for_tier(vehicle_tier),
+            "min_margin_target": min_margin_for_tier(vehicle_tier),
             "run_id": run_id,
             "source_run_id": run_id,
         }
@@ -1939,7 +1954,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         return existing_delivery.get("external_id")
 
     # Kill switch
-    if os.getenv("ALERTS_ENABLED", "false").lower() != "true":
+    if os.getenv("ALERTS_ENABLED", ALERTS_ENABLED_PRODUCTION_DEFAULT).lower() != "true":
         logger.info("[ALERTS DISABLED] skipping alert")
         return None
 
@@ -2129,8 +2144,15 @@ async def _submit_rover_action(opportunity_id: str, action: str, user_id: str) -
 
 
 @telegram_router.post("/callback")
-async def telegram_callback_webhook(payload: dict[str, Any]):
+async def telegram_callback_webhook(
+    payload: dict[str, Any],
+    x_telegram_bot_api_secret_token: Optional[str] = Header(None),
+):
     """Handle Telegram callback_query webhooks for BUY/WATCH/PASS deal buttons."""
+    if not verify_telegram_secret_header(x_telegram_bot_api_secret_token):
+        logger.warning("[TELEGRAM_AUTH] rejected callback: invalid or missing secret token")
+        raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+
     callback_query = payload.get("callback_query") or {}
     callback_id = callback_query.get("id")
     callback_data = callback_query.get("data") or ""
@@ -2179,15 +2201,36 @@ async def telegram_callback_webhook(payload: dict[str, Any]):
             )
             resp.raise_for_status()
 
+    operator_user_id = resolve_operator_user_id(telegram_user_id)
+    if not operator_user_id:
+        logger.warning(
+            "[TELEGRAM_AUTH] rejected unknown operator telegram_user_id=%s",
+            telegram_user_id,
+        )
+        await _answer_callback("Unauthorized operator")
+        raise HTTPException(status_code=403, detail="Unauthorized Telegram operator")
+
     callback_text = "Recorded"
     try:
-        await _submit_rover_action(opportunity_id=opportunity_id, action=action, user_id=ANDREW_UUID)
+        await _submit_rover_action(
+            opportunity_id=opportunity_id,
+            action=action,
+            user_id=operator_user_id,
+        )
         callback_text = f"Recorded {action}"
-    except Exception as exc:
-        logger.warning(
-            "[TELEGRAM] callback processing failed action=%s opportunity_id=%s user_id=%s: %s",
+        logger.info(
+            "[TELEGRAM_AUDIT] action=%s opportunity_id=%s operator_user_id=%s telegram_user_id=%s",
             action,
             opportunity_id,
+            operator_user_id,
+            telegram_user_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[TELEGRAM] callback processing failed action=%s opportunity_id=%s operator_user_id=%s telegram_user_id=%s: %s",
+            action,
+            opportunity_id,
+            operator_user_id,
             telegram_user_id,
             exc,
         )

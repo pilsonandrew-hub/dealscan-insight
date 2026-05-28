@@ -61,8 +61,27 @@ jobs:
 
       - name: Validate Business Rules
         run: |
+          set -euo pipefail
           FAILED=0
-          grep -rn "0\.88\|0\.80" backend/ingest/score.py | grep -q "bid_ceiling\|ceiling" && echo "✅ Bid ceiling intact" || { echo "❌ Bid ceiling missing"; FAILED=1; }
-          grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "test\|#\|//" && { echo "❌ Hardcoded key found"; FAILED=1; } || echo "✅ No hardcoded secrets"
-          grep -rn "HIGH_RUST_STATES" backend/ --include="*.py" | grep -q "OH\|MI" && echo "✅ Rust state filter present" || echo "⚠️ Rust state filter check inconclusive"
+          if grep -q "PREMIUM_BID_CEILING_PCT = 0.88" backend/business_rules/constants.py \
+             && grep -q "STANDARD_BID_CEILING_PCT = 0.80" backend/business_rules/constants.py; then
+            echo "✅ Bid ceilings defined in canonical business_rules module"
+          else
+            echo "❌ Bid ceiling missing from backend/business_rules/constants.py"
+            FAILED=1
+          fi
+          if grep -q "HIGH_RUST_STATES" backend/business_rules/constants.py \
+             && grep -q '"OH"' backend/business_rules/constants.py \
+             && grep -q '"MI"' backend/business_rules/constants.py; then
+            echo "✅ Rust state filter present in business_rules"
+          else
+            echo "❌ Rust state filter missing from business_rules"
+            FAILED=1
+          fi
+          if grep -rn "apify_api_[A-Za-z0-9]\{20\}\|sk-proj-[A-Za-z0-9]\|ntn_[A-Za-z0-9]" src/ backend/ webapp/ --include="*.py" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "test\|#\|//"; then
+            echo "❌ Hardcoded key found"
+            FAILED=1
+          else
+            echo "✅ No hardcoded secrets"
+          fi
           exit $FAILED

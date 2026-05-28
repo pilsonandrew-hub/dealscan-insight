@@ -698,14 +698,17 @@ class WebhookSecurityTests(unittest.TestCase):
         ), patch.object(
             ingest, "passes_basic_gates", lambda *_args, **_kwargs: {"pass": True, "reason": "ok"}
         ), patch.object(
+            ingest, "passes_ingest_margin_floor", lambda *_args, **_kwargs: True
+        ), patch.object(
             ingest,
             "score_vehicle",
             lambda _vehicle: {
                 "dos_score": 80,
-                "wholesale_margin": 2500,
+                "vehicle_tier": "premium",
+                "wholesale_margin": 5000,
                 "ceiling_pass": True,
                 "current_bid": 10000,
-                "gross_margin": 2500,
+                "gross_margin": 5000,
                 "bid_headroom": 2000,
             },
         ), patch.object(
