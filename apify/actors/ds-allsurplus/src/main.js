@@ -180,6 +180,30 @@ function inferTitleStatus(description) {
     return 'Unknown';
 }
 
+function stripHtmlToText(html) {
+    return String(html || '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function parseVin(text) {
+    const match = String(text || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
+    return match ? match[1].toUpperCase() : null;
+}
+
+function parseMileage(text) {
+    const match = String(text || '').replace(/,/g, '').match(/\b(?:mileage|odometer|miles?)[:\s-]*(\d{2,7})\b/i)
+        || String(text || '').replace(/,/g, '').match(/\b(\d{2,7})\s*(?:miles?|mi\b)/i);
+    return match ? parseInt(match[1], 10) : null;
+}
+
 async function searchMaestro(searchText, page, displayRows, facetsFilter = [], sessionId) {
     const correlationId = crypto.randomUUID ? crypto.randomUUID() : 
         Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -224,6 +248,61 @@ async function searchMaestro(searchText, page, displayRows, facetsFilter = [], s
     }
     
     return await response.json();
+}
+
+async function getAssetDetail(assetId, accountId) {
+    const correlationId = crypto.randomUUID ? crypto.randomUUID() :
+        Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+
+    const response = await fetch(`${MAESTRO_URL}/assets/${assetId}/${accountId}/false`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip',
+            'Origin': 'https://www.allsurplus.com',
+            'Referer': `${ASSET_URL_BASE}/${assetId}/${accountId}`,
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'x-api-key': MAESTRO_API_KEY,
+            'x-user-id': '-1',
+            'x-api-correlation-id': correlationId,
+            'Ocp-Apim-Subscription-Key': MAESTRO_SUBSCRIPTION_KEY,
+        },
+        body: JSON.stringify({ businessId: BUSINESS_ID, siteId: 1 }),
+        signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`detail API error ${response.status}: ${text.slice(0, 200)}`);
+    }
+
+    return await response.json();
+}
+
+function enrichListingFromDetail(listing, detail) {
+    if (!detail) return listing;
+
+    const detailText = stripHtmlToText(detail.assetLongDesc || detail.assetShortDesc || '');
+    const detailMileage = Number.parseInt(String(detail.meterCount || '').replace(/,/g, ''), 10);
+    const parsedMileage = parseMileage(detailText);
+    const mileage = Number.isFinite(detailMileage) && detailMileage > 0 ? detailMileage : parsedMileage;
+    const vin = parseVin(detail.vinserial) || parseVin(detailText);
+
+    if (mileage && mileage > 0) listing.mileage = mileage;
+    if (vin) listing.vin = vin;
+    if (detail.assetLongDesc || detail.assetShortDesc) {
+        listing.description = detailText || listing.description;
+        listing.raw_detail_description = detailText || null;
+    }
+    if (detail.assetShortDesc) listing.title = stripHtmlToText(detail.assetShortDesc);
+    if (detail.catDesc) listing.category = detail.catDesc;
+    if (detail.state) {
+        listing.state = detail.state;
+        listing.location_state = detail.state;
+    }
+    listing.detail_enriched = Boolean(detail.assetId || detail.assetLongDesc || detail.meterCount || detail.vinserial);
+    return listing;
 }
 
 // Age gate: ingest.py allows max 4 years old for AllSurplus
@@ -391,8 +470,25 @@ for (const searchText of searchTerms) {
                     scraped_at: new Date().toISOString(),
                 };
                 
+                try {
+                    const detail = await getAssetDetail(item.assetId, item.accountId);
+                    enrichListingFromDetail(listing, detail);
+                } catch (err) {
+                    console.warn(`[DETAIL] Failed ${itemId} — ${err.message}`);
+                }
+
+                if (listing.mileage && listing.mileage > maxMileage) {
+                    console.log(`[SKIP-MILEAGE-DETAIL] ${listing.title} | mileage: ${listing.mileage}`);
+                    continue;
+                }
+
+                if (REJECT_PATTERNS.some((pattern) => pattern.test(listing.description || listing.title || ''))) {
+                    console.log(`[SKIP-CONDITION-DETAIL] ${listing.title}`);
+                    continue;
+                }
+
                 totalPassed++;
-                console.log(`[PASS] ${title} | $${bid} | ${state} | ${year || '?'} ${item.makebrand || '?'} ${item.model || '?'}`);
+                console.log(`[PASS] ${listing.title} | ${bid} | ${listing.state} | ${year || '?'} ${listing.make || '?'} ${listing.model || '?'} | ${listing.mileage ?? 'mileage?'} mi | VIN ${listing.vin ? 'yes' : 'no'}`);
                 allListings.push(listing);
                 await Actor.pushData(listing);
             }
