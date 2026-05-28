@@ -308,15 +308,15 @@ async function enrichFromDetailPages(log) {
     let vinFound = 0;
     let mileageFound = 0;
 
-    const lotByUrl = new Map(toScrape.map(lot => [lot.listing_url, lot]));
+    const lotByIndex = new Map(toScrape.map((lot, index) => [String(index), lot]));
     const detailCrawler = new PlaywrightCrawler({
         maxRequestsPerCrawl: toScrape.length,
         maxConcurrency: 1,
         requestHandlerTimeoutSecs: 60,
         async requestHandler({ page, request, log: detailLog }) {
-            const lot = lotByUrl.get(request.url);
+            const lot = lotByIndex.get(String(request.userData.index));
             if (!lot) {
-                detailLog.warning(`[DETAIL ENRICH] No lot mapping for ${request.url}`);
+                detailLog.warning(`[DETAIL ENRICH] No lot mapping for index=${request.userData.index} url=${request.url}`);
                 return;
             }
             await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -355,7 +355,11 @@ async function enrichFromDetailPages(log) {
         },
     });
 
-    await detailCrawler.run(toScrape.map(lot => lot.listing_url));
+    await detailCrawler.run(toScrape.map((lot, index) => ({
+        url: lot.listing_url,
+        uniqueKey: `proxibid-detail-${index}-${lot.listing_url}`,
+        userData: { index: String(index) },
+    })));
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
