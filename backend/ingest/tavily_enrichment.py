@@ -2,8 +2,9 @@
 
 Tavily is a corroboration/search lane, not an auction page extraction lane.
 It must never block ingest, gate acceptance by itself, or become required for
-scoring. Use it only when source fields are missing or suspicious and keep the
-returned evidence compact/provenance-labelled.
+scoring. Tavily has a small monthly free-credit pool, so use it sparingly:
+only for high-value rows that are already near alert/save territory and still
+have important truth gaps after source/detail extraction.
 """
 
 from __future__ import annotations
@@ -17,9 +18,25 @@ import httpx
 logger = logging.getLogger(__name__)
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
-TIMEOUT_SECONDS = 12
-MAX_RESULTS = 3
+TIMEOUT_SECONDS = 8
+MAX_RESULTS = 2
 _MAX_QUERY_CHARS = 220
+_DEFAULT_MIN_SCORE = 80.0
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _min_score() -> float:
+    raw = os.getenv("TAVILY_MIN_DOS_SCORE", str(_DEFAULT_MIN_SCORE)).strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return _DEFAULT_MIN_SCORE
 
 
 def _api_key() -> str:
@@ -31,18 +48,31 @@ def is_available() -> bool:
     return bool(_api_key())
 
 
+def _score_value(vehicle: dict[str, Any]) -> Optional[float]:
+    raw_score = vehicle.get("dos_score") or vehicle.get("score")
+    if raw_score is None and isinstance(vehicle.get("score_breakdown"), dict):
+        raw_score = vehicle["score_breakdown"].get("dos_score")
+    try:
+        return float(raw_score)
+    except (TypeError, ValueError):
+        return None
+
+
 def should_enrich_vehicle(vehicle: dict[str, Any]) -> bool:
-    """Return True only for listings with gaps Tavily can plausibly corroborate."""
+    """Return True only for scarce, high-value Tavily escalation cases."""
+    if not _env_bool("TAVILY_ENRICHMENT_ENABLED", default=False):
+        return False
     if not vehicle.get("listing_url") and not vehicle.get("title"):
         return False
-    missing_or_suspicious = [
-        not vehicle.get("vin"),
-        not vehicle.get("mileage"),
-        not vehicle.get("description"),
-        not vehicle.get("photos"),
-        str(vehicle.get("condition_grade") or "").lower() in {"", "unknown", "poor"},
-    ]
-    return any(missing_or_suspicious)
+
+    score = _score_value(vehicle)
+    if score is None or score < _min_score():
+        return False
+
+    lacks_primary_identity = not vehicle.get("vin") and not vehicle.get("mileage")
+    has_critical_condition_gap = str(vehicle.get("condition_grade") or "").lower() in {"", "unknown", "poor"}
+    has_no_source_detail = not vehicle.get("description") and not vehicle.get("photos")
+    return lacks_primary_identity or (has_critical_condition_gap and has_no_source_detail)
 
 
 def build_vehicle_query(vehicle: dict[str, Any]) -> str:
@@ -102,6 +132,7 @@ def search_vehicle_context(vehicle: dict[str, Any]) -> Optional[dict[str, Any]]:
                 "search_depth": "basic",
                 "max_results": MAX_RESULTS,
                 "include_raw_content": False,
+                "topic": "general",
             },
             timeout=TIMEOUT_SECONDS,
         )
