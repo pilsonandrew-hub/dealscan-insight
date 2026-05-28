@@ -308,12 +308,17 @@ async function enrichFromDetailPages(log) {
     let vinFound = 0;
     let mileageFound = 0;
 
+    const lotByUrl = new Map(toScrape.map(lot => [lot.listing_url, lot]));
     const detailCrawler = new PlaywrightCrawler({
         maxRequestsPerCrawl: toScrape.length,
         maxConcurrency: 1,
         requestHandlerTimeoutSecs: 60,
         async requestHandler({ page, request, log: detailLog }) {
-            const lot = request.userData.lot;
+            const lot = lotByUrl.get(request.url);
+            if (!lot) {
+                detailLog.warning(`[DETAIL ENRICH] No lot mapping for ${request.url}`);
+                return;
+            }
             await page.waitForLoadState('domcontentloaded').catch(() => {});
             await page.waitForTimeout(2000);
             const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
@@ -350,7 +355,7 @@ async function enrichFromDetailPages(log) {
         },
     });
 
-    await detailCrawler.run(toScrape.map(lot => ({ url: lot.listing_url, userData: { lot } })));
+    await detailCrawler.run(toScrape.map(lot => lot.listing_url));
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
