@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
+from backend.business_rules.constants import ALERTS_ENABLED_PRODUCTION_DEFAULT
 from webapp.database import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,17 @@ def verify_internal_secret(x_internal_secret: Optional[str]) -> None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _alerts_runtime_status() -> dict[str, Any]:
+    raw = os.getenv("ALERTS_ENABLED")
+    effective = (raw if raw is not None else ALERTS_ENABLED_PRODUCTION_DEFAULT).strip().lower()
+    return {
+        "enabled": effective == "true",
+        "source": "env" if raw is not None else "production_default",
+        "raw_value": raw if raw in {"true", "false"} else ("set_non_boolean" if raw is not None else None),
+        "production_default": ALERTS_ENABLED_PRODUCTION_DEFAULT,
+    }
 
 
 def _safe_count(table: str, filters: Optional[list[tuple[str, str, Any]]] = None) -> int:
@@ -125,6 +137,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "latest": webhook_rows[:10],
         },
         "alerts": {
+            "runtime": _alerts_runtime_status(),
             "total": alerts_total,
             "recent_count": len(alert_rows),
             "latest_sent_at": alert_rows[0].get("sent_at") if alert_rows else None,

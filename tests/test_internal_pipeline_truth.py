@@ -51,3 +51,23 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     assert result["opportunities"]["active_dos80_sample"] == 1
     assert result["opportunities"]["active_dos80_missing_mileage_sample"] == 1
     assert "latest" in result["webhooks"]
+
+
+def test_pipeline_truth_reports_alerts_runtime_status(monkeypatch):
+    from webapp.routers import internal
+
+    monkeypatch.setenv("ALERTS_ENABLED", "false")
+    status = internal._alerts_runtime_status()
+
+    assert status == {
+        "enabled": False,
+        "source": "env",
+        "raw_value": "false",
+        "production_default": "true",
+    }
+
+    monkeypatch.delenv("ALERTS_ENABLED", raising=False)
+    status = internal._alerts_runtime_status()
+
+    assert status["enabled"] is True
+    assert status["source"] == "production_default"
