@@ -8,8 +8,6 @@ on:
 permissions:
   contents: read
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   watchdog-hunter:
@@ -111,7 +109,9 @@ jobs:
               msg = "⚠️ <b>DealerScope Watchdog Hunter Alert</b>\n\n" + "\n".join(stalled)
               send_telegram(msg)
               print("Stall detected, alert sent:\n" + "\n".join(stalled))
-              sys.exit(0)
+              # Red run is intentional when watchdog finds real scraper health problems.
+              # Telegram is the operator alert; GitHub status is the audit trail.
+              sys.exit(1)
           else:
               print("Watchdog Hunter: all monitored scrapers healthy")
           PYEOF
