@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Regression guard for Apify deploy source packaging.
+
+The GitHub deploy workflow must include every first-level JS module under each
+actor's src/ directory. If it only uploads hand-picked files, helper imports can
+build green but fail at Apify runtime.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT / ".github" / "workflows" / "apify-deploy.yml"
+
+
+def test_apify_deploy_uploads_all_first_level_src_js_modules() -> None:
+    workflow = WORKFLOW.read_text()
+
+    assert 'Path(src_dir, "src").glob("*.js")' in workflow
+    assert 'actor_source_name = f"src/{src_file.name}"' in workflow
+
+    # Historical failure mode: runtime_budget.js was imported by main_api.js but
+    # omitted by a fixed allow-list, causing Apify runtime ERR_MODULE_NOT_FOUND.
+    assert 'for extra in ["src/main_api.js", "src/utils.js", "src/helpers.js"]' not in workflow

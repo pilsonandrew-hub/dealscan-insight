@@ -35,6 +35,7 @@ jobs:
         run: |
           python3 << 'PYEOF'
           import json, os, subprocess, sys, urllib.request, ssl
+          from pathlib import Path
 
           TOKEN = os.environ["APIFY_TOKEN"]
 
@@ -121,17 +122,16 @@ jobs:
               except:
                   dockerfile = "FROM apify/actor-node-playwright-chrome:20\nCOPY package*.json ./\nRUN npm install --only=prod\nCOPY . ./"
 
-              # Check for additional JS files (like main_api.js)
+              # Include all first-level JS modules under src/. Actors may import helper
+              # modules; omitting one can make an Apify build pass but runtime fail.
               source_files = [
-                  {"name": "src/main.js", "format": "TEXT", "content": main_js},
                   {"name": "package.json", "format": "TEXT", "content": pkg},
                   {"name": "Dockerfile", "format": "TEXT", "content": dockerfile},
               ]
-              for extra in ["src/main_api.js", "src/utils.js", "src/helpers.js"]:
-                  extra_path = f"{src_dir}/{extra}"
-                  if os.path.exists(extra_path):
-                      source_files.append({"name": extra, "format": "TEXT", "content": open(extra_path).read()})
-                      print(f"  + included {extra}")
+              for src_file in sorted(Path(src_dir, "src").glob("*.js")):
+                  actor_source_name = f"src/{src_file.name}"
+                  source_files.append({"name": actor_source_name, "format": "TEXT", "content": src_file.read_text()})
+                  print(f"  + included {actor_source_name}")
 
               # Upload source
               result = api("PUT", f"/acts/{actor_id}/versions/{version}", {"sourceFiles": source_files})
