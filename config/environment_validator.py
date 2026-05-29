@@ -165,6 +165,30 @@ class EnvironmentValidator:
                     "SUPABASE_URL or VITE_SUPABASE_URL should be set before testing ingest logging"
                 )
 
+        supabase_auth_introspection_key = (
+            os.getenv("SUPABASE_ANON_KEY", "")
+            or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+            or os.getenv("VITE_SUPABASE_PUBLISHABLE_KEY", "")
+        )
+        if not supabase_auth_introspection_key:
+            if self.environment in ("production", "staging"):
+                self.errors.append(
+                    "SUPABASE_ANON_KEY, VITE_SUPABASE_ANON_KEY, or VITE_SUPABASE_PUBLISHABLE_KEY is required for Sonar auth introspection"
+                )
+            else:
+                self.warnings.append(
+                    "SUPABASE_ANON_KEY, VITE_SUPABASE_ANON_KEY, or VITE_SUPABASE_PUBLISHABLE_KEY should be set before testing Sonar auth introspection"
+                )
+        elif self._looks_like_placeholder_secret(supabase_auth_introspection_key):
+            if self.environment in ("production", "staging"):
+                self.errors.append(
+                    "Supabase anon/publishable key for Sonar auth introspection is set to a placeholder-like value"
+                )
+            else:
+                self.warnings.append(
+                    "Supabase anon/publishable key for Sonar auth introspection is set to a placeholder-like value"
+                )
+
         supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
         if not supabase_service_role_key:
             if self.environment in ("production", "staging"):

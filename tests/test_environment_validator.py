@@ -55,6 +55,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
             "SUPABASE_URL": "https://example.supabase.co",
+            "VITE_SUPABASE_ANON_KEY": "anon-key",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -75,6 +76,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
             "SUPABASE_URL": "https://example.supabase.co",
+            "VITE_SUPABASE_ANON_KEY": "anon-key",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -99,6 +101,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
             "SUPABASE_URL": "https://example.supabase.co",
+            "VITE_SUPABASE_ANON_KEY": "anon-key",
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
         }
@@ -116,6 +119,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
             "SUPABASE_URL": "https://example.supabase.co",
+            "VITE_SUPABASE_ANON_KEY": "anon-key",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
         }
@@ -133,6 +137,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
             "SUPABASE_URL": "https://example.supabase.co",
+            "VITE_SUPABASE_ANON_KEY": "anon-key",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -156,6 +161,7 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
             "ENVIRONMENT": "production",
             "SECRET_KEY": "x" * 32,
             "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "VITE_SUPABASE_ANON_KEY": "anon-key",
             "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
             "APIFY_TOKEN": "a" * 32,
             "APIFY_WEBHOOK_SECRET": "n" * 32,
@@ -165,6 +171,43 @@ class EnvironmentValidatorWebhookSecretTests(unittest.TestCase):
 
         self.assertIn(
             "SUPABASE_URL or VITE_SUPABASE_URL is required for ingest logging and delivery state",
+            result["errors"],
+        )
+
+    def test_production_requires_supabase_anon_key_for_sonar_auth_introspection(self):
+        env = {
+            "ENVIRONMENT": "production",
+            "SECRET_KEY": "x" * 32,
+            "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
+            "APIFY_TOKEN": "a" * 32,
+            "APIFY_WEBHOOK_SECRET": "n" * 32,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = EnvironmentValidator().validate_all()
+
+        self.assertIn(
+            "SUPABASE_ANON_KEY, VITE_SUPABASE_ANON_KEY, or VITE_SUPABASE_PUBLISHABLE_KEY is required for Sonar auth introspection",
+            result["errors"],
+        )
+
+    def test_production_accepts_supabase_publishable_key_for_sonar_auth_introspection(self):
+        env = {
+            "ENVIRONMENT": "production",
+            "SECRET_KEY": "x" * 32,
+            "DATABASE_URL": "postgresql://user:password@db.example/dealerscope",
+            "SUPABASE_URL": "https://example.supabase.co",
+            "VITE_SUPABASE_PUBLISHABLE_KEY": "publishable-key",
+            "SUPABASE_SERVICE_ROLE_KEY": "s" * 40,
+            "APIFY_TOKEN": "a" * 32,
+            "APIFY_WEBHOOK_SECRET": "n" * 32,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = EnvironmentValidator().validate_all()
+
+        self.assertNotIn(
+            "SUPABASE_ANON_KEY, VITE_SUPABASE_ANON_KEY, or VITE_SUPABASE_PUBLISHABLE_KEY is required for Sonar auth introspection",
             result["errors"],
         )
 
