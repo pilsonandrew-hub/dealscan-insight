@@ -57,6 +57,12 @@ def build_fallback_score(vehicle: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         acquisition_price_basis = vehicle.get("current_bid") or 0
 
+    mileage_value = vehicle.get("mileage")
+    try:
+        has_valid_mileage = mileage_value is not None and float(mileage_value) > 0
+    except (TypeError, ValueError):
+        has_valid_mileage = False
+
     score_provenance = {
         "engine_version": "fallback_v1",
         "engine_impl": "webapp.routers.ingest._fallback_score",
@@ -72,7 +78,7 @@ def build_fallback_score(vehicle: dict[str, Any]) -> dict[str, Any]:
             "has_mmr": False,
             "has_live_manheim": False,
             "has_year": bool(vehicle.get("year")),
-            "has_mileage": bool(vehicle.get("mileage")),
+            "has_mileage": has_valid_mileage,
             "source_site": vehicle.get("source_site"),
         },
         "component_traces": [],

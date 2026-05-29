@@ -72,7 +72,7 @@ def determine_vehicle_tier(year: object, mileage: object) -> str:
         vehicle_tier = "standard"
 
     mileage_value = _coerce_float(mileage)
-    if mileage_value is None:
+    if mileage_value is None or mileage_value <= 0:
         return "rejected"
     if vehicle_tier == "premium" and mileage_value > PREMIUM_MAX_MILEAGE:
         return "rejected"
