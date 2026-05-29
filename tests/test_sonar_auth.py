@@ -7,22 +7,6 @@ from fastapi import HTTPException
 from webapp.routers import sonar
 
 
-class _Auth:
-    def __init__(self, user_id=None, exc=None):
-        self.user_id = user_id
-        self.exc = exc
-
-    def get_user(self, token):
-        if self.exc:
-            raise self.exc
-        return SimpleNamespace(user=SimpleNamespace(id=self.user_id))
-
-
-class _AuthClient:
-    def __init__(self, user_id=None, exc=None):
-        self.auth = _Auth(user_id=user_id, exc=exc)
-
-
 class _Query:
     def __init__(self, rows):
         self.rows = rows
@@ -69,6 +53,7 @@ def isolate_sonar(monkeypatch):
     monkeypatch.setattr(sonar, "_get_redis", no_redis)
     monkeypatch.setattr(sonar, "SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setattr(sonar, "SUPABASE_ANON_KEY", "anon-key")
+    monkeypatch.setattr(sonar, "SUPABASE_SERVICE_ROLE_KEY", "service-key")
     yield
     sonar._memory_store.clear()
 
@@ -80,7 +65,7 @@ def test_require_sonar_user_id_rejects_missing_header():
 
 
 def test_require_sonar_user_id_rejects_invalid_token(monkeypatch):
-    monkeypatch.setattr(sonar, "_get_auth_client", lambda _token: _AuthClient(exc=RuntimeError("bad jwt")))
+    monkeypatch.setattr(sonar, "_fetch_supabase_user", lambda _token: (_ for _ in ()).throw(HTTPException(status_code=401, detail="Authentication failed")))
 
     with pytest.raises(HTTPException) as exc:
         sonar.require_sonar_user_id("Bearer bad-token")
@@ -88,7 +73,7 @@ def test_require_sonar_user_id_rejects_invalid_token(monkeypatch):
 
 
 def test_require_sonar_user_id_accepts_valid_token(monkeypatch):
-    monkeypatch.setattr(sonar, "_get_auth_client", lambda _token: _AuthClient(user_id="user-1"))
+    monkeypatch.setattr(sonar, "_fetch_supabase_user", lambda _token: {"id": "user-1"})
 
     assert sonar.require_sonar_user_id("Bearer valid-token") == "user-1"
 
@@ -110,7 +95,7 @@ def test_sonar_search_requires_auth_before_service_role(monkeypatch):
 
 
 def test_sonar_search_stores_job_owner(monkeypatch):
-    monkeypatch.setattr(sonar, "_get_auth_client", lambda _token: _AuthClient(user_id="user-1"))
+    monkeypatch.setattr(sonar, "_fetch_supabase_user", lambda _token: {"id": "user-1"})
     monkeypatch.setattr(
         sonar,
         "_get_supabase",
@@ -143,7 +128,7 @@ def test_sonar_status_rejects_cross_user_job(monkeypatch):
         "sources": {},
         "timed_out": False,
     }
-    monkeypatch.setattr(sonar, "_get_auth_client", lambda _token: _AuthClient(user_id="user-2"))
+    monkeypatch.setattr(sonar, "_fetch_supabase_user", lambda _token: {"id": "user-2"})
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(sonar.sonar_status("job-1", authorization="Bearer other"))
@@ -159,7 +144,7 @@ def test_sonar_status_allows_job_owner(monkeypatch):
         "sources": {"Database": "done"},
         "timed_out": False,
     }
-    monkeypatch.setattr(sonar, "_get_auth_client", lambda _token: _AuthClient(user_id="user-1"))
+    monkeypatch.setattr(sonar, "_fetch_supabase_user", lambda _token: {"id": "user-1"})
 
     result = asyncio.run(sonar.sonar_status("job-1", authorization="Bearer valid"))
     assert result["results"] == [{"id": "opp-1"}]

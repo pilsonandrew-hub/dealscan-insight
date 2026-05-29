@@ -10,6 +10,8 @@ import json
 import logging
 import uuid
 import os
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
 try:
@@ -18,10 +20,9 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in minimal test envs
     redis = None
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
-from supabase import Client, create_client
+from supabase import create_client
 
 from config.settings import settings
-from supabase.lib.client_options import ClientOptions
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,12 @@ router = APIRouter(prefix="/api/sonar", tags=["sonar"])
 JOB_TTL_SECONDS = 300
 
 SUPABASE_URL = settings.supabase_url
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
+SUPABASE_ANON_KEY = (
+    os.getenv("SUPABASE_ANON_KEY")
+    or os.getenv("VITE_SUPABASE_ANON_KEY")
+    or os.getenv("VITE_SUPABASE_PUBLISHABLE_KEY")
+)
+SUPABASE_SERVICE_ROLE_KEY = settings.supabase_service_role_key
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -75,20 +81,44 @@ def _extract_bearer_token(authorization: str | None) -> str:
     return token
 
 
-def _get_auth_client(token: str) -> Client:
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+def _supabase_auth_api_key() -> str:
+    """Return a server-side key usable for Supabase Auth user introspection."""
+    return (SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY or "").strip()
+
+
+def _fetch_supabase_user(token: str) -> dict:
+    """Validate a Supabase access token through Supabase Auth REST.
+
+    This avoids relying on supabase-py auth header behavior in Railway while
+    preserving the same security boundary: Supabase Auth validates signature,
+    expiry, issuer, and revocation state and returns the authenticated user.
+    """
+    api_key = _supabase_auth_api_key()
+    if not SUPABASE_URL or not api_key:
         raise HTTPException(status_code=503, detail="Authentication service unavailable")
-    return create_client(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY,
-        options=ClientOptions(headers={"Authorization": f"Bearer {token}"}),
+
+    req = urllib.request.Request(
+        f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+        headers={"apikey": api_key, "Authorization": f"Bearer {token}"},
+        method="GET",
     )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as exc:
+        if exc.code in {400, 401, 403}:
+            raise HTTPException(status_code=401, detail="Authentication failed") from exc
+        logger.warning("[SONAR_AUTH] Supabase auth HTTP %s", exc.code)
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
+    except Exception as exc:
+        logger.warning("[SONAR_AUTH] Supabase auth validation failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
 
 
 def _extract_user_id(user_response) -> str | None:
+    if isinstance(user_response, dict):
+        return user_response.get("id") or user_response.get("sub")
     user = getattr(user_response, "user", None)
-    if user is None and isinstance(user_response, dict):
-        user = user_response.get("user") or (user_response.get("data") or {}).get("user")
     if user is None:
         return None
     if isinstance(user, dict):
@@ -99,14 +129,8 @@ def _extract_user_id(user_response) -> str | None:
 def require_sonar_user_id(authorization: str | None = Header(None, alias="Authorization")) -> str:
     """Validate the caller Supabase JWT and return the authenticated user id."""
     token = _extract_bearer_token(authorization)
-    try:
-        user_response = _get_auth_client(token).auth.get_user(token)
-        user_id = _extract_user_id(user_response)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("[SONAR_AUTH] JWT validation failed: %s", exc)
-        raise HTTPException(status_code=401, detail="Authentication failed") from exc
+    user_response = _fetch_supabase_user(token)
+    user_id = _extract_user_id(user_response)
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication failed")
     return str(user_id)
