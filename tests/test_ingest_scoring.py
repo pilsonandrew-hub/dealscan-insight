@@ -885,8 +885,10 @@ def test_score_deal_missing_mileage_is_rejected_not_surfaced_as_platinum():
     assert result["vehicle_tier"] == "rejected"
     assert result["investment_grade"] == "Rejected"
     assert result["ceiling_pass"] is False
-    assert result["score_provenance"]["input_profile"]["has_mileage"] is False
+    assert result["max_bid"] == 0.0
+    assert result["score"] == 0.0
     assert result["dos_score"] == 0.0
+    assert result["score_provenance"]["input_profile"]["has_mileage"] is False
 
 
 def test_score_deal_invalid_mileage_is_rejected_not_surfaced_as_platinum():
