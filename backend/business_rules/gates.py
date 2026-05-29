@@ -72,15 +72,16 @@ def determine_vehicle_tier(year: object, mileage: object) -> str:
         vehicle_tier = "standard"
 
     mileage_value = _coerce_float(mileage)
-    if mileage_value is not None:
-        if vehicle_tier == "premium" and mileage_value > PREMIUM_MAX_MILEAGE:
+    if mileage_value is None:
+        return "rejected"
+    if vehicle_tier == "premium" and mileage_value > PREMIUM_MAX_MILEAGE:
+        return "rejected"
+    if vehicle_tier == "standard":
+        if mileage_value > STANDARD_MAX_MILEAGE:
             return "rejected"
-        if vehicle_tier == "standard":
-            if mileage_value > STANDARD_MAX_MILEAGE:
-                return "rejected"
-            age_years = max(1, current_year - model_year)
-            if mileage_value / age_years > STANDARD_MAX_MILES_PER_YEAR:
-                return "rejected"
+        age_years = max(1, current_year - model_year)
+        if mileage_value / age_years > STANDARD_MAX_MILES_PER_YEAR:
+            return "rejected"
 
     return vehicle_tier
 

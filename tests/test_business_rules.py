@@ -33,6 +33,8 @@ def test_determine_vehicle_tier_matches_canonical_policy():
     assert determine_vehicle_tier(year - 4, 50_001) == "rejected"
     assert determine_vehicle_tier(year - 5, 90_000) == "standard"
     assert determine_vehicle_tier(year - 5, STANDARD_MAX_MILEAGE + 1) == "rejected"
+    assert determine_vehicle_tier(year - 2, None) == "rejected"
+    assert determine_vehicle_tier(year - 5, None) == "rejected"
 
 
 def test_lane_aware_margin_floor():

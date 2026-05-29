@@ -263,7 +263,7 @@ def _condition_score(vehicle: dict) -> float:
 def _mileage_score(vehicle: dict) -> float:
     mileage = _coerce_float(vehicle.get("mileage"))
     if mileage is None:
-        return 55.0
+        return 20.0
     if mileage <= 30000:
         return 100.0
     if mileage <= 60000:
@@ -857,10 +857,10 @@ def score_deal(
     dos_premium = score_deal_premium(vehicle_proxy)
     dos_standard = score_deal_standard(vehicle_proxy)
 
-    if rust_state_rejected:
+    if rust_state_rejected or vehicle_tier == "rejected":
         selected_dos = 0.0
     else:
-        selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard if vehicle_tier == "standard" else max(dos_premium, dos_standard)
+        selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard
 
     buyer_premium_pct_value = _normalize_pct(buyer_premium_pct, 0.05)
     buyer_premium_amount = round((bid_value or 0) * buyer_premium_pct_value, 2) if bid_value and bid_value > 0 else 0.0

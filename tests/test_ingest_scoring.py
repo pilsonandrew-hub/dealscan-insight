@@ -456,6 +456,8 @@ def test_determine_vehicle_tier_enforces_age_and_mileage_hard_stops():
     assert determine_vehicle_tier(CURRENT_YEAR - 5, 100001) == "rejected"
     assert determine_vehicle_tier(CURRENT_YEAR - 11, 10000) == "rejected"
     assert determine_vehicle_tier(None, 10000) == "rejected"
+    assert determine_vehicle_tier(CURRENT_YEAR - 2, None) == "rejected"
+    assert determine_vehicle_tier(CURRENT_YEAR - 5, None) == "rejected"
 
 
 def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
@@ -773,3 +775,25 @@ def test_normalize_apify_vehicle_uses_detail_text_description_alias():
 
     assert normalized is not None
     assert normalized["description"] == "Vehicle does not start. No start condition."
+
+
+def test_score_deal_missing_mileage_is_rejected_not_surfaced_as_platinum():
+    result = score_deal(
+        bid=500,
+        mmr_ca=20000,
+        state="CA",
+        source_site="GovDeals",
+        model="F-150",
+        make="Ford",
+        year=CURRENT_YEAR - 2,
+        mileage=None,
+        title_status="clean",
+        description="clean low bid truck",
+        photos=["https://example.com/photo.jpg"],
+    )
+
+    assert result["vehicle_tier"] == "rejected"
+    assert result["investment_grade"] == "Rejected"
+    assert result["ceiling_pass"] is False
+    assert result["score_provenance"]["input_profile"]["has_mileage"] is False
+    assert result["dos_score"] == 0.0
