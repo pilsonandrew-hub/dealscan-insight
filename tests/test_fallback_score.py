@@ -50,3 +50,25 @@ def test_build_fallback_score_keeps_invalid_mileage_untrusted_with_zero_raw_scor
         assert result["investment_grade"] is None
         assert result["ceiling_pass"] is False
         assert result["max_bid"] == 0
+
+def test_build_fallback_score_preserves_valid_mileage_profile_without_trust_surface():
+    result = build_fallback_score({
+        "title": "2024 Toyota Camry",
+        "make": "Toyota",
+        "year": 2024,
+        "current_bid": 500,
+        "state": "CA",
+        "source_site": "govdeals",
+        "mileage": 12000,
+    })
+
+    assert result["score"] > 0.0
+    assert result["dos_score"] == result["score"]
+    assert result["legacy_dos_score"] == result["score"]
+    assert result["score_provenance"]["input_profile"]["has_mileage"] is True
+    assert result["investment_grade"] is None
+    assert result["ceiling_pass"] is False
+    assert result["max_bid"] == 0
+    assert result["assumption_level"] == "severe"
+    assert result["fallback_flags"] == ["hard_fallback_score", "no_mmr"]
+
