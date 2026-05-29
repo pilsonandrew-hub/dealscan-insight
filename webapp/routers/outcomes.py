@@ -153,7 +153,60 @@ def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = Non
     return opp
 
 
-def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> bool:
+def _dealer_sales_base_payload(user_id: str, opportunity: dict, opportunity_id: str) -> dict:
+    return {
+        "user_id": user_id,
+        "opportunity_id": opportunity_id,
+        "make": opportunity.get("make") or "Unknown",
+        "model": opportunity.get("model") or "Unknown",
+        "year": opportunity.get("year") or 0,
+        "mileage": opportunity.get("mileage"),
+        "state": opportunity.get("state"),
+    }
+
+
+DEALER_SALES_OUTCOME_COLUMNS = {
+    "user_id", "opportunity_id", "make", "model", "year", "mileage", "state",
+    "sale_price", "sold_price", "asking_price", "outcome", "gross_margin",
+    "roi_pct", "sale_date", "days_to_sale", "metadata", "source", "updated_at",
+}
+
+
+def _upsert_dealer_sales_outcome(payload: dict) -> None:
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+    unknown_columns = sorted(set(payload) - DEALER_SALES_OUTCOME_COLUMNS)
+    if unknown_columns:
+        logger.error("[OUTCOMES] dealer_sales payload has unknown columns: %s", unknown_columns)
+        raise HTTPException(status_code=500, detail="Outcome evidence payload does not match schema")
+
+    try:
+        result = supabase_client.table("dealer_sales").upsert(payload, on_conflict="opportunity_id,user_id").execute()
+        if getattr(result, "error", None):
+            raise RuntimeError(result.error)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "[OUTCOMES] dealer_sales persistence failed for opportunity %s: %s",
+            payload.get("opportunity_id"),
+            exc,
+        )
+        raise HTTPException(status_code=500, detail="Failed to persist outcome evidence")
+
+
+def _execute_scoped_opportunity_update(query, opportunity_id: str) -> None:
+    result = query.execute()
+    if getattr(result, "error", None):
+        raise HTTPException(status_code=500, detail="Failed to update opportunity outcome mirror")
+    data = getattr(result, "data", None)
+    if data == []:
+        logger.error("[OUTCOMES] opportunity mirror update matched zero rows for %s", opportunity_id)
+        raise HTTPException(status_code=500, detail="Failed to update opportunity outcome mirror")
+
+
+def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> None:
     asking_price = _safe_float(opportunity.get("current_bid"))
     gross_margin = None
     roi_pct = None
@@ -162,31 +215,59 @@ def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: Out
         roi_pct = round((gross_margin / asking_price) * 100, 4)
 
     insert_payload = {
-        "user_id": user_id,
-        "opportunity_id": payload.opportunity_id,
-        "make": opportunity.get("make") or "Unknown",
-        "model": opportunity.get("model") or "Unknown",
-        "year": opportunity.get("year") or 0,
-        "mileage": opportunity.get("mileage"),
+        **_dealer_sales_base_payload(user_id, opportunity, payload.opportunity_id),
         "sale_price": payload.sale_price,
         "sold_price": payload.sale_price,
+        "asking_price": asking_price,
         "outcome": "won",
         "gross_margin": gross_margin,
         "roi_pct": roi_pct,
-        "state": opportunity.get("state"),
         "sale_date": payload.sale_date,
         "days_to_sale": payload.days_to_sale,
-        "metadata": {"notes": payload.notes or ""},
+        "metadata": {"notes": payload.notes or "", "type": "realized_sale_outcome"},
         "source": "outcome_tracking",
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    try:
-        supabase_client.table("dealer_sales").upsert(insert_payload, on_conflict="opportunity_id,user_id").execute()
-        return True
-    except Exception as exc:
-        logger.warning("[OUTCOMES] dealer_sales mirror skipped for opportunity %s: %s", payload.opportunity_id, exc)
-        return False
+    _upsert_dealer_sales_outcome(insert_payload)
+
+
+def _mirror_bid_outcome_to_dealer_sales(
+    user_id: str,
+    opportunity_id: str,
+    opportunity: dict,
+    normalized: BidOutcomeNormalized,
+    notes: Optional[str],
+) -> None:
+    asking_price = normalized.bid_amount
+    sale_price = normalized.purchase_price if normalized.outcome == "won" else (asking_price or 0)
+    gross_margin = None
+    roi_pct = None
+    if normalized.outcome == "won" and normalized.purchase_price is not None and asking_price and asking_price > 0:
+        gross_margin = round(normalized.purchase_price - asking_price, 2)
+        roi_pct = round((gross_margin / asking_price) * 100, 4)
+
+    insert_payload = {
+        **_dealer_sales_base_payload(user_id, opportunity, opportunity_id),
+        "sale_price": sale_price,
+        "sold_price": normalized.purchase_price if normalized.outcome == "won" else None,
+        "asking_price": asking_price,
+        "outcome": normalized.outcome,
+        "gross_margin": gross_margin,
+        "roi_pct": roi_pct,
+        "metadata": {
+            "type": "bid_outcome",
+            "bid": normalized.bid,
+            "won": normalized.outcome == "won",
+            "purchase_price": normalized.purchase_price,
+            "bid_amount": normalized.bid_amount,
+            "user_notes": notes or "",
+        },
+        "source": "bid_outcome_tracking",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    _upsert_dealer_sales_outcome(insert_payload)
 
 
 @router.patch("/{opportunity_id}")
@@ -237,7 +318,11 @@ async def patch_outcome(
     }
 
     try:
-        supabase_client.table("dealer_sales").upsert(upsert_payload, on_conflict="opportunity_id,user_id").execute()
+        upsert_payload.update({
+            "metadata": {"type": "manual_outcome", "outcome": payload.outcome, "sold_price": sold_price},
+            "source": "manual_outcome_tracking",
+        })
+        _upsert_dealer_sales_outcome(upsert_payload)
 
         opportunity_update = {
             "won": payload.outcome == "won",
@@ -249,7 +334,13 @@ async def patch_outcome(
                 "sold_price": sold_price,
             }),
         }
-        supabase_client.table("opportunities").update(opportunity_update).eq("id", opportunity_id).eq("user_id", user_id).execute()
+        _execute_scoped_opportunity_update(
+            supabase_client.table("opportunities")
+            .update(opportunity_update)
+            .eq("id", opportunity_id)
+            .eq("user_id", user_id),
+            opportunity_id,
+        )
 
         return {
             "success": True,
@@ -258,7 +349,10 @@ async def patch_outcome(
             "sold_price": sold_price,
             "gross_margin": gross_margin,
             "roi_pct": roi_pct,
+            "outcome_persisted": True,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("[OUTCOMES] patch failed for opportunity %s: %s", opportunity_id, exc)
         raise HTTPException(status_code=500, detail="Failed to record outcome")
@@ -277,7 +371,7 @@ async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
     try:
         resp = (
             supabase_client.table("dealer_sales")
-            .select("outcome,gross_margin,roi_pct")
+            .select("opportunity_id,outcome,gross_margin,roi_pct,sale_price,sold_price,asking_price,source,updated_at,created_at")
             .eq("user_id", user_id)
             .execute()
         )
@@ -286,6 +380,7 @@ async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
         gross_margin_total = 0.0
         roi_values: list[float] = []
 
+        recent_outcomes = []
         for row in rows:
             raw_outcome = (row.get("outcome") or "pending").strip().lower()
             outcome = "won" if raw_outcome == "sold" else raw_outcome
@@ -297,12 +392,23 @@ async def get_outcomes_summary(authorization: Optional[str] = Header(None)):
             roi = _safe_float(row.get("roi_pct"))
             if roi is not None:
                 roi_values.append(roi)
+            if len(recent_outcomes) < 10:
+                recent_outcomes.append({
+                    "opportunity_id": row.get("opportunity_id"),
+                    "outcome": outcome,
+                    "sale_price": row.get("sale_price"),
+                    "sold_price": row.get("sold_price"),
+                    "asking_price": row.get("asking_price"),
+                    "source": row.get("source"),
+                    "recorded_at": row.get("updated_at") or row.get("created_at"),
+                })
 
         avg_roi = round(sum(roi_values) / len(roi_values), 2) if roi_values else None
         return {
             "count_by_outcome": counts,
             "total_gross_margin": round(gross_margin_total, 2),
             "avg_roi": avg_roi,
+            "recent_outcomes": recent_outcomes,
         }
     except Exception as exc:
         logger.error("[OUTCOMES] summary failed: %s", exc, exc_info=True)
@@ -321,7 +427,7 @@ async def create_outcome(
     opportunity = _fetch_opportunity(payload.opportunity_id, require_user_id=user_id)
     _legacy_mirror_to_dealer_sales(user_id, opportunity, payload)
 
-    return {"success": True}
+    return {"success": True, "outcome_persisted": True}
 
 
 @router.post("/bid")
@@ -359,9 +465,24 @@ async def create_bid_outcome(
         update_payload["outcome_sale_price"] = normalized.purchase_price
 
     try:
-        supabase_client.table("opportunities").update(update_payload).eq("id", payload.opportunity_id).execute()
+        _mirror_bid_outcome_to_dealer_sales(
+            user_id=user_id,
+            opportunity_id=payload.opportunity_id,
+            opportunity=opportunity,
+            normalized=normalized,
+            notes=payload.notes,
+        )
+        _execute_scoped_opportunity_update(
+            supabase_client.table("opportunities")
+            .update(update_payload)
+            .eq("id", payload.opportunity_id)
+            .eq("user_id", user_id),
+            payload.opportunity_id,
+        )
         logger.info("[OUTCOMES/BID] recorded bid=%s won=%s opp=%s user=%s", payload.bid, payload.won, payload.opportunity_id, user_id)
-        return {"success": True, "opportunity": opportunity}
+        return {"success": True, "outcome": normalized.outcome, "outcome_persisted": True, "opportunity": opportunity}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("[OUTCOMES/BID] failed for opportunity %s: %s", payload.opportunity_id, exc)
         raise HTTPException(status_code=500, detail="Failed to record bid outcome")
