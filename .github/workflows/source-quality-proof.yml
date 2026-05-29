@@ -41,7 +41,21 @@ jobs:
           except ValueError:
               limit = 300
 
-          select = ",".join([
+          def rest_get(path):
+              req = urllib.request.Request(
+                  f"{supabase_url}{path}",
+                  headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read().decode())
+
+          columns_rows = rest_get(
+              "/rest/v1/rpc/get_table_columns"
+              if False else
+              "/rest/v1/opportunities?select=*&limit=1"
+          )
+          available_columns = set(columns_rows[0].keys()) if columns_rows else set()
+          wanted = [
               "id",
               "created_at",
               "source",
@@ -54,19 +68,24 @@ jobs:
               "condition",
               "dos_score",
               "score",
-          ])
+          ]
+          selected_columns = [col for col in wanted if col in available_columns]
+          select = ",".join(selected_columns or ["id"])
+          source_filters = []
+          if "source" in available_columns:
+              source_filters.append(f"source.eq.{source}")
+          if "source_site" in available_columns:
+              source_filters.append(f"source_site.eq.{source}")
+          if not source_filters:
+              raise SystemExit("opportunities has neither source nor source_site column")
+          order_column = "created_at" if "created_at" in available_columns else selected_columns[0]
           query = urllib.parse.urlencode({
               "select": select,
-              "or": f"(source.eq.{source},source_site.eq.{source})",
-              "order": "created_at.desc",
+              "or": f"({','.join(source_filters)})",
+              "order": f"{order_column}.desc",
               "limit": str(limit),
           })
-          req = urllib.request.Request(
-              f"{supabase_url}/rest/v1/opportunities?{query}",
-              headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
-          )
-          with urllib.request.urlopen(req, timeout=30) as resp:
-              rows = json.loads(resp.read().decode())
+          rows = rest_get(f"/rest/v1/opportunities?{query}")
 
           def has_mileage(row):
               try:
