@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException
 
 from backend.business_rules.constants import ALERTS_ENABLED_PRODUCTION_DEFAULT
+from backend.ingest.alert_gating import evaluate_alert_gate
 from webapp.database import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -78,13 +79,39 @@ def _status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(counter.most_common(20))
 
 
+def _alert_gate_breakdown(rows: list[dict[str, Any]], *, limit: int = 25) -> list[dict[str, Any]]:
+    breakdown: list[dict[str, Any]] = []
+    for row in rows[:limit]:
+        gate = evaluate_alert_gate(row)
+        signals = gate.get("signals") or {}
+        breakdown.append({
+            "id": row.get("id"),
+            "source_site": row.get("source_site"),
+            "created_at": row.get("created_at"),
+            "dos_score": row.get("dos_score") or row.get("score"),
+            "eligible": bool(gate.get("eligible")),
+            "alert_type": gate.get("alert_type"),
+            "blocking_reasons": gate.get("blocking_reasons") or [],
+            "summary": gate.get("summary"),
+            "signals": {
+                "pricing_maturity": signals.get("pricing_maturity"),
+                "investment_grade": signals.get("investment_grade"),
+                "confidence": signals.get("confidence"),
+                "mileage": signals.get("mileage"),
+                "condition_grade": signals.get("condition_grade"),
+                "current_bid_trust_score": signals.get("current_bid_trust_score"),
+            },
+        })
+    return breakdown
+
+
 def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
 
     opp_rows = _safe_rows(
         "opportunities",
-        "id,is_active,dos_score,score,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date",
+        "id,is_active,dos_score,score,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid",
         order=("created_at", True),
         limit=1000,
     )
@@ -130,6 +157,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "active_dos80_missing_vin_sample": sum(1 for row in active_dos80 if not row.get("vin")),
             "active_dos80_condition_unverified_sample": sum(1 for row in active_dos80 if str(row.get("condition_grade") or "").lower() in {"", "poor", "unknown"}),
             "source_counts_sample": _status_counts(active_dos80, "source_site"),
+            "active_dos80_gate_breakdown": _alert_gate_breakdown(active_dos80),
         },
         "webhooks": {
             "recent_count": len(webhook_rows),
