@@ -479,6 +479,11 @@ def test_score_deal_uses_premium_lane_defaults_for_recent_vehicle():
     assert result["bid_ceiling_pct"] == 0.88
     assert result["min_margin_target"] == 1500.0
     assert result["ceiling_pass"] is True
+    assert result["investment_grade"] != "Rejected"
+    assert result["dos_score"] > 0
+    assert result["score"] > 0
+    assert result["max_bid"] > 0
+    assert result["score_provenance"]["input_profile"]["has_mileage"] is True
 
 
 def test_score_deal_hard_rejects_older_high_rust_state_even_with_strong_economics():
