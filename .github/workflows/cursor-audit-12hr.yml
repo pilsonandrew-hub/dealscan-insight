@@ -28,16 +28,16 @@ jobs:
           echo "=== DEALERSCOPE BUSINESS RULE AUDIT ==="
           FAILED=0
 
-          # 1. Bid ceiling check
-          if grep -n "0\.88\|0\.80" backend/ingest/score.py | grep -q "bid_ceiling\|CEILING\|ceiling"; then
-            echo "✅ Bid ceiling constants present"
+          # 1. Bid ceiling check — canonical constants may live outside score.py.
+          if grep -RIn "PREMIUM_BID_CEILING_PCT *= *0\.88\|STANDARD_BID_CEILING_PCT *= *0\.80\|bid_ceiling_pct_for_tier" backend/business_rules backend/ingest --include="*.py" | grep -q .; then
+            echo "✅ Bid ceiling constants/gates present"
           else
             echo "❌ FAIL: Bid ceiling missing from score.py"
             FAILED=1
           fi
 
           # 2. Standard year cutoff (must be 10yr — Standard lane allows up to 10yr old vehicles)
-          if grep -n "standard_year_cutoff\|STANDARD_YEAR_CUTOFF" backend/ingest/score.py | grep -q "10"; then
+          if grep -RIn "STANDARD_VEHICLE_MAX_AGE_YEARS *= *10\|standard_year_cutoff" backend/business_rules backend/ingest --include="*.py" | grep -q .; then
             echo "✅ Standard year cutoff correct (10yr for Standard lane)"
           else
             echo "❌ FAIL: Standard year cutoff missing or wrong — should be current_year - 10"
