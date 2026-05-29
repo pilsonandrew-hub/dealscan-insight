@@ -1,19 +1,17 @@
-name: Legacy Build and Deploy Placeholder (manual only)
+name: Legacy Build Validation Placeholder - No Deployment
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_VERSION: '24'
-  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-  SUPABASE_PROJECT_ID: lbnxzvqppccajllsqaaw
 
 jobs:
   test:
+    name: Legacy validation tests only - no deployment
     runs-on: ubuntu-latest
     steps:
       - name: Set Git default branch for quiet checkout
@@ -36,18 +34,19 @@ jobs:
       - name: Run linting
         run: npm run lint
         
-      - name: Run canary tests
+      - name: Run canary build validation
         run: |
-          echo "Running basic canary tests..."
+          echo "Running legacy build validation only. No deployment is performed."
           npm run build
-          echo "✅ Canary tests passed"
+          echo "✅ Legacy build validation passed"
             
       - name: Validate contracts
         run: |
-          echo "Basic contract validation..."
+          echo "Basic contract validation only; not deploy proof."
           echo "✅ Contracts validated"
 
   security-scan:
+    name: Legacy security scan only - no deployment
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -66,9 +65,9 @@ jobs:
             exit 1
           fi
           echo "✅ No hardcoded secrets found"
-          echo "✅ No hardcoded secrets detected"
 
-  build:
+  build-artifact-validation:
+    name: Legacy artifact validation only - no deployment
     needs: [test, security-scan]
     runs-on: ubuntu-latest
     outputs:
@@ -89,16 +88,18 @@ jobs:
         id: version
         run: echo "version=$(npm pkg get version | tr -d '"')" >> $GITHUB_OUTPUT
         
-      - name: Build application
+      - name: Build application artifact only
         env:
           VITE_APP_VERSION: ${{ steps.version.outputs.version }}
           VITE_BUILD_TIME: ${{ github.run_number }}
           VITE_COMMIT_SHA: ${{ github.sha }}
-        run: npm run build
-        
-      - name: Run bundle analysis
         run: |
-          echo "Analyzing bundle..."
+          echo "::notice title=No deployment performed::This legacy workflow builds an artifact only. It is not Railway or Vercel deploy evidence."
+          npm run build
+        
+      - name: Run bundle analysis placeholder
+        run: |
+          echo "Analyzing bundle artifact only..."
           echo "✅ Bundle analysis completed"
           
       - name: Check bundle size
@@ -106,7 +107,6 @@ jobs:
           BUNDLE_SIZE=$(du -sh dist | cut -f1)
           echo "Bundle size: $BUNDLE_SIZE"
           
-          # Fail if bundle is too large (>5MB)
           if [ $(du -sm dist | cut -f1) -gt 5 ]; then
             echo "❌ Bundle size exceeds 5MB limit"
             exit 1
@@ -116,117 +116,30 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: build-${{ steps.version.outputs.version }}
+          name: legacy-build-validation-${{ steps.version.outputs.version }}
           path: |
             dist/
             bundle-analysis.json
           retention-days: 30
 
-  deploy-staging:
-    needs: build
+  current-backend-smoke-check:
+    name: Current Railway backend smoke check - not deploy proof
+    needs: build-artifact-validation
     runs-on: ubuntu-latest
-    environment: staging
     env:
       BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL || 'https://dealscan-insight-production.up.railway.app' }}
     steps:
-      - uses: actions/checkout@v6
-      
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: build-${{ needs.build.outputs.version }}
-          
-      - name: Legacy staging deploy placeholder
+      - name: State non-authoritative boundary
         run: |
-          echo "🚀 Running legacy staging deploy placeholder..."
-          # Add your staging deployment commands here
-          # Example: rsync, scp, or cloud provider CLI
-          
-      - name: Run backend smoke check
+          echo "::notice title=No deployment performed::This job checks the already-deployed Railway backend only. It is not deployment proof."
+
+      - name: Check already-deployed Railway backend health
         run: |
-          echo "🧪 Running smoke tests on Railway backend..."
+          echo "Checking current Railway backend health only..."
           curl -f ${BACKEND_BASE_URL}/healthz
-          echo "✅ Smoke tests complete"
-          
-      - name: Comment on PR (legacy placeholder)
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '🚀 Deployed to staging: https://staging.dealerscope.com'
-            })
+          echo "✅ Current backend health check passed; no deployment was performed"
 
-  deploy-production:
-    needs: [build, deploy-staging]
-    runs-on: ubuntu-latest
-    environment: production
-    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
-    env:
-      BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL || 'https://dealscan-insight-production.up.railway.app' }}
-    steps:
-      - uses: actions/checkout@v6
-      
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: build-${{ needs.build.outputs.version }}
-          
-      - name: Validate legacy production placeholder assumptions
+      - name: Document authoritative deploy evidence
         run: |
-          echo "🔍 Validating legacy production placeholder assumptions..."
-          echo "⚠️ This workflow does not prove production readiness or perform a real backend deployment."
-          
-      - name: Database migration placeholder
-        run: |
-          echo "🗄️ Checking database migrations..."
-          # Add Supabase migration commands here
-          
-      - name: Legacy production deploy placeholder
-        run: |
-          echo "🚀 Running legacy production deploy placeholder..."
-          # Add your production deployment commands here
-          
-      - name: Health check against current Railway backend
-        run: |
-          echo "🏥 Running production health check..."
-          sleep 30 # Wait for deployment
-          
-          for i in {1..5}; do
-            if curl -sf ${BACKEND_BASE_URL}/healthz; then
-              echo "✅ Health check passed"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "❌ Health check failed after 5 attempts"
-          exit 1
-          
-      - name: Performance placeholder
-        run: |
-          echo "⚡ Running performance check..."
-          # Add Lighthouse CI or similar performance testing
-          
-      - name: Notify legacy deploy placeholder
-        run: |
-          echo "📢 Legacy deploy placeholder run completed!"
-          echo "Version: ${{ needs.build.outputs.version }}"
-          echo "URL: https://dealerscope.com"
-
-  rollback:
-    runs-on: ubuntu-latest
-    environment: production
-    if: failure() && (github.ref == 'refs/heads/main' || github.event_name == 'release')
-    needs: [deploy-production]
-    steps:
-      - name: Rollback placeholder
-        run: |
-          echo "🔄 Rolling back deployment..."
-          # Add rollback commands here
-          
-      - name: Notify rollback
-        run: |
-          echo "⚠️ Deployment rolled back due to failure"
+          echo "Authoritative deploy evidence comes from Railway and Vercel commit statuses plus purpose-built live validation workflows."
+          echo "This legacy workflow is non-authoritative and must not be cited as production deploy proof."

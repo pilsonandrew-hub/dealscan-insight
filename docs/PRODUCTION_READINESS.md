@@ -10,6 +10,13 @@ DealerScope is production-ready only when machine-checkable gates pass.
 
 Workflow: `.github/workflows/ci.yml`
 
+
+## Authoritative deployment evidence
+
+`.github/workflows/production-deploy.yml` is a legacy, manual, non-authoritative build/smoke-check placeholder. It does **not** deploy DealerScope and must not be cited as production deploy proof.
+
+Authoritative production deployment evidence comes from Railway and Vercel commit statuses plus purpose-built live validation workflows such as route-contract and internal pipeline truth checks.
+
 ## Production environment contract
 
 See `.env.example` for required values, including:
