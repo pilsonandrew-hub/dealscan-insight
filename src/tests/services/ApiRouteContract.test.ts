@@ -32,6 +32,7 @@ describe('frontend/backend route contract', () => {
         expect.objectContaining({ source: '/api/sniper/(.*)', destination: expect.stringContaining('/api/sniper/$1') }),
         expect.objectContaining({ source: '/api/saved-searches/(.*)', destination: expect.stringContaining('/api/saved-searches/$1') }),
         expect.objectContaining({ source: '/api/recon/(.*)', destination: expect.stringContaining('/api/recon/$1') }),
+        expect.objectContaining({ source: '/api/sonar/(.*)', destination: expect.stringContaining('/api/sonar/$1') }),
       ])
     );
   });

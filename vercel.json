@@ -11,6 +11,7 @@
     { "source": "/api/sniper/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/sniper/$1" },
     { "source": "/api/saved-searches/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/saved-searches/$1" },
     { "source": "/api/recon/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/recon/$1" },
+    { "source": "/api/sonar/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/sonar/$1" },
     { "source": "/api/rover/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/rover/$1" },
     { "source": "/api/ingest/(.*)", "destination": "https://dealscan-insight-production.up.railway.app/api/ingest/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
