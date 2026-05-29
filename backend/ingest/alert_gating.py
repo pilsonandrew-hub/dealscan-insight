@@ -181,7 +181,9 @@ def evaluate_alert_gate(
         reasons.append("condition_unverified")
 
     confidence = signals["confidence"]
-    if confidence is not None and confidence < config.min_confidence:
+    if confidence is None:
+        reasons.append("confidence_missing")
+    elif confidence < config.min_confidence:
         reasons.append(f"confidence<{config.min_confidence:.0f}")
 
     current_bid_trust_score = signals["current_bid_trust_score"]

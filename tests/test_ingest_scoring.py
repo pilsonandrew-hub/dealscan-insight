@@ -157,6 +157,25 @@ def test_alert_gate_blocks_proxy_only_low_confidence_rows():
     assert "confidence<55" in gate["blocking_reasons"]
 
 
+def test_alert_gate_blocks_missing_confidence_even_with_otherwise_strong_signals():
+    record = {
+        "dos_score": 95,
+        "investment_grade": "Platinum",
+        "pricing_maturity": "market_comp",
+        "current_bid_trust_score": 0.9,
+        "bid_headroom": 5000,
+        "roi_per_day": 100,
+        "vin": "1HGCM82633A004352",
+        "mileage": 42000,
+        "condition_grade": "Good",
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is False
+    assert "confidence_missing" in gate["blocking_reasons"]
+
+
 def test_alert_gate_blocks_proxy_pricing_even_with_otherwise_strong_signals():
     record = {
         "dos_score": 95,
