@@ -32,9 +32,13 @@ jobs:
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           backend_base = os.environ["BACKEND_BASE_URL"].rstrip("/")
           frontend_base = os.environ["FRONTEND_BASE_URL"].rstrip("/")
-          email = f"sonar-proof-{os.environ.get('GITHUB_RUN_ID', secrets.token_hex(4))}@example.com"
+          run_id = os.environ.get('GITHUB_RUN_ID', secrets.token_hex(4))
+          email = f"sonar-proof-{run_id}@example.com"
+          other_email = f"sonar-proof-other-{run_id}@example.com"
           password = "Proof-" + secrets.token_urlsafe(18) + "-A1!"
+          other_password = "Proof-" + secrets.token_urlsafe(18) + "-B2!"
           created_user_id = None
+          other_user_id = None
 
           def request_json(url, *, method="GET", payload=None, headers=None, expected=None):
               body = json.dumps(payload).encode() if payload is not None else None
@@ -61,10 +65,27 @@ jobs:
           admin_headers = {"apikey": service_key, "Authorization": f"Bearer {service_key}"}
 
           try:
-              # Unauthenticated requests must fail closed through both Vercel rewrite and Railway.
-              unauth_status, _ = request_json(
+              # Unauthenticated requests must fail closed through Vercel rewrite and direct Railway.
+              unauth_vercel_status, _ = request_json(
                   f"{frontend_base}/api/sonar/status/not-a-real-job",
                   headers={},
+                  expected={401},
+              )
+              unauth_backend_status, _ = request_json(
+                  f"{backend_base}/api/sonar/status/not-a-real-job",
+                  headers={},
+                  expected={401},
+              )
+              unauth_backend_search, _ = request_json(
+                  f"{backend_base}/api/sonar/search",
+                  method="POST",
+                  headers={},
+                  payload={"query": "ford", "min_price": 0, "max_price": 75000, "extended": False},
+                  expected={401},
+              )
+              invalid_token_status, _ = request_json(
+                  f"{backend_base}/api/sonar/status/not-a-real-job",
+                  headers={"Authorization": "Bearer definitely-invalid-token"},
                   expected={401},
               )
 
@@ -78,6 +99,16 @@ jobs:
               created_user_id = created.get("id")
               if not created_user_id:
                   raise RuntimeError("admin user creation did not return id")
+              other_create_status, other_created = request_json(
+                  f"{supabase_url}/auth/v1/admin/users",
+                  method="POST",
+                  headers=admin_headers,
+                  payload={"email": other_email, "password": other_password, "email_confirm": True},
+                  expected={200},
+              )
+              other_user_id = other_created.get("id")
+              if not other_user_id:
+                  raise RuntimeError("second admin user creation did not return id")
 
               token_status, token_data = request_json(
                   f"{supabase_url}/auth/v1/token?grant_type=password",
@@ -89,6 +120,16 @@ jobs:
               access_token = token_data.get("access_token")
               if not access_token:
                   raise RuntimeError("password grant did not return access token")
+              other_token_status, other_token_data = request_json(
+                  f"{supabase_url}/auth/v1/token?grant_type=password",
+                  method="POST",
+                  headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+                  payload={"email": other_email, "password": other_password},
+                  expected={200},
+              )
+              other_access_token = other_token_data.get("access_token")
+              if not other_access_token:
+                  raise RuntimeError("second password grant did not return access token")
 
               auth_headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
               search_status, search_data = request_json(
@@ -111,27 +152,42 @@ jobs:
               status_results = status_data.get("results")
               if not isinstance(status_results, list):
                   raise RuntimeError("status did not return results list")
+              cross_user_status, _ = request_json(
+                  f"{backend_base}/api/sonar/status/{job_id}",
+                  headers={"Authorization": f"Bearer {other_access_token}"},
+                  expected={403},
+              )
 
               print(json.dumps({
-                  "unauth_vercel_status": unauth_status,
+                  "unauth_vercel_status": unauth_vercel_status,
+                  "unauth_backend_status": unauth_backend_status,
+                  "unauth_backend_search": unauth_backend_search,
+                  "invalid_token_status": invalid_token_status,
                   "created_temp_user": True,
+                  "created_second_temp_user": True,
                   "auth_search_status": search_status,
                   "auth_search_results_count": len(results),
                   "job_id_present": True,
                   "auth_status_status": status_status,
                   "auth_status_results_count": len(status_results),
+                  "cross_user_status": cross_user_status,
               }, indent=2, sort_keys=True))
           finally:
-              if created_user_id:
+              deletion_failures = []
+              for label, user_id in (("temp_user", created_user_id), ("second_temp_user", other_user_id)):
+                  if not user_id:
+                      continue
                   try:
                       request_json(
-                          f"{supabase_url}/auth/v1/admin/users/{created_user_id}",
+                          f"{supabase_url}/auth/v1/admin/users/{user_id}",
                           method="DELETE",
                           headers=admin_headers,
                           expected={200, 204},
                       )
-                      print("temp_user_deleted=true")
+                      print(f"{label}_deleted=true")
                   except Exception as exc:
-                      print(f"temp_user_deleted=false reason={exc}")
-                      raise
+                      print(f"{label}_deleted=false reason={exc}")
+                      deletion_failures.append(exc)
+              if deletion_failures:
+                  raise deletion_failures[0]
           PY

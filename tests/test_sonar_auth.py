@@ -78,6 +78,23 @@ def test_require_sonar_user_id_accepts_valid_token(monkeypatch):
     assert sonar.require_sonar_user_id("Bearer valid-token") == "user-1"
 
 
+def test_supabase_auth_api_key_does_not_fall_back_to_service_role(monkeypatch):
+    monkeypatch.setattr(sonar, "SUPABASE_ANON_KEY", None)
+    monkeypatch.setattr(sonar, "SUPABASE_SERVICE_ROLE_KEY", "service-key")
+
+    assert sonar._supabase_auth_api_key() == ""
+
+
+def test_fetch_supabase_user_fails_closed_without_anon_key(monkeypatch):
+    monkeypatch.setattr(sonar, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(sonar, "SUPABASE_ANON_KEY", None)
+    monkeypatch.setattr(sonar, "SUPABASE_SERVICE_ROLE_KEY", "service-key")
+
+    with pytest.raises(HTTPException) as exc:
+        sonar._fetch_supabase_user("token")
+    assert exc.value.status_code == 503
+
+
 def test_sonar_search_requires_auth_before_service_role(monkeypatch):
     called = False
 

@@ -82,8 +82,14 @@ def _extract_bearer_token(authorization: str | None) -> str:
 
 
 def _supabase_auth_api_key() -> str:
-    """Return a server-side key usable for Supabase Auth user introspection."""
-    return (SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY or "").strip()
+    """Return the anon/publishable key used for Supabase Auth introspection.
+
+    Token introspection does not require service-role privileges. Falling back
+    to the service-role key would turn an anon-key misconfiguration into silent
+    privilege escalation, so Sonar fails closed when no anon/publishable key is
+    configured.
+    """
+    return (SUPABASE_ANON_KEY or "").strip()
 
 
 def _fetch_supabase_user(token: str) -> dict:
