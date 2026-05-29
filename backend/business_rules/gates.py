@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Mapping, Optional
 
 from backend.business_rules.constants import (
@@ -28,9 +29,12 @@ def _coerce_float(value: object) -> Optional[float]:
     if value is None or value == "":
         return None
     try:
-        return float(value)
+        normalized = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(normalized):
+        return None
+    return normalized
 
 
 def _coerce_year(value: object) -> Optional[int]:

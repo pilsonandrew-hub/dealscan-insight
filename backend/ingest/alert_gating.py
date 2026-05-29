@@ -167,6 +167,10 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
         "expected_close_source": expected_close_source,
         "vin": _pick_text(record.get("vin"), breakdown.get("vin")),
         "mileage": _pick_numeric(record.get("mileage"), breakdown.get("mileage")),
+        "mileage_invalid": any(
+            key in source and _to_float(source.get(key)) is None
+            for source, key in ((record, "mileage"), (breakdown, "mileage"))
+        ),
         "condition_grade": _pick_text(
             record.get("condition_grade"),
             breakdown.get("condition_grade"),
@@ -193,7 +197,7 @@ def evaluate_alert_gate(
         reasons.append(f"pricing_maturity={signals['pricing_maturity']}")
     if not _valid_vin_shape(signals["vin"]):
         reasons.append("vin_unverified")
-    if signals["mileage"] is None or signals["mileage"] <= 0:
+    if signals.get("mileage_invalid") or signals["mileage"] is None or signals["mileage"] <= 0:
         reasons.append("mileage_missing")
     condition_grade = str(signals["condition_grade"] or "").strip().lower()
     if condition_grade in UNKNOWN_OR_WEAK_CONDITION_GRADES:

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import math
 import re
 from typing import Optional
 
@@ -57,9 +58,12 @@ def _coerce_float(value: object) -> Optional[float]:
     if value is None or value == "":
         return None
     try:
-        return float(value)
+        normalized = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(normalized):
+        return None
+    return normalized
 
 
 def _coerce_year(value: object) -> Optional[int]:
@@ -128,10 +132,8 @@ def _build_score_provenance(
     severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}
     assumption_level = "severe" if any(flag in severe_flags for flag in flags) else "minor" if flags else "none"
 
-    try:
-        has_valid_mileage = mileage is not None and float(str(mileage).replace(",", "").strip()) > 0
-    except (TypeError, ValueError):
-        has_valid_mileage = False
+    mileage_value = _coerce_float(str(mileage).replace(",", "").strip() if mileage is not None else None)
+    has_valid_mileage = mileage_value is not None and mileage_value > 0
 
     return {
         "engine_version": SCORE_ENGINE_VERSION,

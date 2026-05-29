@@ -7,6 +7,7 @@ making severe fallback provenance queryable and independently testable.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any
 
 from backend.ingest.gates import LOW_RUST_STATES
@@ -59,9 +60,14 @@ def build_fallback_score(vehicle: dict[str, Any]) -> dict[str, Any]:
 
     mileage_value = vehicle.get("mileage")
     try:
-        has_valid_mileage = mileage_value is not None and float(mileage_value) > 0
+        normalized_mileage = float(str(mileage_value).replace(",", "").strip()) if mileage_value is not None else None
     except (TypeError, ValueError):
-        has_valid_mileage = False
+        normalized_mileage = None
+    has_valid_mileage = (
+        normalized_mileage is not None
+        and math.isfinite(normalized_mileage)
+        and normalized_mileage > 0
+    )
 
     score_provenance = {
         "engine_version": "fallback_v1",

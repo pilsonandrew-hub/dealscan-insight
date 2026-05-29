@@ -278,7 +278,7 @@ def test_alert_gate_requires_vin_mileage_and_verified_condition():
 
 
 def test_alert_gate_rejects_invalid_mileage_values_and_placeholder_vin():
-    for mileage in (0, -1, "", "  ", "unknown", "0", "-2"):
+    for mileage in (0, -1, "", "  ", "unknown", "0", "-2", "0.0", "-0.1", "-2.5", "nan", "NaN", "inf", "-inf"):
         record = {
             "dos_score": 95,
             "investment_grade": "Platinum",
@@ -885,7 +885,7 @@ def test_score_deal_missing_mileage_is_rejected_not_surfaced_as_platinum():
 
 
 def test_score_deal_invalid_mileage_is_rejected_not_surfaced_as_platinum():
-    for mileage in (0, -1, "", "  ", "unknown", "0", "-2"):
+    for mileage in (0, -1, "", "  ", "unknown", "0", "-2", "0.0", "-0.1", "-2.5", "nan", "NaN", "inf", "-inf"):
         result = score_deal(
             bid=500,
             mmr_ca=20000,
