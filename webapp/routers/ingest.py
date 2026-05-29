@@ -2001,9 +2001,7 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         import httpx
 
         callback_id = opp_id or "unknown"
-        alert_gate = deal.get("alert_gate")
-        if not isinstance(alert_gate, dict):
-            alert_gate = _alert_gate_for_vehicle(deal)
+        alert_gate = _alert_gate_for_vehicle(deal)
         if not alert_gate.get("eligible"):
             logger.info(
                 "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
