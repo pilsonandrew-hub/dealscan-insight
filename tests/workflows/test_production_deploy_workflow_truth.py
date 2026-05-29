@@ -29,6 +29,7 @@ def test_legacy_workflow_is_explicitly_non_authoritative():
 
 
 def test_legacy_workflow_cannot_use_deploy_authority_semantics():
+    assert "environment:" not in LOWER
     for phrase in FORBIDDEN_PHRASES:
         assert phrase not in LOWER
 
@@ -62,3 +63,18 @@ def test_production_readiness_doc_demotes_legacy_workflow():
     assert "non-authoritative" in doc
     assert "must not be cited as production deploy proof" in doc
     assert "railway and vercel commit statuses" in doc
+
+
+def test_legacy_workflow_has_no_deployment_secrets_or_tokens():
+    forbidden_secret_refs = [
+        "secrets.",
+        "supabase_access_token",
+        "supabase_project_id",
+        "railway_token",
+        "vercel_token",
+        "deploy_token",
+        "production_api_key",
+        "staging_api_key",
+    ]
+    for phrase in forbidden_secret_refs:
+        assert phrase not in LOWER
