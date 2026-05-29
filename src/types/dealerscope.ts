@@ -130,7 +130,7 @@ export interface Opportunity {
   model: string;
   year: number;
   mileage?: number;
-  investment_grade?: "Platinum" | "Gold" | "Silver" | "Bronze";
+  investment_grade?: "Platinum" | "Gold" | "Silver" | "Bronze" | "Watch" | "Rejected";
   pricing_source?: string;
   pricing_maturity?: "live_market" | "market_comp" | "proxy" | "unknown";
   pricing_updated_at?: string;

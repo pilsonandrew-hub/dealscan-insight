@@ -465,14 +465,18 @@ def test_score_vehicle_boosts_govdeals_near_close_when_structurally_viable():
         "listing_url": "https://example.com/vehicle/gd-near-close",
         "source_site": "govdeals",
         "auction_end_time": (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat(),
+        "retail_comp_count": 4,
+        "retail_comp_price_estimate": 24000,
+        "retail_comp_confidence": 0.9,
     }
 
     result = score_vehicle(vehicle)
 
-    assert result["ceiling_pass"] is True
-    assert result["ceiling_reason"] == "govdeals_live_bid_near_close"
-    assert float(result["current_bid_trust_score"]) >= 0.85
-    assert result["pricing_maturity"] == "market_comp"
+    assert result["pricing_maturity"] == "proxy"
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "pricing_maturity_proxy"
+    assert result["investment_grade"] == "Rejected"
+    assert result["pricing_trust_blocked"] is True
 
 
 def test_manheim_market_data_uses_proxy_fallback_without_live_config(monkeypatch):
@@ -564,9 +568,13 @@ def test_score_deal_allows_high_rust_state_new_vehicle_exception():
         title_status="clean",
         description="clean vehicle",
         photos=["https://example.com/photo.jpg"],
+        retail_comp_count=4,
+        retail_comp_price_estimate=22000,
+        retail_comp_confidence=0.9,
     )
 
     assert result["vehicle_tier"] == "premium"
+    assert result["pricing_maturity"] == "market_comp"
     assert result["investment_grade"] != "Rejected"
     assert result["ceiling_reason"] == "score_deal_v3_two_lane"
     assert result["ceiling_pass"] is True
@@ -596,6 +604,9 @@ def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
         make="Toyota",
         year=CURRENT_YEAR - 5,
         mileage=30000,
+        retail_comp_count=4,
+        retail_comp_price_estimate=12000,
+        retail_comp_confidence=0.9,
     )
 
     premium = score_deal(
@@ -607,6 +618,9 @@ def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
         make="Toyota",
         year=CURRENT_YEAR - 2,
         mileage=30000,
+        retail_comp_count=4,
+        retail_comp_price_estimate=12000,
+        retail_comp_confidence=0.9,
     )
 
     assert standard["vehicle_tier"] == "standard"
@@ -620,7 +634,6 @@ def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
     assert premium["max_bid"] == 8250.0
     assert premium["min_margin_target"] == 1500.0
     assert premium["ceiling_pass"] is False
-    assert premium["ai_confidence_score"] < 70
 
 
 def test_score_deal_hard_rejects_premium_bid_above_max_bid():
@@ -636,6 +649,9 @@ def test_score_deal_hard_rejects_premium_bid_above_max_bid():
         title_status="clean",
         description="clean vehicle",
         photos=["https://example.com/photo.jpg"],
+        retail_comp_count=4,
+        retail_comp_price_estimate=12000,
+        retail_comp_confidence=0.9,
     )
 
     assert result["vehicle_tier"] == "premium"
@@ -662,6 +678,9 @@ def test_score_deal_hard_rejects_standard_bid_above_max_bid():
         title_status="clean",
         description="clean vehicle",
         photos=["https://example.com/photo.jpg"],
+        retail_comp_count=4,
+        retail_comp_price_estimate=12000,
+        retail_comp_confidence=0.9,
     )
 
     assert result["vehicle_tier"] == "standard"
@@ -823,18 +842,16 @@ def _make_strong_structural_vehicle(bid=7000, year=2019, mileage=55000, state="C
     }
 
 
-def test_strong_structural_bypass_passes_ceiling():
-    """bid <= 50% of max_bid should pass ceiling even with low ai_confidence (proxy pricing)."""
-    from webapp.routers.ingest import score_vehicle, normalize_apify_vehicle
+def test_strong_structural_bypass_does_not_make_proxy_pricing_capital_ready():
+    """Extreme headroom remains scouting-only when pricing is proxy-derived."""
+    from webapp.routers.ingest import score_vehicle
     v = _make_strong_structural_vehicle(bid=7000)
     result = score_vehicle(v)
-    # With bid=$7k, MMR=$28k, max_bid ~= $22.4k (80% CTM standard)
-    # bid/max_bid = 7000/22400 = 31% — well under 50% → bypass should fire
-    assert result.get("ceiling_pass") is True, (
-        f"Strong structural vehicle (bid={v['current_bid']}, mmr=28k) should pass ceiling. "
-        f"Got ceiling_pass={result.get('ceiling_pass')}, reason={result.get('ceiling_reason')}, "
-        f"ai_conf={result.get('ai_confidence_score')}"
-    )
+
+    assert result.get("pricing_maturity") == "proxy"
+    assert result.get("ceiling_pass") is False
+    assert result.get("ceiling_reason") == "pricing_maturity_proxy"
+    assert result.get("investment_grade") == "Rejected"
 
 
 def test_near_ceiling_bid_still_requires_ai_confidence():
@@ -902,6 +919,81 @@ def test_normalize_apify_vehicle_uses_detail_text_description_alias():
     assert normalized is not None
     assert normalized["description"] == "Vehicle does not start. No start condition."
 
+
+
+def _strong_proxy_priced_score_kwargs(**overrides):
+    base = {
+        "bid": 5000,
+        "mmr_ca": 30000,
+        "state": "CA",
+        "source_site": "GovDeals",
+        "model": "F-150",
+        "make": "Ford",
+        "year": CURRENT_YEAR - 2,
+        "mileage": 22000,
+        "title_status": "clean",
+        "description": "clean low mileage truck",
+        "photos": ["https://example.com/photo.jpg"],
+        "mmr_confidence_proxy": 90.0,
+        "retail_comp_count": 0,
+        "manheim_source_status": "fallback",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_score_deal_proxy_pricing_never_receives_capital_ready_grade():
+    result = score_deal(**_strong_proxy_priced_score_kwargs())
+
+    assert result["pricing_maturity"] == "proxy"
+    assert result["investment_grade"] == "Rejected"
+    assert result["investment_grade"] not in {"Platinum", "Gold", "Silver", "Bronze"}
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "pricing_maturity_proxy"
+    assert result["pricing_trust_blocked"] is True
+    assert result["pricing_trust_reason"] == "pricing_maturity_proxy"
+    assert result["max_bid"] == 0.0
+    assert result["bid_headroom"] == 0.0
+    assert result["dos_score"] > 0
+
+
+def test_score_deal_market_comp_pricing_can_remain_capital_ready_when_otherwise_strong():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+
+    assert result["pricing_maturity"] == "market_comp"
+    assert result["investment_grade"] in {"Platinum", "Gold", "Silver", "Bronze"}
+    assert result["investment_grade"] != "Rejected"
+    assert result["pricing_trust_blocked"] is False
+
+
+def test_score_deal_proxy_zero_bid_branch_never_surfaces_bronze():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(bid=0))
+
+    assert result["pricing_maturity"] == "proxy"
+    assert result["investment_grade"] == "Rejected"
+    assert result["investment_grade"] != "Bronze"
+    assert result["ceiling_pass"] is False
+
+
+def test_alert_gate_still_blocks_proxy_pricing_after_scoring_downgrade():
+    result = score_deal(**_strong_proxy_priced_score_kwargs())
+    record = {
+        **result,
+        "vin": "1HGCM82633A004352",
+        "mileage": 22000,
+        "condition_grade": "Good",
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is False
+    assert "pricing_maturity=proxy" in gate["blocking_reasons"]
+    assert "grade=Rejected" in gate["blocking_reasons"]
 
 def test_score_deal_missing_mileage_is_rejected_not_surfaced_as_platinum():
     result = score_deal(

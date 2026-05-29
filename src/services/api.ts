@@ -470,7 +470,7 @@ export const api = {
       return (data || [])
         .map(transformOpportunity)
         .sort((a, b) => {
-          const gradeRank = (grade?: string) => ({ Platinum: 4, Gold: 3, Silver: 2, Bronze: 1 }[grade || ''] || 0);
+          const gradeRank = (grade?: string) => ({ Platinum: 4, Gold: 3, Silver: 2, Bronze: 1, Watch: 0, Rejected: 0 }[grade || ''] || 0);
           const gradeDelta = gradeRank(b.investment_grade) - gradeRank(a.investment_grade);
           if (gradeDelta !== 0) return gradeDelta;
           return (b.score || 0) - (a.score || 0);

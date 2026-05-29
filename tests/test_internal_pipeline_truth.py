@@ -44,7 +44,7 @@ class _Supabase:
                     "vin": None,
                     "condition_grade": "Poor",
                     "source_site": "govdeals",
-                    "investment_grade": "Platinum",
+                    "investment_grade": "Rejected",
                     "roi_per_day": 300,
                     "bid_headroom": 1000,
                     "current_bid_trust_score": 0.9,
@@ -92,6 +92,7 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     assert blocked["eligible"] is False
     assert "mileage_missing" in blocked["blocking_reasons"]
     assert "pricing_maturity=proxy" in blocked["blocking_reasons"]
+    assert "grade=Rejected" in blocked["blocking_reasons"]
     allowed = next(item for item in breakdown if item["id"] == "2")
     assert allowed["eligible"] is True
     assert allowed["blocking_reasons"] == []

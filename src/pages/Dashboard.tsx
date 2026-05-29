@@ -114,6 +114,8 @@ function gradeColor(grade: Opportunity['investment_grade']): string {
   if (grade === 'Gold') return 'bg-amber-500/15 text-amber-300 border border-amber-500/30';
   if (grade === 'Silver') return 'bg-slate-400/15 text-slate-200 border border-slate-400/30';
   if (grade === 'Bronze') return 'bg-orange-500/15 text-orange-300 border border-orange-500/30';
+  if (grade === 'Watch') return 'bg-blue-500/15 text-blue-300 border border-blue-500/30';
+  if (grade === 'Rejected') return 'bg-red-500/15 text-red-300 border border-red-500/30';
   return 'bg-gray-700 text-gray-200 border border-gray-600';
 }
 
@@ -243,6 +245,7 @@ const DealCard = ({
   const [showWhy, setShowWhy] = React.useState(false);
   const [outcomeOpen, setOutcomeOpen] = React.useState(false);
   const auctionStatus = getAuctionStatus(deal.auction_end);
+  const proxyPricingBlocked = deal.pricing_maturity === 'proxy' || deal.pricing_source === 'mmr_proxy';
   return (
   <div className={`bg-gray-900 rounded-xl border border-gray-800 p-4 hover:border-emerald-500/40 transition-colors${auctionStatus === 'closed' ? ' opacity-60' : ''}`}>
     <div className="flex items-start justify-between mb-3">
@@ -266,6 +269,11 @@ const DealCard = ({
           {deal.investment_grade || 'Watch'}
         </span>
         <LaneBadge lane={deal.designated_lane} size="sm" />
+        {proxyPricingBlocked && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border bg-red-500/15 text-red-300 border-red-500/30">
+            PRICING BLOCKED
+          </span>
+        )}
         <span className={`text-xs font-bold px-2 py-1 rounded-md ${dosColor(deal.score)}`}>
           {deal.score ?? '—'} {dosLabel(deal.score)}
         </span>
@@ -310,6 +318,12 @@ const DealCard = ({
         <p className="text-sm text-gray-300 truncate">{[deal.state, deal.source_site].filter(Boolean).join(' • ') || '—'}</p>
       </div>
     </div>
+
+    {proxyPricingBlocked && (
+      <div className="mb-3 rounded-lg border border-red-500/30 bg-red-950/30 p-3 text-xs text-red-200">
+        Proxy pricing only — scouting signal, not capital-ready. Live MMR or market comps required before bid allocation.
+      </div>
+    )}
 
     <div className="mb-3 rounded-lg border border-gray-800 bg-gray-950/60 p-3">
       <div className="grid grid-cols-2 gap-2">

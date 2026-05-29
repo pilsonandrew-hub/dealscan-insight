@@ -895,7 +895,7 @@ def score_deal(
             "estimated_days_to_sale": None,
             "roi_per_day": None,
             "roi_pct": 0.0,
-            "investment_grade": "Rejected" if vehicle_tier == "rejected" else "Bronze",
+            "investment_grade": "Rejected",
             "bid_ceiling_pct": bid_ceiling_pct,
             "max_bid": 0.0,
             "bid_headroom": 0.0,
@@ -1010,7 +1010,13 @@ def score_deal(
 
     all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount + transport + recon_reserve
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
-    if vehicle_tier == "rejected" or hard_rejected_by_economics:
+    pricing_trust_blocked = pricing_maturity == "proxy"
+    if pricing_trust_blocked:
+        ceiling_pass = False
+        max_bid = 0.0
+        bid_headroom = 0.0
+        investment_grade = "Rejected"
+    elif vehicle_tier == "rejected" or hard_rejected_by_economics:
         investment_grade = "Rejected"
     elif selected_dos >= 80 and roi_pct >= 20 and ceiling_pass:
         investment_grade = "Platinum"
@@ -1121,6 +1127,8 @@ def score_deal(
         "pricing_source": pricing_source or mmr_lookup_basis or "mmr_proxy",
         "pricing_maturity": pricing_maturity,
         "pricing_updated_at": pricing_updated_at,
+        "pricing_trust_blocked": pricing_trust_blocked,
+        "pricing_trust_reason": "pricing_maturity_proxy" if pricing_trust_blocked else None,
         "expected_close_bid": round(expected_close_bid, 2),
         "expected_close_source": expected_close_source,
         "current_bid_trust_score": trust_score,
@@ -1158,6 +1166,8 @@ def score_deal(
             if bid_ceiling_exceeded
             else "margin_floor_failed"
             if margin_floor_failed
+            else "pricing_maturity_proxy"
+            if pricing_trust_blocked
             else "score_deal_v3_two_lane"
         ),
         "ceiling_pass": ceiling_pass,
