@@ -59,10 +59,28 @@ jobs:
               print(exc.read().decode(errors="replace")[:500], file=sys.stderr)
               raise
 
+          opportunities = truth.get("opportunities") or {}
+          gate_breakdown = opportunities.get("active_dos80_gate_breakdown") or []
+          if not isinstance(gate_breakdown, list):
+              print("active_dos80_gate_breakdown is not a list", file=sys.stderr)
+              raise SystemExit(1)
+          if opportunities.get("active_dos80_sample", 0) and not gate_breakdown:
+              print("active_dos80_gate_breakdown missing despite active DOS>=80 sample", file=sys.stderr)
+              raise SystemExit(1)
+          for item in gate_breakdown:
+              if "eligible" not in item or "blocking_reasons" not in item:
+                  print("gate breakdown item missing eligible/blocking_reasons", file=sys.stderr)
+                  raise SystemExit(1)
+
           sanitized = {
               "alerts_runtime": truth.get("alerts_runtime"),
               "alerts": truth.get("alerts"),
               "deliveries": truth.get("deliveries"),
+              "opportunities": {
+                  "active_dos80_sample": opportunities.get("active_dos80_sample"),
+                  "active_dos80_gate_breakdown_count": len(gate_breakdown),
+                  "active_dos80_gate_breakdown_sample": gate_breakdown[:5],
+              },
           }
           print(json.dumps(sanitized, indent=2, sort_keys=True))
           PY
