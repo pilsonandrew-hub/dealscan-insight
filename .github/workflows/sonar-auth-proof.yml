@@ -13,6 +13,8 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       BACKEND_BASE_URL: https://dealscan-insight-production.up.railway.app
       FRONTEND_BASE_URL: https://dealscan-insight.vercel.app
@@ -30,7 +32,17 @@ jobs:
           import urllib.request
 
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
-          anon_key = os.environ["SUPABASE_ANON_KEY"]
+          anon_key = (
+              os.environ.get("SUPABASE_ANON_KEY")
+              or os.environ.get("VITE_SUPABASE_ANON_KEY")
+              or os.environ.get("VITE_SUPABASE_PUBLISHABLE_KEY")
+              or ""
+          )
+          if not anon_key.strip():
+              raise RuntimeError(
+                  "Sonar auth proof requires SUPABASE_ANON_KEY, "
+                  "VITE_SUPABASE_ANON_KEY, or VITE_SUPABASE_PUBLISHABLE_KEY"
+              )
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           backend_base = os.environ["BACKEND_BASE_URL"].rstrip("/")
           frontend_base = os.environ["FRONTEND_BASE_URL"].rstrip("/")
