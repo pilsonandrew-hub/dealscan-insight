@@ -69,6 +69,9 @@ def build_fallback_score(vehicle: dict[str, Any]) -> dict[str, Any]:
         and normalized_mileage > 0
     )
 
+    if not has_valid_mileage:
+        score = 0.0
+
     score_provenance = {
         "engine_version": "fallback_v1",
         "engine_impl": "webapp.routers.ingest._fallback_score",
