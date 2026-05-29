@@ -1,0 +1,112 @@
+name: DealerScope Source Quality Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Source/source_site to inspect
+        required: true
+        default: proxibid
+      limit:
+        description: Recent-row sample size
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch sanitized source quality summary
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SOURCE_NAME: ${{ inputs.source }}
+          SAMPLE_LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          source = (os.environ.get("SOURCE_NAME") or "proxibid").strip().lower()
+          try:
+              limit = max(1, min(int(os.environ.get("SAMPLE_LIMIT") or "300"), 1000))
+          except ValueError:
+              limit = 300
+
+          select = ",".join([
+              "id",
+              "created_at",
+              "source",
+              "source_site",
+              "mileage",
+              "vin",
+              "pricing_maturity",
+              "mmr_confidence_proxy",
+              "condition_grade",
+              "condition",
+              "dos_score",
+              "score",
+          ])
+          query = urllib.parse.urlencode({
+              "select": select,
+              "or": f"(source.eq.{source},source_site.eq.{source})",
+              "order": "created_at.desc",
+              "limit": str(limit),
+          })
+          req = urllib.request.Request(
+              f"{supabase_url}/rest/v1/opportunities?{query}",
+              headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              rows = json.loads(resp.read().decode())
+
+          def has_mileage(row):
+              try:
+                  value = row.get("mileage")
+                  return value not in (None, "") and float(value) > 0
+              except (TypeError, ValueError):
+                  return False
+
+          def has_vin(row):
+              value = str(row.get("vin") or "").strip().upper()
+              return len(value) == 17 and value.isalnum() and not any(ch in value for ch in "IOQ")
+
+          def has_condition(row):
+              value = str(row.get("condition_grade") or row.get("condition") or "").strip().lower()
+              return bool(value) and value not in {"unknown", "poor"}
+
+          def has_confidence(row):
+              return row.get("mmr_confidence_proxy") is not None
+
+          def count_by(field):
+              out = {}
+              for row in rows:
+                  value = str(row.get(field) or "unknown")
+                  out[value] = out.get(value, 0) + 1
+              return dict(sorted(out.items()))
+
+          n = len(rows)
+          summary = {
+              "source": source,
+              "sample_count": n,
+              "mileage_present": sum(has_mileage(row) for row in rows),
+              "vin_present": sum(has_vin(row) for row in rows),
+              "verified_condition_present": sum(has_condition(row) for row in rows),
+              "confidence_present": sum(has_confidence(row) for row in rows),
+              "pricing_maturity_counts": count_by("pricing_maturity"),
+              "latest_created_at": rows[0].get("created_at") if rows else None,
+              "oldest_created_at_in_sample": rows[-1].get("created_at") if rows else None,
+          }
+          for key in ["mileage_present", "vin_present", "verified_condition_present", "confidence_present"]:
+              summary[key + "_pct"] = round((summary[key] / n) * 100, 1) if n else None
+
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
