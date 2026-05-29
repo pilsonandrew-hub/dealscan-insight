@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation, type Location } from 'react-router-dom';
 import { useAuth } from '@/contexts/ModernAuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 
+type AuthLocationState = {
+  from?: Location;
+};
+
+function getAuthRedirectPath(state: unknown): string {
+  const from = (state as AuthLocationState | null)?.from;
+  return typeof from?.pathname === 'string' ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}` : '/';
+}
+
 export default function Auth() {
   const { user, signIn, signUp, loading } = useAuth();
+  const location = useLocation();
+  const redirectTo = getAuthRedirectPath(location.state);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -21,9 +32,9 @@ export default function Auth() {
     displayName: '',
   });
 
-  // Redirect if already authenticated
+  // Redirect authenticated users back to the protected route they originally requested.
   if (user && !loading) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={redirectTo} replace />;
   }
 
   if (loading) {
