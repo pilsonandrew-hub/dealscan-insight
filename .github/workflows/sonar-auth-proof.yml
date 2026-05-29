@@ -12,6 +12,7 @@ jobs:
     timeout-minutes: 5
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       BACKEND_BASE_URL: https://dealscan-insight-production.up.railway.app
       FRONTEND_BASE_URL: https://dealscan-insight.vercel.app
@@ -29,6 +30,7 @@ jobs:
           import urllib.request
 
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
+          anon_key = os.environ["SUPABASE_ANON_KEY"]
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           backend_base = os.environ["BACKEND_BASE_URL"].rstrip("/")
           frontend_base = os.environ["FRONTEND_BASE_URL"].rstrip("/")
@@ -113,7 +115,7 @@ jobs:
               token_status, token_data = request_json(
                   f"{supabase_url}/auth/v1/token?grant_type=password",
                   method="POST",
-                  headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+                  headers={"apikey": anon_key},
                   payload={"email": email, "password": password},
                   expected={200},
               )
@@ -123,7 +125,7 @@ jobs:
               other_token_status, other_token_data = request_json(
                   f"{supabase_url}/auth/v1/token?grant_type=password",
                   method="POST",
-                  headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+                  headers={"apikey": anon_key},
                   payload={"email": other_email, "password": other_password},
                   expected={200},
               )
