@@ -1,7 +1,32 @@
+import math
+
 from backend.ingest.gates import (
     find_title_brand_issue,
     is_commercial_hd_tonnage,
     passes_basic_gates,
+)
+
+
+INVALID_MILEAGE_VALUES = (
+    None,
+    "",
+    "  ",
+    "unknown",
+    0,
+    -1,
+    "0",
+    "-2",
+    "0.0",
+    "-0.1",
+    "-2.5",
+    float("nan"),
+    math.inf,
+    -math.inf,
+    "nan",
+    "NaN",
+    "inf",
+    "+inf",
+    "-inf",
 )
 
 
@@ -76,8 +101,15 @@ def test_passes_basic_gates_uses_injected_tier_result():
 def test_passes_basic_gates_rejects_non_positive_mileage_with_canonical_tier():
     from backend.business_rules.gates import determine_vehicle_tier
 
-    for mileage in (None, 0, -1, "", "  ", "unknown", "0", "-2", "0.0", "-0.1", "-2.5", "nan", "NaN", "inf", "-inf"):
+    for mileage in INVALID_MILEAGE_VALUES:
         assert passes_basic_gates(_vehicle(mileage=mileage), determine_vehicle_tier=determine_vehicle_tier) == {
             "pass": False,
             "reason": "age_or_mileage_exceeded",
         }
+
+    missing_mileage_vehicle = _vehicle()
+    missing_mileage_vehicle.pop("mileage")
+    assert passes_basic_gates(missing_mileage_vehicle, determine_vehicle_tier=determine_vehicle_tier) == {
+        "pass": False,
+        "reason": "age_or_mileage_exceeded",
+    }

@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 from datetime import datetime, timezone, timedelta
@@ -8,6 +9,29 @@ from backend.ingest.manheim_market import get_manheim_market_data
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
 from backend.ingest.score import CURRENT_YEAR, determine_vehicle_tier, resolve_expected_close_bid, score_deal
 from webapp.routers.ingest import _normalize_auction_end_time, normalize_apify_vehicle, passes_basic_gates, score_vehicle
+
+
+INVALID_MILEAGE_VALUES = (
+    None,
+    "",
+    "  ",
+    "unknown",
+    0,
+    -1,
+    "0",
+    "-2",
+    "0.0",
+    "-0.1",
+    "-2.5",
+    float("nan"),
+    math.inf,
+    -math.inf,
+    "nan",
+    "NaN",
+    "inf",
+    "+inf",
+    "-inf",
+)
 
 
 def test_passes_basic_gates_rejects_title_brand_keywords():
@@ -278,7 +302,7 @@ def test_alert_gate_requires_vin_mileage_and_verified_condition():
 
 
 def test_alert_gate_rejects_invalid_mileage_values_and_placeholder_vin():
-    for mileage in (0, -1, "", "  ", "unknown", "0", "-2", "0.0", "-0.1", "-2.5", "nan", "NaN", "inf", "-inf"):
+    for mileage in INVALID_MILEAGE_VALUES:
         record = {
             "dos_score": 95,
             "investment_grade": "Platinum",
@@ -297,6 +321,21 @@ def test_alert_gate_rejects_invalid_mileage_values_and_placeholder_vin():
         assert gate["eligible"] is False
         assert "vin_unverified" in gate["blocking_reasons"]
         assert "mileage_missing" in gate["blocking_reasons"]
+
+    missing_mileage_record = {
+        "dos_score": 95,
+        "investment_grade": "Platinum",
+        "pricing_maturity": "market_comp",
+        "current_bid_trust_score": 0.9,
+        "mmr_confidence_proxy": 90.0,
+        "bid_headroom": 5000,
+        "roi_per_day": 100,
+        "vin": "1HGCM82633A004352",
+        "condition_grade": "Good",
+    }
+    missing_gate = evaluate_alert_gate(missing_mileage_record, thresholds=AlertThresholds())
+    assert missing_gate["eligible"] is False
+    assert "mileage_missing" in missing_gate["blocking_reasons"]
 
 
 def test_score_deal_subtracts_recon_reserve_from_margin():
@@ -542,12 +581,9 @@ def test_determine_vehicle_tier_enforces_age_and_mileage_hard_stops():
     assert determine_vehicle_tier(CURRENT_YEAR - 5, 100001) == "rejected"
     assert determine_vehicle_tier(CURRENT_YEAR - 11, 10000) == "rejected"
     assert determine_vehicle_tier(None, 10000) == "rejected"
-    assert determine_vehicle_tier(CURRENT_YEAR - 2, None) == "rejected"
-    assert determine_vehicle_tier(CURRENT_YEAR - 5, None) == "rejected"
-    assert determine_vehicle_tier(CURRENT_YEAR - 2, 0) == "rejected"
-    assert determine_vehicle_tier(CURRENT_YEAR - 2, -1) == "rejected"
-    assert determine_vehicle_tier(CURRENT_YEAR - 2, "") == "rejected"
-    assert determine_vehicle_tier(CURRENT_YEAR - 2, "unknown") == "rejected"
+    for mileage in INVALID_MILEAGE_VALUES:
+        assert determine_vehicle_tier(CURRENT_YEAR - 2, mileage) == "rejected"
+    assert determine_vehicle_tier(CURRENT_YEAR - 2, 12000) == "premium"
 
 
 def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
@@ -892,7 +928,7 @@ def test_score_deal_missing_mileage_is_rejected_not_surfaced_as_platinum():
 
 
 def test_score_deal_invalid_mileage_is_rejected_not_surfaced_as_platinum():
-    for mileage in (0, -1, "", "  ", "unknown", "0", "-2", "0.0", "-0.1", "-2.5", "nan", "NaN", "inf", "-inf"):
+    for mileage in INVALID_MILEAGE_VALUES:
         result = score_deal(
             bid=500,
             mmr_ca=20000,
