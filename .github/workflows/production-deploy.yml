@@ -1,4 +1,4 @@
-name: Legacy Build Validation Placeholder - No Deployment
+name: Legacy Non-Authoritative Build Validation Placeholder - No Deployment
 on:
   workflow_dispatch:
 
@@ -37,6 +37,7 @@ jobs:
       - name: Run canary build validation
         run: |
           echo "Running legacy build validation only. No deployment is performed."
+          echo "This workflow is non-authoritative and must not be cited as production deploy proof."
           npm run build
           echo "✅ Legacy build validation passed"
             
@@ -95,6 +96,7 @@ jobs:
           VITE_COMMIT_SHA: ${{ github.sha }}
         run: |
           echo "::notice title=No deployment performed::This legacy workflow builds an artifact only. It is not Railway or Vercel deploy evidence."
+          echo "This workflow is non-authoritative and must not be cited as production deploy proof."
           npm run build
         
       - name: Run bundle analysis placeholder
