@@ -128,6 +128,11 @@ def _build_score_provenance(
     severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}
     assumption_level = "severe" if any(flag in severe_flags for flag in flags) else "minor" if flags else "none"
 
+    try:
+        has_valid_mileage = mileage is not None and float(str(mileage).replace(",", "").strip()) > 0
+    except (TypeError, ValueError):
+        has_valid_mileage = False
+
     return {
         "engine_version": SCORE_ENGINE_VERSION,
         "engine_impl": SCORE_ENGINE_IMPL,
@@ -143,7 +148,7 @@ def _build_score_provenance(
             "has_mmr": mmr_source != "none",
             "has_live_manheim": mmr_source == "manheim_mmr_mid",
             "has_year": year is not None,
-            "has_mileage": mileage is not None,
+            "has_mileage": has_valid_mileage,
             "source_site": source_site,
         },
         "component_traces": [],

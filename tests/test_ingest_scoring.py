@@ -844,3 +844,4 @@ def test_score_deal_non_positive_mileage_is_rejected_not_surfaced_as_platinum():
         assert result["max_bid"] == 0.0
         assert result["score"] == 0.0
         assert result["dos_score"] == 0.0
+        assert result["score_provenance"]["input_profile"]["has_mileage"] is False
