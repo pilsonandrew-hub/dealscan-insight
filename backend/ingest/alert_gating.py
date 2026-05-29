@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Mapping, Optional
 
 from backend.business_rules.constants import (
@@ -40,9 +41,12 @@ def _to_float(value: Any) -> Optional[float]:
     if value is None or value == "":
         return None
     try:
-        return float(value)
+        normalized = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(normalized):
+        return None
+    return normalized
 
 
 def _pick_numeric(*values: Any) -> Optional[float]:
@@ -51,6 +55,29 @@ def _pick_numeric(*values: Any) -> Optional[float]:
         if normalized is not None:
             return normalized
     return None
+
+
+def _pick_confidence(record: Mapping[str, Any], breakdown: Mapping[str, Any]) -> tuple[Optional[float], bool]:
+    candidates = (
+        (record, "mmr_confidence_proxy"),
+        (breakdown, "mmr_confidence_proxy"),
+        (record, "manheim_confidence"),
+        (breakdown, "manheim_confidence"),
+        (record, "retail_comp_confidence"),
+        (breakdown, "retail_comp_confidence"),
+    )
+    saw_confidence_field = False
+    for source, key in candidates:
+        if key not in source:
+            continue
+        saw_confidence_field = True
+        normalized = _to_float(source.get(key))
+        if normalized is None:
+            return None, True
+        if normalized <= 1.0:
+            normalized *= 100.0
+        return normalized, False
+    return None, saw_confidence_field
 
 
 def _pick_text(*values: Any) -> Optional[str]:
@@ -94,16 +121,7 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
         record.get("expected_close_source"),
         breakdown.get("expected_close_source"),
     ) or "unknown"
-    confidence = _pick_numeric(
-        record.get("mmr_confidence_proxy"),
-        breakdown.get("mmr_confidence_proxy"),
-        record.get("manheim_confidence"),
-        breakdown.get("manheim_confidence"),
-        record.get("retail_comp_confidence"),
-        breakdown.get("retail_comp_confidence"),
-    )
-    if confidence is not None and confidence <= 1.0:
-        confidence *= 100.0
+    confidence, confidence_invalid = _pick_confidence(record, breakdown)
 
     return {
         "score": _pick_numeric(record.get("dos_score"), record.get("score"), breakdown.get("dos_score"), breakdown.get("score")) or 0.0,
@@ -122,6 +140,7 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
             breakdown.get("current_bid_trust_score"),
         ),
         "confidence": confidence,
+        "confidence_invalid": confidence_invalid,
         "acquisition_price_basis": _pick_numeric(
             record.get("acquisition_price_basis"),
             breakdown.get("acquisition_price_basis"),
@@ -181,7 +200,9 @@ def evaluate_alert_gate(
         reasons.append("condition_unverified")
 
     confidence = signals["confidence"]
-    if confidence is None:
+    if signals.get("confidence_invalid"):
+        reasons.append("confidence_invalid")
+    elif confidence is None:
         reasons.append("confidence_missing")
     elif confidence < config.min_confidence:
         reasons.append(f"confidence<{config.min_confidence:.0f}")

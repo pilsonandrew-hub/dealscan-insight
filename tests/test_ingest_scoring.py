@@ -157,23 +157,84 @@ def test_alert_gate_blocks_proxy_only_low_confidence_rows():
     assert "confidence<55" in gate["blocking_reasons"]
 
 
-def test_alert_gate_blocks_missing_confidence_even_with_otherwise_strong_signals():
+def _otherwise_alert_eligible_record(**overrides):
     record = {
         "dos_score": 95,
         "investment_grade": "Platinum",
         "pricing_maturity": "market_comp",
         "current_bid_trust_score": 0.9,
+        "mmr_confidence_proxy": 90.0,
         "bid_headroom": 5000,
         "roi_per_day": 100,
         "vin": "1HGCM82633A004352",
         "mileage": 42000,
         "condition_grade": "Good",
     }
+    record.update(overrides)
+    return record
+
+
+def test_alert_gate_allows_valid_high_confidence_record_with_otherwise_strong_signals():
+    gate = evaluate_alert_gate(_otherwise_alert_eligible_record(), thresholds=AlertThresholds())
+
+    assert gate["eligible"] is True
+    assert gate["alert_type"] == "platinum"
+    assert gate["blocking_reasons"] == []
+
+
+def test_alert_gate_blocks_missing_confidence_even_with_otherwise_strong_signals():
+    record = _otherwise_alert_eligible_record()
+    del record["mmr_confidence_proxy"]
 
     gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
 
     assert gate["eligible"] is False
     assert "confidence_missing" in gate["blocking_reasons"]
+
+
+def test_alert_gate_blocks_none_confidence_even_with_otherwise_strong_signals():
+    gate = evaluate_alert_gate(
+        _otherwise_alert_eligible_record(mmr_confidence_proxy=None),
+        thresholds=AlertThresholds(),
+    )
+
+    assert gate["eligible"] is False
+    assert "confidence_invalid" in gate["blocking_reasons"]
+
+
+def test_alert_gate_blocks_malformed_confidence_even_when_fallback_confidence_exists():
+    for confidence in ("not-a-number", "", "  ", {}, []):
+        gate = evaluate_alert_gate(
+            _otherwise_alert_eligible_record(
+                mmr_confidence_proxy=confidence,
+                manheim_confidence=90.0,
+            ),
+            thresholds=AlertThresholds(),
+        )
+
+        assert gate["eligible"] is False
+        assert "confidence_invalid" in gate["blocking_reasons"]
+
+
+def test_alert_gate_blocks_non_finite_confidence_values():
+    for confidence in (float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf"):
+        gate = evaluate_alert_gate(
+            _otherwise_alert_eligible_record(mmr_confidence_proxy=confidence),
+            thresholds=AlertThresholds(),
+        )
+
+        assert gate["eligible"] is False
+        assert "confidence_invalid" in gate["blocking_reasons"]
+
+
+def test_alert_gate_blocks_below_threshold_confidence_even_with_otherwise_strong_signals():
+    gate = evaluate_alert_gate(
+        _otherwise_alert_eligible_record(mmr_confidence_proxy=45.0),
+        thresholds=AlertThresholds(),
+    )
+
+    assert gate["eligible"] is False
+    assert "confidence<55" in gate["blocking_reasons"]
 
 
 def test_alert_gate_blocks_proxy_pricing_even_with_otherwise_strong_signals():
