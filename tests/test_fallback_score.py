@@ -31,8 +31,8 @@ def test_build_fallback_score_records_missing_bid_in_profile_and_basis():
     assert result["acquisition_price_basis"] == 0
 
 
-def test_build_fallback_score_keeps_missing_or_non_positive_mileage_untrusted_even_when_score_is_high():
-    for mileage in (None, 0, -1):
+def test_build_fallback_score_keeps_invalid_mileage_untrusted_even_when_score_is_high():
+    for mileage in (None, 0, -1, "", "  ", "unknown", "0", "-2"):
         result = build_fallback_score({
             "title": "2024 Toyota Camry",
             "make": "Toyota",

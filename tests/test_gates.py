@@ -76,7 +76,7 @@ def test_passes_basic_gates_uses_injected_tier_result():
 def test_passes_basic_gates_rejects_non_positive_mileage_with_canonical_tier():
     from backend.business_rules.gates import determine_vehicle_tier
 
-    for mileage in (None, 0, -1, "", "unknown"):
+    for mileage in (None, 0, -1, "", "  ", "unknown", "0", "-2"):
         assert passes_basic_gates(_vehicle(mileage=mileage), determine_vehicle_tier=determine_vehicle_tier) == {
             "pass": False,
             "reason": "age_or_mileage_exceeded",
