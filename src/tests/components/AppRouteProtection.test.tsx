@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { Location } from 'react-router-dom';
 import App from '@/App';
 import Auth from '@/pages/Auth';
+import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AuthContext, type AuthContextType } from '@/contexts/auth-context-core';
 import { testUtils } from '@/tests/setup';
 
@@ -61,6 +62,30 @@ describe('App route access control', () => {
     expect(appSource).toMatch(
       /<Route\s+path="\/deal\/:id"\s+element=\{[\s\S]*?<ProtectedRoute>[\s\S]*?<DealDetail\s*\/>[\s\S]*?<\/ProtectedRoute>[\s\S]*?\}\s*\/>/
     );
+  });
+
+  it('does not mount DealDetail while auth state is still loading', () => {
+    const authValue: AuthContextType = {
+      user: null,
+      session: null,
+      loading: true,
+      signIn: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+    };
+
+    render(
+      <AuthContext.Provider value={authValue}>
+        <MemoryRouter initialEntries={['/deal/loading-proof']}>
+          <ProtectedRoute>
+            <div data-testid="deal-detail-route">DealDetail rendered</div>
+          </ProtectedRoute>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    );
+
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.queryByTestId('deal-detail-route')).not.toBeInTheDocument();
   });
 
   it('redirects unauthenticated direct deal detail navigation to auth without rendering DealDetail', async () => {
