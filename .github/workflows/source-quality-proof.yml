@@ -35,6 +35,8 @@ jobs:
           import urllib.request
 
           PROXIBID_ACTOR_ID = "bxhncvtHEP712WX2e"
+          VIN_PASS_THRESHOLD_PCT = 5.0
+          MILEAGE_PASS_THRESHOLD_PCT = 1.0
 
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -61,11 +63,7 @@ jobs:
                   headers={"Authorization": f"Bearer {token}"},
               )
 
-          columns_rows = rest_get(
-              "/rest/v1/rpc/get_table_columns"
-              if False else
-              "/rest/v1/opportunities?select=*&limit=1"
-          )
+          columns_rows = rest_get("/rest/v1/opportunities?select=*&limit=1")
           available_columns = set(columns_rows[0].keys()) if columns_rows else set()
           wanted = [
               "id",
@@ -84,10 +82,10 @@ jobs:
           selected_columns = [col for col in wanted if col in available_columns]
           select = ",".join(selected_columns or ["id"])
           source_filters = []
-          if "source" in available_columns:
-              source_filters.append(f"source.eq.{source}")
           if "source_site" in available_columns:
               source_filters.append(f"source_site.eq.{source}")
+          if "source" in available_columns:
+              source_filters.append(f"source.eq.{source}")
           if not source_filters:
               raise SystemExit("opportunities has neither source nor source_site column")
           order_column = "created_at" if "created_at" in available_columns else selected_columns[0]
@@ -117,6 +115,9 @@ jobs:
           def has_confidence(row):
               return row.get("mmr_confidence_proxy") is not None
 
+          def pct(count, total):
+              return round((count / total) * 100, 1) if total else None
+
           def count_by(field):
               out = {}
               for row in rows:
@@ -124,21 +125,39 @@ jobs:
                   out[value] = out.get(value, 0) + 1
               return dict(sorted(out.items()))
 
+          def canonical_source_ok(row):
+              return str(row.get("source_site") or row.get("source") or "").strip().lower() == source
+
           n = len(rows)
-          summary = {
-              "source": source,
-              "accepted_opportunity_quality": True,
+          mileage_count = sum(has_mileage(row) for row in rows)
+          vin_count = sum(has_vin(row) for row in rows)
+          condition_count = sum(has_condition(row) for row in rows)
+          confidence_count = sum(has_confidence(row) for row in rows)
+          source_exact_count = sum(canonical_source_ok(row) for row in rows)
+          accepted_quality = {
               "sample_count": n,
-              "mileage_present": sum(has_mileage(row) for row in rows),
-              "vin_present": sum(has_vin(row) for row in rows),
-              "verified_condition_present": sum(has_condition(row) for row in rows),
-              "confidence_present": sum(has_confidence(row) for row in rows),
+              "source_site_exact_count": source_exact_count,
+              "source_site_exact_pct": pct(source_exact_count, n),
+              "mileage_present": mileage_count,
+              "mileage_present_pct": pct(mileage_count, n),
+              "vin_present": vin_count,
+              "vin_present_pct": pct(vin_count, n),
+              "verified_condition_present": condition_count,
+              "verified_condition_present_pct": pct(condition_count, n),
+              "confidence_present": confidence_count,
+              "confidence_present_pct": pct(confidence_count, n),
               "pricing_maturity_counts": count_by("pricing_maturity"),
               "latest_created_at": rows[0].get("created_at") if rows else None,
               "oldest_created_at_in_sample": rows[-1].get("created_at") if rows else None,
+              "passes_original_enrichment_standard": bool(
+                  n > 0
+                  and source_exact_count == n
+                  and pct(vin_count, n) is not None
+                  and pct(vin_count, n) >= VIN_PASS_THRESHOLD_PCT
+                  and pct(mileage_count, n) is not None
+                  and pct(mileage_count, n) >= MILEAGE_PASS_THRESHOLD_PCT
+              ),
           }
-          for key in ["mileage_present", "vin_present", "verified_condition_present", "confidence_present"]:
-              summary[key + "_pct"] = round((summary[key] / n) * 100, 1) if n else None
 
           scraper_enrichment = None
           apify_token = os.environ.get("APIFY_TOKEN")
@@ -155,17 +174,63 @@ jobs:
                       f"/datasets/{dataset_id}/items?clean=true&limit=1000",
                       apify_token,
                   )
-                  proof_rows = [item for item in items if item.get("record_type") == "source_quality_proof" and item.get("source_site") == source]
+                  proof_rows = [
+                      item for item in items
+                      if item.get("record_type") == "source_quality_proof"
+                      and str(item.get("source_site") or "").strip().lower() == source
+                  ]
                   if proof_rows:
                       scraper_enrichment = proof_rows[-1]
                       scraper_enrichment["actor_run_id"] = run.get("id")
                       scraper_enrichment["dataset_id"] = dataset_id
                       scraper_enrichment["finished_at"] = run.get("finishedAt")
                       break
-          summary["scraper_enrichment_attempt_quality"] = scraper_enrichment or {
-              "available": False,
-              "reason": "no_recent_source_quality_proof_record",
+
+          if scraper_enrichment:
+              scraper_enrichment["available"] = True
+              scraper_enrichment["extraction_detected"] = bool(
+                  scraper_enrichment.get("detail_vins_found", 0) > 0
+                  or scraper_enrichment.get("detail_mileages_found", 0) > 0
+              )
+              scraper_enrichment["strict_filter_rejection_detected"] = bool(
+                  scraper_enrichment.get("enriched_rows_rejected", 0) > 0
+                  and scraper_enrichment.get("rejection_reasons")
+              )
+          else:
+              scraper_enrichment = {
+                  "available": False,
+                  "reason": "no_recent_source_quality_proof_record",
+                  "extraction_detected": False,
+                  "strict_filter_rejection_detected": False,
+              }
+
+          corrected_scope_pass = bool(
+              scraper_enrichment.get("available")
+              and scraper_enrichment.get("extraction_detected")
+              and (
+                  accepted_quality["passes_original_enrichment_standard"]
+                  or scraper_enrichment.get("strict_filter_rejection_detected")
+              )
+          )
+
+          issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else (
+              "PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH" if corrected_scope_pass else "BLOCK"
+          )
+          summary = {
+              "source": source,
+              "issue10_verdict": issue10_verdict,
+              "issue10_scope_note": (
+                  "Original accepted-opportunity enrichment standard passed."
+                  if issue10_verdict == "PASS_ORIGINAL"
+                  else "Corrected low-yield source truth passed: scraper enrichment is observable and strict filters explain rejected enriched rows."
+                  if issue10_verdict == "PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH"
+                  else "Issue #10 remains blocked: accepted opportunities lack enrichment and scraper proof is unavailable or insufficient."
+              ),
+              "accepted_opportunity_quality": accepted_quality,
+              "scraper_enrichment_attempt_quality": scraper_enrichment,
           }
 
           print(json.dumps(summary, indent=2, sort_keys=True))
+          if issue10_verdict == "BLOCK":
+              raise SystemExit(1)
           PY
