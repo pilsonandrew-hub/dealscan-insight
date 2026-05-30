@@ -2,6 +2,11 @@ name: DealerScope Supabase Live Inspection
 
 on:
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Optional Apify run id for sanitized run-level ingest inspection"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -23,5 +28,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RUN_ID: ${{ inputs.run_id }}
         run: |
-          python3 scripts/supabase_live_inspection.py
+          if [ -n "${RUN_ID}" ]; then
+            python3 scripts/supabase_live_inspection.py --run-id "${RUN_ID}"
+          else
+            python3 scripts/supabase_live_inspection.py
+          fi

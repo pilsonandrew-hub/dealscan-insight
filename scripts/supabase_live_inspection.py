@@ -6,6 +6,7 @@ avoids row payloads, customer/user fields, tokens, and listing details.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -233,6 +234,138 @@ def _summarize_recent_opportunity_truth(rows: list[dict[str, Any]]) -> dict[str,
     }
 
 
+def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: Counter[str] = Counter()
+    channel_counts: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+    listing_ids: set[str] = set()
+    latest_created_at = None
+    latest_updated_at = None
+    for row in rows:
+        status = str(row.get("status") or "unknown")[:80]
+        channel = str(row.get("channel") or "unknown")[:80]
+        status_counts[status] += 1
+        channel_counts[channel] += 1
+        error = str(row.get("error_message") or "")[:160]
+        if error:
+            reason_counts[error] += 1
+        listing_id = row.get("listing_id")
+        if listing_id:
+            listing_ids.add(str(listing_id))
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
+            latest_created_at = created_at
+        if updated_at and (latest_updated_at is None or str(updated_at) > str(latest_updated_at)):
+            latest_updated_at = updated_at
+    return {
+        "row_count": len(rows),
+        "distinct_listing_ids": len(listing_ids),
+        "status_counts": dict(status_counts.most_common(20)),
+        "channel_counts": dict(channel_counts.most_common(20)),
+        "sanitized_error_counts": dict(reason_counts.most_common(20)),
+        "latest_created_at": latest_created_at,
+        "latest_updated_at": latest_updated_at,
+    }
+
+
+def _summarize_run_webhook_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: Counter[str] = Counter()
+    error_counts: Counter[str] = Counter()
+    item_counts: Counter[str] = Counter()
+    latest_received_at = None
+    for row in rows:
+        status = str(row.get("processing_status") or row.get("status") or "unknown")[:80]
+        status_counts[status] += 1
+        error = str(row.get("error_message") or "")[:160]
+        if error:
+            error_counts[error] += 1
+        if row.get("item_count") is not None:
+            item_counts[str(row.get("item_count"))] += 1
+        received_at = row.get("received_at") or row.get("created_at")
+        if received_at and (latest_received_at is None or str(received_at) > str(latest_received_at)):
+            latest_received_at = received_at
+    return {
+        "row_count": len(rows),
+        "status_counts": dict(status_counts.most_common(20)),
+        "sanitized_error_counts": dict(error_counts.most_common(20)),
+        "item_count_values": dict(item_counts.most_common(20)),
+        "latest_received_at": latest_received_at,
+    }
+
+
+def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    step_counts: Counter[str] = Counter()
+    vin_present = 0
+    mileage_present = 0
+    for row in rows:
+        source_counts[str(row.get("source_site") or row.get("source") or "unknown")[:80]] += 1
+        step_counts[str(row.get("step_status") or row.get("status") or "unknown")[:80]] += 1
+        raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
+        if row.get("vin") or raw.get("vin"):
+            vin_present += 1
+        if _coerce_float(row.get("mileage") if row.get("mileage") is not None else raw.get("mileage")) is not None:
+            mileage_present += 1
+    return {
+        "row_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "step_status_counts": dict(step_counts.most_common(20)),
+        "vin_present_rows": vin_present,
+        "mileage_present_rows": mileage_present,
+    }
+
+
+def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[str, Any]:
+    delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
+    delivery_select = ",".join([
+        col for col in ["run_id", "listing_id", "channel", "status", "error_message", "created_at", "updated_at"]
+        if col in delivery_columns
+    ]) or "run_id,status"
+    _, _, delivery_rows = _request(
+        base_url,
+        service_key,
+        "ingest_delivery_log",
+        {"select": delivery_select, "run_id": f"eq.{run_id}", "order": "created_at.asc", "limit": "200"},
+    )
+
+    webhook_columns = _available_columns(base_url, service_key, "webhook_log")
+    webhook_select = ",".join([
+        col for col in ["run_id", "received_at", "created_at", "processing_status", "status", "error_message", "item_count", "actor_id"]
+        if col in webhook_columns
+    ]) or "run_id"
+    _, _, webhook_rows = _request(
+        base_url,
+        service_key,
+        "webhook_log",
+        {"select": webhook_select, "run_id": f"eq.{run_id}", "order": "received_at.asc", "limit": "50"},
+    )
+
+    opportunity_columns = _available_columns(base_url, service_key, "opportunities")
+    opportunity_select = ",".join([
+        col for col in ["id", "run_id", "source_run_id", "source_site", "source", "step_status", "status", "vin", "mileage", "created_at", "processed_at", "raw_data"]
+        if col in opportunity_columns
+    ]) or "id"
+    opportunity_filters = []
+    if "run_id" in opportunity_columns:
+        opportunity_filters.append({"select": opportunity_select, "run_id": f"eq.{run_id}", "limit": "200"})
+    if "source_run_id" in opportunity_columns:
+        opportunity_filters.append({"select": opportunity_select, "source_run_id": f"eq.{run_id}", "limit": "200"})
+    opportunity_by_id: dict[str, dict[str, Any]] = {}
+    for params in opportunity_filters:
+        _, _, rows = _request(base_url, service_key, "opportunities", params)
+        for row in rows if isinstance(rows, list) else []:
+            opportunity_by_id[str(row.get("id") or json.dumps(row, sort_keys=True))] = row
+
+    return {
+        "run_id": run_id,
+        "delivery_log": _summarize_run_delivery_rows(delivery_rows if isinstance(delivery_rows, list) else []),
+        "webhook_log": _summarize_run_webhook_rows(webhook_rows if isinstance(webhook_rows, list) else []),
+        "opportunities": _summarize_run_opportunity_rows(list(opportunity_by_id.values())),
+        "truth_boundary": "Run-level sanitized aggregate only. Does not print titles, VIN values, listing URLs, raw payloads, user data, or secrets.",
+    }
+
+
 def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
     desired_opportunity_columns = [
         "created_at", "updated_at", "source_site", "source", "state", "year",
@@ -294,6 +427,10 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Read-only sanitized Supabase live inspection.")
+    parser.add_argument("--run-id", help="Optional Apify run id for sanitized run-level ingest inspection.")
+    args = parser.parse_args()
+
     base_url = _require_env("SUPABASE_URL")
     service_key = _require_env("SUPABASE_SERVICE_ROLE_KEY")
     if not base_url.endswith(".supabase.co") and ".supabase.co/" not in base_url:
@@ -323,6 +460,12 @@ def main() -> int:
         report["row_level_truth_sample"] = _safe_truth_audit(base_url, service_key)
     except Exception as exc:
         report["row_level_truth_sample_failure"] = str(exc)[:500]
+
+    if args.run_id:
+        try:
+            report["run_id_truth_sample"] = _run_id_truth_audit(base_url, service_key, args.run_id)
+        except Exception as exc:
+            report["run_id_truth_sample_failure"] = str(exc)[:500]
 
     print(json.dumps(report, indent=2, sort_keys=True))
     critical = ["webhook_log", "opportunities", "alert_log"]
