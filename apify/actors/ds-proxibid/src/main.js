@@ -87,6 +87,7 @@ await Actor.init();
 const input = await Actor.getInput() ?? {};
 const {
     searchQuery = "",
+    maxItems = 200,
     maxPages = 5,
     minBid = 500,
     maxBid = 50000,
@@ -231,6 +232,11 @@ const crawler = new PlaywrightCrawler({
         const label = request.userData.label ?? 'LIST';
         const url = request.url;
 
+        if (passingLots.length >= maxItems) {
+            log.info(`[Proxibid] Max items reached (${passingLots.length}/${maxItems}); skipping ${url}`);
+            return;
+        }
+
         if (label === 'LIST') {
             log.info(`[Proxibid] Loading list page: ${url}`);
 
@@ -296,6 +302,10 @@ const crawler = new PlaywrightCrawler({
             log.info(`[Proxibid] Extracted ${cards.length} cards from ${url}`);
 
             for (const card of cards) {
+                if (passingLots.length >= maxItems) {
+                    log.info(`[Proxibid] Max items reached (${passingLots.length}/${maxItems}); stopping card extraction for ${url}`);
+                    break;
+                }
                 totalFound++;
                 recordLocationSample(card.location);
 
@@ -347,7 +357,7 @@ const crawler = new PlaywrightCrawler({
 
             // Pagination: increment page number in URL
             const pageNum = request.userData.page ?? 1;
-            if (cards.length > 0 && pageNum < maxPages) {
+            if (cards.length > 0 && pageNum < maxPages && passingLots.length < maxItems) {
                 let nextUrl;
                 if (url.match(/[?&]page=\d+/)) {
                     nextUrl = url.replace(/([?&])page=\d+/, `$1page=${pageNum + 1}`);
@@ -476,7 +486,7 @@ async function enrichFromDetailPages(log) {
                 log.info(`[DETAIL REJECT] ${rejectReasons.join(',')} — ${lot.title}`);
             }
 
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 250));
         } catch (err) {
             enrichmentProof.detail_pages_failed++;
             log.warning(`[DETAIL ENRICH] Failed for ${lot.listing_url}: ${err.message}`);
