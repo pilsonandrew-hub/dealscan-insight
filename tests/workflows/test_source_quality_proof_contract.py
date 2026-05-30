@@ -34,6 +34,18 @@ def test_source_quality_proof_requires_exact_source_and_apify_proof_for_correcte
     assert 'extraction_detected' in text
 
 
+def test_source_quality_proof_requires_actor_run_lineage_pricing_and_provenance_for_original_pass():
+    text = WORKFLOW.read_text()
+    assert 'rows_for_actor_run' in text
+    assert 'row_run_ids' in text
+    assert 'accepted_opportunities_for_actor_run' in text
+    assert 'run_lineage_proven' in text
+    assert 'scraper_enrichment.get("run_lineage_proven")' in text
+    assert 'pricing_raw_count == n' in text
+    assert 'provenance_count == n' in text
+    assert 'source_window_rows' in text
+
+
 def test_proxibid_actor_emits_non_opportunity_enrichment_proof_record():
     text = ACTOR.read_text()
     assert "record_type: 'source_quality_proof'" in text
@@ -41,6 +53,10 @@ def test_proxibid_actor_emits_non_opportunity_enrichment_proof_record():
     assert 'detail_pages_fetched' in text
     assert 'detail_vins_found' in text
     assert 'detail_mileages_found' in text
+    assert 'accepted_rows_total' in text
+    assert 'rejected_rows_total' in text
+    assert 'accepted_rows_with_vin' in text
+    assert 'accepted_rows_with_mileage' in text
     assert 'enriched_rows_accepted' in text
     assert 'enriched_rows_rejected' in text
     assert 'rejection_reasons' in text

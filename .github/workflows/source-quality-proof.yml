@@ -98,7 +98,7 @@ jobs:
               raise SystemExit("opportunities has neither source nor source_site column")
 
           order_column = "created_at" if "created_at" in available_columns else selected_columns[0]
-          query_args = {
+          base_query_args = {
               "select": select,
               source_filter_key: f"eq.{source}",
               "order": f"{order_column}.desc",
@@ -107,9 +107,7 @@ jobs:
           proof_window_start = None
           if "created_at" in available_columns:
               proof_window_start = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace("+00:00", "Z")
-              query_args["created_at"] = f"gte.{proof_window_start}"
-          query = urllib.parse.urlencode(query_args)
-          rows = rest_get(f"/rest/v1/opportunities?{query}")
+              base_query_args["created_at"] = f"gte.{proof_window_start}"
 
           def has_mileage(row):
               try:
@@ -132,9 +130,9 @@ jobs:
           def pct(count, total):
               return round((count / total) * 100, 1) if total else None
 
-          def count_by(field):
+          def count_by(field, source_rows=None):
               out = {}
-              for row in rows:
+              for row in (source_rows if source_rows is not None else rows):
                   value = str(row.get(field) or "unknown")
                   out[value] = out.get(value, 0) + 1
               return dict(sorted(out.items()))
@@ -178,6 +176,46 @@ jobs:
                   "listing_url_present": bool(row.get("listing_url") or raw.get("listing_url")),
               }
 
+          def row_run_ids(row):
+              raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
+              values = []
+              for key in ("source_run_id", "run_id", "actor_run_id", "apify_run_id"):
+                  for container in (row, raw):
+                      value = container.get(key) if isinstance(container, dict) else None
+                      if value not in (None, "", {}, []):
+                          values.append(str(value))
+              return set(values)
+
+          def rows_for_actor_run(actor_run_id):
+              if not actor_run_id:
+                  return []
+              lineage_filters = []
+              if "source_run_id" in available_columns:
+                  lineage_filters.append(("source_run_id", f"eq.{actor_run_id}"))
+              if "run_id" in available_columns:
+                  lineage_filters.append(("run_id", f"eq.{actor_run_id}"))
+
+              by_id = {}
+              for key, value in lineage_filters:
+                  query_args = dict(base_query_args)
+                  query_args[key] = value
+                  query = urllib.parse.urlencode(query_args)
+                  for row in rest_get(f"/rest/v1/opportunities?{query}"):
+                      by_id[row.get("id") or json.dumps(row, sort_keys=True)] = row
+
+              if not by_id and "raw_data" in available_columns:
+                  # Supabase REST cannot reliably OR across JSON/object top-level columns here, so
+                  # fall back to the bounded source/time window and require raw row lineage locally.
+                  query = urllib.parse.urlencode(base_query_args)
+                  for row in rest_get(f"/rest/v1/opportunities?{query}"):
+                      if actor_run_id in row_run_ids(row):
+                          by_id[row.get("id") or json.dumps(row, sort_keys=True)] = row
+              return list(by_id.values())
+
+          query = urllib.parse.urlencode(base_query_args)
+          source_window_rows = rest_get(f"/rest/v1/opportunities?{query}")
+          rows = source_window_rows
+
           n = len(rows)
           mileage_count = sum(has_mileage(row) for row in rows)
           vin_count = sum(has_vin(row) for row in rows)
@@ -205,18 +243,11 @@ jobs:
               "pricing_raw_present_pct": pct(pricing_raw_count, n),
               "provenance_present": provenance_count,
               "provenance_present_pct": pct(provenance_count, n),
-              "pricing_maturity_counts": count_by("pricing_maturity"),
+              "pricing_maturity_counts": count_by("pricing_maturity", rows),
               "latest_created_at": rows[0].get("created_at") if rows else None,
               "oldest_created_at_in_sample": rows[-1].get("created_at") if rows else None,
               "sanitized_enriched_samples": enriched_samples,
-              "passes_original_enrichment_standard": bool(
-                  n > 0
-                  and source_exact_count == n
-                  and pct(vin_count, n) is not None
-                  and pct(vin_count, n) >= VIN_PASS_THRESHOLD_PCT
-                  and pct(mileage_count, n) is not None
-                  and pct(mileage_count, n) >= MILEAGE_PASS_THRESHOLD_PCT
-              ),
+              "passes_original_enrichment_standard": False,
           }
 
           scraper_enrichment = None
@@ -248,6 +279,41 @@ jobs:
 
           if scraper_enrichment:
               scraper_enrichment["available"] = True
+              lineage_rows = rows_for_actor_run(scraper_enrichment.get("actor_run_id"))
+              scraper_enrichment["accepted_opportunities_for_actor_run"] = len(lineage_rows)
+              scraper_enrichment["run_lineage_proven"] = bool(lineage_rows)
+              if lineage_rows:
+                  rows = lineage_rows
+                  n = len(rows)
+                  mileage_count = sum(has_mileage(row) for row in rows)
+                  vin_count = sum(has_vin(row) for row in rows)
+                  condition_count = sum(has_condition(row) for row in rows)
+                  confidence_count = sum(has_confidence(row) for row in rows)
+                  source_exact_count = sum(canonical_source_ok(row) for row in rows)
+                  pricing_raw_count = sum(pricing_raw_present(row) for row in rows)
+                  provenance_count = sum(provenance_present(row) for row in rows)
+                  enriched_samples = [sanitize_sample(row) for row in rows if has_vin(row) or has_mileage(row) or provenance_present(row)][:5]
+                  accepted_quality.update({
+                      "sample_count": n,
+                      "source_site_exact_count": source_exact_count,
+                      "source_site_exact_pct": pct(source_exact_count, n),
+                      "mileage_present": mileage_count,
+                      "mileage_present_pct": pct(mileage_count, n),
+                      "vin_present": vin_count,
+                      "vin_present_pct": pct(vin_count, n),
+                      "verified_condition_present": condition_count,
+                      "verified_condition_present_pct": pct(condition_count, n),
+                      "confidence_present": confidence_count,
+                      "confidence_present_pct": pct(confidence_count, n),
+                      "pricing_raw_present": pricing_raw_count,
+                      "pricing_raw_present_pct": pct(pricing_raw_count, n),
+                      "provenance_present": provenance_count,
+                      "provenance_present_pct": pct(provenance_count, n),
+                      "pricing_maturity_counts": count_by("pricing_maturity", rows),
+                      "latest_created_at": rows[0].get("created_at") if rows else None,
+                      "oldest_created_at_in_sample": rows[-1].get("created_at") if rows else None,
+                      "sanitized_enriched_samples": enriched_samples,
+                  })
               scraper_enrichment["extraction_detected"] = bool(
                   scraper_enrichment.get("detail_vins_found", 0) > 0
                   or scraper_enrichment.get("detail_mileages_found", 0) > 0
@@ -263,6 +329,18 @@ jobs:
                   "extraction_detected": False,
                   "strict_filter_rejection_detected": False,
               }
+
+          accepted_quality["passes_original_enrichment_standard"] = bool(
+              n > 0
+              and scraper_enrichment.get("run_lineage_proven")
+              and source_exact_count == n
+              and pricing_raw_count == n
+              and provenance_count == n
+              and pct(vin_count, n) is not None
+              and pct(vin_count, n) >= VIN_PASS_THRESHOLD_PCT
+              and pct(mileage_count, n) is not None
+              and pct(mileage_count, n) >= MILEAGE_PASS_THRESHOLD_PCT
+          )
 
           low_yield_source_truth_detected = bool(
               scraper_enrichment.get("available")

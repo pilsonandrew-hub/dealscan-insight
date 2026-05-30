@@ -89,7 +89,7 @@ const {
     minBid = 500,
     maxBid = 50000,
     minYear = new Date().getFullYear() - 10,
-    maxDetailPages = 50,
+    maxDetailPages = 200,
 } = input;
 
 const CATEGORY_URLS = searchQuery
@@ -119,6 +119,10 @@ const enrichmentProof = {
     detail_pages_failed: 0,
     detail_vins_found: 0,
     detail_mileages_found: 0,
+    accepted_rows_total: 0,
+    rejected_rows_total: 0,
+    accepted_rows_with_vin: 0,
+    accepted_rows_with_mileage: 0,
     enriched_rows_accepted: 0,
     enriched_rows_rejected: 0,
     rejection_reasons: {},
@@ -399,7 +403,7 @@ function detailTextFromHtml(html) {
 
 async function enrichFromDetailPages(log) {
     const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
-    const detailLimit = Number(maxDetailPages) || 50;
+    const detailLimit = Number(maxDetailPages) || 200;
     const toScrape = lotsNeedingDetail.slice(0, detailLimit);
     enrichmentProof.detail_pages_attempted = toScrape.length;
     if (toScrape.length === 0) {
@@ -488,8 +492,14 @@ function proofSample(lot) {
 
 function finalizeEnrichmentProof(lotsToPush) {
     enrichmentProof.generated_at = new Date().toISOString();
-    enrichmentProof.enriched_rows_accepted = lotsToPush.filter(lot => lot.detail_enriched).length;
+    const accepted = lotsToPush;
+    const acceptedEnriched = accepted.filter(lot => lot.detail_enriched);
     const rejected = passingLots.filter(lot => lot.rejected_after_detail);
+    enrichmentProof.accepted_rows_total = accepted.length;
+    enrichmentProof.rejected_rows_total = rejected.length;
+    enrichmentProof.accepted_rows_with_vin = accepted.filter(lot => lot.vin).length;
+    enrichmentProof.accepted_rows_with_mileage = accepted.filter(lot => lot.mileage).length;
+    enrichmentProof.enriched_rows_accepted = acceptedEnriched.length;
     enrichmentProof.enriched_rows_rejected = rejected.length;
     enrichmentProof.rejection_reasons = {};
     for (const lot of rejected) {
@@ -497,7 +507,7 @@ function finalizeEnrichmentProof(lotsToPush) {
             enrichmentProof.rejection_reasons[reason] = (enrichmentProof.rejection_reasons[reason] ?? 0) + 1;
         }
     }
-    enrichmentProof.accepted_enriched_samples = lotsToPush.filter(lot => lot.detail_enriched).slice(0, 5).map(proofSample);
+    enrichmentProof.accepted_enriched_samples = acceptedEnriched.slice(0, 5).map(proofSample);
     enrichmentProof.rejected_enriched_samples = rejected.slice(0, 5).map(proofSample);
     return enrichmentProof;
 }

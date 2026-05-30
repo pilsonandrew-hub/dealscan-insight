@@ -40,9 +40,9 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(scraper.parseMileage(text)).toBe(44321);
   });
 
-  test('defaults detail enrichment to 50 pages while preserving input override', () => {
-    expect(source).toContain('maxDetailPages = 50');
-    expect(source).toContain('const detailLimit = Number(maxDetailPages) || 50;');
+  test('defaults detail enrichment to 200 pages while preserving input override', () => {
+    expect(source).toContain('maxDetailPages = 200');
+    expect(source).toContain('const detailLimit = Number(maxDetailPages) || 200;');
     expect(source).toContain('lotsNeedingDetail.slice(0, detailLimit)');
   });
 
@@ -51,6 +51,10 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('detail_pages_attempted');
     expect(source).toContain('detail_vins_found');
     expect(source).toContain('detail_mileages_found');
+    expect(source).toContain('accepted_rows_total');
+    expect(source).toContain('rejected_rows_total');
+    expect(source).toContain('accepted_rows_with_vin');
+    expect(source).toContain('accepted_rows_with_mileage');
     expect(source).toContain('enriched_rows_rejected');
     expect(source).toContain('rejected_enriched_samples');
     expect(source).toContain('await Actor.pushData(proof)');
