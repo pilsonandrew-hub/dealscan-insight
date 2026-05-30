@@ -523,6 +523,12 @@ function publishableLots() {
             run_id: actorRunId,
             apify_run_id: actorRunId,
             actor_run_id: actorRunId,
+            provenance_fields: {
+                source_run_id: actorRunId,
+                actor_run_id: actorRunId,
+                detail_enriched: Boolean(lot.detail_enriched),
+                detail_enriched_by_detail_page: Boolean(lot.detail_enriched_by_detail_page),
+            },
         }));
 }
 
