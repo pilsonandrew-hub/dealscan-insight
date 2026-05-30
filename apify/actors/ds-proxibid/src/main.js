@@ -5,7 +5,7 @@
  * Uses Playwright to scroll-load the lazy-rendered lot grid, then parses article cards.
  *
  * Live recon findings (2026-03-17):
- * - Category URLs: /for-sale/cars-vehicles/pickup-trucks, /for-sale/cars-vehicles/cars
+ * - Category URLs: /for-sale/cars-vehicles/cars plus focused car subcategories
  * - Lot URL pattern: /Cars-Vehicles/Trucks/{Title}/lotInformation/{lotId}
  * - Card container: <article> elements
  * - Title: a[href*="/lotInformation/"] span[data-testid="body-primary"] (first)
@@ -23,7 +23,8 @@ const SOURCE = 'proxibid';
 const BASE = 'https://www.proxibid.com';
 const actorRunId = process.env.APIFY_ACTOR_RUN_ID || process.env.APIFY_RUN_ID || null;
 
-// Vehicle category pages to scrape (overridden when searchQuery is provided)
+// Vehicle category pages to scrape. Keep focused car subcategories first to improve
+// accepted-opportunity VIN/mileage yield without loosening buyer-grade filters.
 
 const TARGET_STATES = new Set([
     'AZ','CA','NV','CO','NM','UT','TX','FL','GA','SC','TN','NC','VA','WA','OR','HI',
@@ -93,17 +94,22 @@ const {
     maxDetailPages = 200,
 } = input;
 
-const CATEGORY_URLS = searchQuery
-    ? [
-        `${BASE}/for-sale/cars-vehicles/cars?q=${encodeURIComponent(searchQuery)}`,
-        `${BASE}/for-sale/cars-vehicles/pickup-trucks?q=${encodeURIComponent(searchQuery)}`,
-        `${BASE}/for-sale/cars-vehicles/trucks?q=${encodeURIComponent(searchQuery)}`,
-    ]
-    : [
-        `${BASE}/for-sale/cars-vehicles/pickup-trucks`,
-        `${BASE}/for-sale/cars-vehicles/cars`,
-        `${BASE}/for-sale/cars-vehicles/trucks`,
-    ];
+const TARGET_CATEGORY_PATHS = [
+    '/for-sale/cars-vehicles/cars',
+    '/for-sale/cars-vehicles/wagons',
+    '/for-sale/cars-vehicles/passenger-vans',
+    '/for-sale/cars-vehicles/coupes',
+    '/for-sale/cars-vehicles/hatchbacks',
+    '/for-sale/cars-vehicles/sedans',
+    '/for-sale/cars-vehicles/suv-s',
+    '/for-sale/cars-vehicles/pickup-trucks',
+    '/for-sale/cars-vehicles/trucks',
+];
+
+const CATEGORY_URLS = TARGET_CATEGORY_PATHS.map(path => {
+    const url = `${BASE}${path}`;
+    return searchQuery ? `${url}?q=${encodeURIComponent(searchQuery)}` : url;
+});
 
 let totalFound = 0;
 let totalPassed = 0;

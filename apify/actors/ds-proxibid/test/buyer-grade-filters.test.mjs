@@ -40,6 +40,21 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(scraper.parseMileage(text)).toBe(44321);
   });
 
+  test('targets focused Proxibid car subcategories before broad truck inventory', () => {
+    const carIndex = source.indexOf("'/for-sale/cars-vehicles/cars'");
+    const wagonsIndex = source.indexOf("'/for-sale/cars-vehicles/wagons'");
+    const vansIndex = source.indexOf("'/for-sale/cars-vehicles/passenger-vans'");
+    const coupesIndex = source.indexOf("'/for-sale/cars-vehicles/coupes'");
+    const hatchbacksIndex = source.indexOf("'/for-sale/cars-vehicles/hatchbacks'");
+    const trucksIndex = source.indexOf("'/for-sale/cars-vehicles/trucks'");
+    expect(carIndex).toBeGreaterThan(-1);
+    expect(wagonsIndex).toBeGreaterThan(carIndex);
+    expect(vansIndex).toBeGreaterThan(wagonsIndex);
+    expect(coupesIndex).toBeGreaterThan(vansIndex);
+    expect(hatchbacksIndex).toBeGreaterThan(coupesIndex);
+    expect(trucksIndex).toBeGreaterThan(hatchbacksIndex);
+  });
+
   test('defaults detail enrichment to 200 pages while preserving input override', () => {
     expect(source).toContain('maxDetailPages = 200');
     expect(source).toContain('const detailLimit = Math.min(Math.max(Number(maxDetailPages) || 200, 0), 250);');
