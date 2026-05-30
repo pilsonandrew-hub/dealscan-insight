@@ -58,6 +58,9 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('enriched_rows_rejected');
     expect(source).toContain('rejected_enriched_samples');
     expect(source).toContain('detail_enriched_by_detail_page');
+    expect(source).toContain('actor_run_id: actorRunId');
+    expect(source).toContain('source_run_id: actorRunId');
+    expect(source).toContain('run_id: actorRunId');
     expect(source).toContain('await Actor.pushData(proof)');
     expect(source).toContain('.filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)');
   });

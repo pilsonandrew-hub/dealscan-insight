@@ -21,6 +21,7 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'proxibid';
 const BASE = 'https://www.proxibid.com';
+const actorRunId = process.env.APIFY_ACTOR_RUN_ID || process.env.APIFY_RUN_ID || null;
 
 // Vehicle category pages to scrape (overridden when searchQuery is provided)
 
@@ -114,6 +115,7 @@ const enrichmentProof = {
     source_site: SOURCE,
     generated_at: null,
     actor: 'ds-proxibid',
+    actor_run_id: actorRunId,
     detail_pages_attempted: 0,
     detail_pages_fetched: 0,
     detail_pages_failed: 0,
@@ -515,7 +517,13 @@ function finalizeEnrichmentProof(lotsToPush) {
 function publishableLots() {
     return passingLots
         .filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)
-        .map(({ detail_text, rejected_after_detail, reject_reasons, detail_enriched_by_detail_page, ...lot }) => lot);
+        .map(({ detail_text, rejected_after_detail, reject_reasons, ...lot }) => ({
+            ...lot,
+            source_run_id: actorRunId,
+            run_id: actorRunId,
+            apify_run_id: actorRunId,
+            actor_run_id: actorRunId,
+        }));
 }
 
 try {
