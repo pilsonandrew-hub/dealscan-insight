@@ -430,6 +430,14 @@ async def pipeline_status(_: None = Depends(require_pipeline_auth)):
     }
 
 
+@app.get("/metrics", include_in_schema=False)
+async def metrics(_: None = Depends(require_pipeline_auth)):
+    """Return sanitized operator-only in-memory runtime metrics."""
+    from webapp.monitoring import get_metrics
+
+    return get_metrics()
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

@@ -2,12 +2,12 @@
 Application monitoring and metrics
 """
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from fastapi import FastAPI
 
 # Simple in-memory metrics (use Prometheus in production)
 metrics = defaultdict(int)
-response_times = []
+response_times = deque(maxlen=1000)
 
 def setup_monitoring(app: FastAPI):
     """Setup monitoring middleware"""
@@ -28,7 +28,8 @@ def setup_monitoring(app: FastAPI):
 
 def get_metrics():
     """Get current metrics"""
-    avg_response_time = sum(response_times[-100:]) / len(response_times[-100:]) if response_times else 0
+    recent_response_times = list(response_times)[-100:]
+    avg_response_time = sum(recent_response_times) / len(recent_response_times) if recent_response_times else 0
     
     return {
         "total_requests": metrics["total_requests"],
