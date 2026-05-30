@@ -2684,6 +2684,76 @@ def _finalize_duplicate_recovery(vehicle: dict, canonical_row: dict, canonical_u
         logger.info("[DEDUP] canonical source update applied for %s", canonical_row["id"])
 
 
+def _existing_enrichment_snapshot(existing_id: str) -> dict:
+    if supabase_client is None:
+        return {}
+    try:
+        result = (
+            supabase_client.table("opportunities")
+            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id")
+            .eq("id", existing_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(result, "data", None) or []
+        return rows[0] if rows else {}
+    except Exception as lookup_err:
+        logger.warning(
+            "[INGEST] Duplicate enrichment lookup failed for %s: %s",
+            existing_id,
+            lookup_err,
+        )
+        return {}
+
+
+def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> dict:
+    """Return missing enrichment fields worth backfilling onto an existing row.
+
+    This is intentionally narrow: duplicate recovery must not rewrite score, bid,
+    grade, pricing truth, or existing enrichment evidence. It only carries source-
+    detail evidence into fields that are currently empty on the existing row.
+    """
+    existing = existing or {}
+    update: dict = {}
+    for key in (
+        "vin",
+        "mileage",
+        "condition_grade",
+        "raw_data",
+        "source_run_id",
+        "run_id",
+    ):
+        value = row.get(key)
+        current_value = existing.get(key)
+        if value not in (None, "", {}, []) and current_value in (None, "", {}, []):
+            update[key] = value
+    if update:
+        update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return update
+
+
+def _backfill_existing_opportunity_enrichment(existing_id: str, row: dict) -> None:
+    if supabase_client is None:
+        return
+    existing = _existing_enrichment_snapshot(existing_id)
+    update_payload = _duplicate_enrichment_update(row, existing)
+    if not update_payload:
+        return
+    try:
+        supabase_client.table("opportunities").update(update_payload).eq("id", existing_id).execute()
+        logger.info(
+            "[INGEST] Backfilled missing enrichment fields for duplicate opportunity %s: %s",
+            existing_id,
+            sorted(update_payload.keys()),
+        )
+    except Exception as update_err:
+        logger.warning(
+            "[INGEST] Duplicate enrichment backfill failed for %s: %s",
+            existing_id,
+            update_err,
+        )
+
+
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
     if supabase_client is not None:
         try:
@@ -2894,6 +2964,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
 
             existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
             if existing_id:
+                _backfill_existing_opportunity_enrichment(existing_id, row)
                 _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                 return existing_id
         except Exception as e:
@@ -2921,6 +2992,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                 existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
                 if existing_id:
                     logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
+                    _backfill_existing_opportunity_enrichment(existing_id, row)
                     _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                     return existing_id
                 _mark_save_outcome(vehicle, "duplicate_unresolved", error_message=error_text)

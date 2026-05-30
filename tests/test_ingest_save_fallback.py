@@ -95,6 +95,66 @@ class _StubSupabase:
         return _StubTable(self.row, self.error_text)
 
 
+class _RecordingQuery:
+    def __init__(self, table, result_rows):
+        self.table = table
+        self.result_rows = result_rows
+        self.filters = []
+        self.limit_value = None
+
+    def eq(self, field, value):
+        self.filters.append((field, value))
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        return self
+
+    def execute(self):
+        self.table.select_calls.append((list(self.filters), self.limit_value))
+        return types.SimpleNamespace(data=self.result_rows)
+
+
+class _RecordingUpdate:
+    def __init__(self, table, payload):
+        self.table = table
+        self.payload = payload
+        self.filters = []
+
+    def eq(self, field, value):
+        self.filters.append((field, value))
+        return self
+
+    def execute(self):
+        self.table.update_calls.append((self.payload, list(self.filters)))
+        return types.SimpleNamespace(data=[{"id": "existing-42"}])
+
+
+class _DuplicateBackfillTable(_StubTable):
+    def __init__(self, row: dict, error_text: str, existing_row: dict | None = None):
+        super().__init__(row, error_text)
+        self.existing_row = existing_row or {}
+        self.select_calls = []
+        self.update_calls = []
+
+    def select(self, columns):
+        self.selected_columns = columns
+        return _RecordingQuery(self, [self.existing_row])
+
+    def update(self, payload):
+        return _RecordingUpdate(self, payload)
+
+
+class _DuplicateBackfillSupabase(_StubSupabase):
+    def __init__(self, row: dict, error_text: str, existing_row: dict | None = None):
+        self._table = _DuplicateBackfillTable(row, error_text, existing_row)
+
+    def table(self, name):
+        if name != "opportunities":
+            raise AssertionError(f"unexpected table: {name}")
+        return self._table
+
+
 class _CanonicalConflictTable:
     def __init__(self, row: dict, duplicate_row_id: str):
         self.row = row
@@ -207,6 +267,93 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertEqual(saved_id, "existing-42")
         self.assertEqual(vehicle["_save_status"], "duplicate_existing")
         self.assertEqual(fallback_calls, [])
+
+    def test_duplicate_recovery_backfills_enrichment_fields_without_direct_pg(self):
+        row = {
+            "listing_id": "listing-2",
+            "listing_url": "https://example.com/vehicle/2",
+            "title": "2024 Honda Accord",
+            "vin": "1HGCM82633A004352",
+            "mileage": 32100,
+            "condition_grade": "good",
+            "raw_data": {"detail_enriched": True, "vin": "1HGCM82633A004352", "mileage": 32100},
+            "source_run_id": "run-123",
+            "run_id": "run-123",
+        }
+        vehicle = {"dos_score": 80, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(
+            row,
+            'duplicate key value violates unique constraint "opportunities_listing_key" (23505)',
+        )
+        fallback_calls = []
+
+        def fake_direct_pg(payload):
+            fallback_calls.append(payload)
+            return "pg-should-not-run", "saved_direct_pg"
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: (None, False)), patch.object(
+            ingest, "_lookup_existing_opportunity_id", lambda *_: "existing-42"
+        ), patch.object(ingest, "_save_opportunity_direct_pg", fake_direct_pg):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-42")
+        self.assertEqual(vehicle["_save_status"], "duplicate_existing")
+        self.assertEqual(fallback_calls, [])
+        self.assertEqual(supabase._table.select_calls, [([("id", "existing-42")], 1)])
+        self.assertEqual(len(supabase._table.update_calls), 1)
+        update_payload, filters = supabase._table.update_calls[0]
+        self.assertEqual(filters, [("id", "existing-42")])
+        self.assertEqual(update_payload["vin"], row["vin"])
+        self.assertEqual(update_payload["mileage"], row["mileage"])
+        self.assertEqual(update_payload["condition_grade"], row["condition_grade"])
+        self.assertEqual(update_payload["raw_data"], row["raw_data"])
+        self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
+        self.assertIn("updated_at", update_payload)
+
+    def test_duplicate_recovery_does_not_overwrite_existing_enrichment_fields(self):
+        row = {
+            "listing_id": "listing-3",
+            "listing_url": "https://example.com/vehicle/3",
+            "title": "2024 Honda Accord",
+            "vin": "1HGCM82633A004352",
+            "mileage": 32100,
+            "condition_grade": "good",
+            "raw_data": {"detail_enriched": True},
+            "source_run_id": "run-123",
+            "run_id": "run-123",
+        }
+        existing_row = {
+            "vin": "EXISTINGVIN1234567",
+            "mileage": None,
+            "condition_grade": "fair",
+            "raw_data": {"original": True},
+            "source_run_id": None,
+            "run_id": "old-run",
+        }
+        vehicle = {"dos_score": 80, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(
+            row,
+            'duplicate key value violates unique constraint "opportunities_listing_key" (23505)',
+            existing_row,
+        )
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: (None, False)), patch.object(
+            ingest, "_lookup_existing_opportunity_id", lambda *_: "existing-42"
+        ), patch.object(ingest, "_save_opportunity_direct_pg", lambda _: ("pg-should-not-run", "saved_direct_pg")):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-42")
+        update_payload, _filters = supabase._table.update_calls[0]
+        self.assertNotIn("vin", update_payload)
+        self.assertEqual(update_payload["mileage"], row["mileage"])
+        self.assertNotIn("condition_grade", update_payload)
+        self.assertNotIn("raw_data", update_payload)
+        self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
+        self.assertNotIn("run_id", update_payload)
 
     def test_pgrst204_still_falls_back_to_direct_pg(self):
         row = {
