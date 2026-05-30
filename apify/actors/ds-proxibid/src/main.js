@@ -93,19 +93,40 @@ const {
     maxBid = 50000,
     minYear = new Date().getFullYear() - 10,
     maxDetailPages = 200,
+    targetCategories = "",
 } = input;
 
 const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];
 
-const TARGET_CATEGORIES = [
-    { label: "SUV's", path: '/for-sale/cars-vehicles/suv-s' },
-    { label: 'Sedans', path: '/for-sale/cars-vehicles/sedans' },
-    { label: 'Wagons', path: '/for-sale/cars-vehicles/wagons' },
-    { label: 'Coupes', path: '/for-sale/cars-vehicles/coupes' },
-    { label: 'Hatchbacks', path: '/for-sale/cars-vehicles/hatchbacks' },
-    { label: 'Sports Cars', path: '/for-sale/cars-vehicles/sports-cars' },
-    { label: 'Hybrid Cars', path: '/for-sale/cars-vehicles/hybrid-cars' },
+const ALL_TARGET_CATEGORIES = [
+    { label: "SUV's", slug: 'suv-s', path: '/for-sale/cars-vehicles/suv-s' },
+    { label: 'Sedans', slug: 'sedans', path: '/for-sale/cars-vehicles/sedans' },
+    { label: 'Wagons', slug: 'wagons', path: '/for-sale/cars-vehicles/wagons' },
+    { label: 'Coupes', slug: 'coupes', path: '/for-sale/cars-vehicles/coupes' },
+    { label: 'Hatchbacks', slug: 'hatchbacks', path: '/for-sale/cars-vehicles/hatchbacks' },
+    { label: 'Sports Cars', slug: 'sports-cars', path: '/for-sale/cars-vehicles/sports-cars' },
+    { label: 'Hybrid Cars', slug: 'hybrid-cars', path: '/for-sale/cars-vehicles/hybrid-cars' },
 ];
+
+function selectedTargetCategories(rawTargetCategories) {
+    const requested = String(rawTargetCategories ?? '')
+        .split(',')
+        .map(value => value.trim().toLowerCase())
+        .filter(Boolean);
+    if (requested.length === 0) return ALL_TARGET_CATEGORIES;
+    const allowed = new Set(requested);
+    const selected = ALL_TARGET_CATEGORIES.filter(category => (
+        allowed.has(category.slug)
+        || allowed.has(category.label.toLowerCase())
+        || allowed.has(category.path.toLowerCase())
+    ));
+    if (selected.length === 0) {
+        throw new Error(`No valid Proxibid target categories selected: ${rawTargetCategories}`);
+    }
+    return selected;
+}
+
+const TARGET_CATEGORIES = selectedTargetCategories(targetCategories);
 
 const CATEGORY_URLS = TARGET_CATEGORIES.map(category => {
     const url = `${BASE}${category.path}`;

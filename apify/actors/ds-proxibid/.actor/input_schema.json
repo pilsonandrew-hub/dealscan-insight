@@ -26,6 +26,13 @@
       "minimum": 0,
       "maximum": 250,
       "editor": "number"
+    },
+    "targetCategories": {
+      "title": "Target Categories",
+      "type": "string",
+      "description": "Comma-separated Proxibid car category slugs to scrape, e.g. sedans,suv-s,coupes. Empty means all configured car subcategories.",
+      "editor": "textfield",
+      "default": ""
     }
   }
 }

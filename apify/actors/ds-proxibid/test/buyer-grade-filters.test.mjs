@@ -42,6 +42,7 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
 
   test('targets the Cars menu selections directly before VIN/odometer detail extraction', () => {
     const navigationIndex = source.indexOf("const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];");
+    const selectableIndex = source.indexOf('function selectedTargetCategories(rawTargetCategories)');
     const suvIndex = source.indexOf("path: '/for-sale/cars-vehicles/suv-s'");
     const sedansIndex = source.indexOf("path: '/for-sale/cars-vehicles/sedans'");
     const wagonsIndex = source.indexOf("path: '/for-sale/cars-vehicles/wagons'");
@@ -53,6 +54,10 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     const trucksIndex = source.indexOf("path: '/for-sale/cars-vehicles/trucks'");
 
     expect(navigationIndex).toBeGreaterThan(-1);
+    expect(selectableIndex).toBeGreaterThan(navigationIndex);
+    expect(source).toContain('targetCategories = ""');
+    expect(source).toContain('selectedTargetCategories(targetCategories)');
+    expect(source).toContain('No valid Proxibid target categories selected');
     expect(suvIndex).toBeGreaterThan(navigationIndex);
     expect(sedansIndex).toBeGreaterThan(suvIndex);
     expect(wagonsIndex).toBeGreaterThan(sedansIndex);
@@ -100,6 +105,7 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('input_contract');
     expect(source).toContain('category_navigation_path');
     expect(source).toContain('targeted_categories');
+    expect(source).toContain('targetCategories');
     expect(source).toContain('source_category_label');
     expect(source).toContain('source_category_path');
     expect(source).toContain('source_navigation_path');
