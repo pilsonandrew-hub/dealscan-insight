@@ -1,0 +1,117 @@
+name: Run Apify Actor
+
+on:
+  workflow_dispatch:
+    inputs:
+      actor:
+        description: "Actor name to run"
+        required: true
+        default: "ds-proxibid"
+      max_items:
+        description: "Max items input"
+        required: false
+        default: "200"
+      max_detail_pages:
+        description: "Max detail pages input"
+        required: false
+        default: "200"
+
+permissions:
+  contents: read
+
+jobs:
+  run-actor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Run selected Apify actor and wait for completion
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          ACTOR_NAME: ${{ inputs.actor }}
+          MAX_ITEMS: ${{ inputs.max_items }}
+          MAX_DETAIL_PAGES: ${{ inputs.max_detail_pages }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          import time
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ["APIFY_TOKEN"]
+          actor_name = os.environ.get("ACTOR_NAME", "ds-proxibid")
+          actor_map = {
+              "ds-proxibid": "bxhncvtHEP712WX2e",
+          }
+          actor_id = actor_map.get(actor_name)
+          if not actor_id:
+              raise SystemExit(f"Unsupported actor: {actor_name}")
+
+          def api(method, path, payload=None):
+              sep = "&" if "?" in path else "?"
+              url = f"https://api.apify.com/v2{path}{sep}token={urllib.parse.quote(token)}"
+              data = json.dumps(payload or {}).encode() if payload is not None else None
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method=method,
+                  headers={"Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  return json.loads(resp.read().decode())
+
+          actor_input = {
+              "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
+              "maxDetailPages": int(os.environ.get("MAX_DETAIL_PAGES") or "200"),
+          }
+          started = api("POST", f"/acts/{actor_id}/runs", actor_input).get("data", {})
+          run_id = started.get("id")
+          if not run_id:
+              raise SystemExit("Apify did not return a run id")
+          print(json.dumps({"actor": actor_name, "run_id": run_id, "status": started.get("status")}, sort_keys=True))
+
+          terminal = {"SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"}
+          last = started
+          for _ in range(90):
+              time.sleep(20)
+              last = api("GET", f"/actor-runs/{run_id}").get("data", {})
+              status = last.get("status")
+              print(json.dumps({"run_id": run_id, "status": status}, sort_keys=True))
+              if status in terminal:
+                  break
+          else:
+              raise SystemExit("Timed out waiting for Apify actor run")
+
+          dataset_id = last.get("defaultDatasetId")
+          summary = {
+              "actor": actor_name,
+              "run_id": run_id,
+              "status": last.get("status"),
+              "dataset_id": dataset_id,
+              "started_at": last.get("startedAt"),
+              "finished_at": last.get("finishedAt"),
+          }
+          if dataset_id:
+              items = api("GET", f"/datasets/{dataset_id}/items?clean=true&limit=1000")
+              summary["dataset_items_sampled"] = len(items) if isinstance(items, list) else None
+              proofs = [item for item in items if isinstance(item, dict) and item.get("record_type") == "source_quality_proof"]
+              if proofs:
+                  proof = proofs[-1]
+                  summary["source_quality_proof"] = {
+                      key: proof.get(key)
+                      for key in (
+                          "detail_pages_attempted",
+                          "detail_pages_fetched",
+                          "detail_pages_failed",
+                          "detail_vins_found",
+                          "detail_mileages_found",
+                          "enriched_rows_accepted",
+                          "enriched_rows_rejected",
+                          "rejection_reasons",
+                      )
+                  }
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          if last.get("status") != "SUCCEEDED":
+              raise SystemExit(1)
+          PY
