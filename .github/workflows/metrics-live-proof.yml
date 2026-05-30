@@ -15,61 +15,28 @@ jobs:
     steps:
       - name: Prove metrics auth and sanitization
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           PIPELINE_SECRET_FALLBACK: ${{ secrets.PIPELINE_SECRET }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          import json
-          import os
-          import sys
-          import urllib.request
-
-          fallback = (os.environ.get('PIPELINE_SECRET_FALLBACK') or '').strip()
-          if fallback:
-              print('pipeline_secret_source=github_secret')
-              with open('/tmp/pipeline_secret', 'w') as fh:
-                  fh.write(fallback)
-              raise SystemExit(0)
-
-          supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
-          service_key = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
-          if not supabase_url or not service_key:
-              print('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required to resolve PIPELINE_SECRET', file=sys.stderr)
-              raise SystemExit(1)
-
-          req = urllib.request.Request(
-              f'{supabase_url}/rest/v1/app_config?select=key,value&key=in.(PIPELINE_SECRET,INTERNAL_API_SECRET)',
-              headers={
-                  'apikey': service_key,
-                  'Authorization': f'Bearer {service_key}',
-              },
-          )
-          with urllib.request.urlopen(req, timeout=30) as resp:
-              rows = json.loads(resp.read().decode())
-
-          by_key = {
-              str(row.get('key') or ''): str(row.get('value') or '').strip()
-              for row in rows
-              if isinstance(row, dict)
-          }
-          secret = by_key.get('PIPELINE_SECRET') or by_key.get('INTERNAL_API_SECRET') or ''
-          if not secret:
-              print('PIPELINE_SECRET missing from GitHub secrets; PIPELINE_SECRET/INTERNAL_API_SECRET missing from Supabase app_config', file=sys.stderr)
-              raise SystemExit(1)
-
-          source = 'supabase_app_config_pipeline_secret' if by_key.get('PIPELINE_SECRET') else 'supabase_app_config_internal_secret'
-          print(f'pipeline_secret_source={source}')
-          with open('/tmp/pipeline_secret', 'w') as fh:
-              fh.write(secret)
-          PY
-
-          PIPELINE_SECRET="$(cat /tmp/pipeline_secret)"
-          if [ -z "$PIPELINE_SECRET" ]; then
-            echo "PIPELINE_SECRET resolved empty" >&2
-            exit 1
+          PIPELINE_SECRET="${PIPELINE_SECRET_FALLBACK:-}"
+          if [ -n "$PIPELINE_SECRET" ]; then
+            echo "pipeline_secret_source=github_secret"
+          else
+            if [ -z "${RAILWAY_TOKEN:-}" ]; then
+              echo "PIPELINE_SECRET GitHub secret or RAILWAY_PROJECT_TOKEN is required for live metrics proof" >&2
+              exit 1
+            fi
+            npm install -g @railway/cli >/dev/null 2>&1
+            PIPELINE_SECRET="$(railway run -s fbc5a039-4de7-468c-abb1-71dcdaf47f38 -e 1a116d8c-86fd-47ed-8f50-b8b8b994d514 -- printenv PIPELINE_SECRET 2>/tmp/railway_metrics_secret.err || true)"
+            PIPELINE_SECRET="$(printf '%s' "$PIPELINE_SECRET" | tail -n 1 | tr -d '\r\n')"
+            if [ -z "$PIPELINE_SECRET" ]; then
+              echo "PIPELINE_SECRET missing from GitHub secrets and Railway environment" >&2
+              sed -E 's/[A-Za-z0-9_=-]{20,}/[redacted]/g' /tmp/railway_metrics_secret.err >&2 || true
+              exit 1
+            fi
+            echo "pipeline_secret_source=railway_environment"
           fi
 
           unauth_code=$(curl -sS -o /tmp/metrics_unauth.json -w '%{http_code}' "$BACKEND_URL/metrics")
