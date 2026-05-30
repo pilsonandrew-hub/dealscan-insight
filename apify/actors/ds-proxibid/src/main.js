@@ -130,6 +130,10 @@ const enrichmentProof = {
     rejection_reasons: {},
     accepted_enriched_samples: [],
     rejected_enriched_samples: [],
+    input_contract: {
+        max_detail_pages_default: 200,
+        actor_timeout_secs_expected: 900,
+    },
 };
 
 function normalize(text) {
@@ -405,7 +409,7 @@ function detailTextFromHtml(html) {
 
 async function enrichFromDetailPages(log) {
     const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
-    const detailLimit = Number(maxDetailPages) || 200;
+    const detailLimit = Math.min(Math.max(Number(maxDetailPages) || 200, 0), 250);
     const toScrape = lotsNeedingDetail.slice(0, detailLimit);
     enrichmentProof.detail_pages_attempted = toScrape.length;
     if (toScrape.length === 0) {

@@ -42,8 +42,17 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
 
   test('defaults detail enrichment to 200 pages while preserving input override', () => {
     expect(source).toContain('maxDetailPages = 200');
-    expect(source).toContain('const detailLimit = Number(maxDetailPages) || 200;');
+    expect(source).toContain('const detailLimit = Math.min(Math.max(Number(maxDetailPages) || 200, 0), 250);');
     expect(source).toContain('lotsNeedingDetail.slice(0, detailLimit)');
+  });
+
+  test('actor metadata allows the 200-page enrichment default to run without schema clipping or timeout truncation', () => {
+    const inputSchema = JSON.parse(readFileSync(resolve('apify/actors/ds-proxibid/.actor/input_schema.json'), 'utf8'));
+    const actorConfig = JSON.parse(readFileSync(resolve('apify/actors/ds-proxibid/.actor/actor.json'), 'utf8'));
+    expect(inputSchema.properties.maxDetailPages.default).toBe(200);
+    expect(inputSchema.properties.maxDetailPages.maximum).toBeGreaterThanOrEqual(200);
+    expect(actorConfig.defaultRunOptions.timeoutSecs).toBeGreaterThanOrEqual(900);
+    expect(actorConfig.defaultRunOptions.memoryMbytes).toBeGreaterThanOrEqual(1024);
   });
 
   test('emits structured enrichment proof without publishing rejected detail rows as opportunities', () => {
@@ -62,6 +71,8 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('source_run_id: actorRunId');
     expect(source).toContain('run_id: actorRunId');
     expect(source).toContain('provenance_fields');
+    expect(source).toContain('input_contract');
+    expect(source).toContain('actor_timeout_secs_expected: 900');
     expect(source).toContain('await Actor.pushData(proof)');
     expect(source).toContain('.filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)');
   });

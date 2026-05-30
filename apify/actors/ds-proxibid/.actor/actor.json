@@ -6,8 +6,8 @@
   "version": "0.0",
   "input": "./input_schema.json",
   "defaultRunOptions": {
-    "timeoutSecs": 300,
-    "memoryMbytes": 512
+    "timeoutSecs": 900,
+    "memoryMbytes": 1024
   },
   "buildTag": "latest"
 }

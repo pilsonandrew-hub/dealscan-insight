@@ -22,9 +22,9 @@
       "title": "Max Detail Pages",
       "type": "integer",
       "description": "Maximum Proxibid detail pages to fetch per run for VIN/mileage enrichment before pushing rows",
-      "default": 50,
+      "default": 200,
       "minimum": 0,
-      "maximum": 150,
+      "maximum": 250,
       "editor": "number"
     }
   }
