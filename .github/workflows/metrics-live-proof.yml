@@ -12,13 +12,59 @@ jobs:
     timeout-minutes: 5
     env:
       BACKEND_URL: https://dealscan-insight-production.up.railway.app
-      PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
     steps:
       - name: Prove metrics auth and sanitization
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PIPELINE_SECRET_FALLBACK: ${{ secrets.PIPELINE_SECRET }}
         run: |
           set -euo pipefail
-          if [ -z "${PIPELINE_SECRET:-}" ]; then
-            echo "PIPELINE_SECRET GitHub secret is required for live metrics proof" >&2
+
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          fallback = (os.environ.get('PIPELINE_SECRET_FALLBACK') or '').strip()
+          if fallback:
+              print('pipeline_secret_source=github_secret')
+              with open('/tmp/pipeline_secret', 'w') as fh:
+                  fh.write(fallback)
+              raise SystemExit(0)
+
+          supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+          service_key = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
+          if not supabase_url or not service_key:
+              print('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required to resolve PIPELINE_SECRET', file=sys.stderr)
+              raise SystemExit(1)
+
+          req = urllib.request.Request(
+              f'{supabase_url}/rest/v1/app_config?select=key,value&key=eq.PIPELINE_SECRET',
+              headers={
+                  'apikey': service_key,
+                  'Authorization': f'Bearer {service_key}',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              rows = json.loads(resp.read().decode())
+
+          secret = ''
+          if rows and isinstance(rows[0], dict):
+              secret = str(rows[0].get('value') or '').strip()
+          if not secret:
+              print('PIPELINE_SECRET missing from GitHub secrets and Supabase app_config', file=sys.stderr)
+              raise SystemExit(1)
+
+          print('pipeline_secret_source=supabase_app_config')
+          with open('/tmp/pipeline_secret', 'w') as fh:
+              fh.write(secret)
+          PY
+
+          PIPELINE_SECRET="$(cat /tmp/pipeline_secret)"
+          if [ -z "$PIPELINE_SECRET" ]; then
+            echo "PIPELINE_SECRET resolved empty" >&2
             exit 1
           fi
 
