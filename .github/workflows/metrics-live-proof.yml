@@ -41,7 +41,7 @@ jobs:
               raise SystemExit(1)
 
           req = urllib.request.Request(
-              f'{supabase_url}/rest/v1/app_config?select=key,value&key=eq.PIPELINE_SECRET',
+              f'{supabase_url}/rest/v1/app_config?select=key,value&key=in.(PIPELINE_SECRET,INTERNAL_API_SECRET)',
               headers={
                   'apikey': service_key,
                   'Authorization': f'Bearer {service_key}',
@@ -50,14 +50,18 @@ jobs:
           with urllib.request.urlopen(req, timeout=30) as resp:
               rows = json.loads(resp.read().decode())
 
-          secret = ''
-          if rows and isinstance(rows[0], dict):
-              secret = str(rows[0].get('value') or '').strip()
+          by_key = {
+              str(row.get('key') or ''): str(row.get('value') or '').strip()
+              for row in rows
+              if isinstance(row, dict)
+          }
+          secret = by_key.get('PIPELINE_SECRET') or by_key.get('INTERNAL_API_SECRET') or ''
           if not secret:
-              print('PIPELINE_SECRET missing from GitHub secrets and Supabase app_config', file=sys.stderr)
+              print('PIPELINE_SECRET missing from GitHub secrets; PIPELINE_SECRET/INTERNAL_API_SECRET missing from Supabase app_config', file=sys.stderr)
               raise SystemExit(1)
 
-          print('pipeline_secret_source=supabase_app_config')
+          source = 'supabase_app_config_pipeline_secret' if by_key.get('PIPELINE_SECRET') else 'supabase_app_config_internal_secret'
+          print(f'pipeline_secret_source={source}')
           with open('/tmp/pipeline_secret', 'w') as fh:
               fh.write(secret)
           PY
