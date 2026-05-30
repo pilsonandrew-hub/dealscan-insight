@@ -95,21 +95,24 @@ const {
     maxDetailPages = 200,
 } = input;
 
-const TARGET_CATEGORY_PATHS = [
-    '/for-sale/cars-vehicles/cars',
-    '/for-sale/cars-vehicles/wagons',
-    '/for-sale/cars-vehicles/passenger-vans',
-    '/for-sale/cars-vehicles/coupes',
-    '/for-sale/cars-vehicles/hatchbacks',
-    '/for-sale/cars-vehicles/sedans',
-    '/for-sale/cars-vehicles/suv-s',
-    '/for-sale/cars-vehicles/pickup-trucks',
-    '/for-sale/cars-vehicles/trucks',
+const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];
+
+const TARGET_CATEGORIES = [
+    { label: "SUV's", path: '/for-sale/cars-vehicles/suv-s' },
+    { label: 'Sedans', path: '/for-sale/cars-vehicles/sedans' },
+    { label: 'Wagons', path: '/for-sale/cars-vehicles/wagons' },
+    { label: 'Coupes', path: '/for-sale/cars-vehicles/coupes' },
+    { label: 'Hatchbacks', path: '/for-sale/cars-vehicles/hatchbacks' },
+    { label: 'Sports Cars', path: '/for-sale/cars-vehicles/sports-cars' },
+    { label: 'Hybrid Cars', path: '/for-sale/cars-vehicles/hybrid-cars' },
 ];
 
-const CATEGORY_URLS = TARGET_CATEGORY_PATHS.map(path => {
-    const url = `${BASE}${path}`;
-    return searchQuery ? `${url}?q=${encodeURIComponent(searchQuery)}` : url;
+const CATEGORY_URLS = TARGET_CATEGORIES.map(category => {
+    const url = `${BASE}${category.path}`;
+    return {
+        ...category,
+        url: searchQuery ? `${url}?q=${encodeURIComponent(searchQuery)}` : url,
+    };
 });
 
 let totalFound = 0;
@@ -138,6 +141,8 @@ const enrichmentProof = {
     accepted_enriched_samples: [],
     rejected_enriched_samples: [],
     input_contract: {
+        category_navigation_path: CATEGORY_NAVIGATION_PATH,
+        targeted_categories: TARGET_CATEGORIES.map(category => category.label),
         max_detail_pages_default: 200,
         actor_timeout_secs_expected: 900,
     },
@@ -231,6 +236,8 @@ const crawler = new PlaywrightCrawler({
     async requestHandler({ page, request, log }) {
         const label = request.userData.label ?? 'LIST';
         const url = request.url;
+        const categoryLabel = request.userData.categoryLabel ?? 'Unknown';
+        const categoryPath = request.userData.categoryPath ?? '';
 
         if (passingLots.length >= maxItems) {
             log.info(`[Proxibid] Max items reached (${passingLots.length}/${maxItems}); skipping ${url}`);
@@ -238,7 +245,7 @@ const crawler = new PlaywrightCrawler({
         }
 
         if (label === 'LIST') {
-            log.info(`[Proxibid] Loading list page: ${url}`);
+            log.info(`[Proxibid] Loading ${CATEGORY_NAVIGATION_PATH.join(' > ')} > ${categoryLabel}: ${url}`);
 
             // Wait for Angular/React lot cards to render
             await page.waitForLoadState('networkidle').catch(() => {});
@@ -351,6 +358,9 @@ const crawler = new PlaywrightCrawler({
                     time_left: card.timeLeft,
                     vin: vin ?? null,
                     source_site: SOURCE,
+                    source_category_label: categoryLabel,
+                    source_category_path: categoryPath,
+                    source_navigation_path: [...CATEGORY_NAVIGATION_PATH, categoryLabel].join(' > '),
                     scraped_at: new Date().toISOString(),
                 });
             }
@@ -368,7 +378,7 @@ const crawler = new PlaywrightCrawler({
                 }
                 await crawler.addRequests([{
                     url: nextUrl,
-                    userData: { label: 'LIST', page: pageNum + 1 },
+                    userData: { label: 'LIST', page: pageNum + 1, categoryLabel, categoryPath },
                 }]);
             }
         }
@@ -509,6 +519,9 @@ function proofSample(lot) {
         vin: lot.vin ?? null,
         reject_reasons: lot.reject_reasons ?? [],
         source_site: lot.source_site,
+        source_category_label: lot.source_category_label ?? null,
+        source_category_path: lot.source_category_path ?? null,
+        source_navigation_path: lot.source_navigation_path ?? null,
     };
 }
 
@@ -553,7 +566,15 @@ function publishableLots() {
 }
 
 try {
-    await crawler.run(CATEGORY_URLS.map(url => ({ url, userData: { label: 'LIST', page: 1 } })));
+    await crawler.run(CATEGORY_URLS.map(category => ({
+        url: category.url,
+        userData: {
+            label: 'LIST',
+            page: 1,
+            categoryLabel: category.label,
+            categoryPath: category.path,
+        },
+    })));
     await enrichFromDetailPages(console);
     const lotsToPush = publishableLots();
     for (const lot of lotsToPush) {

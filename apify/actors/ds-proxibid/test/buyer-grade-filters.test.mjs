@@ -40,19 +40,28 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(scraper.parseMileage(text)).toBe(44321);
   });
 
-  test('targets focused Proxibid car subcategories before broad truck inventory', () => {
-    const carIndex = source.indexOf("'/for-sale/cars-vehicles/cars'");
-    const wagonsIndex = source.indexOf("'/for-sale/cars-vehicles/wagons'");
-    const vansIndex = source.indexOf("'/for-sale/cars-vehicles/passenger-vans'");
-    const coupesIndex = source.indexOf("'/for-sale/cars-vehicles/coupes'");
-    const hatchbacksIndex = source.indexOf("'/for-sale/cars-vehicles/hatchbacks'");
-    const trucksIndex = source.indexOf("'/for-sale/cars-vehicles/trucks'");
-    expect(carIndex).toBeGreaterThan(-1);
-    expect(wagonsIndex).toBeGreaterThan(carIndex);
-    expect(vansIndex).toBeGreaterThan(wagonsIndex);
-    expect(coupesIndex).toBeGreaterThan(vansIndex);
+  test('targets the Cars menu selections directly before VIN/odometer detail extraction', () => {
+    const navigationIndex = source.indexOf("const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];");
+    const suvIndex = source.indexOf("path: '/for-sale/cars-vehicles/suv-s'");
+    const sedansIndex = source.indexOf("path: '/for-sale/cars-vehicles/sedans'");
+    const wagonsIndex = source.indexOf("path: '/for-sale/cars-vehicles/wagons'");
+    const coupesIndex = source.indexOf("path: '/for-sale/cars-vehicles/coupes'");
+    const hatchbacksIndex = source.indexOf("path: '/for-sale/cars-vehicles/hatchbacks'");
+    const sportsIndex = source.indexOf("path: '/for-sale/cars-vehicles/sports-cars'");
+    const hybridsIndex = source.indexOf("path: '/for-sale/cars-vehicles/hybrid-cars'");
+    const broadCarsIndex = source.indexOf("path: '/for-sale/cars-vehicles/cars'");
+    const trucksIndex = source.indexOf("path: '/for-sale/cars-vehicles/trucks'");
+
+    expect(navigationIndex).toBeGreaterThan(-1);
+    expect(suvIndex).toBeGreaterThan(navigationIndex);
+    expect(sedansIndex).toBeGreaterThan(suvIndex);
+    expect(wagonsIndex).toBeGreaterThan(sedansIndex);
+    expect(coupesIndex).toBeGreaterThan(wagonsIndex);
     expect(hatchbacksIndex).toBeGreaterThan(coupesIndex);
-    expect(trucksIndex).toBeGreaterThan(hatchbacksIndex);
+    expect(sportsIndex).toBeGreaterThan(hatchbacksIndex);
+    expect(hybridsIndex).toBeGreaterThan(sportsIndex);
+    expect(broadCarsIndex).toBe(-1);
+    expect(trucksIndex).toBe(-1);
   });
 
   test('defaults detail enrichment to 200 pages while preserving input override', () => {
@@ -89,6 +98,11 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('defaultDatasetId: dataset.id');
     expect(source).toContain('provenance_fields');
     expect(source).toContain('input_contract');
+    expect(source).toContain('category_navigation_path');
+    expect(source).toContain('targeted_categories');
+    expect(source).toContain('source_category_label');
+    expect(source).toContain('source_category_path');
+    expect(source).toContain('source_navigation_path');
     expect(source).toContain('actor_timeout_secs_expected: 900');
     expect(source).toContain('await Actor.pushData(proof)');
     expect(source).toContain('.filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)');
