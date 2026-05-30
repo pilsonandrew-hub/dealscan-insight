@@ -1,0 +1,74 @@
+name: Metrics Live Proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metrics-live-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKEND_URL: https://dealscan-insight-production.up.railway.app
+      PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
+    steps:
+      - name: Prove metrics auth and sanitization
+        run: |
+          set -euo pipefail
+          if [ -z "${PIPELINE_SECRET:-}" ]; then
+            echo "PIPELINE_SECRET GitHub secret is required for live metrics proof" >&2
+            exit 1
+          fi
+
+          unauth_code=$(curl -sS -o /tmp/metrics_unauth.json -w '%{http_code}' "$BACKEND_URL/metrics")
+          if [ "$unauth_code" != "401" ] && [ "$unauth_code" != "404" ]; then
+            echo "Unauthenticated /metrics returned $unauth_code, expected 401 or 404" >&2
+            cat /tmp/metrics_unauth.json >&2 || true
+            exit 1
+          fi
+
+          wrong_code=$(curl -sS -o /tmp/metrics_wrong.json -w '%{http_code}' -H 'Authorization: Bearer wrong' "$BACKEND_URL/metrics")
+          if [ "$wrong_code" != "401" ] && [ "$wrong_code" != "404" ]; then
+            echo "Wrong-auth /metrics returned $wrong_code, expected 401 or 404" >&2
+            cat /tmp/metrics_wrong.json >&2 || true
+            exit 1
+          fi
+
+          ok_code=$(curl -sS -o /tmp/metrics_ok.json -w '%{http_code}' -H "Authorization: Bearer $PIPELINE_SECRET" "$BACKEND_URL/metrics")
+          if [ "$ok_code" != "200" ]; then
+            echo "Authenticated /metrics returned $ok_code, expected 200" >&2
+            cat /tmp/metrics_ok.json >&2 || true
+            exit 1
+          fi
+
+          python3 <<'PY'
+          import json
+          payload = json.load(open('/tmp/metrics_ok.json'))
+          expected = {'total_requests', 'status_codes', 'avg_response_time_ms', 'health'}
+          assert set(payload) == expected, payload
+          assert isinstance(payload['total_requests'], int), payload
+          assert isinstance(payload['status_codes'], dict), payload
+          assert isinstance(payload['avg_response_time_ms'], (int, float)), payload
+          assert payload['health'] == 'healthy', payload
+          serialized = json.dumps(payload).lower()
+          forbidden = ['secret', 'token', 'authorization', 'bearer', 'vin', 'listing_url', 'webhook']
+          leaked = [item for item in forbidden if item in serialized]
+          assert not leaked, leaked
+          print(json.dumps({
+              'verdict': 'PASS',
+              'unauthenticated_status': '401_or_404',
+              'wrong_auth_status': '401_or_404',
+              'authenticated_status': 200,
+              'payload_keys': sorted(payload),
+          }, indent=2))
+          PY
+
+          curl -sS "$BACKEND_URL/openapi.json" > /tmp/openapi.json
+          python3 <<'PY'
+          import json
+          schema = json.load(open('/tmp/openapi.json'))
+          assert '/metrics' not in schema.get('paths', {}), 'metrics endpoint leaked into OpenAPI schema'
+          print('openapi_hidden=true')
+          PY
