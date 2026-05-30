@@ -61,7 +61,7 @@ The active frontend service/component tier has been cleaned to stop hardcoding t
 
 Current frontend behavior should not rely on:
 - dead `/api/health`
-- dead `/api/metrics`
+- dead `/api/metrics` — this does **not** refer to backend-origin operator route `GET /metrics`
 - dead `/api/ready`
 - dead `/api/live`
 - dead `/api/ingest/ingest-vehicle`
@@ -73,6 +73,7 @@ Current frontend behavior should not rely on:
 ### Verified present in production
 - `/health`
 - `/healthz`
+- `/metrics` — backend-origin only, operator-authenticated with `PIPELINE_SECRET`, excluded from OpenAPI
 - `/api/ingest/opportunities/{opportunity_id}/pass`
 - `/api/opportunities/{opportunity_id}/pass`
 
@@ -83,7 +84,7 @@ Current frontend behavior should not rely on:
 - `/api/upload/*`
 - `/api/ml/*`
 - `/api/health`
-- `/api/metrics`
+- `/api/metrics` — note: this does **not** refer to backend-origin `GET /metrics`
 - `/api/ready`
 - `/api/live`
 - `/api/ingest/ingest-vehicle`
@@ -99,7 +100,7 @@ This rollout plan intentionally rejects older assumptions such as:
 - `/api/auth`, `/api/vehicles`, `/api/upload`, or `/api/ml` being mounted production route families
 - synthetic validation/evaluation scripts as production evidence
 - local v4.7 export/harness scripts as rollout truth
-- stale `/api/health` or `/api/metrics` checks as production health authority
+- stale `/api/health` or `/api/metrics` checks as production health authority; use `/health`, `/healthz`, and authenticated backend-origin `/metrics` instead
 
 ---
 

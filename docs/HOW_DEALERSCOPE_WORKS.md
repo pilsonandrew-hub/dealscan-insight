@@ -71,9 +71,10 @@ The canonical ingest/scoring path is centered on:
 ### Explicit retained alias
 - `POST /api/opportunities/{opportunity_id}/pass`
 
-### Live health routes
+### Live health / operator observability routes
 - `GET /health`
 - `GET /healthz`
+- `GET /metrics` — backend-origin only, operator-authenticated with `PIPELINE_SECRET`, excluded from OpenAPI
 
 ### Not current mounted authority anymore
 The older mounted SQLAlchemy/auth router family was removed from the main backend entrypoint because it was absent from verified production route surface and had become false authority:
@@ -158,6 +159,7 @@ Verified live production checks established the following:
 ### Present in production
 - `/health`
 - `/healthz`
+- `/metrics` — backend-origin only, operator-authenticated with `PIPELINE_SECRET`, excluded from OpenAPI
 - `/api/ingest/opportunities/{opportunity_id}/pass`
 - `/api/opportunities/{opportunity_id}/pass`
 
@@ -168,7 +170,7 @@ Verified live production checks established the following:
 - `/api/upload/*`
 - `/api/ml/*`
 - `/api/health`
-- `/api/metrics`
+- `/api/metrics` — note: this does **not** refer to backend-origin `GET /metrics`
 - `/api/ready`
 - `/api/live`
 - `/api/ingest/ingest-vehicle`
