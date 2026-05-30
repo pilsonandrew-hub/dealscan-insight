@@ -905,11 +905,13 @@ def test_normalize_apify_vehicle_preserves_detail_enrichment_fields_for_accepted
         "vin": "3TYCZ5AN0RT123456",
         "listing_url": "https://example.com/lot/proxibid-enriched",
         "source_site": "proxibid",
+        "source_run_id": "apify-run-from-dataset-row",
+        "actor_run_id": "apify-run-from-dataset-row",
         "detail_enriched": True,
         "detail_enriched_by_detail_page": True,
     }
 
-    normalized = normalize_apify_vehicle(item, run_id="proxibid-post-patch")
+    normalized = normalize_apify_vehicle(item, run_id="webhook-fallback-run")
 
     assert normalized is not None
     assert normalized["source_site"] == "proxibid"
@@ -917,7 +919,9 @@ def test_normalize_apify_vehicle_preserves_detail_enrichment_fields_for_accepted
     assert normalized["mileage"] == 22000
     assert normalized["detail_enriched"] is True
     assert normalized["detail_enriched_by_detail_page"] is True
-    assert normalized["source_run_id"] == "proxibid-post-patch"
+    assert normalized["source_run_id"] == "apify-run-from-dataset-row"
+    assert normalized["run_id"] == "apify-run-from-dataset-row"
+    assert normalized["actor_run_id"] == "apify-run-from-dataset-row"
 
 def test_normalize_apify_vehicle_preserves_detail_condition_fields_for_scoring():
     item = {

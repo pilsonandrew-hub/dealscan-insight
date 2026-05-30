@@ -581,8 +581,13 @@ try {
                 eventType: 'ACTOR.RUN.SUCCEEDED',
                 eventData: {
                     actorId: env.actorId,
+                    actorRunId: env.actorRunId,
+                    runId: env.actorRunId,
                     defaultDatasetId: dataset.id,
                 },
+                actorRunId: env.actorRunId,
+                runId: env.actorRunId,
+                defaultDatasetId: dataset.id,
             }),
             signal: AbortSignal.timeout(10000),
         });

@@ -85,6 +85,8 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('actor_run_id: actorRunId');
     expect(source).toContain('source_run_id: actorRunId');
     expect(source).toContain('run_id: actorRunId');
+    expect(source).toContain('actorRunId: env.actorRunId');
+    expect(source).toContain('defaultDatasetId: dataset.id');
     expect(source).toContain('provenance_fields');
     expect(source).toContain('input_contract');
     expect(source).toContain('actor_timeout_secs_expected: 900');

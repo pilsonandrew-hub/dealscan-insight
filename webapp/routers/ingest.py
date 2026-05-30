@@ -1535,6 +1535,14 @@ def normalize_apify_vehicle(
             "auctionfee",
         )
 
+        item_run_id = (
+            item.get("source_run_id")
+            or item.get("run_id")
+            or item.get("actor_run_id")
+            or item.get("apify_run_id")
+            or run_id
+        )
+
         normalized = {
             "listing_id": _compute_listing_id(source, listing_url),
             "title": title,
@@ -1571,8 +1579,10 @@ def normalize_apify_vehicle(
             "risk_flags": [],
             "bid_ceiling_pct": bid_ceiling_pct_for_tier(vehicle_tier),
             "min_margin_target": min_margin_for_tier(vehicle_tier),
-            "run_id": run_id,
-            "source_run_id": run_id,
+            "run_id": item_run_id,
+            "source_run_id": item_run_id,
+            "actor_run_id": item.get("actor_run_id") or item_run_id,
+            "apify_run_id": item.get("apify_run_id") or item_run_id,
             "detail_enriched": item.get("detail_enriched"),
             "detail_enriched_by_detail_page": item.get("detail_enriched_by_detail_page"),
         }
