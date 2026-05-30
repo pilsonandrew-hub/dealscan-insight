@@ -878,6 +878,47 @@ def test_near_ceiling_bid_still_requires_ai_confidence():
     assert "dos_score" in result
 
 
+
+def test_source_quality_proof_record_is_not_normalized_as_opportunity():
+    proof = {
+        "record_type": "source_quality_proof",
+        "source_site": "proxibid",
+        "title": "PROXIBID ENRICHMENT PROOF",
+        "detail_pages_fetched": 15,
+        "detail_vins_found": 4,
+        "detail_mileages_found": 5,
+        "enriched_rows_rejected": 5,
+    }
+
+    assert normalize_apify_vehicle(proof, run_id="proof-run") is None
+
+
+def test_normalize_apify_vehicle_preserves_detail_enrichment_fields_for_accepted_rows():
+    item = {
+        "title": "2024 Toyota Tacoma SR5",
+        "year": 2024,
+        "make": "Toyota",
+        "model": "Tacoma SR5",
+        "state": "CA",
+        "current_bid": 15000,
+        "mileage": 22000,
+        "vin": "3TYCZ5AN0RT123456",
+        "listing_url": "https://example.com/lot/proxibid-enriched",
+        "source_site": "proxibid",
+        "detail_enriched": True,
+        "detail_enriched_by_detail_page": True,
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="proxibid-post-patch")
+
+    assert normalized is not None
+    assert normalized["source_site"] == "proxibid"
+    assert normalized["vin"] == "3TYCZ5AN0RT123456"
+    assert normalized["mileage"] == 22000
+    assert normalized["detail_enriched"] is True
+    assert normalized["detail_enriched_by_detail_page"] is True
+    assert normalized["source_run_id"] == "proxibid-post-patch"
+
 def test_normalize_apify_vehicle_preserves_detail_condition_fields_for_scoring():
     item = {
         "title": "2024 Ford F-150 XL",

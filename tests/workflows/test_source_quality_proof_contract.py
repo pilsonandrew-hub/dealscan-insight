@@ -10,10 +10,14 @@ def test_source_quality_proof_reports_two_truth_layers_and_verdicts():
     assert 'scraper_enrichment_attempt_quality' in text
     assert 'issue10_verdict' in text
     assert 'PASS_ORIGINAL' in text
-    assert 'PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH' in text
+    assert 'low_yield_source_truth_detected' in text
     assert 'BLOCK' in text
     assert 'passes_original_enrichment_standard' in text
     assert 'strict_filter_rejection_detected' in text
+    assert 'proof_window_start' in text
+    assert 'pricing_raw_present' in text
+    assert 'provenance_present' in text
+    assert 'sanitized_enriched_samples' in text
 
 
 def test_source_quality_proof_requires_exact_source_and_apify_proof_for_corrected_scope():
@@ -21,6 +25,9 @@ def test_source_quality_proof_requires_exact_source_and_apify_proof_for_correcte
     assert 'source_site_exact_count' in text
     assert 'source_site_exact_pct' in text
     assert 'source_exact_count == n' in text
+    assert 'source_filter_key: f"eq.{source}"' in text
+    assert 'created_at' in text and 'timedelta(days=7)' in text
+    assert 'or=(' not in text
     assert 'source_quality_proof' in text
     assert 'APIFY_TOKEN' in text
     assert 'PROXIBID_ACTOR_ID' in text
@@ -48,3 +55,27 @@ def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     assert 'mileage_over_50k' in text
     assert 'condition_reject' in text
     assert 'rejected_after_detail' in text
+
+
+def test_low_yield_source_truth_is_diagnostic_not_passing():
+    text = WORKFLOW.read_text()
+    assert 'low_yield_source_truth_detected' in text
+    assert 'PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH' not in text
+    assert 'issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else "BLOCK"' in text
+    assert 'Low-yield scraper truth is diagnostic only' in text
+
+
+def test_source_quality_proof_reports_required_live_db_fields():
+    text = WORKFLOW.read_text()
+    for required in [
+        'vin',
+        'mileage',
+        'pricing_raw',
+        'pricing_maturity',
+        'raw_data',
+        'provenance_fields',
+        'source_run_id',
+        'run_id',
+        'sanitized_enriched_samples',
+    ]:
+        assert required in text

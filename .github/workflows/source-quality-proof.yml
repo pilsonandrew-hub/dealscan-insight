@@ -33,6 +33,7 @@ jobs:
           import os
           import urllib.parse
           import urllib.request
+          from datetime import datetime, timedelta, timezone
 
           PROXIBID_ACTOR_ID = "bxhncvtHEP712WX2e"
           VIN_PASS_THRESHOLD_PCT = 5.0
@@ -78,23 +79,36 @@ jobs:
               "condition",
               "dos_score",
               "score",
+              "pricing_raw",
+              "pricing_source",
+              "raw_data",
+              "provenance_fields",
+              "source_run_id",
+              "run_id",
+              "listing_url",
+              "detail_enriched",
           ]
           selected_columns = [col for col in wanted if col in available_columns]
           select = ",".join(selected_columns or ["id"])
-          source_filters = []
           if "source_site" in available_columns:
-              source_filters.append(f"source_site.eq.{source}")
-          if "source" in available_columns:
-              source_filters.append(f"source.eq.{source}")
-          if not source_filters:
+              source_filter_key = "source_site"
+          elif "source" in available_columns:
+              source_filter_key = "source"
+          else:
               raise SystemExit("opportunities has neither source nor source_site column")
+
           order_column = "created_at" if "created_at" in available_columns else selected_columns[0]
-          query = urllib.parse.urlencode({
+          query_args = {
               "select": select,
-              "or": f"({','.join(source_filters)})",
+              source_filter_key: f"eq.{source}",
               "order": f"{order_column}.desc",
               "limit": str(limit),
-          })
+          }
+          proof_window_start = None
+          if "created_at" in available_columns:
+              proof_window_start = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace("+00:00", "Z")
+              query_args["created_at"] = f"gte.{proof_window_start}"
+          query = urllib.parse.urlencode(query_args)
           rows = rest_get(f"/rest/v1/opportunities?{query}")
 
           def has_mileage(row):
@@ -126,7 +140,43 @@ jobs:
               return dict(sorted(out.items()))
 
           def canonical_source_ok(row):
-              return str(row.get("source_site") or row.get("source") or "").strip().lower() == source
+              return str(row.get(source_filter_key) or "").strip().lower() == source
+
+          def field_present(row, *names):
+              for name in names:
+                  value = row.get(name)
+                  if value not in (None, "", {}, []):
+                      return True
+              return False
+
+          def pricing_raw_present(row):
+              raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
+              return field_present(row, "pricing_raw", "pricing_source", "pricing_maturity") or any(
+                  raw.get(key) not in (None, "", {}, [])
+                  for key in ("pricing_raw", "pricing_source", "market_comp", "estimated_sale_price")
+              )
+
+          def provenance_present(row):
+              raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
+              return field_present(row, "provenance_fields", "source_run_id", "run_id", "detail_enriched") or any(
+                  raw.get(key) not in (None, "", {}, [])
+                  for key in ("provenance_fields", "source_run_id", "run_id", "detail_enriched", "scraped_at", "listing_url")
+              )
+
+          def sanitize_sample(row):
+              raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
+              return {
+                  "id": str(row.get("id") or "")[:8],
+                  "created_at": row.get("created_at"),
+                  "source_site": row.get("source_site"),
+                  "vin_present": has_vin(row),
+                  "mileage_present": has_mileage(row),
+                  "pricing_maturity": row.get("pricing_maturity"),
+                  "pricing_raw_present": pricing_raw_present(row),
+                  "provenance_present": provenance_present(row),
+                  "detail_enriched": bool(row.get("detail_enriched") or raw.get("detail_enriched")),
+                  "listing_url_present": bool(row.get("listing_url") or raw.get("listing_url")),
+              }
 
           n = len(rows)
           mileage_count = sum(has_mileage(row) for row in rows)
@@ -134,8 +184,13 @@ jobs:
           condition_count = sum(has_condition(row) for row in rows)
           confidence_count = sum(has_confidence(row) for row in rows)
           source_exact_count = sum(canonical_source_ok(row) for row in rows)
+          pricing_raw_count = sum(pricing_raw_present(row) for row in rows)
+          provenance_count = sum(provenance_present(row) for row in rows)
+          enriched_samples = [sanitize_sample(row) for row in rows if has_vin(row) or has_mileage(row) or provenance_present(row)][:5]
           accepted_quality = {
               "sample_count": n,
+              "proof_window_start": proof_window_start,
+              "source_filter_column": source_filter_key,
               "source_site_exact_count": source_exact_count,
               "source_site_exact_pct": pct(source_exact_count, n),
               "mileage_present": mileage_count,
@@ -146,9 +201,14 @@ jobs:
               "verified_condition_present_pct": pct(condition_count, n),
               "confidence_present": confidence_count,
               "confidence_present_pct": pct(confidence_count, n),
+              "pricing_raw_present": pricing_raw_count,
+              "pricing_raw_present_pct": pct(pricing_raw_count, n),
+              "provenance_present": provenance_count,
+              "provenance_present_pct": pct(provenance_count, n),
               "pricing_maturity_counts": count_by("pricing_maturity"),
               "latest_created_at": rows[0].get("created_at") if rows else None,
               "oldest_created_at_in_sample": rows[-1].get("created_at") if rows else None,
+              "sanitized_enriched_samples": enriched_samples,
               "passes_original_enrichment_standard": bool(
                   n > 0
                   and source_exact_count == n
@@ -204,28 +264,22 @@ jobs:
                   "strict_filter_rejection_detected": False,
               }
 
-          corrected_scope_pass = bool(
+          low_yield_source_truth_detected = bool(
               scraper_enrichment.get("available")
               and scraper_enrichment.get("extraction_detected")
-              and (
-                  accepted_quality["passes_original_enrichment_standard"]
-                  or scraper_enrichment.get("strict_filter_rejection_detected")
-              )
+              and scraper_enrichment.get("strict_filter_rejection_detected")
           )
 
-          issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else (
-              "PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH" if corrected_scope_pass else "BLOCK"
-          )
+          issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else "BLOCK"
           summary = {
               "source": source,
               "issue10_verdict": issue10_verdict,
               "issue10_scope_note": (
                   "Original accepted-opportunity enrichment standard passed."
                   if issue10_verdict == "PASS_ORIGINAL"
-                  else "Corrected low-yield source truth passed: scraper enrichment is observable and strict filters explain rejected enriched rows."
-                  if issue10_verdict == "PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH"
-                  else "Issue #10 remains blocked: accepted opportunities lack enrichment and scraper proof is unavailable or insufficient."
+                  else "Issue #10 remains blocked under original accepted-opportunity enrichment proof. Low-yield scraper truth is diagnostic only unless Andrew explicitly re-scopes."
               ),
+              "low_yield_source_truth_detected": low_yield_source_truth_detected,
               "accepted_opportunity_quality": accepted_quality,
               "scraper_enrichment_attempt_quality": scraper_enrichment,
           }

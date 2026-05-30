@@ -1413,6 +1413,10 @@ def normalize_apify_vehicle(
     - parseforge/govdeals-scraper: camelCase (currentBid, url, locationState, etc.)
     """
     try:
+        if item.get("record_type") == "source_quality_proof":
+            logger.info("[INGEST] Skipping source quality proof record from opportunity normalization")
+            return None
+
         title = item.get("title", "")
 
         # State: parseforge uses locationState, ours uses state
@@ -1569,6 +1573,8 @@ def normalize_apify_vehicle(
             "min_margin_target": min_margin_for_tier(vehicle_tier),
             "run_id": run_id,
             "source_run_id": run_id,
+            "detail_enriched": item.get("detail_enriched"),
+            "detail_enriched_by_detail_page": item.get("detail_enriched_by_detail_page"),
         }
         normalized["canonical_id"] = compute_canonical_id(normalized)
         normalized["all_sources"] = [source] if source else []
