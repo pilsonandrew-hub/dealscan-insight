@@ -23,6 +23,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           SOURCE_NAME: ${{ inputs.source }}
           SAMPLE_LIMIT: ${{ inputs.limit }}
         run: |
@@ -33,6 +34,8 @@ jobs:
           import urllib.parse
           import urllib.request
 
+          PROXIBID_ACTOR_ID = "bxhncvtHEP712WX2e"
+
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           source = (os.environ.get("SOURCE_NAME") or "proxibid").strip().lower()
@@ -41,13 +44,22 @@ jobs:
           except ValueError:
               limit = 300
 
+          def json_get(url, headers=None):
+              req = urllib.request.Request(url, headers=headers or {})
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read().decode())
+
           def rest_get(path):
-              req = urllib.request.Request(
+              return json_get(
                   f"{supabase_url}{path}",
                   headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
               )
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  return json.loads(resp.read().decode())
+
+          def apify_get(path, token):
+              return json_get(
+                  f"https://api.apify.com/v2{path}",
+                  headers={"Authorization": f"Bearer {token}"},
+              )
 
           columns_rows = rest_get(
               "/rest/v1/rpc/get_table_columns"
@@ -115,6 +127,7 @@ jobs:
           n = len(rows)
           summary = {
               "source": source,
+              "accepted_opportunity_quality": True,
               "sample_count": n,
               "mileage_present": sum(has_mileage(row) for row in rows),
               "vin_present": sum(has_vin(row) for row in rows),
@@ -126,6 +139,33 @@ jobs:
           }
           for key in ["mileage_present", "vin_present", "verified_condition_present", "confidence_present"]:
               summary[key + "_pct"] = round((summary[key] / n) * 100, 1) if n else None
+
+          scraper_enrichment = None
+          apify_token = os.environ.get("APIFY_TOKEN")
+          if source == "proxibid" and apify_token:
+              runs = apify_get(
+                  f"/acts/{PROXIBID_ACTOR_ID}/runs?limit=5&status=SUCCEEDED&desc=true",
+                  apify_token,
+              ).get("data", {}).get("items", [])
+              for run in runs:
+                  dataset_id = run.get("defaultDatasetId")
+                  if not dataset_id:
+                      continue
+                  items = apify_get(
+                      f"/datasets/{dataset_id}/items?clean=true&limit=1000",
+                      apify_token,
+                  )
+                  proof_rows = [item for item in items if item.get("record_type") == "source_quality_proof" and item.get("source_site") == source]
+                  if proof_rows:
+                      scraper_enrichment = proof_rows[-1]
+                      scraper_enrichment["actor_run_id"] = run.get("id")
+                      scraper_enrichment["dataset_id"] = dataset_id
+                      scraper_enrichment["finished_at"] = run.get("finishedAt")
+                      break
+          summary["scraper_enrichment_attempt_quality"] = scraper_enrichment or {
+              "available": False,
+              "reason": "no_recent_source_quality_proof_record",
+          }
 
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY

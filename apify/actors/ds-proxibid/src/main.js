@@ -109,6 +109,22 @@ let totalPassed = 0;
 const seenLotIds = new Set();
 const sampleLocations = [];
 const passingLots = [];
+const enrichmentProof = {
+    record_type: 'source_quality_proof',
+    source_site: SOURCE,
+    generated_at: null,
+    actor: 'ds-proxibid',
+    detail_pages_attempted: 0,
+    detail_pages_fetched: 0,
+    detail_pages_failed: 0,
+    detail_vins_found: 0,
+    detail_mileages_found: 0,
+    enriched_rows_accepted: 0,
+    enriched_rows_rejected: 0,
+    rejection_reasons: {},
+    accepted_enriched_samples: [],
+    rejected_enriched_samples: [],
+};
 
 function normalize(text) {
     return String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -144,18 +160,32 @@ function parseBid(text) {
 
 function parseMileage(text) {
     const normalized = normalize(text).replace(/,/g, '');
-    const direct = normalized.match(/\b(?:mileage|odometer(?:\s+shows)?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i)
-        ?? normalized.match(/\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)/i);
-    if (!direct) return null;
-    const value = parseFloat(direct[1]);
-    if (Number.isNaN(value) || value <= 0) return null;
-    const mileage = direct[2] ? Math.round(value * 1000) : Math.round(value);
-    return mileage > 0 && mileage <= 1000000 ? mileage : null;
+    const patterns = [
+        /\b(?:mileage|odometer(?:\s+shows)?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i,
+        /\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)(?:\s+on\s+(?:meter|odometer))?/i,
+    ];
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        if (!match) continue;
+        const value = parseFloat(match[1]);
+        if (Number.isNaN(value) || value <= 0) continue;
+        const mileage = match[2] ? Math.round(value * 1000) : Math.round(value);
+        if (mileage > 0 && mileage <= 1000000) return mileage;
+    }
+    return null;
 }
 
 function parseVin(text) {
-    const m = normalize(text).match(/\b#?([A-HJ-NPR-Z0-9]{17})\b/i);
-    return m ? m[1].toUpperCase() : null;
+    const normalized = normalize(text);
+    const patterns = [
+        /\b(?:VIN|Vehicle\s+Identification\s+Number|SN|Serial\s*(?:No\.?|Number)?)[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i,
+        /\b#?([A-HJ-NPR-Z0-9]{17})\b/i,
+    ];
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        if (match) return match[1].toUpperCase();
+    }
+    return null;
 }
 
 function hasConditionReject(text) {
@@ -319,19 +349,59 @@ const crawler = new PlaywrightCrawler({
     },
 });
 
+function decodeHtmlEntities(text) {
+    return String(text ?? '')
+        .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>');
+}
+
+function extractAttributes(tag) {
+    const attributes = {};
+    const attrPattern = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(["'])([\s\S]*?)\2/g;
+    let match;
+    while ((match = attrPattern.exec(String(tag ?? ''))) !== null) {
+        attributes[match[1].toLowerCase()] = decodeHtmlEntities(match[3]);
+    }
+    return attributes;
+}
+
+function extractMetaDescriptions(html) {
+    const descriptions = [];
+    const metaPattern = /<meta\b[^>]*>/gi;
+    let match;
+    while ((match = metaPattern.exec(String(html ?? ''))) !== null) {
+        const attrs = extractAttributes(match[0]);
+        const label = String(attrs.name ?? attrs.property ?? '').toLowerCase();
+        if ((label === 'description' || label === 'og:description') && attrs.content) {
+            descriptions.push(attrs.content);
+        }
+    }
+    return descriptions.join(' ');
+}
+
+
 function stripHtmlToText(html) {
-    return normalize(String(html ?? '')
+    return normalize(decodeHtmlEntities(String(html ?? '')
         .replace(/<script[\s\S]*?<\/script>/gi, ' ')
         .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&amp;/gi, '&'));
+        .replace(/<[^>]+>/g, ' ')));
+}
+
+function detailTextFromHtml(html) {
+    return normalize(`${extractMetaDescriptions(html)} ${stripHtmlToText(html)}`);
 }
 
 async function enrichFromDetailPages(log) {
     const lotsNeedingDetail = passingLots.filter(lot => lot.listing_url && (!lot.vin || !lot.mileage));
     const detailLimit = Number(maxDetailPages) || 50;
     const toScrape = lotsNeedingDetail.slice(0, detailLimit);
+    enrichmentProof.detail_pages_attempted = toScrape.length;
     if (toScrape.length === 0) {
         log.info('[DETAIL ENRICH] All Proxibid lots already have VIN/mileage or no detail URLs — skipping');
         return;
@@ -351,19 +421,21 @@ async function enrichFromDetailPages(log) {
                 },
             });
             if (!response.ok) {
+                enrichmentProof.detail_pages_failed++;
                 log.warning(`[DETAIL ENRICH] HTTP ${response.status} for ${lot.listing_url}`);
                 continue;
             }
-            const bodyText = stripHtmlToText(await response.text());
+            enrichmentProof.detail_pages_fetched++;
+            const bodyText = detailTextFromHtml(await response.text());
             lot.detail_text = bodyText;
 
+            let enrichedByDetail = false;
             if (!lot.vin) {
-                const vinMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
-                    ?? bodyText.match(/\bVehicle Identification Number[:\s]*([A-HJ-NPR-Z0-9]{17})\b/i)
-                    ?? bodyText.match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
-                if (vinMatch) {
-                    lot.vin = vinMatch[1].toUpperCase();
+                const vin = parseVin(bodyText);
+                if (vin) {
+                    lot.vin = vin;
                     vinFound++;
+                    enrichedByDetail = true;
                     log.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
                 }
             }
@@ -373,9 +445,12 @@ async function enrichFromDetailPages(log) {
                 if (mileage) {
                     lot.mileage = mileage;
                     mileageFound++;
+                    enrichedByDetail = true;
                     log.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
                 }
             }
+            lot.detail_enriched = Boolean(lot.vin || lot.mileage);
+            lot.detail_enriched_by_detail_page = enrichedByDetail;
 
             const rejectReasons = applyBuyerGradeFilters(lot);
             if (rejectReasons.length > 0) {
@@ -387,17 +462,50 @@ async function enrichFromDetailPages(log) {
 
             await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (err) {
+            enrichmentProof.detail_pages_failed++;
             log.warning(`[DETAIL ENRICH] Failed for ${lot.listing_url}: ${err.message}`);
         }
     }
 
-    log.info(`[DETAIL ENRICH] Complete: fetched ${toScrape.length}, found ${vinFound} VINs and ${mileageFound} mileages, rejected ${rejectedAfterDetail}`);
+    enrichmentProof.detail_vins_found = vinFound;
+    enrichmentProof.detail_mileages_found = mileageFound;
+    log.info(`[DETAIL ENRICH] Complete: fetched ${enrichmentProof.detail_pages_fetched}, found ${vinFound} VINs and ${mileageFound} mileages, rejected ${rejectedAfterDetail}`);
+}
+
+function proofSample(lot) {
+    return {
+        lot_id: parseLotId(lot.listing_url ?? ''),
+        title: lot.title,
+        state: lot.state,
+        mileage_present: Boolean(lot.mileage),
+        vin_present: Boolean(lot.vin),
+        mileage: lot.mileage ?? null,
+        vin: lot.vin ?? null,
+        reject_reasons: lot.reject_reasons ?? [],
+        source_site: lot.source_site,
+    };
+}
+
+function finalizeEnrichmentProof(lotsToPush) {
+    enrichmentProof.generated_at = new Date().toISOString();
+    enrichmentProof.enriched_rows_accepted = lotsToPush.filter(lot => lot.detail_enriched).length;
+    const rejected = passingLots.filter(lot => lot.rejected_after_detail);
+    enrichmentProof.enriched_rows_rejected = rejected.length;
+    enrichmentProof.rejection_reasons = {};
+    for (const lot of rejected) {
+        for (const reason of lot.reject_reasons ?? []) {
+            enrichmentProof.rejection_reasons[reason] = (enrichmentProof.rejection_reasons[reason] ?? 0) + 1;
+        }
+    }
+    enrichmentProof.accepted_enriched_samples = lotsToPush.filter(lot => lot.detail_enriched).slice(0, 5).map(proofSample);
+    enrichmentProof.rejected_enriched_samples = rejected.slice(0, 5).map(proofSample);
+    return enrichmentProof;
 }
 
 function publishableLots() {
     return passingLots
         .filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)
-        .map(({ detail_text, rejected_after_detail, reject_reasons, ...lot }) => lot);
+        .map(({ detail_text, rejected_after_detail, reject_reasons, detail_enriched_by_detail_page, ...lot }) => lot);
 }
 
 try {
@@ -407,6 +515,9 @@ try {
     for (const lot of lotsToPush) {
         await Actor.pushData(lot);
     }
+    const proof = finalizeEnrichmentProof(lotsToPush);
+    await Actor.pushData(proof);
+    console.log('[PROXIBID ENRICHMENT PROOF]', JSON.stringify(proof));
     console.log('[Proxibid] Sample locations:', sampleLocations);
     console.log(`[PROXIBID COMPLETE] Found: ${totalFound} | Passed list filters: ${totalPassed} | Pushed: ${lotsToPush.length}`);
 } catch (err) {
