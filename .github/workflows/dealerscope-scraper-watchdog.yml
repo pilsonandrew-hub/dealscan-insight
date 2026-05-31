@@ -2,7 +2,7 @@ name: DealerScope Watchdog Hunter
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # lightweight 24/7 Watchdog Hunter between 12hr heavy sweeps
+    - cron: '0 */10 * * *'   # Watchdog Hunter every 10 hours to reduce alert/action noise
   workflow_dispatch:
 
 permissions:
