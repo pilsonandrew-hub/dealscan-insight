@@ -496,7 +496,11 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
             await page.waitForTimeout(2000);
 
             const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
-            lot.detail_diagnostics = extractDetailDiagnostics(bodyText);
+            const pageTitle = await page.title().catch(() => '');
+            lot.detail_diagnostics = extractDetailDiagnostics(bodyText, {
+                pageTitle,
+                currentUrl: page.url(),
+            });
 
             // Look for explicit VIN label first
             const vinLabelMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
@@ -529,7 +533,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
-function extractDetailDiagnostics(bodyText) {
+function extractDetailDiagnostics(bodyText, metadata = {}) {
     const text = String(bodyText || '').replace(/\s+/g, ' ').trim();
     const fieldPattern = /\b(?:VIN|Vehicle Identification Number|Mileage|Odometer|Miles|Meter|Serial)\b/ig;
     const field_snippets = [];
@@ -541,7 +545,14 @@ function extractDetailDiagnostics(bodyText) {
         if (snippet && !field_snippets.includes(snippet)) field_snippets.push(snippet);
     }
 
+    const noFieldTextSample = field_snippets.length === 0
+        ? text.slice(0, 350)
+        : '';
+
     return {
+        body_text_length: text.length,
+        page_title: String(metadata.pageTitle || '').slice(0, 160),
+        current_url: String(metadata.currentUrl || '').slice(0, 240),
         vin_candidates: [...new Set(text.match(VIN_PATTERN) || [])].slice(0, 5),
         mileage_candidates: [...new Set([
             ...(text.match(/\bMileage[:\s#\-]*[\d,]+/ig) || []),
@@ -549,6 +560,7 @@ function extractDetailDiagnostics(bodyText) {
             ...(text.match(/\b[\d,]{2,6}\s*(?:miles?|mi\b)/ig) || []),
         ])].slice(0, 8),
         field_snippets,
+        no_field_text_sample: noFieldTextSample,
     };
 }
 

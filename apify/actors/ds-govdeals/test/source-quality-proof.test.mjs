@@ -85,12 +85,16 @@ describe('ds-govdeals source quality proof contract', () => {
   });
 
   test('adds sanitized detail diagnostics to attempted exclusion samples', () => {
-    expect(source).toContain('function extractDetailDiagnostics(bodyText)');
-    expect(source).toContain('lot.detail_diagnostics = extractDetailDiagnostics(bodyText);');
+    expect(source).toContain('function extractDetailDiagnostics(bodyText, metadata = {})');
+    expect(source).toContain('lot.detail_diagnostics = extractDetailDiagnostics(bodyText, {');
     expect(source).toContain('detail_diagnostics: lot.detail_diagnostics || null');
     expect(source).toContain('vin_candidates');
     expect(source).toContain('mileage_candidates');
     expect(source).toContain('field_snippets');
+    expect(source).toContain('body_text_length');
+    expect(source).toContain('page_title');
+    expect(source).toContain('current_url');
+    expect(source).toContain('no_field_text_sample');
   });
 
   test('extracts mileage from normalized GovDeals odometer detail text', () => {
