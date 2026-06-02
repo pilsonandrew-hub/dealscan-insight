@@ -118,4 +118,12 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('detailDiagnostics.mileage_candidates');
     expect(source).toContain('detailDiagnostics.field_snippets');
   });
+
+  test('preserves condition source text on pushed GovDeals opportunity rows', () => {
+    expect(source).toContain('function buildDescriptionFromLot(lot)');
+    expect(source).toContain('description:   buildDescriptionFromLot(lot)');
+    expect(source).toContain('const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage || !l.description));');
+    expect(source).toContain('lot.detail_text = extractDetailText(bodyText);');
+    expect(source).toContain('if (lot.detail_text && !lot.description) lot.description = lot.detail_text;');
+  });
 });

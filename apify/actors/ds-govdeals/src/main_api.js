@@ -410,9 +410,23 @@ function normalizeLot(lot) {
         photo_url:     lot.imageUrl || (lot.photo ? `https://webassets.lqdt1.com/assets/photos/${lot.photo}` : ''),
         vin:           extractVinFromLot(lot),
         mileage:       lot.meterCount || null,
+        description:   buildDescriptionFromLot(lot),
         source_site:   'govdeals',
         scraped_at:    new Date().toISOString(),
     };
+}
+
+function buildDescriptionFromLot(lot) {
+    return normalizeDetailText([
+        lot.longDescription,
+        lot.itemDescription,
+        lot.description,
+        lot.notes,
+        lot.assetLongDescription,
+        lot.itemNotes,
+        lot.assetShortDescription,
+        lot.title,
+    ].filter(Boolean).join(' '));
 }
 
 function ensureBroadVehiclePayload(payload) {
@@ -473,7 +487,7 @@ function isBroadVehiclePayload(candidate, reference = null) {
  * Caps at MAX_DETAIL_PAGES to keep scheduled runs bounded and rate-limited.
  */
 async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
-    const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage));
+    const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage || !l.description));
     const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
 
     if (toScrape.length === 0) {
@@ -503,6 +517,8 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
                 pageTitle,
                 currentUrl: page.url(),
             });
+            lot.detail_text = extractDetailText(bodyText);
+            if (lot.detail_text && !lot.description) lot.description = lot.detail_text;
 
             // Look for explicit VIN label first
             const vinLabelMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
@@ -535,8 +551,16 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     log.info(`[DETAIL ENRICH] Complete: attempted ${detailAttempts} of ${toScrape.length} planned pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
+function normalizeDetailText(value, maxLength = 4000) {
+    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function extractDetailText(bodyText) {
+    return normalizeDetailText(bodyText);
+}
+
 function extractDetailDiagnostics(bodyText, metadata = {}) {
-    const text = String(bodyText || '').replace(/\s+/g, ' ').trim();
+    const text = normalizeDetailText(bodyText);
     const fieldPattern = /\b(?:VIN|Vehicle Identification Number|Mileage|Odometer|Miles|Meter|Serial)\b/ig;
     const field_snippets = [];
     let match;
