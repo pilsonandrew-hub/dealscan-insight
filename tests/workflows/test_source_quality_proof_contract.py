@@ -111,3 +111,13 @@ def test_source_quality_proof_reports_actor_output_boundary_separately_from_acce
     assert 'actor_output_live_confirmed_no_accepted_rows' in text
     assert 'dirty_actor_output' in text
     assert 'accepted_opportunity_quality' in text
+
+
+def test_source_quality_proof_retries_transient_api_timeouts():
+    text = WORKFLOW.read_text()
+    assert 'import time' in text
+    assert 'import urllib.error' in text
+    assert 'def json_get(url, headers=None, attempts=3):' in text
+    assert 'except (TimeoutError, urllib.error.URLError)' in text
+    assert 'if attempt == attempts - 1' in text
+    assert 'time.sleep' in text
