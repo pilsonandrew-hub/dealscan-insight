@@ -280,6 +280,20 @@ def _condition_blocker_basis_counts(rows: list[dict[str, Any]]) -> dict[str, int
     return dict(counter.most_common(20))
 
 
+def _condition_blocker_basis_by_source(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    by_source: dict[str, Counter[str]] = {}
+    for row in rows:
+        basis = _condition_blocker_basis(row)
+        if not basis:
+            continue
+        source = str(row.get("source_site") or row.get("source") or "unknown").strip().lower() or "unknown"
+        by_source.setdefault(source, Counter())[basis] += 1
+    return {
+        source: dict(counter.most_common(20))
+        for source, counter in sorted(by_source.items())
+    }
+
+
 def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
@@ -337,6 +351,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "source_counts_sample": _status_counts(active_dos80, "source_site"),
             "active_dos80_condition_counts_sample": _status_counts(active_dos80, "condition_grade"),
             "active_dos80_condition_blocker_basis_counts_sample": _condition_blocker_basis_counts(active_dos80),
+            "active_dos80_condition_blocker_basis_by_source_sample": _condition_blocker_basis_by_source(active_dos80),
             "active_dos80_pricing_maturity_counts_sample": _status_counts(active_dos80, "pricing_maturity"),
             "active_dos80_alert_eligible_sample": sum(1 for row in active_dos80_gate_breakdown if row.get("eligible") is True),
             "active_dos80_gate_blocker_counts_sample": _gate_blocker_counts(active_dos80_gate_breakdown),

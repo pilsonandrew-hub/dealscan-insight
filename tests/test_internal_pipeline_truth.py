@@ -169,6 +169,11 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     assert result["opportunities"]["active_dos80_condition_blocker_basis_counts_sample"] == {
         "age_mileage_heuristic": 1,
     }
+    assert result["opportunities"]["active_dos80_condition_blocker_basis_by_source_sample"] == {
+        "govdeals": {
+            "age_mileage_heuristic": 1,
+        },
+    }
     assert result["opportunities"]["active_dos80_pricing_maturity_counts_sample"] == {
         "proxy": 1,
         "market_comp": 1,
@@ -249,6 +254,14 @@ def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(m
     assert result["opportunities"]["active_dos80_condition_blocker_basis_counts_sample"] == {
         "explicit_negative_condition_signal": 1,
         "age_mileage_heuristic": 1,
+    }
+    assert result["opportunities"]["active_dos80_condition_blocker_basis_by_source_sample"] == {
+        "gsaauctions": {
+            "explicit_negative_condition_signal": 1,
+        },
+        "jjkane": {
+            "age_mileage_heuristic": 1,
+        },
     }
     breakdown_by_id = {
         item["id"]: item
