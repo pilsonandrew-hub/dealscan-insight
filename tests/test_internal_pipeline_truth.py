@@ -232,6 +232,11 @@ def test_opportunity_condition_proof_uses_detail_text_for_exact_row(monkeypatch)
                     "description": "2020 Dodge Durango SRT",
                     "detail_text": "Starts and runs. Exterior has minor scratches. Interior is clean.",
                     "source_run_id": "run-123",
+                    "run_id": "run-123",
+                    "actor_run_id": "run-123",
+                    "listing_url": "https://www.govdeals.com/asset/197/5804?utm=test",
+                    "listing_id": "govdeals:197/5804",
+                    "vin": "1C4SDJGJ0LC123456",
                 },
             },
         ],
@@ -254,7 +259,70 @@ def test_opportunity_condition_proof_uses_detail_text_for_exact_row(monkeypatch)
         "detail_text": {"present": True, "length": len("Starts and runs. Exterior has minor scratches. Interior is clean."), "matches_title": False},
         "assetLongDesc": {"present": False, "length": 0, "matches_title": False},
     }
-    assert result["opportunity"]["raw_data_keys_present"] == ["description", "detail_text", "source_run_id"]
+    assert result["opportunity"]["raw_data_keys_present"] == [
+        "actor_run_id",
+        "description",
+        "detail_text",
+        "listing_id",
+        "listing_url",
+        "run_id",
+        "source_run_id",
+        "vin",
+    ]
+    assert result["opportunity"]["source_identity"] == {
+        "listing_id": "govdeals:197/5804",
+        "listing_url": "https://www.govdeals.com/asset/197/5804",
+        "source_run_id": "run-123",
+        "run_id": "run-123",
+        "actor_run_id": "run-123",
+        "apify_run_id": None,
+        "vin_present": True,
+        "vin_suffix": "123456",
+    }
+    assert result["opportunity"]["condition_backfill_assessment"] == {
+        "stored_source_condition_evidence": True,
+        "status": "source_condition_evidence_present",
+        "reason": "stored row already has non-title condition evidence",
+    }
+
+
+def test_opportunity_condition_proof_blocks_backfill_when_stored_evidence_missing(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "durango-row",
+                "is_active": True,
+                "dos_score": 91,
+                "mileage": 13983,
+                "year": 2020,
+                "title": "2020 Dodge Durango SRT",
+                "condition_grade": "Poor",
+                "source_site": "govdeals",
+                "raw_data": {
+                    "description": "2020 Dodge Durango SRT",
+                    "listing_url": "https://www.govdeals.com/asset/197/5804?utm=test",
+                    "source_run_id": "old-run",
+                },
+            },
+        ],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_opportunity_condition_proof("durango-row")
+
+    assert result["opportunity"]["source_identity"]["listing_url"] == "https://www.govdeals.com/asset/197/5804"
+    assert result["opportunity"]["condition_evidence_fields"]["description"] == {
+        "present": True,
+        "length": len("2020 Dodge Durango SRT"),
+        "matches_title": True,
+    }
+    assert result["opportunity"]["condition_evidence_fields"]["detail_text"]["present"] is False
+    assert result["opportunity"]["condition_backfill_assessment"] == {
+        "stored_source_condition_evidence": False,
+        "status": "blocked_missing_source_condition_evidence",
+        "reason": "stored row has no non-title condition evidence to justify backfill",
+    }
 
 
 def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(monkeypatch):

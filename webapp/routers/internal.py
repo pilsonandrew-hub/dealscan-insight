@@ -6,6 +6,7 @@ import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, Header, HTTPException, Path
 
@@ -393,6 +394,52 @@ def _raw_data_keys_present(row: dict[str, Any]) -> list[str]:
     )
 
 
+def _public_url_without_query(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parts = urlsplit(text)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _source_identity(row: dict[str, Any]) -> dict[str, Any]:
+    vin = str(_pick_row_or_raw(row, "vin") or "").strip()
+    return {
+        "listing_id": _pick_row_or_raw(row, "listing_id"),
+        "listing_url": _public_url_without_query(_pick_row_or_raw(row, "listing_url", "url")),
+        "source_run_id": _pick_row_or_raw(row, "source_run_id"),
+        "run_id": _pick_row_or_raw(row, "run_id"),
+        "actor_run_id": _pick_row_or_raw(row, "actor_run_id"),
+        "apify_run_id": _pick_row_or_raw(row, "apify_run_id"),
+        "vin_present": bool(vin),
+        "vin_suffix": vin[-6:] if len(vin) >= 6 else (vin or None),
+    }
+
+
+def _stored_source_condition_evidence(row: dict[str, Any]) -> bool:
+    for evidence in _condition_evidence_fields(row).values():
+        if evidence.get("present") and not evidence.get("matches_title"):
+            return True
+    return False
+
+
+def _condition_backfill_assessment(row: dict[str, Any]) -> dict[str, Any]:
+    has_evidence = _stored_source_condition_evidence(row)
+    if has_evidence:
+        return {
+            "stored_source_condition_evidence": True,
+            "status": "source_condition_evidence_present",
+            "reason": "stored row already has non-title condition evidence",
+        }
+    return {
+        "stored_source_condition_evidence": False,
+        "status": "blocked_missing_source_condition_evidence",
+        "reason": "stored row has no non-title condition evidence to justify backfill",
+    }
+
+
 def _opportunity_condition_proof_row(row: dict[str, Any]) -> dict[str, Any]:
     sample = _condition_blocker_basis_sample(row) or {}
     return {
@@ -406,6 +453,8 @@ def _opportunity_condition_proof_row(row: dict[str, Any]) -> dict[str, Any]:
         "condition_signals": sample.get("condition_signals") or [],
         "source_text_excerpt": sample.get("source_text_excerpt") or "",
         "condition_evidence_fields": _condition_evidence_fields(row),
+        "condition_backfill_assessment": _condition_backfill_assessment(row),
+        "source_identity": _source_identity(row),
         "raw_data_keys_present": _raw_data_keys_present(row),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),

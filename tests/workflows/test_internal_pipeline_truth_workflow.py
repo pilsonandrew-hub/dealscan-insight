@@ -18,3 +18,5 @@ def test_internal_pipeline_truth_workflow_prints_gate_aggregates():
     assert "active_dos80_pricing_maturity_counts_sample" in text
     assert "/api/internal/opportunity-condition-proof/" in text
     assert "condition_evidence_fields" in text
+    assert "source_identity" in text
+    assert "condition_backfill_assessment" in text

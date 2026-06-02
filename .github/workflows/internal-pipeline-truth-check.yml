@@ -125,6 +125,8 @@ jobs:
                       "condition_signals": opportunity.get("condition_signals"),
                       "source_text_excerpt": opportunity.get("source_text_excerpt"),
                       "condition_evidence_fields": opportunity.get("condition_evidence_fields"),
+                      "condition_backfill_assessment": opportunity.get("condition_backfill_assessment"),
+                      "source_identity": opportunity.get("source_identity"),
                       "raw_data_keys_present": opportunity.get("raw_data_keys_present"),
                       "created_at": opportunity.get("created_at"),
                       "updated_at": opportunity.get("updated_at"),
