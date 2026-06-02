@@ -77,6 +77,7 @@ const CONDITION_REJECT_PATTERNS = [
 ];
 const NON_DEALER_TARGET_PATTERNS = [
     /\btravel\s+trailer\b/i,
+    /\btrail\s+runner\b/i,
     /\btrailer\b/i,
     /\brv\b/i,
     /\bcamper\b/i,
