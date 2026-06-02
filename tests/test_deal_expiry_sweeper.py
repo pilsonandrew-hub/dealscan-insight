@@ -39,6 +39,18 @@ class _Query:
         self.filters.append(("eq", column, value))
         return self
 
+    def gte(self, column, value):
+        self.filters.append(("gte", column, value))
+        return self
+
+    def lte(self, column, value):
+        self.filters.append(("lte", column, value))
+        return self
+
+    def is_(self, column, value):
+        self.filters.append(("is", column, value))
+        return self
+
     def update(self, payload):
         self.mode = "update"
         self.payload = payload
@@ -96,4 +108,36 @@ def test_sweeper_archives_stale_saved_inactive_deals():
         "payload": {"pipeline_step": "archived"},
         "ids": ["saved-inactive-1", "saved-inactive-2"],
         "filters": [("in", "id", ("saved-inactive-1", "saved-inactive-2"))],
+    } in client.updates
+
+
+def test_sweeper_archives_active_high_dos_rows_with_missing_or_invalid_mileage():
+    now = datetime(2026, 6, 2, 1, 11, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", 80),
+                ("is", "mileage", "null"),
+            ): [{"id": "missing-mileage-1"}, {"id": "missing-mileage-2"}],
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", 80),
+                ("lte", "mileage", 0),
+            ): [{"id": "zero-mileage-1"}],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["archived_untrusted_active_high_dos_missing_mileage"] == 3
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "archived_quality_missing_mileage",
+        },
+        "ids": ["missing-mileage-1", "missing-mileage-2", "zero-mileage-1"],
+        "filters": [("in", "id", ("missing-mileage-1", "missing-mileage-2", "zero-mileage-1"))],
     } in client.updates

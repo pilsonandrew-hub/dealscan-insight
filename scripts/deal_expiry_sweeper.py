@@ -40,6 +40,17 @@ def _chunked(values: list[str], size: int = 200):
         yield values[index:index + size]
 
 
+def _dedupe_preserving_order(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
 def _update_batches(supabase: Any, ids: list[str], payload: dict[str, Any]) -> int:
     count = 0
     for batch in _chunked(ids):
@@ -55,6 +66,8 @@ def build_message(summary: dict[str, Any]) -> str:
         f"Archived passed deals: <b>{summary['archived_passed']}</b>\n"
         "Archived stale saved/inactive deals: "
         f"<b>{summary['archived_stale_saved_inactive']}</b>\n"
+        "Archived active high-DOS missing-mileage deals: "
+        f"<b>{summary['archived_untrusted_active_high_dos_missing_mileage']}</b>\n"
         f"Run time: {summary['run_time']}"
     )
 
@@ -92,6 +105,24 @@ def run_sweep(
             lambda q: q.lt("updated_at", archive_cutoff),
         ],
     )
+    active_high_dos_missing_mileage_ids = _dedupe_preserving_order([
+        *_fetch_ids(
+            supabase,
+            [
+                lambda q: q.eq("is_active", True),
+                lambda q: q.gte("dos_score", 80),
+                lambda q: q.is_("mileage", "null"),
+            ],
+        ),
+        *_fetch_ids(
+            supabase,
+            [
+                lambda q: q.eq("is_active", True),
+                lambda q: q.gte("dos_score", 80),
+                lambda q: q.lte("mileage", 0),
+            ],
+        ),
+    ])
 
     summary = {
         "expired": _update_batches(
@@ -108,6 +139,15 @@ def run_sweep(
             supabase,
             stale_saved_inactive_ids,
             {"pipeline_step": "archived"},
+        ),
+        "archived_untrusted_active_high_dos_missing_mileage": _update_batches(
+            supabase,
+            active_high_dos_missing_mileage_ids,
+            {
+                "is_active": False,
+                "pipeline_step": "archived",
+                "step_status": "archived_quality_missing_mileage",
+            },
         ),
         "run_time": now.strftime("%Y-%m-%d %H:%M UTC"),
     }
