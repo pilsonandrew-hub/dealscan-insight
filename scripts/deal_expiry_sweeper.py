@@ -146,7 +146,7 @@ def run_sweep(
             {
                 "is_active": False,
                 "pipeline_step": "archived",
-                "step_status": "archived_quality_missing_mileage",
+                "step_status": "q_no_mileage",
             },
         ),
         "run_time": now.strftime("%Y-%m-%d %H:%M UTC"),

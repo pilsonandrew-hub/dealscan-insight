@@ -136,7 +136,7 @@ def test_sweeper_archives_active_high_dos_rows_with_missing_or_invalid_mileage()
         "payload": {
             "is_active": False,
             "pipeline_step": "archived",
-            "step_status": "archived_quality_missing_mileage",
+            "step_status": "q_no_mileage",
         },
         "ids": ["missing-mileage-1", "missing-mileage-2", "zero-mileage-1"],
         "filters": [("in", "id", ("missing-mileage-1", "missing-mileage-2", "zero-mileage-1"))],
