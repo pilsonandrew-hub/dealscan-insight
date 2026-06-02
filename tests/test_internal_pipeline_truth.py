@@ -174,6 +174,17 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
             "age_mileage_heuristic": 1,
         },
     }
+    assert result["opportunities"]["active_dos80_condition_blocker_basis_samples"][0] == {
+        "id": "1",
+        "source_site": "govdeals",
+        "title": "2018 Ford Transit",
+        "year": 2018,
+        "mileage": None,
+        "condition_grade": "Poor",
+        "condition_blocker_basis": "age_mileage_heuristic",
+        "condition_signals": [],
+        "source_text_excerpt": "2018 Ford Transit",
+    }
     assert result["opportunities"]["active_dos80_pricing_maturity_counts_sample"] == {
         "proxy": 1,
         "market_comp": 1,
@@ -269,6 +280,17 @@ def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(m
     }
     assert breakdown_by_id["explicit-damage"]["signals"]["condition_blocker_basis"] == "explicit_negative_condition_signal"
     assert breakdown_by_id["old-mileage"]["signals"]["condition_blocker_basis"] == "age_mileage_heuristic"
+
+    samples_by_id = {
+        item["id"]: item
+        for item in result["opportunities"]["active_dos80_condition_blocker_basis_samples"]
+    }
+    assert samples_by_id["explicit-damage"]["condition_blocker_basis"] == "explicit_negative_condition_signal"
+    assert samples_by_id["explicit-damage"]["condition_signals"] == ["frame damage"]
+    assert samples_by_id["explicit-damage"]["source_text_excerpt"] == "2024 Ford F-150 Runs but has frame damage. frame damage"
+    assert samples_by_id["old-mileage"]["condition_blocker_basis"] == "age_mileage_heuristic"
+    assert samples_by_id["old-mileage"]["condition_signals"] == []
+    assert samples_by_id["old-mileage"]["source_text_excerpt"] == "2017 Chevrolet Tahoe"
 
 
 def test_pipeline_truth_requires_usable_market_prices(monkeypatch):

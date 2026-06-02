@@ -278,6 +278,39 @@ def _condition_blocker_basis(row: dict[str, Any]) -> Optional[str]:
     return "missing_condition_evidence"
 
 
+def _condition_blocker_basis_sample(row: dict[str, Any]) -> Optional[dict[str, Any]]:
+    basis = _condition_blocker_basis(row)
+    if not basis:
+        return None
+
+    title = str(_pick_row_or_raw(row, "title") or "")
+    description = str(_pick_row_or_raw(row, "description", "details", "condition_notes") or "")
+    damage_type = str(_pick_row_or_raw(row, "damage_type", "damage", "title_status") or "")
+    mileage = _pick_row_or_raw(row, "mileage")
+    year = _pick_row_or_raw(row, "year")
+    condition = score_condition(
+        title=title,
+        description=description,
+        mileage=mileage or 0,
+        year=year or 0,
+        damage_type=damage_type,
+    )
+    source_text_excerpt = " ".join(
+        f"{title} {description} {damage_type}".split()
+    )[:240]
+    return {
+        "id": row.get("id"),
+        "source_site": row.get("source_site") or row.get("source"),
+        "title": title or None,
+        "year": year,
+        "mileage": mileage,
+        "condition_grade": row.get("condition_grade"),
+        "condition_blocker_basis": basis,
+        "condition_signals": condition.get("condition_signals") or [],
+        "source_text_excerpt": source_text_excerpt,
+    }
+
+
 def _condition_blocker_basis_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counter: Counter[str] = Counter()
     for row in rows:
@@ -299,6 +332,17 @@ def _condition_blocker_basis_by_source(rows: list[dict[str, Any]]) -> dict[str, 
         source: dict(counter.most_common(20))
         for source, counter in sorted(by_source.items())
     }
+
+
+def _condition_blocker_basis_samples(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    for row in rows:
+        sample = _condition_blocker_basis_sample(row)
+        if sample:
+            samples.append(sample)
+        if len(samples) >= limit:
+            break
+    return samples
 
 
 def build_pipeline_truth() -> dict[str, Any]:
@@ -359,6 +403,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "active_dos80_condition_counts_sample": _status_counts(active_dos80, "condition_grade"),
             "active_dos80_condition_blocker_basis_counts_sample": _condition_blocker_basis_counts(active_dos80),
             "active_dos80_condition_blocker_basis_by_source_sample": _condition_blocker_basis_by_source(active_dos80),
+            "active_dos80_condition_blocker_basis_samples": _condition_blocker_basis_samples(active_dos80),
             "active_dos80_pricing_maturity_counts_sample": _status_counts(active_dos80, "pricing_maturity"),
             "active_dos80_alert_eligible_sample": sum(1 for row in active_dos80_gate_breakdown if row.get("eligible") is True),
             "active_dos80_gate_blocker_counts_sample": _gate_blocker_counts(active_dos80_gate_breakdown),
