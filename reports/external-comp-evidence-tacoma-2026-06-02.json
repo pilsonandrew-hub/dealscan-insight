@@ -1,0 +1,53 @@
+{
+  "source_run_id": "manual-2026-06-02-tacoma-external-listing-dry-run",
+  "source_url": "https://github.com/pilsonandrew-hub/dealscan-insight/blob/main/reports/pricing-external-comp-provenance-tacoma-2026-06-02.md",
+  "confidence_notes": "Dry-run external retail listing evidence only; active listing comps are not closed-sale outcome evidence and require review before any market_prices insert.",
+  "vehicle": {
+    "year": 2023,
+    "make": "Toyota",
+    "model": "Tacoma",
+    "state": "FL"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.lakelandtoyota.com/used-Lakeland-2023-Toyota-Tacoma%2B2WD-SR5-3TMAZ5CN1PM198528",
+      "captured_at": "2026-06-02T11:40:00Z",
+      "price": 31343,
+      "mileage": 47330,
+      "vin": "3TMAZ5CN1PM198528",
+      "listing_id": "lakeland-toyota-PM198528",
+      "title": "2023 Toyota Tacoma 2WD SR5",
+      "title_history_caveat": "Lakeland Toyota active retail listing; total price includes disclosed dealer fees; title history not independently verified by DealerScope."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-Toyota-Tacoma-Tallahassee-FL_w641_c21359",
+      "captured_at": "2026-06-02T11:40:00Z",
+      "price": 34879,
+      "mileage": 75085,
+      "vin": "3TMAZ5CNXPM212782",
+      "listing_id": "carfax-tallahassee-3TMAZ5CNXPM212782",
+      "title": "2023 Toyota Tacoma SR5",
+      "title_history_caveat": "CARFAX active retail listing reported no accident or damage; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-Toyota-Tacoma-Tallahassee-FL_w641_c21359",
+      "captured_at": "2026-06-02T11:40:00Z",
+      "price": 36838,
+      "mileage": 45132,
+      "vin": "3TMAZ5CN8PM203014",
+      "listing_id": "carfax-tallahassee-3TMAZ5CN8PM203014",
+      "title": "2023 Toyota Tacoma SR5",
+      "title_history_caveat": "CARFAX active retail listing reported no accident or damage; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-Toyota-Tacoma-Tallahassee-FL_w641_c21359",
+      "captured_at": "2026-06-02T11:40:00Z",
+      "price": 40944,
+      "mileage": 69957,
+      "vin": "3TMCZ5AN5PM577883",
+      "listing_id": "carfax-tallahassee-3TMCZ5AN5PM577883",
+      "title": "2023 Toyota Tacoma TRD Off Road",
+      "title_history_caveat": "CARFAX active retail listing reported no accident or damage; not closed-sale evidence."
+    }
+  ]
+}
