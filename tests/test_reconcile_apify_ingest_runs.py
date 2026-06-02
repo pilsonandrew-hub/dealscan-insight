@@ -1,4 +1,5 @@
 import json
+import io
 import ssl
 import subprocess
 import sys
@@ -7,6 +8,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error as urllib_error
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -451,6 +453,98 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         webhook_mock.assert_called_once()
         opportunities_mock.assert_called_once()
         delivery_mock.assert_called_once()
+
+    def test_fetch_delivery_rows_via_rest_carries_sanitized_skip_samples(self):
+        with patch.object(
+            reconcile,
+            "_fetch_postgrest_rows",
+            return_value=[
+                {
+                    "run_id": "run-1",
+                    "channel": "db_save",
+                    "status": "skipped_ceiling",
+                    "listing_id": "listing-1",
+                    "listing_url": "https://example.com/asset/1",
+                    "error_message": "bid_ceiling_exceeded | bid=$35,000 max_bid=$22,000 mmr=$30,000 headroom=$-13,000 tier=core",
+                    "attempt_count": 1,
+                    "created_at": "2026-03-17T01:00:00+00:00",
+                    "updated_at": "2026-03-17T01:00:00+00:00",
+                },
+                {
+                    "run_id": "run-1",
+                    "channel": "db_save",
+                    "status": "skipped_gate",
+                    "listing_id": "listing-2",
+                    "listing_url": "https://example.com/asset/2",
+                    "error_message": "age_or_mileage_exceeded",
+                    "attempt_count": 1,
+                    "created_at": "2026-03-17T01:01:00+00:00",
+                    "updated_at": "2026-03-17T01:01:00+00:00",
+                },
+            ],
+        ):
+            rows = reconcile.fetch_delivery_rows_via_rest(
+                base_url="https://example.supabase.co/rest/v1",
+                service_role_key="service-key",
+                start=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc),
+                end=datetime(2026, 3, 17, 2, 0, tzinfo=timezone.utc),
+            )
+
+        db_save = rows["run-1"]["channels"]["db_save"]
+        self.assertEqual(db_save["statuses"], {"skipped_ceiling": 1, "skipped_gate": 1})
+        self.assertEqual(len(db_save["samples"]["skipped_ceiling"]), 1)
+        self.assertEqual(
+            db_save["samples"]["skipped_ceiling"][0],
+            {
+                "listing_id": "listing-1",
+                "listing_url": "https://example.com/asset/1",
+                "error_message": "bid_ceiling_exceeded | bid=$35,000 max_bid=$22,000 mmr=$30,000 headroom=$-13,000 tier=core",
+            },
+        )
+
+    def test_print_reports_includes_db_save_skip_samples(self):
+        report = {
+            "run_id": "run-1",
+            "apify": {
+                "actor_name": "ds-govdeals",
+                "status": "SUCCEEDED",
+                "dataset_id": "dataset-1",
+                "item_count": 1,
+            },
+            "webhook": {"latest_status": "processed", "webhook_entries": 1},
+            "opportunities": {},
+            "delivery": {
+                "channels": {
+                    "db_save": {
+                        "statuses": {"skipped_ceiling": 1},
+                        "total_rows": 1,
+                        "total_attempts": 1,
+                        "samples": {
+                            "skipped_ceiling": [
+                                {
+                                    "listing_id": "listing-1",
+                                    "listing_url": "https://example.com/asset/1",
+                                    "error_message": "bid_ceiling_exceeded | bid=$35,000 max_bid=$22,000 mmr=$30,000 headroom=$-13,000 tier=core",
+                                }
+                            ]
+                        },
+                    }
+                }
+            },
+            "issues": [],
+            "issue_scope": "clean",
+            "likely_cause": None,
+        }
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            reconcile.print_reports([report], summary_only=False)
+
+        output = buffer.getvalue()
+        self.assertIn("db_save_samples:", output)
+        self.assertIn("status=skipped_ceiling", output)
+        self.assertIn("listing_id=listing-1", output)
+        self.assertIn("bid_ceiling_exceeded", output)
 
     def test_main_uses_rest_fallback_when_dsn_is_unavailable(self):
         with tempfile.TemporaryDirectory() as tmpdir:

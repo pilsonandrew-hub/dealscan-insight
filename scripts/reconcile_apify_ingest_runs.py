@@ -96,6 +96,7 @@ def classify_issue_scope(issues: list[str]) -> str:
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 DIRECT_PG_UNAVAILABLE_FALLBACK_MARKER = "webhook_log_claim_direct_pg_unavailable"
 POSTGREST_PAGE_SIZE = 1000
+DELIVERY_SAMPLE_LIMIT = 5
 _CURL_SSL_FALLBACK_NOTIFIED = False
 
 
@@ -722,6 +723,40 @@ def derive_source_names(actors: dict[str, str]) -> list[str]:
     return sorted({name for name in names if name})
 
 
+def _delivery_sample_from_row(row: dict[str, Any]) -> dict[str, str]:
+    sample: dict[str, str] = {}
+    for key in ("listing_id", "listing_url", "error_message"):
+        value = row.get(key)
+        if value not in {None, ""}:
+            sample[key] = str(value)[:240]
+    return sample
+
+
+def _accumulate_delivery_row(grouped: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+    run_id = row.get("run_id")
+    if not run_id:
+        return
+    run_entry = grouped.setdefault(str(run_id), {"channels": {}, "last_updated_at": None})
+    channel_name = str(row.get("channel") or "unknown")
+    status = str(row.get("status") or "unknown")
+    channel_entry = run_entry["channels"].setdefault(
+        channel_name,
+        {"statuses": {}, "total_rows": 0, "total_attempts": 0, "samples": {}},
+    )
+    channel_entry["statuses"][status] = int(channel_entry["statuses"].get(status) or 0) + 1
+    channel_entry["total_rows"] += 1
+    channel_entry["total_attempts"] += _first_int(row.get("attempt_count")) or 0
+    sample = _delivery_sample_from_row(row)
+    if sample:
+        status_samples = channel_entry["samples"].setdefault(status, [])
+        if len(status_samples) < DELIVERY_SAMPLE_LIMIT:
+            status_samples.append(sample)
+    last_updated_at = parse_datetime(row.get("updated_at"))
+    prior_last = run_entry.get("last_updated_at")
+    if last_updated_at and (prior_last is None or last_updated_at > prior_last):
+        run_entry["last_updated_at"] = last_updated_at
+
+
 def fetch_delivery_rows(connection, start: datetime, end: datetime) -> dict[str, dict[str, Any]]:
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute(
@@ -730,31 +765,24 @@ def fetch_delivery_rows(connection, start: datetime, end: datetime) -> dict[str,
               run_id,
               channel,
               status,
-              count(*)::int as row_count,
-              sum(attempt_count)::int as total_attempts,
-              max(updated_at) as last_updated_at
+              listing_id,
+              listing_url,
+              error_message,
+              attempt_count,
+              created_at,
+              updated_at
             from public.ingest_delivery_log
             where run_id is not null
               and created_at >= %s
               and created_at <= %s
-            group by run_id, channel, status
-            order by run_id, channel, status
+            order by run_id, channel, status, created_at asc
             """
             ,
             (start, end),
         )
         grouped: dict[str, dict[str, Any]] = {}
         for row in cursor.fetchall():
-            run_id = row["run_id"]
-            run_entry = grouped.setdefault(run_id, {"channels": {}, "last_updated_at": None})
-            channel_entry = run_entry["channels"].setdefault(row["channel"], {"statuses": {}, "total_rows": 0, "total_attempts": 0})
-            channel_entry["statuses"][row["status"]] = int(row["row_count"] or 0)
-            channel_entry["total_rows"] += int(row["row_count"] or 0)
-            channel_entry["total_attempts"] += int(row["total_attempts"] or 0)
-            last_updated_at = parse_datetime(row.get("last_updated_at"))
-            prior_last = run_entry.get("last_updated_at")
-            if last_updated_at and (prior_last is None or last_updated_at > prior_last):
-                run_entry["last_updated_at"] = last_updated_at
+            _accumulate_delivery_row(grouped, dict(row))
         return grouped
 
 
@@ -769,7 +797,7 @@ def fetch_delivery_rows_via_rest(
         service_role_key=service_role_key,
         table="ingest_delivery_log",
         query=[
-            ("select", "run_id,channel,status,attempt_count,created_at,updated_at"),
+            ("select", "run_id,channel,status,listing_id,listing_url,error_message,attempt_count,created_at,updated_at"),
             ("run_id", "not.is.null"),
             ("created_at", f"gte.{start.isoformat()}"),
             ("created_at", f"lte.{end.isoformat()}"),
@@ -778,23 +806,7 @@ def fetch_delivery_rows_via_rest(
     )
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
-        run_id = row.get("run_id")
-        if not run_id:
-            continue
-        run_entry = grouped.setdefault(str(run_id), {"channels": {}, "last_updated_at": None})
-        channel_name = str(row.get("channel") or "unknown")
-        status = str(row.get("status") or "unknown")
-        channel_entry = run_entry["channels"].setdefault(
-            channel_name,
-            {"statuses": {}, "total_rows": 0, "total_attempts": 0},
-        )
-        channel_entry["statuses"][status] = int(channel_entry["statuses"].get(status) or 0) + 1
-        channel_entry["total_rows"] += 1
-        channel_entry["total_attempts"] += _first_int(row.get("attempt_count")) or 0
-        last_updated_at = parse_datetime(row.get("updated_at"))
-        prior_last = run_entry.get("last_updated_at")
-        if last_updated_at and (prior_last is None or last_updated_at > prior_last):
-            run_entry["last_updated_at"] = last_updated_at
+        _accumulate_delivery_row(grouped, row)
     return grouped
 
 
@@ -1028,6 +1040,15 @@ def _format_status_counts(statuses: dict[str, int]) -> str:
     return ", ".join(f"{status}={count}" for status, count in sorted(statuses.items()))
 
 
+def _format_delivery_sample(sample: dict[str, str]) -> str:
+    parts: list[str] = []
+    for key in ("listing_id", "listing_url", "error_message"):
+        value = sample.get(key)
+        if value:
+            parts.append(f"{key}={value}")
+    return " | ".join(parts)
+
+
 def print_reports(reports: list[dict[str, Any]], summary_only: bool) -> None:
     print("\nRuns")
     if not reports:
@@ -1074,6 +1095,14 @@ def print_reports(reports: list[dict[str, Any]], summary_only: bool) -> None:
                     f"{channel_name}={_format_status_counts(channel.get('statuses') or {})} | "
                     f"rows={channel.get('total_rows') or 0} | attempts={channel.get('total_attempts') or 0}"
                 )
+                samples = channel.get("samples") or {}
+                if samples:
+                    print(f"  {channel_name}_samples:")
+                    for status in sorted(samples):
+                        for sample in samples[status]:
+                            formatted_sample = _format_delivery_sample(sample)
+                            if formatted_sample:
+                                print(f"    - status={status} | {formatted_sample}")
         else:
             print("  delivery=missing")
         if webhook.get("latest_error"):
