@@ -3096,6 +3096,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
         try:
             existing_id, should_update = _check_vin_duplicate(normalized_vin, float(score))
             if existing_id:
+                _backfill_existing_opportunity_enrichment(existing_id, row)
                 if should_update:
                     # New score is higher — update the existing record
                     try:

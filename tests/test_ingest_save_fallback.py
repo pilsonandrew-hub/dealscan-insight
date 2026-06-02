@@ -398,8 +398,8 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
 
         self.assertEqual(saved_id, "existing-durango")
         self.assertEqual(vehicle["_save_status"], "vin_dedup_pricing_refreshed")
-        self.assertEqual(len(supabase._table.update_calls), 1)
-        update_payload, filters = supabase._table.update_calls[0]
+        self.assertEqual(len(supabase._table.update_calls), 2)
+        update_payload, filters = supabase._table.update_calls[-1]
         self.assertEqual(filters, [("id", "existing-durango")])
         self.assertEqual(update_payload["pricing_maturity"], "market_comp")
         self.assertEqual(update_payload["pricing_source"], "retail_market_cache")
@@ -410,6 +410,65 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertEqual(update_payload["bid_headroom"], 12670)
         self.assertNotIn("vin", update_payload)
         self.assertNotIn("listing_url", update_payload)
+        self.assertIn("updated_at", update_payload)
+
+    def test_vin_duplicate_backfills_missing_enrichment_without_new_insert(self):
+        row = {
+            "listing_id": "listing-durango",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "title": "2020 Dodge Durango SRT",
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 43122,
+            "condition_grade": "Fair",
+            "raw_data": {
+                "description": "Runs and drives. Interior wear noted.",
+                "detail_text": "Runs and drives. Interior wear noted.",
+            },
+            "source_run_id": "3PEh74Eh4q7K4pYsY",
+            "run_id": "3PEh74Eh4q7K4pYsY",
+            "dos_score": 86.9,
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+            "retail_comp_price_estimate": 46004,
+            "retail_comp_count": 5,
+            "expected_close_bid": 13685.15,
+            "max_bid": 23270,
+            "bid_headroom": 12670,
+        }
+        existing_row = {
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": None,
+            "condition_grade": None,
+            "raw_data": {},
+            "source_run_id": None,
+            "run_id": "old-run",
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+            "retail_comp_price_estimate": 46004,
+            "retail_comp_count": 5,
+            "expected_close_bid": 13685.15,
+            "max_bid": 23270,
+            "bid_headroom": 12670,
+        }
+        vehicle = {"dos_score": 86.9, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(row, "unused", existing_row)
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: ("existing-durango", False)):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-durango")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
+        self.assertEqual(len(supabase._table.update_calls), 1)
+        update_payload, filters = supabase._table.update_calls[0]
+        self.assertEqual(filters, [("id", "existing-durango")])
+        self.assertEqual(update_payload["mileage"], row["mileage"])
+        self.assertEqual(update_payload["condition_grade"], row["condition_grade"])
+        self.assertEqual(update_payload["raw_data"], row["raw_data"])
+        self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
+        self.assertNotIn("vin", update_payload)
+        self.assertNotIn("run_id", update_payload)
         self.assertIn("updated_at", update_payload)
 
     def test_pgrst204_still_falls_back_to_direct_pg(self):
