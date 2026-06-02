@@ -12,6 +12,7 @@ import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
 const MAX_DETAIL_PAGES = 200;
+const MAX_ALLOWED_MILEAGE = 100000;
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
@@ -293,7 +294,7 @@ async function pushListing(listing, sourceUrl, log) {
         log.debug(`[SKIP] Too old or unknown year: ${year} - ${title}`);
         return false;
     }
-    if (mileage !== null && mileage > 100000) {
+    if (mileage !== null && mileage > MAX_ALLOWED_MILEAGE) {
         log.debug(`[SKIP] Too many miles: ${mileage} - ${title}`);
         return false;
     }
@@ -383,7 +384,7 @@ async function pushTXListing(listing, sourceUrl, log) {
         log.debug(`[TX][SKIP] Too old or unknown year: ${year} - ${title}`);
         return false;
     }
-    if (mileage !== null && mileage > 100000) {
+    if (mileage !== null && mileage > MAX_ALLOWED_MILEAGE) {
         log.debug(`[TX][SKIP] Too many miles: ${mileage} - ${title}`);
         return false;
     }
@@ -453,6 +454,10 @@ const crawler = new PlaywrightCrawler({
                         vehicle.mileage = mileage;
                         log.info(`[MILEAGE DETAIL] Found mileage ${mileage} for: ${vehicle.title}`);
                     }
+                }
+                if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE) {
+                    log.info(`[MILEAGE DETAIL][SKIP] Too many miles after detail enrichment: ${vehicle.mileage} - ${vehicle.title}`);
+                    return;
                 }
             } catch (err) {
                 log.warning(`[VIN DETAIL] Failed for ${request.url}: ${err.message}`);
