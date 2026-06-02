@@ -276,7 +276,8 @@ const crawler = new PlaywrightCrawler({
             if (capturedApi.interceptedLots.length > 0) {
                 log.info(`Processing ${capturedApi.interceptedLots.length} intercepted lots from page load`);
                 for (const lot of capturedApi.interceptedLots) {
-                    seenIds.add(lot.assetId);
+                    const lotId = String(lot.assetId ?? lot.id ?? '');
+                    if (lotId) seenIds.add(lotId);
                     totalFound++;
                     if (!passes(lot)) continue;
                     totalPassed++;

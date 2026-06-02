@@ -31,4 +31,10 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('const DETAIL_PAGE_REQUIRED_MS = 12000;');
     expect(source).toContain('const DETAIL_PAGE_TIMEOUT_MS = 12000;');
   });
+
+  test('normalizes intercepted lot ids before pagination dedupe', () => {
+    expect(source).not.toContain('seenIds.add(lot.assetId);');
+    expect(source).toContain("const lotId = String(lot.assetId ?? lot.id ?? '');");
+    expect(source).toContain('if (lotId) seenIds.add(lotId);');
+  });
 });
