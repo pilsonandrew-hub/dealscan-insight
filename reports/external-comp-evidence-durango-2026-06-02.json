@@ -1,0 +1,63 @@
+{
+  "source_run_id": "manual-2026-06-02-durango-external-listing-dry-run",
+  "source_url": "https://github.com/pilsonandrew-hub/dealscan-insight/blob/main/reports/pricing-external-comp-provenance-durango-2026-06-02.md",
+  "confidence_notes": "Dry-run external retail listing evidence only; active listing comps are not closed-sale outcome evidence and require review before any market_prices insert.",
+  "vehicle": {
+    "year": 2020,
+    "make": "Dodge",
+    "model": "Durango",
+    "state": "MS"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.cargurus.com/Cars/l-Used-2020-Dodge-Durango-SRT-AWD-t87520",
+      "captured_at": "2026-06-02T09:35:00Z",
+      "price": 41984,
+      "mileage": 40992,
+      "vin": "1C4SDJGJ2LC324636",
+      "listing_id": "cargurus-mlm1-324636",
+      "title": "2020 Dodge Durango SRT AWD",
+      "title_history_caveat": "CarGurus listing; active retail asking price; title history not independently verified by DealerScope."
+    },
+    {
+      "source_url": "https://www.cargurus.com/Cars/l-Used-2020-Dodge-Durango-SRT-AWD-t87520",
+      "captured_at": "2026-06-02T09:35:00Z",
+      "price": 46079,
+      "mileage": 52817,
+      "vin": "1C4SDJGJ0LC309259",
+      "listing_id": "cargurus-55561",
+      "title": "2020 Dodge Durango SRT AWD",
+      "title_history_caveat": "CarGurus listing; active retail asking price; title history not independently verified by DealerScope."
+    },
+    {
+      "source_url": "https://www.cargurus.com/Cars/l-Used-2020-Dodge-Durango-SRT-AWD-t87520",
+      "captured_at": "2026-06-02T09:35:00Z",
+      "price": 55171,
+      "mileage": 16988,
+      "vin": "1C4SDJGJ8LC348522",
+      "listing_id": "cargurus-iab8114",
+      "title": "2020 Dodge Durango SRT AWD",
+      "title_history_caveat": "CarGurus listing; active retail asking price; title history not independently verified by DealerScope."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2020-Dodge-Durango-SRT_x46652",
+      "captured_at": "2026-06-02T09:35:00Z",
+      "price": 45250,
+      "mileage": 34718,
+      "vin": "1C4SDJGJ4LC171581",
+      "listing_id": "carfax-greenfield-in-1c4sdjgj4lc171581",
+      "title": "2020 Dodge Durango SRT SUV",
+      "title_history_caveat": "CARFAX listing reported no accident or damage; active retail asking price; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2020-Dodge-Durango-SRT_x46652",
+      "captured_at": "2026-06-02T09:35:00Z",
+      "price": 41536,
+      "mileage": 61421,
+      "vin": "1C4SDJGJ1LC184420",
+      "listing_id": "carfax-colorado-springs-1c4sdjgj1lc184420",
+      "title": "2020 Dodge Durango SRT SUV",
+      "title_history_caveat": "CARFAX listing reported minor/other damage; active retail asking price; not closed-sale evidence."
+    }
+  ]
+}
