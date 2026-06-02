@@ -16,7 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v6
 
       - name: Install supabase client and sweep expired deals
         env:
@@ -25,5 +28,5 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "-1003672399222"
         run: |
-          python3 -m pip install --upgrade pip supabase
+          python3 -m pip install --disable-pip-version-check --no-cache-dir supabase==2.30.0
           python3 scripts/deal_expiry_sweeper.py
