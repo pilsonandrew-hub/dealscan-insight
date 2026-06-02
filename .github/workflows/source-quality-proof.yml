@@ -35,7 +35,11 @@ jobs:
           import urllib.request
           from datetime import datetime, timedelta, timezone
 
-          PROXIBID_ACTOR_ID = "bxhncvtHEP712WX2e"
+          SOURCE_ACTOR_IDS = {
+              "proxibid": "bxhncvtHEP712WX2e",
+              "govdeals": "CuKaIAcWyFS0EPrAz",
+          }
+          PROXIBID_ACTOR_ID = SOURCE_ACTOR_IDS["proxibid"]
           VIN_PASS_THRESHOLD_PCT = 5.0
           MILEAGE_PASS_THRESHOLD_PCT = 1.0
 
@@ -251,10 +255,16 @@ jobs:
           }
 
           scraper_enrichment = None
+          actor_output_quality = {
+              "available": False,
+              "reason": "no_recent_source_quality_proof_record",
+              "actor_output_clean": False,
+          }
           apify_token = os.environ.get("APIFY_TOKEN")
-          if source == "proxibid" and apify_token:
+          actor_id = SOURCE_ACTOR_IDS.get(source)
+          if actor_id and apify_token:
               runs = apify_get(
-                  f"/acts/{PROXIBID_ACTOR_ID}/runs?limit=5&status=SUCCEEDED&desc=true",
+                  f"/acts/{actor_id}/runs?limit=5&status=SUCCEEDED&desc=true",
                   apify_token,
               ).get("data", {}).get("items", [])
               for run in runs:
@@ -272,10 +282,42 @@ jobs:
                   ]
                   if proof_rows:
                       scraper_enrichment = proof_rows[-1]
+                      opportunity_items = [
+                          item for item in items
+                          if isinstance(item, dict) and item.get("record_type") != "source_quality_proof"
+                      ]
+                      pushed_missing_vin = int(scraper_enrichment.get("pushed_rows_missing_vin") or 0)
+                      pushed_missing_mileage = int(scraper_enrichment.get("pushed_rows_missing_mileage") or 0)
+                      detail_pages_failed = int(scraper_enrichment.get("detail_pages_failed") or 0)
                       scraper_enrichment["actor_run_id"] = run.get("id")
                       scraper_enrichment["dataset_id"] = dataset_id
                       scraper_enrichment["finished_at"] = run.get("finishedAt")
+                      actor_output_quality = {
+                          "available": True,
+                          "actor_run_id": run.get("id"),
+                          "dataset_id": dataset_id,
+                          "finished_at": run.get("finishedAt"),
+                          "dataset_items_sampled": len(items) if isinstance(items, list) else None,
+                          "opportunity_items_sampled": len(opportunity_items),
+                          "pushed_rows_total": scraper_enrichment.get("pushed_rows_total"),
+                          "pushed_rows_with_vin": scraper_enrichment.get("pushed_rows_with_vin"),
+                          "pushed_rows_with_mileage": scraper_enrichment.get("pushed_rows_with_mileage"),
+                          "pushed_rows_missing_vin": pushed_missing_vin,
+                          "pushed_rows_missing_mileage": pushed_missing_mileage,
+                          "pushed_rows_with_description": sum(bool(item.get("description")) for item in opportunity_items),
+                          "pushed_rows_with_detail_text": sum(bool(item.get("detail_text")) for item in opportunity_items),
+                          "detail_pages_attempted": scraper_enrichment.get("detail_pages_attempted"),
+                          "detail_pages_fetched": scraper_enrichment.get("detail_pages_fetched"),
+                          "detail_pages_failed": detail_pages_failed,
+                          "actor_output_clean": pushed_missing_vin == 0
+                          and pushed_missing_mileage == 0
+                          and detail_pages_failed == 0,
+                      }
                       break
+          elif not actor_id:
+              actor_output_quality["reason"] = "unsupported_source_actor"
+          elif not apify_token:
+              actor_output_quality["reason"] = "apify_token_missing"
 
           if scraper_enrichment:
               scraper_enrichment["available"] = True
@@ -348,10 +390,20 @@ jobs:
               and scraper_enrichment.get("strict_filter_rejection_detected")
           )
 
+          if scraper_enrichment.get("run_lineage_proven"):
+              accepted_landing_status = "accepted_rows_present"
+          elif actor_output_quality.get("available") and actor_output_quality.get("actor_output_clean"):
+              accepted_landing_status = "actor_output_live_confirmed_no_accepted_rows"
+          elif actor_output_quality.get("available"):
+              accepted_landing_status = "dirty_actor_output"
+          else:
+              accepted_landing_status = "actor_output_unavailable"
+
           issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else "BLOCK"
           summary = {
               "source": source,
               "issue10_verdict": issue10_verdict,
+              "accepted_landing_status": accepted_landing_status,
               "issue10_scope_note": (
                   "Original accepted-opportunity enrichment standard passed."
                   if issue10_verdict == "PASS_ORIGINAL"
@@ -359,6 +411,7 @@ jobs:
               ),
               "low_yield_source_truth_detected": low_yield_source_truth_detected,
               "accepted_opportunity_quality": accepted_quality,
+              "actor_output_quality": actor_output_quality,
               "scraper_enrichment_attempt_quality": scraper_enrichment,
           }
 

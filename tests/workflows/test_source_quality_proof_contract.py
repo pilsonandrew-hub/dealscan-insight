@@ -31,6 +31,8 @@ def test_source_quality_proof_requires_exact_source_and_apify_proof_for_correcte
     assert 'source_quality_proof' in text
     assert 'APIFY_TOKEN' in text
     assert 'PROXIBID_ACTOR_ID' in text
+    assert 'SOURCE_ACTOR_IDS' in text
+    assert '"govdeals": "CuKaIAcWyFS0EPrAz"' in text
     assert 'extraction_detected' in text
 
 
@@ -97,3 +99,15 @@ def test_source_quality_proof_reports_required_live_db_fields():
         'sanitized_enriched_samples',
     ]:
         assert required in text
+
+
+def test_source_quality_proof_reports_actor_output_boundary_separately_from_accepted_rows():
+    text = WORKFLOW.read_text()
+    assert 'actor_output_quality' in text
+    assert 'actor_output_clean' in text
+    assert 'pushed_rows_with_description' in text
+    assert 'pushed_rows_with_detail_text' in text
+    assert 'accepted_landing_status' in text
+    assert 'actor_output_live_confirmed_no_accepted_rows' in text
+    assert 'dirty_actor_output' in text
+    assert 'accepted_opportunity_quality' in text
