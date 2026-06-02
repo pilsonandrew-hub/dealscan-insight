@@ -38,7 +38,9 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       EVIDENCE_FILE: ${{ inputs.evidence_file }}
       APPLY_EXTERNAL_COMP: ${{ inputs.apply }}
       CONFIRMATION: ${{ inputs.confirmation }}
@@ -82,3 +84,10 @@ jobs:
           fi
 
           python3 scripts/prepare_external_market_comp_seed.py "${args[@]}"
+
+      - name: Verify pricing substrate after apply
+        if: ${{ inputs.apply == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_pricing_substrate.py --require-ready
+          python3 scripts/report_pricing_blocked_source_candidates.py --lookback-days 14 --limit 10
