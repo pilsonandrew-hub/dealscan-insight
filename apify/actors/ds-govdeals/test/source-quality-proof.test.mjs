@@ -92,4 +92,11 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('mileage_candidates');
     expect(source).toContain('field_snippets');
   });
+
+  test('extracts mileage from normalized GovDeals odometer detail text', () => {
+    expect(source).toContain('function extractMileageFromText(bodyText)');
+    expect(source).toContain('const mileage = extractMileageFromText(bodyText);');
+    expect(source).toContain("String(bodyText || '').replace(/\\s+/g, ' ').trim()");
+    expect(source).toContain('/\\bOdometer\\s+(?:reads\\s+)?([\\d,]+)\\s*(?:miles?|mi\\b)?/i');
+  });
 });

@@ -510,17 +510,12 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
                 log.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
             }
 
-            const mileageMatch = bodyText.match(/\bMileage[:\s#\-]*([\d,]+)/i)
-                ?? bodyText.match(/\bOdometer[:\s#\-]*([\d,]+)/i)
-                ?? bodyText.match(/\b([\d,]{2,6})\s*(?:miles?|mi\b)/i);
-            if (!lot.mileage && mileageMatch) {
-                const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
-                if (!Number.isNaN(mileage) && mileage > 0) {
-                    lot.mileage = mileage;
-                    mileageFound++;
-                    sourceQualityStats.detail_mileages_found++;
-                    log.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
-                }
+            const mileage = extractMileageFromText(bodyText);
+            if (!lot.mileage && mileage) {
+                lot.mileage = mileage;
+                mileageFound++;
+                sourceQualityStats.detail_mileages_found++;
+                log.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
             }
 
             // ~1 req/sec
@@ -555,6 +550,17 @@ function extractDetailDiagnostics(bodyText) {
         ])].slice(0, 8),
         field_snippets,
     };
+}
+
+function extractMileageFromText(bodyText) {
+    const text = String(bodyText || '').replace(/\s+/g, ' ').trim();
+    const mileageMatch = text.match(/\bMileage[:\s#\-]*([\d,]+)/i)
+        ?? text.match(/\bOdometer\s+(?:reads\s+)?([\d,]+)\s*(?:miles?|mi\b)?/i)
+        ?? text.match(/\b([\d,]{2,6})\s*(?:miles?|mi\b)/i);
+    if (!mileageMatch) return null;
+
+    const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
+    return !Number.isNaN(mileage) && mileage > 0 ? mileage : null;
 }
 
 function sampleExcludedLots(lots, limit = 10) {
