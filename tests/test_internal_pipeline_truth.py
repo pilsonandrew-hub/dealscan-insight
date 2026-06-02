@@ -325,6 +325,91 @@ def test_opportunity_condition_proof_blocks_backfill_when_stored_evidence_missin
     }
 
 
+def test_pipeline_truth_reports_condition_storage_gap_samples(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "stored-gap",
+                "is_active": True,
+                "dos_score": 91,
+                "mileage": 13983,
+                "year": 2020,
+                "title": "2020 Dodge Durango SRT",
+                "pricing_maturity": "market_comp",
+                "vin": "1C4SDJGJ6LC324462",
+                "condition_grade": "Poor",
+                "source_site": "govdeals",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.9,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": "2020 Dodge Durango SRT",
+                    "listing_url": "https://www.govdeals.com/asset/197/5804?utm=test",
+                    "actor_run_id": "actor-run-1",
+                    "source_run_id": "source-run-1",
+                    "vin": "1C4SDJGJ6LC324462",
+                },
+            },
+            {
+                "id": "stored-evidence",
+                "is_active": True,
+                "dos_score": 90,
+                "mileage": 12000,
+                "year": 2021,
+                "title": "2021 Dodge Durango",
+                "pricing_maturity": "market_comp",
+                "vin": "1C4RDJFG3MC696184",
+                "condition_grade": "Poor",
+                "source_site": "govdeals",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.9,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": "2021 Dodge Durango",
+                    "detail_text": "Starts and runs. Exterior has minor scratches.",
+                    "listing_url": "https://www.govdeals.com/asset/202/8585",
+                },
+            },
+        ],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    opportunities = result["opportunities"]
+    assert opportunities["active_dos80_condition_storage_gap_count_sample"] == 1
+    assert opportunities["active_dos80_condition_storage_gap_by_source_sample"] == {"govdeals": 1}
+    assert opportunities["active_dos80_condition_storage_gap_samples"][0]["id"] == "stored-gap"
+    assert opportunities["active_dos80_condition_storage_gap_samples"][0]["source_identity"] == {
+        "listing_id": None,
+        "listing_url": "https://www.govdeals.com/asset/197/5804",
+        "source_run_id": "source-run-1",
+        "run_id": None,
+        "actor_run_id": "actor-run-1",
+        "apify_run_id": None,
+        "vin_present": True,
+        "vin_suffix": "324462",
+    }
+    assert opportunities["active_dos80_condition_storage_gap_samples"][0]["condition_backfill_assessment"]["status"] == "blocked_missing_source_condition_evidence"
+
+
 def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "opportunities": [

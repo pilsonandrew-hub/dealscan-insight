@@ -371,6 +371,47 @@ def _condition_blocker_basis_samples(rows: list[dict[str, Any]], *, limit: int =
     return samples
 
 
+def _condition_storage_gap_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    gap_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not _condition_blocker_basis(row):
+            continue
+        if _stored_source_condition_evidence(row):
+            continue
+        gap_rows.append(row)
+    return gap_rows
+
+
+def _condition_storage_gap_by_source(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for row in _condition_storage_gap_rows(rows):
+        source = str(row.get("source_site") or row.get("source") or "unknown").strip().lower() or "unknown"
+        counter[source] += 1
+    return dict(counter.most_common(20))
+
+
+def _condition_storage_gap_samples(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    for row in _condition_storage_gap_rows(rows):
+        proof = _opportunity_condition_proof_row(row)
+        samples.append({
+            "id": proof.get("id"),
+            "source_site": proof.get("source_site"),
+            "title": proof.get("title"),
+            "year": proof.get("year"),
+            "mileage": proof.get("mileage"),
+            "condition_grade": proof.get("condition_grade"),
+            "condition_blocker_basis": proof.get("condition_blocker_basis"),
+            "condition_evidence_fields": proof.get("condition_evidence_fields"),
+            "condition_backfill_assessment": proof.get("condition_backfill_assessment"),
+            "source_identity": proof.get("source_identity"),
+            "raw_data_keys_present": proof.get("raw_data_keys_present"),
+        })
+        if len(samples) >= limit:
+            break
+    return samples
+
+
 def _condition_evidence_fields(row: dict[str, Any]) -> dict[str, dict[str, Any]]:
     title_text = " ".join(str(_pick_row_or_raw(row, "title") or "").split()).strip().lower()
     evidence: dict[str, dict[str, Any]] = {}
@@ -504,6 +545,7 @@ def build_pipeline_truth() -> dict[str, Any]:
         if float(row.get("dos_score") or row.get("score") or 0) >= 80
     ]
     active_dos80_gate_breakdown = _alert_gate_breakdown(active_dos80)
+    active_dos80_condition_storage_gap_rows = _condition_storage_gap_rows(active_dos80)
 
     webhook_rows = _safe_rows(
         "webhook_log",
@@ -545,6 +587,9 @@ def build_pipeline_truth() -> dict[str, Any]:
             "active_dos80_condition_blocker_basis_counts_sample": _condition_blocker_basis_counts(active_dos80),
             "active_dos80_condition_blocker_basis_by_source_sample": _condition_blocker_basis_by_source(active_dos80),
             "active_dos80_condition_blocker_basis_samples": _condition_blocker_basis_samples(active_dos80),
+            "active_dos80_condition_storage_gap_count_sample": len(active_dos80_condition_storage_gap_rows),
+            "active_dos80_condition_storage_gap_by_source_sample": _condition_storage_gap_by_source(active_dos80),
+            "active_dos80_condition_storage_gap_samples": _condition_storage_gap_samples(active_dos80),
             "active_dos80_pricing_maturity_counts_sample": _status_counts(active_dos80, "pricing_maturity"),
             "active_dos80_alert_eligible_sample": sum(1 for row in active_dos80_gate_breakdown if row.get("eligible") is True),
             "active_dos80_gate_blocker_counts_sample": _gate_blocker_counts(active_dos80_gate_breakdown),
