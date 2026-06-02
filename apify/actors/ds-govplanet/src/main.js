@@ -219,13 +219,22 @@ function isVehicle(desc = '') {
 // DC location fix — "Dist. of Columbia" doesn't match standard state names
 const DC_PATTERN = /dist.*columbia|washington.*d\.?c\.?/i;
 
-function passesFilters({ year, price, state, locationText = '' }) {
+function isMileageOverLimit(mileage, maxMileage) {
+    return mileage !== null && mileage !== undefined && maxMileage > 0 && mileage > maxMileage;
+}
+
+function isAgeOverLimit(year, maxAgeYears, now = new Date()) {
+    if (!year || maxAgeYears <= 0) return false;
+    return (now.getFullYear() - year) > maxAgeYears;
+}
+
+function passesFilters({ year, price, state, locationText = '', mileage = null, maxMileage = 100000, maxAgeYears = 10 }) {
     // Accept DC regardless of state extraction
     const isDC = DC_PATTERN.test(locationText);
     if (!isDC && (!state || !US_STATES.has(state))) return false;
     const currentYear = new Date().getFullYear();
-    // Government vehicles are kept longer — allow up to 10 years old
-    if (!year || (currentYear - year) > 10) return false;
+    if (!year || isAgeOverLimit(year, maxAgeYears)) return false;
+    if (isMileageOverLimit(mileage, maxMileage)) return false;
     if (year && year < 1970) return false;
     // Rust-state: bypass for <=2yr old vehicles in high-rust states
     if (state && HIGH_RUST.has(state)) {
@@ -292,6 +301,8 @@ let totalPushedWithVin = 0;
 let totalPushedWithMileage = 0;
 let totalPushedWithAuctionEnd = 0;
 let totalMissingVinWithoutDetail = 0;
+let totalMileageOverLimit = 0;
+let totalAgeOverLimit = 0;
 const excludedMissingVinSamples = [];
 const detailCaptchaSamples = [];
 const seenEquipIds = new Set();
@@ -404,7 +415,17 @@ const crawler = new CheerioCrawler({
             if (auctionEndTime) totalQuickviewsWithAuctionEnd++;
 
             if (!isVehicle(desc)) { totalSkipped++; continue; }
-            if (!passesFilters({ year, price, state, locationText: item.eumeLocation || '' })) { totalSkipped++; continue; }
+            if (isMileageOverLimit(mileage, maxMileage)) {
+                totalSkipped++;
+                totalMileageOverLimit++;
+                continue;
+            }
+            if (isAgeOverLimit(year, maxAgeYears)) {
+                totalSkipped++;
+                totalAgeOverLimit++;
+                continue;
+            }
+            if (!passesFilters({ year, price, state, locationText: item.eumeLocation || '', mileage, maxMileage, maxAgeYears })) { totalSkipped++; continue; }
             if (price < minBid || (maxBid > 0 && price > maxBid)) { totalSkipped++; continue; }
             totalPassed++;
 
@@ -511,6 +532,8 @@ const sourceQualityProof = {
     quickview_rows_with_mileage: totalQuickviewsWithMileage,
     quickview_rows_with_auction_end: totalQuickviewsWithAuctionEnd,
     rows_excluded_missing_vin: totalDetailMissingVin + totalMissingVinWithoutDetail,
+    rows_excluded_mileage_over_limit: totalMileageOverLimit,
+    rows_excluded_age_over_limit: totalAgeOverLimit,
     detail_pages_queued: totalDetailQueued,
     detail_pages_attempted: totalDetailAttempted,
     detail_pages_fetched: totalDetailFetched,

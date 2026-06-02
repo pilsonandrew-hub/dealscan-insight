@@ -8,10 +8,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(__dirname, '../src/main.js'), 'utf8');
 
 function loadHelperExports() {
-  const helperStart = source.indexOf('function extractVin');
+  const helperStart = source.indexOf('const HIGH_RUST');
   const helperEnd = source.indexOf('// ── Parse quickviews');
   const helperSource = source.slice(helperStart, helperEnd) + `
-({ extractVin, parseDetailVin, parseAuctionEnd })`;
+({ extractVin, parseDetailVin, parseAuctionEnd, passesFilters })`;
   return vm.runInNewContext(helperSource, {});
 }
 
@@ -45,6 +45,30 @@ describe('ds-govplanet source contract', () => {
     expect(helpers.parseAuctionEnd('', now)).toBeNull();
   });
 
+  test('enforces GovPlanet max mileage and max age input gates before publish', () => {
+    const helpers = loadHelperExports();
+
+    expect(helpers.passesFilters({
+      year: 2022,
+      price: 12000,
+      state: 'CA',
+      locationText: 'Los Angeles, CA',
+      mileage: 149039,
+      maxMileage: 100000,
+      maxAgeYears: 10,
+    })).toBe(false);
+
+    expect(helpers.passesFilters({
+      year: 2018,
+      price: 12000,
+      state: 'CA',
+      locationText: 'Los Angeles, CA',
+      mileage: 42000,
+      maxMileage: 100000,
+      maxAgeYears: 4,
+    })).toBe(false);
+  });
+
   test('queues capped detail enrichment before rejecting list rows without VIN', () => {
     const detailQueueIndex = source.indexOf('await queue.addRequest({');
     const missingVinRejectIndex = source.indexOf('missing_vin_without_detail');
@@ -76,6 +100,8 @@ describe('ds-govplanet source contract', () => {
     expect(source).toContain('quickview_rows_with_vin');
     expect(source).toContain('quickview_rows_with_auction_end');
     expect(source).toContain('pushed_rows_missing_vin');
+    expect(source).toContain('rows_excluded_mileage_over_limit');
+    expect(source).toContain('rows_excluded_age_over_limit');
     expect(source).toContain('detail_pages_captcha');
     expect(source).toContain('detail_captcha_samples');
     expect(source).toContain('[SOURCE QUALITY PROOF]');
