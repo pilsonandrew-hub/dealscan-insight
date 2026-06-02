@@ -86,6 +86,8 @@ class _Supabase:
                     "is_active": True,
                     "dos_score": 90,
                     "mileage": None,
+                    "year": 2018,
+                    "title": "2018 Ford Transit",
                     "pricing_maturity": "proxy",
                     "vin": None,
                     "condition_grade": "Poor",
@@ -102,6 +104,8 @@ class _Supabase:
                     "is_active": True,
                     "dos_score": 91,
                     "mileage": 25000,
+                    "year": 2025,
+                    "title": "2025 Honda Accord",
                     "pricing_maturity": "market_comp",
                     "vin": "1HGCM82633A004352",
                     "condition_grade": "Good",
@@ -162,6 +166,9 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
         "Poor": 1,
         "Good": 1,
     }
+    assert result["opportunities"]["active_dos80_condition_blocker_basis_counts_sample"] == {
+        "age_mileage_heuristic": 1,
+    }
     assert result["opportunities"]["active_dos80_pricing_maturity_counts_sample"] == {
         "proxy": 1,
         "market_comp": 1,
@@ -177,6 +184,78 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
         "latest_dealer_sale_date": None,
         "ready_for_market_comp_pricing": False,
     }
+
+
+def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "explicit-damage",
+                "is_active": True,
+                "dos_score": 92,
+                "mileage": 30000,
+                "year": 2024,
+                "title": "2024 Ford F-150",
+                "pricing_maturity": "market_comp",
+                "vin": "1FTFW1E50PFA12345",
+                "condition_grade": "Poor",
+                "source_site": "gsaauctions",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.9,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": "Runs but has frame damage.",
+                    "damage_type": "frame damage",
+                },
+            },
+            {
+                "id": "old-mileage",
+                "is_active": True,
+                "dos_score": 89,
+                "mileage": 87540,
+                "year": 2017,
+                "title": "2017 Chevrolet Tahoe",
+                "pricing_maturity": "market_comp",
+                "vin": "1GNSKCKC0HR123456",
+                "condition_grade": "Poor",
+                "source_site": "jjkane",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.9,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+            },
+        ],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["opportunities"]["active_dos80_condition_blocker_basis_counts_sample"] == {
+        "explicit_negative_condition_signal": 1,
+        "age_mileage_heuristic": 1,
+    }
+    breakdown_by_id = {
+        item["id"]: item
+        for item in result["opportunities"]["active_dos80_gate_breakdown"]
+    }
+    assert breakdown_by_id["explicit-damage"]["signals"]["condition_blocker_basis"] == "explicit_negative_condition_signal"
+    assert breakdown_by_id["old-mileage"]["signals"]["condition_blocker_basis"] == "age_mileage_heuristic"
 
 
 def test_pipeline_truth_requires_usable_market_prices(monkeypatch):

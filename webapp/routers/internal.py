@@ -11,6 +11,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from backend.business_rules.constants import ALERTS_ENABLED_PRODUCTION_DEFAULT
 from backend.ingest.alert_gating import evaluate_alert_gate
+from backend.ingest.condition import score_condition
 from webapp.database import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,7 @@ def _alert_gate_breakdown(rows: list[dict[str, Any]], *, limit: int = 25) -> lis
     for row in rows[:limit]:
         gate = evaluate_alert_gate(row)
         signals = gate.get("signals") or {}
+        condition_blocker_basis = _condition_blocker_basis(row)
         breakdown.append({
             "id": row.get("id"),
             "source_site": row.get("source_site"),
@@ -179,6 +181,7 @@ def _alert_gate_breakdown(rows: list[dict[str, Any]], *, limit: int = 25) -> lis
                 "confidence": signals.get("confidence"),
                 "mileage": signals.get("mileage"),
                 "condition_grade": signals.get("condition_grade"),
+                "condition_blocker_basis": condition_blocker_basis,
                 "current_bid_trust_score": signals.get("current_bid_trust_score"),
             },
         })
@@ -193,6 +196,90 @@ def _gate_blocker_counts(breakdown: list[dict[str, Any]]) -> dict[str, int]:
     return dict(counter.most_common(20))
 
 
+_EXPLICIT_NEGATIVE_CONDITION_SIGNALS = frozenset({
+    "flood",
+    "fire",
+    "hail",
+    "storm",
+    "water damage",
+    "salvage",
+    "frame damage",
+    "structural damage",
+    "rollover",
+    "totaled",
+    "no start",
+    "not running",
+    "does not run",
+    "non-runner",
+    "non runner",
+    "will not start",
+    "won't start",
+    "grade_1",
+    "grade_2",
+    "needs work",
+    "parts only",
+    "wrecked",
+    "branded title",
+    "rebuilt",
+    "odometer rollback",
+    "lemon",
+})
+
+
+def _raw_data(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("raw_data")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _pick_row_or_raw(row: dict[str, Any], *keys: str) -> Any:
+    raw = _raw_data(row)
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+        value = raw.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _condition_blocker_basis(row: dict[str, Any]) -> Optional[str]:
+    condition_grade = str(row.get("condition_grade") or "").strip().lower()
+    if condition_grade not in {"", "poor", "unknown"}:
+        return None
+
+    title = str(_pick_row_or_raw(row, "title") or "")
+    description = str(_pick_row_or_raw(row, "description", "details", "condition_notes") or "")
+    damage_type = str(_pick_row_or_raw(row, "damage_type", "damage", "title_status") or "")
+    mileage = _pick_row_or_raw(row, "mileage")
+    year = _pick_row_or_raw(row, "year")
+
+    condition = score_condition(
+        title=title,
+        description=description,
+        mileage=mileage or 0,
+        year=year or 0,
+        damage_type=damage_type,
+    )
+    signals = {str(signal).lower() for signal in condition.get("condition_signals") or []}
+    if signals & _EXPLICIT_NEGATIVE_CONDITION_SIGNALS:
+        return "explicit_negative_condition_signal"
+    if year or mileage:
+        return "age_mileage_heuristic"
+    if title or description or damage_type:
+        return "source_text_without_negative_signal"
+    return "missing_condition_evidence"
+
+
+def _condition_blocker_basis_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for row in rows:
+        basis = _condition_blocker_basis(row)
+        if basis:
+            counter[basis] += 1
+    return dict(counter.most_common(20))
+
+
 def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
@@ -201,7 +288,7 @@ def build_pipeline_truth() -> dict[str, Any]:
 
     opp_rows = _safe_rows(
         "opportunities",
-        "id,is_active,dos_score,score,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid",
+        "id,is_active,dos_score,score,title,year,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid,raw_data",
         order=("created_at", True),
         limit=1000,
     )
@@ -249,6 +336,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "active_dos80_condition_unverified_sample": sum(1 for row in active_dos80 if str(row.get("condition_grade") or "").lower() in {"", "poor", "unknown"}),
             "source_counts_sample": _status_counts(active_dos80, "source_site"),
             "active_dos80_condition_counts_sample": _status_counts(active_dos80, "condition_grade"),
+            "active_dos80_condition_blocker_basis_counts_sample": _condition_blocker_basis_counts(active_dos80),
             "active_dos80_pricing_maturity_counts_sample": _status_counts(active_dos80, "pricing_maturity"),
             "active_dos80_alert_eligible_sample": sum(1 for row in active_dos80_gate_breakdown if row.get("eligible") is True),
             "active_dos80_gate_blocker_counts_sample": _gate_blocker_counts(active_dos80_gate_breakdown),

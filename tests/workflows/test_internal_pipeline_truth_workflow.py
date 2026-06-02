@@ -11,4 +11,5 @@ def test_internal_pipeline_truth_workflow_prints_gate_aggregates():
     assert "active_dos80_gate_blocker_counts_sample" in text
     assert "active_dos80_alert_eligible_sample" in text
     assert "active_dos80_condition_counts_sample" in text
+    assert "active_dos80_condition_blocker_basis_counts_sample" in text
     assert "active_dos80_pricing_maturity_counts_sample" in text
