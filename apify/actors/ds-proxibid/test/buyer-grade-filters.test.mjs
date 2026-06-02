@@ -40,6 +40,16 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(scraper.parseMileage(text)).toBe(44321);
   });
 
+  test('does not treat Proxibid driving directions as odometer mileage', () => {
+    expect(scraper.parseMileage('Driving Directions: Approximately 12.4 miles west of I-35 and Hwy 6 Intersection')).toBeNull();
+    expect(scraper.parseMileage('Driving Directions: 4 Miles West of US Hwy 27 on State Rd 66 Sebring Florida.')).toBeNull();
+  });
+
+  test('still extracts odometer-labeled mileage from detail text', () => {
+    expect(scraper.parseMileage('Odometer shows 12,345 miles. VIN: 1GTHK24K58E139687')).toBe(12345);
+    expect(scraper.parseMileage('Seller notes: 44,321 Miles on Meter Serial Number: 1GTHK24K58E139687')).toBe(44321);
+  });
+
   test('targets the Cars menu selections directly before VIN/odometer detail extraction', () => {
     const navigationIndex = source.indexOf("const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];");
     const selectableIndex = source.indexOf('function selectedTargetCategories(rawTargetCategories)');
