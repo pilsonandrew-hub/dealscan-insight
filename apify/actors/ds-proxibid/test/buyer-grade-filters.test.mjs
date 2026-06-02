@@ -111,7 +111,25 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(source).toContain('source_navigation_path');
     expect(source).toContain('actor_timeout_secs_expected: 900');
     expect(source).toContain('await Actor.pushData(proof)');
-    expect(source).toContain('.filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)');
+    expect(source).toContain('!lot.rejected_after_detail');
+    expect(source).toContain('applyBuyerGradeFilters(lot).length === 0');
+  });
+
+  test('requires VIN and mileage before publishing Proxibid opportunity rows', () => {
+    expect(source).toContain('rows_excluded_missing_required_data');
+    expect(source).toContain('missing_required_data');
+    expect(source).toContain('lot.vin && lot.mileage');
+    expect(source).toContain('pushed_rows_total');
+    expect(source).toContain('pushed_rows_with_vin');
+    expect(source).toContain('pushed_rows_with_mileage');
+  });
+
+  test('uses a non-empty webhook secret fallback and logs real webhook HTTP status', () => {
+    expect(source).toContain('DEFAULT_WEBHOOK_SECRET');
+    expect(source).toContain("process.env.WEBHOOK_SECRET || DEFAULT_WEBHOOK_SECRET");
+    expect(source).toContain('const webhookResponse = await fetch');
+    expect(source).toContain('webhookResponse.status');
+    expect(source).toContain('webhookResponse.ok');
   });
 
 });

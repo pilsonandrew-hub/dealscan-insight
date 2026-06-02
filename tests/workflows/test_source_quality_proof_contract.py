@@ -67,7 +67,9 @@ def test_proxibid_actor_emits_non_opportunity_enrichment_proof_record():
 
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     text = ACTOR.read_text()
-    assert ".filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)" in text
+    assert '!lot.rejected_after_detail' in text
+    assert 'applyBuyerGradeFilters(lot).length === 0' in text
+    assert 'lot.vin && lot.mileage' in text
     assert 'mileage_over_50k' in text
     assert 'condition_reject' in text
     assert 'rejected_after_detail' in text

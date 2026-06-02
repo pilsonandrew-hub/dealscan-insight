@@ -21,6 +21,7 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'proxibid';
 const BASE = 'https://www.proxibid.com';
+const DEFAULT_WEBHOOK_SECRET = 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
 const actorRunId = process.env.APIFY_ACTOR_RUN_ID || process.env.APIFY_RUN_ID || null;
 
 // Vehicle category pages to scrape. Keep focused car subcategories first to improve
@@ -156,11 +157,18 @@ const enrichmentProof = {
     rejected_rows_total: 0,
     accepted_rows_with_vin: 0,
     accepted_rows_with_mileage: 0,
+    pushed_rows_total: 0,
+    pushed_rows_with_vin: 0,
+    pushed_rows_with_mileage: 0,
+    rows_excluded_missing_required_data: 0,
+    rows_excluded_missing_vin: 0,
+    rows_excluded_missing_mileage: 0,
     enriched_rows_accepted: 0,
     enriched_rows_rejected: 0,
     rejection_reasons: {},
     accepted_enriched_samples: [],
     rejected_enriched_samples: [],
+    excluded_missing_required_samples: [],
     input_contract: {
         category_navigation_path: CATEGORY_NAVIGATION_PATH,
         targeted_categories: TARGET_CATEGORIES.map(category => category.label),
@@ -551,10 +559,21 @@ function finalizeEnrichmentProof(lotsToPush) {
     const accepted = lotsToPush;
     const acceptedEnriched = accepted.filter(lot => lot.detail_enriched);
     const rejected = passingLots.filter(lot => lot.rejected_after_detail);
+    const missingRequired = passingLots.filter(lot => (
+        !lot.rejected_after_detail
+        && applyBuyerGradeFilters(lot).length === 0
+        && (!lot.vin || !lot.mileage)
+    ));
     enrichmentProof.accepted_rows_total = accepted.length;
     enrichmentProof.rejected_rows_total = rejected.length;
     enrichmentProof.accepted_rows_with_vin = accepted.filter(lot => lot.vin).length;
     enrichmentProof.accepted_rows_with_mileage = accepted.filter(lot => lot.mileage).length;
+    enrichmentProof.pushed_rows_total = accepted.length;
+    enrichmentProof.pushed_rows_with_vin = accepted.filter(lot => lot.vin).length;
+    enrichmentProof.pushed_rows_with_mileage = accepted.filter(lot => lot.mileage).length;
+    enrichmentProof.rows_excluded_missing_required_data = missingRequired.length;
+    enrichmentProof.rows_excluded_missing_vin = missingRequired.filter(lot => !lot.vin).length;
+    enrichmentProof.rows_excluded_missing_mileage = missingRequired.filter(lot => !lot.mileage).length;
     enrichmentProof.enriched_rows_accepted = acceptedEnriched.length;
     enrichmentProof.enriched_rows_rejected = rejected.length;
     enrichmentProof.rejection_reasons = {};
@@ -565,12 +584,24 @@ function finalizeEnrichmentProof(lotsToPush) {
     }
     enrichmentProof.accepted_enriched_samples = acceptedEnriched.slice(0, 5).map(proofSample);
     enrichmentProof.rejected_enriched_samples = rejected.slice(0, 5).map(proofSample);
+    enrichmentProof.excluded_missing_required_samples = missingRequired.slice(0, 5).map(lot => ({
+        ...proofSample(lot),
+        reject_reasons: [
+            'missing_required_data',
+            ...(!lot.vin ? ['missing_vin'] : []),
+            ...(!lot.mileage ? ['missing_mileage'] : []),
+        ],
+    }));
     return enrichmentProof;
 }
 
 function publishableLots() {
     return passingLots
-        .filter(lot => !lot.rejected_after_detail && applyBuyerGradeFilters(lot).length === 0)
+        .filter(lot => (
+            !lot.rejected_after_detail
+            && applyBuyerGradeFilters(lot).length === 0
+            && lot.vin && lot.mileage
+        ))
         .map(({ detail_text, rejected_after_detail, reject_reasons, ...lot }) => ({
             ...lot,
             source_run_id: actorRunId,
@@ -613,10 +644,10 @@ try {
     try {
         const dataset = await Actor.openDataset();
         const env = Actor.getEnv();
-        await fetch('https://dealscan-insight-production.up.railway.app/api/ingest/apify', {
+        const webhookResponse = await fetch('https://dealscan-insight-production.up.railway.app/api/ingest/apify', {
             method: 'POST',
             headers: {
-                'X-Apify-Webhook-Secret': process.env.WEBHOOK_SECRET || '',
+                'X-Apify-Webhook-Secret': process.env.WEBHOOK_SECRET || DEFAULT_WEBHOOK_SECRET,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -633,7 +664,11 @@ try {
             }),
             signal: AbortSignal.timeout(10000),
         });
-        console.log('[PROXIBID] Webhook sent to Railway ingest');
+        if (webhookResponse.ok) {
+            console.log(`[PROXIBID] Webhook sent to Railway ingest: HTTP ${webhookResponse.status}`);
+        } else {
+            console.warn(`[PROXIBID] Webhook returned HTTP ${webhookResponse.status}`);
+        }
     } catch (webhookErr) {
         console.warn(`[PROXIBID] Webhook failed (non-blocking): ${webhookErr.message}`);
     }
