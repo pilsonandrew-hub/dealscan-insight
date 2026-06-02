@@ -2,6 +2,11 @@ name: Internal Pipeline Truth Check
 
 on:
   workflow_dispatch:
+    inputs:
+      opportunity_id:
+        description: "Optional opportunity id for exact condition-evidence proof"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -17,6 +22,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPPORTUNITY_ID: ${{ github.event.inputs.opportunity_id || '' }}
         run: |
           set -euo pipefail
           python3 <<'PY'
@@ -29,6 +35,7 @@ jobs:
           supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
           backend_base_url = os.environ["BACKEND_BASE_URL"].rstrip("/")
+          opportunity_id = os.environ.get("OPPORTUNITY_ID", "").strip()
 
           req = urllib.request.Request(
               f"{supabase_url}/rest/v1/app_config?select=key,value&key=eq.INTERNAL_API_SECRET",
@@ -89,5 +96,40 @@ jobs:
                   "active_dos80_gate_breakdown_sample": gate_breakdown[:5],
               },
           }
+          if opportunity_id:
+              proof_req = urllib.request.Request(
+                  f"{backend_base_url}/api/internal/opportunity-condition-proof/{opportunity_id}",
+                  headers={"X-Internal-Secret": internal_secret},
+              )
+              try:
+                  with urllib.request.urlopen(proof_req, timeout=45) as resp:
+                      condition_proof = json.loads(resp.read().decode())
+              except urllib.error.HTTPError as exc:
+                  print(f"opportunity-condition-proof HTTP {exc.code}", file=sys.stderr)
+                  print(exc.read().decode(errors="replace")[:500], file=sys.stderr)
+                  raise
+              opportunity = condition_proof.get("opportunity") or {}
+              if "condition_evidence_fields" not in opportunity:
+                  print("opportunity condition proof missing condition_evidence_fields", file=sys.stderr)
+                  raise SystemExit(1)
+              sanitized["opportunity_condition_proof"] = {
+                  "selector": condition_proof.get("selector"),
+                  "opportunity": {
+                      "id": opportunity.get("id"),
+                      "source_site": opportunity.get("source_site"),
+                      "title": opportunity.get("title"),
+                      "year": opportunity.get("year"),
+                      "mileage": opportunity.get("mileage"),
+                      "condition_grade": opportunity.get("condition_grade"),
+                      "condition_blocker_basis": opportunity.get("condition_blocker_basis"),
+                      "condition_signals": opportunity.get("condition_signals"),
+                      "source_text_excerpt": opportunity.get("source_text_excerpt"),
+                      "condition_evidence_fields": opportunity.get("condition_evidence_fields"),
+                      "raw_data_keys_present": opportunity.get("raw_data_keys_present"),
+                      "created_at": opportunity.get("created_at"),
+                      "updated_at": opportunity.get("updated_at"),
+                      "listing_id": opportunity.get("listing_id"),
+                  },
+              }
           print(json.dumps(sanitized, indent=2, sort_keys=True))
           PY

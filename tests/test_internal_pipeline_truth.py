@@ -202,6 +202,61 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     }
 
 
+def test_opportunity_condition_proof_uses_detail_text_for_exact_row(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "durango-row",
+                "is_active": True,
+                "dos_score": 91,
+                "mileage": 13983,
+                "year": 2020,
+                "title": "2020 Dodge Durango SRT",
+                "description": "2020 Dodge Durango SRT",
+                "pricing_maturity": "market_comp",
+                "vin": "1C4SDJGJ0LC123456",
+                "condition_grade": "Poor",
+                "source_site": "govdeals",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.9,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": "2020 Dodge Durango SRT",
+                    "detail_text": "Starts and runs. Exterior has minor scratches. Interior is clean.",
+                    "source_run_id": "run-123",
+                },
+            },
+        ],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_opportunity_condition_proof("durango-row")
+
+    assert result["status"] == "ok"
+    assert result["selector"] == {"id": "durango-row"}
+    assert result["opportunity"]["id"] == "durango-row"
+    assert result["opportunity"]["condition_blocker_basis"] == "age_mileage_heuristic"
+    assert result["opportunity"]["condition_signals"] == []
+    assert result["opportunity"]["source_text_excerpt"].startswith("2020 Dodge Durango SRT Starts and runs")
+    assert result["opportunity"]["condition_evidence_fields"] == {
+        "description": {"present": True, "length": len("2020 Dodge Durango SRT"), "matches_title": True},
+        "details": {"present": False, "length": 0, "matches_title": False},
+        "condition_notes": {"present": False, "length": 0, "matches_title": False},
+        "detail_text": {"present": True, "length": len("Starts and runs. Exterior has minor scratches. Interior is clean."), "matches_title": False},
+        "assetLongDesc": {"present": False, "length": 0, "matches_title": False},
+    }
+    assert result["opportunity"]["raw_data_keys_present"] == ["description", "detail_text", "source_run_id"]
+
+
 def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "opportunities": [

@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Path
 
 from backend.business_rules.constants import ALERTS_ENABLED_PRODUCTION_DEFAULT
 from backend.ingest.alert_gating import evaluate_alert_gate
@@ -370,6 +370,73 @@ def _condition_blocker_basis_samples(rows: list[dict[str, Any]], *, limit: int =
     return samples
 
 
+def _condition_evidence_fields(row: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    title_text = " ".join(str(_pick_row_or_raw(row, "title") or "").split()).strip().lower()
+    evidence: dict[str, dict[str, Any]] = {}
+    for key in ("description", "details", "condition_notes", "detail_text", "assetLongDesc"):
+        value = _pick_row_or_raw(row, key)
+        text = " ".join(str(value or "").split()).strip()
+        evidence[key] = {
+            "present": bool(text),
+            "length": len(text),
+            "matches_title": bool(text and text.lower() == title_text),
+        }
+    return evidence
+
+
+def _raw_data_keys_present(row: dict[str, Any]) -> list[str]:
+    raw = _raw_data(row)
+    return sorted(
+        key
+        for key, value in raw.items()
+        if value not in (None, "", [], {})
+    )
+
+
+def _opportunity_condition_proof_row(row: dict[str, Any]) -> dict[str, Any]:
+    sample = _condition_blocker_basis_sample(row) or {}
+    return {
+        "id": row.get("id"),
+        "source_site": row.get("source_site") or row.get("source"),
+        "title": str(_pick_row_or_raw(row, "title") or "") or None,
+        "year": _pick_row_or_raw(row, "year"),
+        "mileage": _pick_row_or_raw(row, "mileage"),
+        "condition_grade": row.get("condition_grade"),
+        "condition_blocker_basis": sample.get("condition_blocker_basis") or _condition_blocker_basis(row),
+        "condition_signals": sample.get("condition_signals") or [],
+        "source_text_excerpt": sample.get("source_text_excerpt") or "",
+        "condition_evidence_fields": _condition_evidence_fields(row),
+        "raw_data_keys_present": _raw_data_keys_present(row),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "listing_id": row.get("listing_id"),
+    }
+
+
+def build_opportunity_condition_proof(opportunity_id: str) -> dict[str, Any]:
+    if supabase_client is None:
+        raise HTTPException(status_code=503, detail="Supabase service client unavailable")
+    clean_id = str(opportunity_id or "").strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="Opportunity id is required")
+
+    rows = _safe_rows(
+        "opportunities",
+        "id,listing_id,title,year,mileage,condition_grade,source_site,created_at,updated_at,raw_data,description",
+        limit=1,
+        filters=[("eq", "id", clean_id)],
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    return {
+        "status": "ok",
+        "generated_at": _now_iso(),
+        "selector": {"id": clean_id},
+        "opportunity": _opportunity_condition_proof_row(rows[0]),
+    }
+
+
 def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
@@ -462,3 +529,13 @@ def pipeline_truth(x_internal_secret: Optional[str] = Header(None, alias="X-Inte
     """Return aggregate-only pipeline truth for governed internal operators."""
     verify_internal_secret(x_internal_secret)
     return build_pipeline_truth()
+
+
+@router.get("/opportunity-condition-proof/{opportunity_id}", include_in_schema=False)
+def opportunity_condition_proof(
+    opportunity_id: str = Path(..., min_length=1),
+    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret"),
+) -> dict[str, Any]:
+    """Return sanitized condition-evidence truth for one governed opportunity row."""
+    verify_internal_secret(x_internal_secret)
+    return build_opportunity_condition_proof(opportunity_id)
