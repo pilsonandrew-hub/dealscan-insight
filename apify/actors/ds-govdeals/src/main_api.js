@@ -104,6 +104,9 @@ const sourceQualityStats = {
     detail_pages_failed: 0,
     detail_vins_found: 0,
     detail_mileages_found: 0,
+    rows_excluded_missing_required_data: 0,
+    rows_excluded_missing_vin: 0,
+    rows_excluded_missing_mileage: 0,
 };
 const capturedApi = {
     apiKey: null,
@@ -354,12 +357,25 @@ const crawler = new PlaywrightCrawler({
             // Step 3: Detail enrichment for VIN/mileage before pushing lots.
             await enrichFromDetailPages(page, passingLots, log, runtimeBudget);
 
-            // Step 4: Push all passing lots after detail enrichment completes
-            for (const lot of passingLots) {
+            const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));
+            const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);
+            sourceQualityStats.rows_excluded_missing_required_data = incompleteLots.length;
+            sourceQualityStats.rows_excluded_missing_vin = incompleteLots.filter(lot => !lot.vin).length;
+            sourceQualityStats.rows_excluded_missing_mileage = incompleteLots.filter(lot => !lot.mileage).length;
+            for (const lot of incompleteLots) {
+                const reasons = [
+                    !lot.vin ? 'missing_vin' : null,
+                    !lot.mileage ? 'missing_mileage' : null,
+                ].filter(Boolean).join(',');
+                log.warning(`[GOVDEALS] Excluding incomplete row after detail enrichment (${reasons}): ${lot.title} ${lot.listing_url}`);
+            }
+
+            // Step 4: Push only rows with required identity and mileage after detail enrichment completes
+            for (const lot of pushableLots) {
                 await Actor.pushData(lot);
             }
-            await pushSourceQualityProof(log);
-            log.info(`[GOVDEALS] Pushed ${passingLots.length} lots to dataset`);
+            await pushSourceQualityProof(log, pushableLots);
+            log.info(`[GOVDEALS] Pushed ${pushableLots.length} lots to dataset; excluded ${incompleteLots.length} incomplete rows`);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');
@@ -504,20 +520,23 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
-async function pushSourceQualityProof(log) {
-    const pushedRowsWithVin = passingLots.filter(lot => Boolean(lot.vin)).length;
-    const pushedRowsWithMileage = passingLots.filter(lot => Boolean(lot.mileage)).length;
+async function pushSourceQualityProof(log, pushedLots = passingLots) {
+    const pushedRowsWithVin = pushedLots.filter(lot => Boolean(lot.vin)).length;
+    const pushedRowsWithMileage = pushedLots.filter(lot => Boolean(lot.mileage)).length;
     const proof = {
         record_type: 'source_quality_proof',
         source_site: 'govdeals',
         generated_at: new Date().toISOString(),
         found_rows_total: totalFound,
         prefilter_passed_rows_total: totalPassed,
-        pushed_rows_total: passingLots.length,
+        pushed_rows_total: pushedLots.length,
         pushed_rows_with_vin: pushedRowsWithVin,
         pushed_rows_with_mileage: pushedRowsWithMileage,
-        pushed_rows_missing_vin: Math.max(0, passingLots.length - pushedRowsWithVin),
-        pushed_rows_missing_mileage: Math.max(0, passingLots.length - pushedRowsWithMileage),
+        pushed_rows_missing_vin: Math.max(0, pushedLots.length - pushedRowsWithVin),
+        pushed_rows_missing_mileage: Math.max(0, pushedLots.length - pushedRowsWithMileage),
+        rows_excluded_missing_required_data: sourceQualityStats.rows_excluded_missing_required_data,
+        rows_excluded_missing_vin: sourceQualityStats.rows_excluded_missing_vin,
+        rows_excluded_missing_mileage: sourceQualityStats.rows_excluded_missing_mileage,
         detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
         detail_pages_fetched: sourceQualityStats.detail_pages_fetched,
         detail_pages_failed: sourceQualityStats.detail_pages_failed,

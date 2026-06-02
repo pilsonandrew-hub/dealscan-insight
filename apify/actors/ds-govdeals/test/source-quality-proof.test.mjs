@@ -51,4 +51,14 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('/\\blot\\s+of\\b/i');
     expect(source).toContain('/\\b(?:jail|prisoner)\\s+(?:van|transport)\\b/i');
   });
+
+  test('keeps detail-enriched rows missing required data out of pushed opportunities', () => {
+    expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
+    expect(source).toContain('const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);');
+    expect(source).toContain('rows_excluded_missing_required_data');
+    expect(source).toContain('rows_excluded_missing_vin');
+    expect(source).toContain('rows_excluded_missing_mileage');
+    expect(source).toContain('for (const lot of pushableLots)');
+    expect(source).toContain('await pushSourceQualityProof(log, pushableLots)');
+  });
 });
