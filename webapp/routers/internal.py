@@ -58,6 +58,14 @@ def _safe_count(table: str, filters: Optional[list[tuple[str, str, Any]]] = None
     return int(getattr(result, "count", None) or 0)
 
 
+def _optional_count(table: str) -> tuple[str, int]:
+    try:
+        return "present", _safe_count(table)
+    except Exception:
+        logger.warning("[PIPELINE_TRUTH] optional table unavailable: %s", table)
+        return "missing", 0
+
+
 def _safe_rows(table: str, select: str, *, order: Optional[tuple[str, bool]] = None, limit: int = 200, filters: Optional[list[tuple[str, str, Any]]] = None) -> list[dict[str, Any]]:
     query = supabase_client.table(table).select(select)
     for method, column, value in filters or []:
@@ -68,6 +76,14 @@ def _safe_rows(table: str, select: str, *, order: Optional[tuple[str, bool]] = N
     result = query.limit(limit).execute()
     rows = getattr(result, "data", None) or []
     return rows if isinstance(rows, list) else []
+
+
+def _optional_rows(table: str, select: str, *, order: Optional[tuple[str, bool]] = None, limit: int = 10) -> list[dict[str, Any]]:
+    try:
+        return _safe_rows(table, select, order=order, limit=limit)
+    except Exception:
+        logger.warning("[PIPELINE_TRUTH] optional rows unavailable: %s", table)
+        return []
 
 
 def _status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -108,6 +124,16 @@ def _alert_gate_breakdown(rows: list[dict[str, Any]], *, limit: int = 25) -> lis
 def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
+
+    market_prices_status, market_prices_rows = _optional_count("market_prices")
+    dealer_sales_status, dealer_sales_rows = _optional_count("dealer_sales")
+    latest_dealer_sale_rows = _optional_rows(
+        "dealer_sales",
+        "id,sale_date",
+        order=("sale_date", True),
+        limit=1,
+    ) if dealer_sales_status == "present" else []
+    latest_dealer_sale_date = latest_dealer_sale_rows[0].get("sale_date") if latest_dealer_sale_rows else None
 
     opp_rows = _safe_rows(
         "opportunities",
@@ -163,6 +189,17 @@ def build_pipeline_truth() -> dict[str, Any]:
             "recent_count": len(webhook_rows),
             "status_counts": _status_counts(webhook_rows, "processing_status"),
             "latest": webhook_rows[:10],
+        },
+        "pricing_substrate": {
+            "market_prices_table": market_prices_status,
+            "market_prices_rows": market_prices_rows,
+            "dealer_sales_table": dealer_sales_status,
+            "dealer_sales_rows": dealer_sales_rows,
+            "latest_dealer_sale_date": latest_dealer_sale_date,
+            "ready_for_market_comp_pricing": bool(
+                market_prices_rows > 0
+                or (dealer_sales_rows >= 2 and latest_dealer_sale_date is not None)
+            ),
         },
         "alerts": {
             "runtime": _alerts_runtime_status(),

@@ -76,6 +76,10 @@ class _Supabase:
             "webhook_log": [{"id": "w1", "processing_status": "processed", "source": "govdeals"}],
             "alert_log": [{"id": "a1", "sent_at": "2026-05-20T02:11:32Z", "delivery_state": "sent"}],
             "ingest_delivery_log": [{"id": "d1", "created_at": "2026-05-20T02:11:32Z", "channel": "telegram_alert", "status": "sent"}],
+            "dealer_sales": [
+                {"id": "sale-1", "sale_date": None, "make": "Ford", "model": "F150 HAS"},
+                {"id": "sale-2", "sale_date": None, "make": "Ford", "model": "F-550"},
+            ],
         }[name]
         return _Query(rows)
 
@@ -97,6 +101,14 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     assert allowed["eligible"] is True
     assert allowed["blocking_reasons"] == []
     assert "latest" in result["webhooks"]
+    assert result["pricing_substrate"] == {
+        "market_prices_table": "missing",
+        "market_prices_rows": 0,
+        "dealer_sales_table": "present",
+        "dealer_sales_rows": 2,
+        "latest_dealer_sale_date": None,
+        "ready_for_market_comp_pricing": False,
+    }
 
 
 def test_pipeline_truth_reports_alerts_runtime_status(monkeypatch):
