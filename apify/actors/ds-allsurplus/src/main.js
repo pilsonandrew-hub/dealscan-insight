@@ -1,7 +1,9 @@
 import { Actor } from 'apify';
 
+const DEFAULT_WEBHOOK_SECRET = 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
+
 if (!process.env.WEBHOOK_SECRET) {
-    console.warn('[ALLSURPLUS] WARNING: WEBHOOK_SECRET env var not set');
+    console.warn('[ALLSURPLUS] WARNING: WEBHOOK_SECRET env var not set; using deployed fallback secret');
 }
 
 await Actor.init();
@@ -327,8 +329,19 @@ const {
 const sessionId = `ds-allsurplus-${Date.now()}`;
 const seenIds = new Set();
 const allListings = [];
+const excludedMissingRequiredSamples = [];
 let totalFound = 0;
 let totalPassed = 0;
+let listRowsWithVin = 0;
+let listRowsWithMileage = 0;
+let detailPagesAttempted = 0;
+let detailPagesFetched = 0;
+let detailPagesFailed = 0;
+let detailVinsFound = 0;
+let detailMileagesFound = 0;
+let rowsExcludedMissingRequiredData = 0;
+let rowsExcludedMissingVin = 0;
+let rowsExcludedMissingMileage = 0;
 
 console.log(`[AllSurplus] Starting maestro API scraper | sessionId=${sessionId}`);
 
@@ -412,6 +425,9 @@ for (const searchText of searchTerms) {
 
                 const mileageRaw = item.mileage || item.meter_reading || '';
                 const mileageNum = parseInt(mileageRaw.toString().replace(/,/g, ''), 10);
+                if (parseVin(item.vinserial || item.vin || '')) listRowsWithVin++;
+                if (!isNaN(mileageNum) && mileageNum > 0) listRowsWithMileage++;
+
                 if (!isNaN(mileageNum) && mileageNum > 0 && mileageNum > maxMileage) {
                     console.log('[SKIP-MILEAGE]', title, '| mileage:', mileageNum);
                     continue;
@@ -471,14 +487,46 @@ for (const searchText of searchTerms) {
                 };
                 
                 try {
+                    detailPagesAttempted++;
                     const detail = await getAssetDetail(item.assetId, item.accountId);
+                    detailPagesFetched++;
                     enrichListingFromDetail(listing, detail);
                 } catch (err) {
+                    detailPagesFailed++;
                     console.warn(`[DETAIL] Failed ${itemId} — ${err.message}`);
                 }
 
+                if (listing.vin) detailVinsFound++;
+                if (listing.mileage) detailMileagesFound++;
+
                 if (listing.mileage && listing.mileage > maxMileage) {
                     console.log(`[SKIP-MILEAGE-DETAIL] ${listing.title} | mileage: ${listing.mileage}`);
+                    continue;
+                }
+
+                const missingRequiredReasons = [];
+                if (!listing.vin) missingRequiredReasons.push('missing_vin_after_detail');
+                if (!listing.mileage) missingRequiredReasons.push('missing_mileage_after_detail');
+                if (missingRequiredReasons.length > 0) {
+                    rowsExcludedMissingRequiredData++;
+                    if (!listing.vin) rowsExcludedMissingVin++;
+                    if (!listing.mileage) rowsExcludedMissingMileage++;
+                    if (excludedMissingRequiredSamples.length < 10) {
+                        excludedMissingRequiredSamples.push({
+                            listing_id: listing.listing_id,
+                            listing_url: listing.listing_url,
+                            title: listing.title,
+                            year: listing.year,
+                            make: listing.make,
+                            model: listing.model,
+                            state: listing.state,
+                            mileage: listing.mileage,
+                            has_vin: Boolean(listing.vin),
+                            detail_enriched: Boolean(listing.detail_enriched),
+                            rejection_reasons: missingRequiredReasons,
+                        });
+                    }
+                    console.log(`[SKIP-REQUIRED-DATA] ${listing.title} | ${missingRequiredReasons.join(',')}`);
                     continue;
                 }
 
@@ -511,14 +559,36 @@ for (const searchText of searchTerms) {
 
 console.log(`[ALLSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed} | Unique: ${seenIds.size}`);
 
+await Actor.pushData({
+    record_type: 'source_quality_proof',
+    source_site: 'allsurplus',
+    run_id: process.env.APIFY_ACTOR_RUN_ID ?? 'local',
+    generated_at: new Date().toISOString(),
+    found_rows_total: totalFound,
+    unique_rows_total: seenIds.size,
+    pushed_rows_total: totalPassed,
+    list_rows_with_vin: listRowsWithVin,
+    list_rows_with_mileage: listRowsWithMileage,
+    detail_pages_attempted: detailPagesAttempted,
+    detail_pages_fetched: detailPagesFetched,
+    detail_pages_failed: detailPagesFailed,
+    detail_vins_found: detailVinsFound,
+    detail_mileages_found: detailMileagesFound,
+    rows_excluded_missing_required_data: rowsExcludedMissingRequiredData,
+    rows_excluded_missing_vin: rowsExcludedMissingVin,
+    rows_excluded_missing_mileage: rowsExcludedMissingMileage,
+    excluded_missing_required_samples: excludedMissingRequiredSamples,
+});
+
 // ── Webhook notification ──────────────────────────────────────────────────────
 if (totalPassed > 0) {
     try {
+        const effectiveWebhookSecret = process.env.WEBHOOK_SECRET || DEFAULT_WEBHOOK_SECRET;
         const webhookResp = await fetch('https://dealscan-insight-production.up.railway.app/api/ingest/apify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Apify-Webhook-Secret': process.env.WEBHOOK_SECRET || '',
+                'X-Apify-Webhook-Secret': effectiveWebhookSecret,
             },
             body: JSON.stringify({
                 source: 'allsurplus',

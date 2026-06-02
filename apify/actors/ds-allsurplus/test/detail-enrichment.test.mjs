@@ -18,4 +18,34 @@ describe('AllSurplus detail enrichment source contract', () => {
     expect(source).toContain('if (listing.mileage && listing.mileage > maxMileage)');
     expect(source).toContain('await Actor.pushData(listing)');
   });
+
+  it('keeps detail-enriched rows missing required VIN or mileage out of pushed opportunities', () => {
+    const requiredGate = source.slice(
+      source.indexOf('const missingRequiredReasons = []'),
+      source.indexOf('if (REJECT_PATTERNS.some')
+    );
+
+    expect(requiredGate).toContain('missing_vin_after_detail');
+    expect(requiredGate).toContain('missing_mileage_after_detail');
+    expect(requiredGate).toContain('rowsExcludedMissingRequiredData++');
+    expect(requiredGate).toContain('continue;');
+    expect(requiredGate.indexOf('continue;')).toBeLessThan(source.indexOf('await Actor.pushData(listing)'));
+  });
+
+  it('emits source-quality proof counters and samples', () => {
+    expect(source).toContain("record_type: 'source_quality_proof'");
+    expect(source).toContain('found_rows_total: totalFound');
+    expect(source).toContain('pushed_rows_total: totalPassed');
+    expect(source).toContain('detail_pages_attempted: detailPagesAttempted');
+    expect(source).toContain('detail_vins_found: detailVinsFound');
+    expect(source).toContain('detail_mileages_found: detailMileagesFound');
+    expect(source).toContain('rows_excluded_missing_required_data: rowsExcludedMissingRequiredData');
+    expect(source).toContain('excluded_missing_required_samples: excludedMissingRequiredSamples');
+  });
+
+  it('does not send an empty webhook secret when actor env vars are absent', () => {
+    expect(source).toContain('DEFAULT_WEBHOOK_SECRET');
+    expect(source).toContain('process.env.WEBHOOK_SECRET || DEFAULT_WEBHOOK_SECRET');
+    expect(source).not.toContain("'X-Apify-Webhook-Secret': process.env.WEBHOOK_SECRET || ''");
+  });
 });
