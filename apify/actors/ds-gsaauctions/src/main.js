@@ -26,7 +26,10 @@ import { Actor } from 'apify';
 
 const SOURCE = 'gsaauctions';
 const API_URL = 'https://www.ppms.gov/gw/auction/ppms/api/v1/auctions';
+const SALES_PREVIEW_URL = 'https://www.ppms.gov/gw/sales/ppms/api/v1/sales/preview/auctions';
 const BASE_UI_URL = 'https://www.gsaauctions.gov';
+const DEFAULT_WEBHOOK_SECRET = 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
+const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
 
 // Vehicle category codes
 const VEHICLE_CATEGORY_CODES = new Set(['300', '310', '320', '330', '340', '350', '360', '370']);
@@ -83,6 +86,33 @@ const CONDITION_REJECT_PATTERNS = [
 
 function normalizeText(v) {
     return String(v ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function stripHtmlToText(value) {
+    return String(value ?? '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function parseVin(text) {
+    const match = String(text ?? '').match(VIN_PATTERN);
+    return match ? match[1].toUpperCase() : null;
+}
+
+function parseMileage(text) {
+    const normalized = String(text ?? '').replace(/,/g, '');
+    const labeled = normalized.match(/\b(?:mileage|odometer|est\.?\s*mi\.?|miles?)[:=\s.-]*(\d{2,7}(?:\.\d+)?)\b/i);
+    if (labeled) return Math.round(parseFloat(labeled[1]));
+
+    const trailing = normalized.match(/\b(\d{2,7}(?:\.\d+)?)\s*(?:miles?|mi\.?)\b/i);
+    return trailing ? Math.round(parseFloat(trailing[1])) : null;
 }
 
 function parseBid(v) {
@@ -144,6 +174,53 @@ async function fetchPage(page, size = 50) {
     return resp.json();
 }
 
+async function fetchLotPreview(lotId) {
+    const resp = await fetch(`${SALES_PREVIEW_URL}/${encodeURIComponent(lotId)}`, {
+        method: 'GET',
+        headers: {
+            'Accept': 'application/json',
+            'Origin': 'https://www.gsaauctions.gov',
+            'Referer': 'https://www.gsaauctions.gov/',
+        },
+        signal: AbortSignal.timeout(20000),
+    });
+
+    if (!resp.ok) {
+        throw new Error(`GSA detail API error: ${resp.status}`);
+    }
+
+    return resp.json();
+}
+
+function parsePreviewDetail(detail) {
+    const auctionDescriptionDTO = detail?.auctionDescriptionDTO ?? {};
+    const imageNames = [
+        ...(detail?.imagesAndDocs?.image ?? []),
+        ...(detail?.imagesAndDocs?.documents ?? []),
+    ].map((item) => [item?.name, item?.description].filter(Boolean).join(' '));
+    const detailText = [
+        detail?.salesDescription,
+        auctionDescriptionDTO.make,
+        auctionDescriptionDTO.model,
+        auctionDescriptionDTO.odometer,
+        auctionDescriptionDTO.itemDescription,
+        auctionDescriptionDTO.specialDescription,
+        auctionDescriptionDTO.additionalInstruction,
+        ...(auctionDescriptionDTO.inspectionInstructions ?? []),
+        ...imageNames,
+    ].filter(Boolean).join(' ');
+    const plainText = stripHtmlToText(detailText);
+    const mileage = parseMileage(`${auctionDescriptionDTO.odometer ?? ''} ${plainText}`);
+
+    return {
+        vin: parseVin(plainText),
+        mileage,
+        description: plainText,
+        title_status: /\bscrap\b/i.test(plainText) ? 'Scrap' : /\bsalvage\b/i.test(plainText) ? 'Salvage' : 'Unknown',
+        detail_text_length: plainText.length,
+    };
+}
+
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
@@ -166,6 +243,17 @@ const currentYear = new Date().getFullYear();
 const seenIds = new Set();
 let totalFound = 0;
 let totalPassed = 0;
+let listRowsWithVin = 0;
+let listRowsWithMileage = 0;
+let detailPagesAttempted = 0;
+let detailPagesFetched = 0;
+let detailPagesFailed = 0;
+let detailVinsFound = 0;
+let detailMileagesFound = 0;
+let rowsExcludedMissingRequiredData = 0;
+let rowsExcludedMissingVin = 0;
+let rowsExcludedMissingMileage = 0;
+const excludedMissingRequiredSamples = [];
 
 console.log('[GSA] Fetching total page count...');
 
@@ -203,6 +291,14 @@ for (let page = startPage; page <= totalPages; page++) {
         seenIds.add(lotId);
 
         const title = normalizeText(item.lotName || '');
+        const listText = [
+            item.lotName,
+            item.lotDescription,
+            item.salesDescription,
+            item.uri,
+        ].filter(Boolean).join(' ');
+        if (parseVin(listText)) listRowsWithVin++;
+        if (parseMileage(listText)) listRowsWithMileage++;
         const categoryCode = String(item.categoryCode ?? '');
         const location = item.location ?? {};
         const stateCode = normalizeText(location.state || '');
@@ -234,7 +330,7 @@ for (let page = startPage; page <= totalPages; page++) {
 
         if (!year || year < minYear || year > maxYear) continue;
 
-        const listingId = String(auctionId || lotId);
+        const listingId = String(lotId);
         const listingUrl = `${BASE_UI_URL}/auctions/preview/${listingId}`;
 
         // Image URL construction
@@ -271,9 +367,61 @@ for (let page = startPage; page <= totalPages; page++) {
             scraped_at: new Date().toISOString(),
         };
 
+        let detail = null;
+        try {
+            detailPagesAttempted++;
+            detail = await fetchLotPreview(lotId);
+            detailPagesFetched++;
+        } catch (err) {
+            detailPagesFailed++;
+            console.warn(`[GSA DETAIL] Failed ${lotId}: ${err.message}`);
+        }
+
+        if (detail) {
+            const parsedDetail = parsePreviewDetail(detail);
+            if (parsedDetail.vin) detailVinsFound++;
+            if (parsedDetail.mileage) detailMileagesFound++;
+            record.vin = parsedDetail.vin;
+            record.mileage = parsedDetail.mileage;
+            record.description = parsedDetail.description;
+            record.title_status = parsedDetail.title_status;
+            record.detail_enriched = true;
+            record.detail_text_length = parsedDetail.detail_text_length;
+        } else {
+            record.detail_enriched = false;
+        }
+
+        if (!record.vin || !record.mileage) {
+            const missingReasons = [
+                !record.vin ? 'missing_vin_after_detail' : null,
+                !record.mileage ? 'missing_mileage_after_detail' : null,
+            ].filter(Boolean);
+            rowsExcludedMissingRequiredData++;
+            if (!record.vin) rowsExcludedMissingVin++;
+            if (!record.mileage) rowsExcludedMissingMileage++;
+            if (excludedMissingRequiredSamples.length < 10) {
+                excludedMissingRequiredSamples.push({
+                    title,
+                    listing_url: listingUrl,
+                    lot_id: lotId,
+                    current_bid: effectiveBid,
+                    year,
+                    make,
+                    model,
+                    missing_vin: !record.vin,
+                    missing_mileage: !record.mileage,
+                    rejection_reasons: missingReasons,
+                    detail_enriched: record.detail_enriched,
+                    detail_text_length: record.detail_text_length ?? 0,
+                });
+            }
+            console.log(`[GSA EXCLUDE] reasons=${missingReasons.join(',')} | ${title}`);
+            continue;
+        }
+
         await Actor.pushData(record);
         totalPassed++;
-        console.log(`[PASS] ${title} | bid=$${effectiveBid} | ${stateCode} | end=${item.endDate}`);
+        console.log(`[PASS] ${title} | bid=$${effectiveBid} | ${stateCode} | vin=${record.vin} mileage=${record.mileage} | end=${item.endDate}`);
     }
 
     // Polite delay between pages
@@ -282,9 +430,28 @@ for (let page = startPage; page <= totalPages; page++) {
     }
 }
 
+await Actor.pushData({
+    record_type: 'source_quality_proof',
+    source_site: SOURCE,
+    found_rows_total: totalFound,
+    pushed_rows_total: totalPassed,
+    list_rows_with_vin: listRowsWithVin,
+    list_rows_with_mileage: listRowsWithMileage,
+    detail_pages_attempted: detailPagesAttempted,
+    detail_pages_fetched: detailPagesFetched,
+    detail_pages_failed: detailPagesFailed,
+    detail_vins_found: detailVinsFound,
+    detail_mileages_found: detailMileagesFound,
+    rows_excluded_missing_required_data: rowsExcludedMissingRequiredData,
+    rows_excluded_missing_vin: rowsExcludedMissingVin,
+    rows_excluded_missing_mileage: rowsExcludedMissingMileage,
+    excluded_missing_required_samples: excludedMissingRequiredSamples,
+    scraped_at: new Date().toISOString(),
+});
+
 // Webhook notification
 const effectiveWebhookUrl = webhookUrl || process.env.WEBHOOK_URL || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
-const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || '';
+const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || DEFAULT_WEBHOOK_SECRET;
 
 if (effectiveWebhookUrl && totalPassed > 0) {
     try {
