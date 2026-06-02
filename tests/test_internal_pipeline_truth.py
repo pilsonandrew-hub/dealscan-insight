@@ -23,16 +23,62 @@ class _Query:
     def __init__(self, rows, count=None):
         self.rows = rows
         self.count = count if count is not None else len(rows)
+        self.filters = []
+        self._limit = None
+        self._order = None
 
     def select(self, *_args, **_kwargs): return self
-    def eq(self, *_args, **_kwargs): return self
-    def limit(self, *_args, **_kwargs): return self
-    def order(self, *_args, **_kwargs): return self
-    def execute(self): return SimpleNamespace(data=self.rows, count=self.count)
+    def eq(self, column, value):
+        self.filters.append(("eq", column, value))
+        return self
+    def gt(self, column, value):
+        self.filters.append(("gt", column, value))
+        return self
+    def gte(self, column, value):
+        self.filters.append(("gte", column, value))
+        return self
+    def not_(self, column, operator, value):
+        self.filters.append(("not_", column, operator, value))
+        return self
+    def limit(self, value):
+        self._limit = value
+        return self
+    def order(self, column, desc=False, **_kwargs):
+        self._order = (column, desc)
+        return self
+    def execute(self):
+        rows = list(self.rows)
+        for filter_spec in self.filters:
+            method, column, *values = filter_spec
+            if method == "eq":
+                rows = [row for row in rows if row.get(column) == values[0]]
+            elif method == "gt":
+                rows = [row for row in rows if row.get(column) is not None and row.get(column) > values[0]]
+            elif method == "gte":
+                rows = [row for row in rows if row.get(column) is not None and str(row.get(column)) >= str(values[0])]
+            elif method == "not_":
+                operator, value = values
+                if operator == "is" and value == "null":
+                    rows = [row for row in rows if row.get(column) is not None]
+        if self._order:
+            column, desc = self._order
+            rows = sorted(rows, key=lambda row: row.get(column) or "", reverse=desc)
+        count = len(rows)
+        if self._limit is not None:
+            rows = rows[: self._limit]
+        return SimpleNamespace(data=rows, count=count)
 
 
 class _Supabase:
+    def __init__(self, overrides=None):
+        self.overrides = overrides or {}
+
     def table(self, name):
+        if name in self.overrides:
+            rows = self.overrides[name]
+            if rows is None:
+                raise RuntimeError(f"{name} missing")
+            return _Query(rows)
         rows = {
             "opportunities": [
                 {
@@ -80,7 +126,10 @@ class _Supabase:
                 {"id": "sale-1", "sale_date": None, "make": "Ford", "model": "F150 HAS"},
                 {"id": "sale-2", "sale_date": None, "make": "Ford", "model": "F-550"},
             ],
+            "market_prices": None,
         }[name]
+        if rows is None:
+            raise RuntimeError(f"{name} missing")
         return _Query(rows)
 
 
@@ -104,11 +153,87 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     assert result["pricing_substrate"] == {
         "market_prices_table": "missing",
         "market_prices_rows": 0,
+        "market_prices_usable_rows": 0,
         "dealer_sales_table": "present",
         "dealer_sales_rows": 2,
+        "dealer_sales_usable_rows": 0,
         "latest_dealer_sale_date": None,
         "ready_for_market_comp_pricing": False,
     }
+
+
+def test_pipeline_truth_requires_usable_market_prices(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "market_prices": [
+            {
+                "id": "market-1",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+        ],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["pricing_substrate"]["market_prices_table"] == "present"
+    assert result["pricing_substrate"]["market_prices_rows"] == 1
+    assert result["pricing_substrate"]["market_prices_usable_rows"] == 1
+    assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is True
+
+
+def test_pipeline_truth_rejects_empty_or_stale_market_prices(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "market_prices": [
+            {
+                "id": "market-1",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2020-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+            {
+                "id": "market-2",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": None,
+            },
+        ],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["pricing_substrate"]["market_prices_table"] == "present"
+    assert result["pricing_substrate"]["market_prices_rows"] == 2
+    assert result["pricing_substrate"]["market_prices_usable_rows"] == 0
+    assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is False
+
+
+def test_pipeline_truth_accepts_recent_positive_dealer_sales(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "market_prices": [],
+        "dealer_sales": [
+            {"id": "sale-1", "sale_price": 22000, "sale_date": "2099-01-01T00:00:00+00:00"},
+            {"id": "sale-2", "sale_price": 23000, "sale_date": "2099-01-02T00:00:00+00:00"},
+        ],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["pricing_substrate"]["market_prices_table"] == "present"
+    assert result["pricing_substrate"]["market_prices_rows"] == 0
+    assert result["pricing_substrate"]["dealer_sales_rows"] == 2
+    assert result["pricing_substrate"]["dealer_sales_usable_rows"] == 2
+    assert result["pricing_substrate"]["latest_dealer_sale_date"] == "2099-01-02T00:00:00+00:00"
+    assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is True
 
 
 def test_pipeline_truth_reports_alerts_runtime_status(monkeypatch):

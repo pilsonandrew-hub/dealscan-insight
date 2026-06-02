@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -53,7 +53,10 @@ def _alerts_runtime_status() -> dict[str, Any]:
 def _safe_count(table: str, filters: Optional[list[tuple[str, str, Any]]] = None) -> int:
     query = supabase_client.table(table).select("id", count="exact")
     for method, column, value in filters or []:
-        query = getattr(query, method)(column, value)
+        if method == "not_":
+            query = query.not_(column, *value)
+        else:
+            query = getattr(query, method)(column, value)
     result = query.limit(1).execute()
     return int(getattr(result, "count", None) or 0)
 
@@ -64,6 +67,14 @@ def _optional_count(table: str) -> tuple[str, int]:
     except Exception:
         logger.warning("[PIPELINE_TRUTH] optional table unavailable: %s", table)
         return "missing", 0
+
+
+def _optional_filtered_count(table: str, filters: list[tuple[str, str, Any]]) -> int:
+    try:
+        return _safe_count(table, filters)
+    except Exception:
+        logger.warning("[PIPELINE_TRUTH] optional filtered count unavailable: %s", table)
+        return 0
 
 
 def _safe_rows(table: str, select: str, *, order: Optional[tuple[str, bool]] = None, limit: int = 200, filters: Optional[list[tuple[str, str, Any]]] = None) -> list[dict[str, Any]]:
@@ -84,6 +95,59 @@ def _optional_rows(table: str, select: str, *, order: Optional[tuple[str, bool]]
     except Exception:
         logger.warning("[PIPELINE_TRUTH] optional rows unavailable: %s", table)
         return []
+
+
+def _pricing_substrate_truth() -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    recent_sale_cutoff = (now - timedelta(days=365)).isoformat()
+
+    market_prices_status, market_prices_rows = _optional_count("market_prices")
+    market_prices_usable_rows = 0
+    if market_prices_status == "present":
+        market_prices_usable_rows = _optional_filtered_count(
+            "market_prices",
+            [
+                ("gt", "avg_price", 0),
+                ("gt", "low_price", 0),
+                ("gt", "high_price", 0),
+                ("gte", "sample_size", 2),
+                ("gte", "expires_at", now.isoformat()),
+                ("not_", "source", ("is", "null")),
+            ],
+        )
+
+    dealer_sales_status, dealer_sales_rows = _optional_count("dealer_sales")
+    dealer_sales_usable_rows = 0
+    if dealer_sales_status == "present":
+        dealer_sales_usable_rows = _optional_filtered_count(
+            "dealer_sales",
+            [
+                ("gt", "sale_price", 0),
+                ("gte", "sale_date", recent_sale_cutoff),
+            ],
+        )
+
+    latest_dealer_sale_rows = _optional_rows(
+        "dealer_sales",
+        "id,sale_date",
+        order=("sale_date", True),
+        limit=1,
+    ) if dealer_sales_status == "present" else []
+    latest_dealer_sale_date = latest_dealer_sale_rows[0].get("sale_date") if latest_dealer_sale_rows else None
+
+    return {
+        "market_prices_table": market_prices_status,
+        "market_prices_rows": market_prices_rows,
+        "market_prices_usable_rows": market_prices_usable_rows,
+        "dealer_sales_table": dealer_sales_status,
+        "dealer_sales_rows": dealer_sales_rows,
+        "dealer_sales_usable_rows": dealer_sales_usable_rows,
+        "latest_dealer_sale_date": latest_dealer_sale_date,
+        "ready_for_market_comp_pricing": bool(
+            market_prices_usable_rows > 0
+            or dealer_sales_usable_rows >= 2
+        ),
+    }
 
 
 def _status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -125,15 +189,7 @@ def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
 
-    market_prices_status, market_prices_rows = _optional_count("market_prices")
-    dealer_sales_status, dealer_sales_rows = _optional_count("dealer_sales")
-    latest_dealer_sale_rows = _optional_rows(
-        "dealer_sales",
-        "id,sale_date",
-        order=("sale_date", True),
-        limit=1,
-    ) if dealer_sales_status == "present" else []
-    latest_dealer_sale_date = latest_dealer_sale_rows[0].get("sale_date") if latest_dealer_sale_rows else None
+    pricing_substrate = _pricing_substrate_truth()
 
     opp_rows = _safe_rows(
         "opportunities",
@@ -190,17 +246,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "status_counts": _status_counts(webhook_rows, "processing_status"),
             "latest": webhook_rows[:10],
         },
-        "pricing_substrate": {
-            "market_prices_table": market_prices_status,
-            "market_prices_rows": market_prices_rows,
-            "dealer_sales_table": dealer_sales_status,
-            "dealer_sales_rows": dealer_sales_rows,
-            "latest_dealer_sale_date": latest_dealer_sale_date,
-            "ready_for_market_comp_pricing": bool(
-                market_prices_rows > 0
-                or (dealer_sales_rows >= 2 and latest_dealer_sale_date is not None)
-            ),
-        },
+        "pricing_substrate": pricing_substrate,
         "alerts": {
             "runtime": _alerts_runtime_status(),
             "total": alerts_total,
