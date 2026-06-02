@@ -20,4 +20,9 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('pushed_rows_missing_mileage');
     expect(source).toContain('await Actor.pushData(proof)');
   });
+
+  test('does not expand pagination beyond the caller maxPages cap', () => {
+    expect(source).not.toContain('Math.max(totalPages, Math.ceil(totalCount / pageSize))');
+    expect(source).toMatch(/Math\.min\(\s*totalPages,\s*Math\.ceil\(totalCount \/ pageSize\),\s*HARD_MAX_PAGES,\s*\)/);
+  });
 });

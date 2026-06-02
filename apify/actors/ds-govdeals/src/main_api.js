@@ -534,7 +534,10 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
     const seenPageSignatures = new Set();
     let zeroNewItemPages = 0;
     let totalCount = null;
-    let totalPages = Number.isFinite(maxPages) ? maxPages : HARD_MAX_PAGES;
+    const requestedMaxPages = Number(maxPages);
+    let totalPages = Number.isFinite(requestedMaxPages) && requestedMaxPages > 0
+        ? requestedMaxPages
+        : HARD_MAX_PAGES;
 
     // Paginate the REST endpoint directly using the Maestro `page` parameter.
     for (let pageNum = 1; pageNum <= Math.min(totalPages, HARD_MAX_PAGES); pageNum++) {
@@ -572,7 +575,8 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             if (resp.total && Number.isFinite(Number(resp.total))) {
                 totalCount = Number(resp.total);
                 totalPages = Math.min(
-                    Math.max(totalPages, Math.ceil(totalCount / pageSize)),
+                    totalPages,
+                    Math.ceil(totalCount / pageSize),
                     HARD_MAX_PAGES,
                 );
             }
