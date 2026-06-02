@@ -11,7 +11,7 @@ function loadHelperExports() {
   const helperStart = source.indexOf('function extractVin');
   const helperEnd = source.indexOf('// ── Parse quickviews');
   const helperSource = source.slice(helperStart, helperEnd) + `
-({ extractVin, parseDetailVin })`;
+({ extractVin, parseDetailVin, parseAuctionEnd })`;
   return vm.runInNewContext(helperSource, {});
 }
 
@@ -34,6 +34,15 @@ describe('ds-govplanet source contract', () => {
     expect(helpers.parseDetailVin('Vehicle Identification Number 1FTFW1E50JFA12345')).toBe('1FTFW1E50JFA12345');
     expect(helpers.parseDetailVin('Serial Number: 3C6UR5DL8JG123456')).toBe('3C6UR5DL8JG123456');
     expect(helpers.parseDetailVin('Lot number 15280228 and no vehicle identity')).toBeNull();
+  });
+
+  test('parses GovPlanet date-style auction end labels', () => {
+    const helpers = loadHelperExports();
+    const now = new Date('2026-06-02T10:00:00.000Z');
+
+    expect(helpers.parseAuctionEnd('Jun 10', now)).toBe('2026-06-10T23:59:59.000Z');
+    expect(helpers.parseAuctionEnd('2 days 3 hours', now)).toBe('2026-06-04T13:00:00.000Z');
+    expect(helpers.parseAuctionEnd('', now)).toBeNull();
   });
 
   test('queues capped detail enrichment before rejecting list rows without VIN', () => {
@@ -59,5 +68,16 @@ describe('ds-govplanet source contract', () => {
     expect(detailHandler).toContain('missing_vin_after_detail');
     expect(detailHandler).toContain('vin: detailVin');
     expect(detailHandler.indexOf('if (!detailVin)')).toBeLessThan(detailHandler.indexOf('await Actor.pushData(enriched);'));
+  });
+
+  test('emits source quality proof with VIN, auction end, and detail captcha counters', () => {
+    expect(source).toContain("record_type: 'source_quality_proof'");
+    expect(source).toContain('source_site: SOURCE');
+    expect(source).toContain('quickview_rows_with_vin');
+    expect(source).toContain('quickview_rows_with_auction_end');
+    expect(source).toContain('pushed_rows_missing_vin');
+    expect(source).toContain('detail_pages_captcha');
+    expect(source).toContain('detail_captcha_samples');
+    expect(source).toContain('[SOURCE QUALITY PROOF]');
   });
 });

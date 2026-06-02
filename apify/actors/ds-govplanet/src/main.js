@@ -153,6 +153,35 @@ function parsePrice(priceStr = '') {
     return m ? parseFloat(m[0]) : 0;
 }
 
+function parseAuctionEnd(timeLeft = '', now = new Date()) {
+    const text = String(timeLeft || '').trim();
+    if (!text) return null;
+
+    const daysMatch = text.match(/(\d+)\s*day/i);
+    const hoursMatch = text.match(/(\d+)\s*hour/i);
+    if (daysMatch || hoursMatch) {
+        const days = daysMatch ? parseInt(daysMatch[1], 10) : 0;
+        const hours = hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
+        const ms = days * 86400000 + hours * 3600000;
+        return ms > 0 ? new Date(now.getTime() + ms).toISOString() : null;
+    }
+
+    const monthDay = text.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:,\s*(\d{4}))?\b/i);
+    if (!monthDay) return null;
+
+    const monthIndex = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+        .indexOf(monthDay[1].slice(0, 3).toLowerCase());
+    if (monthIndex < 0) return null;
+
+    let year = monthDay[3] ? parseInt(monthDay[3], 10) : now.getUTCFullYear();
+    let end = new Date(Date.UTC(year, monthIndex, parseInt(monthDay[2], 10), 23, 59, 59));
+    if (!monthDay[3] && end.getTime() < now.getTime() - 86400000) {
+        year += 1;
+        end = new Date(Date.UTC(year, monthIndex, parseInt(monthDay[2], 10), 23, 59, 59));
+    }
+    return Number.isNaN(end.getTime()) ? null : end.toISOString();
+}
+
 function extractYear(desc = '') {
     const m = desc.match(/\b(19[89]\d|20[0-3]\d)\b/);
     return m ? parseInt(m[1], 10) : null;
@@ -251,6 +280,20 @@ let totalDetailQueued = 0;
 let totalDetailAttempted = 0;
 let totalDetailVinFound = 0;
 let totalDetailMissingVin = 0;
+let totalDetailFetched = 0;
+let totalDetailFailed = 0;
+let totalDetailCaptcha = 0;
+let totalFound = 0;
+let totalPassed = 0;
+let totalQuickviewsWithVin = 0;
+let totalQuickviewsWithMileage = 0;
+let totalQuickviewsWithAuctionEnd = 0;
+let totalPushedWithVin = 0;
+let totalPushedWithMileage = 0;
+let totalPushedWithAuctionEnd = 0;
+let totalMissingVinWithoutDetail = 0;
+const excludedMissingVinSamples = [];
+const detailCaptchaSamples = [];
 const seenEquipIds = new Set();
 const pendingPages  = new Map(); // categoryLabel → Set of pstart values already queued
 
@@ -283,10 +326,32 @@ const crawler = new CheerioCrawler({
         if (request.userData?.kind === 'detail') {
             const vehicle = request.userData.vehicle;
             totalDetailAttempted++;
+            totalDetailFetched++;
+            const isCaptcha = /Human Verification|captcha-container|AwsWafIntegration|x-amzn-waf-action/i.test(html);
+            if (isCaptcha) {
+                totalDetailCaptcha++;
+                if (detailCaptchaSamples.length < 10) {
+                    detailCaptchaSamples.push({
+                        title: vehicle.title,
+                        listing_url: vehicle.listing_url,
+                        equip_id: vehicle.equip_id,
+                    });
+                }
+            }
             const detailVin = parseDetailVin(html);
             if (!detailVin) {
                 totalDetailMissingVin++;
                 totalSkipped++;
+                if (excludedMissingVinSamples.length < 10) {
+                    excludedMissingVinSamples.push({
+                        title: vehicle.title,
+                        listing_url: vehicle.listing_url,
+                        mileage: vehicle.mileage,
+                        auction_end_time: vehicle.auction_end_time,
+                        detail_attempted: true,
+                        detail_captcha: isCaptcha,
+                    });
+                }
                 log.info(`[${label}] Skipped missing_vin_after_detail: ${vehicle.title} (${vehicle.equip_id})`);
                 return;
             }
@@ -297,6 +362,9 @@ const crawler = new CheerioCrawler({
             };
             await Actor.pushData(enriched);
             totalPushed++;
+            totalPushedWithVin++;
+            if (enriched.mileage) totalPushedWithMileage++;
+            if (enriched.auction_end_time) totalPushedWithAuctionEnd++;
             totalDetailVinFound++;
             log.info(`[${label}] Detail enriched VIN for ${vehicle.title} (${vehicle.equip_id})`);
             return;
@@ -308,6 +376,7 @@ const crawler = new CheerioCrawler({
 
         // ── Extract quickviews ──
         const items = parseQuickviews(html);
+        totalFound += items.length;
         log.info(`[${label}] pstart=${pstart} → ${items.length} items (total=${total})`);
 
         // ── Process items ──
@@ -325,14 +394,19 @@ const crawler = new CheerioCrawler({
             const make     = extractMake(desc);
             const model    = extractModel(desc, make || '');
             const mileage  = parseMileage(item.usage || '');
+            const auctionEndTime = parseAuctionEnd(item.timeLeft || '');
             const listingUrl = item.itemPageUri
                 ? `${BASE}${item.itemPageUri.split('?')[0]}`
                 : null;
             const vin = extractVin(item.vin || item.vehicleVin || item.vinNumber || item.title || '');
+            if (vin) totalQuickviewsWithVin++;
+            if (mileage) totalQuickviewsWithMileage++;
+            if (auctionEndTime) totalQuickviewsWithAuctionEnd++;
 
             if (!isVehicle(desc)) { totalSkipped++; continue; }
             if (!passesFilters({ year, price, state, locationText: item.eumeLocation || '' })) { totalSkipped++; continue; }
             if (price < minBid || (maxBid > 0 && price > maxBid)) { totalSkipped++; continue; }
+            totalPassed++;
 
             const vehicle = {
                 title:            desc,
@@ -343,15 +417,7 @@ const crawler = new CheerioCrawler({
                 state,
                 city:             (item.eumeLocation || '').split(',')[0].trim() || null,
                 mileage,
-                auction_end_time: (() => {
-                    const tl = item.timeLeft || '';
-                    const daysMatch = tl.match(/(\d+)\s*day/i);
-                    const hoursMatch = tl.match(/(\d+)\s*hour/i);
-                    const days = daysMatch ? parseInt(daysMatch[1], 10) : 0;
-                    const hours = hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
-                    const ms = days * 86400000 + hours * 3600000;
-                    return ms > 0 ? new Date(Date.now() + ms).toISOString() : null;
-                })(),
+                auction_end_time: auctionEndTime,
                 listing_url:      listingUrl,
                 photo_url:        item.photo || item.photoThumb || null,
                 vin,
@@ -371,6 +437,17 @@ const crawler = new CheerioCrawler({
                     continue;
                 }
                 totalSkipped++;
+                totalMissingVinWithoutDetail++;
+                if (excludedMissingVinSamples.length < 10) {
+                    excludedMissingVinSamples.push({
+                        title: desc,
+                        listing_url: listingUrl,
+                        mileage,
+                        auction_end_time: auctionEndTime,
+                        detail_attempted: false,
+                        detail_captcha: false,
+                    });
+                }
                 log.info(`[${label}] Skipped missing_vin_without_detail: ${desc} (${equipId})`);
                 continue;
             }
@@ -381,6 +458,9 @@ const crawler = new CheerioCrawler({
         if (records.length > 0) {
             await Actor.pushData(records);
             totalPushed += records.length;
+            totalPushedWithVin += records.filter(record => Boolean(record.vin)).length;
+            totalPushedWithMileage += records.filter(record => Boolean(record.mileage)).length;
+            totalPushedWithAuctionEnd += records.filter(record => Boolean(record.auction_end_time)).length;
             log.info(`[${label}] Pushed ${records.length} records (total so far: ${totalPushed})`);
         }
 
@@ -403,6 +483,9 @@ const crawler = new CheerioCrawler({
     },
 
     failedRequestHandler({ request, log }) {
+        if (request.userData?.kind === 'detail') {
+            totalDetailFailed++;
+        }
         log.error(`Request failed: ${request.url}`);
     },
 });
@@ -410,6 +493,45 @@ const crawler = new CheerioCrawler({
 await crawler.run();
 
 console.log(`[GOVPLANET] Done. Pushed: ${totalPushed} | Skipped: ${totalSkipped} | Unique equipIds: ${seenEquipIds.size} | Detail queued: ${totalDetailQueued} | Detail attempted: ${totalDetailAttempted} | Detail VIN found: ${totalDetailVinFound} | Detail missing VIN: ${totalDetailMissingVin}`);
+
+const sourceQualityProof = {
+    record_type: 'source_quality_proof',
+    source_site: SOURCE,
+    generated_at: new Date().toISOString(),
+    found_rows_total: totalFound,
+    prefilter_passed_rows_total: totalPassed,
+    pushed_rows_total: totalPushed,
+    pushed_rows_with_vin: totalPushedWithVin,
+    pushed_rows_with_mileage: totalPushedWithMileage,
+    pushed_rows_with_auction_end: totalPushedWithAuctionEnd,
+    pushed_rows_missing_vin: Math.max(0, totalPushed - totalPushedWithVin),
+    pushed_rows_missing_mileage: Math.max(0, totalPushed - totalPushedWithMileage),
+    pushed_rows_missing_auction_end: Math.max(0, totalPushed - totalPushedWithAuctionEnd),
+    quickview_rows_with_vin: totalQuickviewsWithVin,
+    quickview_rows_with_mileage: totalQuickviewsWithMileage,
+    quickview_rows_with_auction_end: totalQuickviewsWithAuctionEnd,
+    rows_excluded_missing_vin: totalDetailMissingVin + totalMissingVinWithoutDetail,
+    detail_pages_queued: totalDetailQueued,
+    detail_pages_attempted: totalDetailAttempted,
+    detail_pages_fetched: totalDetailFetched,
+    detail_pages_failed: totalDetailFailed,
+    detail_pages_captcha: totalDetailCaptcha,
+    detail_vins_found: totalDetailVinFound,
+    detail_missing_vin: totalDetailMissingVin,
+    excluded_missing_vin_samples: excludedMissingVinSamples,
+    detail_captcha_samples: detailCaptchaSamples,
+    target_contract: {
+        maxItemsPerCategory,
+        minBid,
+        maxBid,
+        maxMileage,
+        maxAgeYears,
+        maxDetailPages,
+        searchQuery,
+    },
+};
+await Actor.pushData(sourceQualityProof);
+console.log(`[SOURCE QUALITY PROOF] ${JSON.stringify(sourceQualityProof)}`);
 
 // ── Webhook notification ──────────────────────────────────────────────────────
 if (webhookUrl && totalPushed > 0) {
