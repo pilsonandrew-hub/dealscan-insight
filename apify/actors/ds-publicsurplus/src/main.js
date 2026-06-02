@@ -85,6 +85,7 @@ const seenListings = new Set();
 
 let totalFound = 0;
 let totalAfterFilters = 0;
+let totalPushed = 0;
 
 function normalizeText(value) {
     return String(value ?? '')
@@ -339,6 +340,7 @@ async function pushListing(listing, sourceUrl, log) {
     if (!vehicle.vin && listingUrl && detailPageCount < MAX_DETAIL_PAGES) {
         vinQueue.push(vehicle);
     } else {
+        totalPushed++;
         await Actor.pushData(vehicle);
     }
     return true;
@@ -416,6 +418,7 @@ async function pushTXListing(listing, sourceUrl, log) {
 
     totalAfterFilters++;
     log.info(`[TX][PASS] ${vehicle.title} | $${vehicle.current_bid} | VIN: ${vehicle.vin}`);
+    totalPushed++;
     await Actor.pushData(vehicle);
     return true;
 }
@@ -462,6 +465,7 @@ const crawler = new PlaywrightCrawler({
             } catch (err) {
                 log.warning(`[VIN DETAIL] Failed for ${request.url}: ${err.message}`);
             }
+            totalPushed++;
             await Actor.pushData(vehicle);
             return;
         }
@@ -672,11 +676,11 @@ if (vinQueue.length > 0) {
     console.log('[PUBLICSURPLUS] No VIN detail pages needed (all VINs found inline or no passing lots)');
 }
 
-console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters}`);
+console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Pushed: ${totalPushed}`);
 // ── Webhook notification ──────────────────────────────────────────────────────
 const webhookUrl = process.env.WEBHOOK_URL || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
 const webhookSecret = process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
-if (webhookUrl && totalAfterFilters > 0) {
+if (webhookUrl && totalPushed > 0) {
     try {
         const env = Actor.getEnv();
         const dataset = await Actor.openDataset();
@@ -692,7 +696,7 @@ if (webhookUrl && totalAfterFilters > 0) {
                 runId: env.actorRunId || 'local',
                 actorId: env.actorId || '',
                 datasetId: datasetInfo?.id || '',
-                itemCount: totalAfterFilters,
+                itemCount: totalPushed,
             }),
         });
         console.log(`[WEBHOOK] Notified ingest: HTTP ${resp.status}`);

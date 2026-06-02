@@ -27,4 +27,11 @@ describe('ds-publicsurplus source contract', () => {
     expect(detailHandler.indexOf('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)'))
       .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
   });
+
+  test('uses actual published row count for webhook itemCount', () => {
+    expect(source).toContain('let totalPushed = 0;');
+    expect(source).toContain('totalPushed++;');
+    expect(source).toContain('itemCount: totalPushed');
+    expect(source).not.toContain('itemCount: totalAfterFilters');
+  });
 });
