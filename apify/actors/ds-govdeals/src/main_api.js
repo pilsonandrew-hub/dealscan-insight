@@ -75,6 +75,18 @@ const CONDITION_REJECT_PATTERNS = [
     /\bbad\s+engine\b/i,
     /\bno\s+title\b/i,
 ];
+const NON_DEALER_TARGET_PATTERNS = [
+    /\btravel\s+trailer\b/i,
+    /\btrailer\b/i,
+    /\brv\b/i,
+    /\bcamper\b/i,
+    /\bfifth[\s-]+wheel\b/i,
+    /\bboat\b/i,
+    /\bmotorcycle\b/i,
+    /\blot\s+of\b/i,
+    /\bassorted\b/i,
+    /\b(?:jail|prisoner)\s+(?:van|transport)\b/i,
+];
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
@@ -134,6 +146,7 @@ function passes(item) {
         item.title,
     ].filter(Boolean).join(' ').toLowerCase();
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(conditionText))) return false;
+    if (NON_DEALER_TARGET_PATTERNS.some((pattern) => pattern.test(conditionText))) return false;
     const state = (item.locationState || item.state || '').toUpperCase();
     const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;

@@ -43,4 +43,12 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('const MAX_DETAIL_PAGES = 60;');
     expect(source).toContain('requestHandlerTimeoutSecs: 600');
   });
+
+  test('rejects non-dealer-target vehicle-family lots before detail enrichment', () => {
+    expect(source).toContain('NON_DEALER_TARGET_PATTERNS');
+    expect(source).toContain('NON_DEALER_TARGET_PATTERNS.some((pattern) => pattern.test(conditionText))');
+    expect(source).toContain('/\\btravel\\s+trailer\\b/i');
+    expect(source).toContain('/\\blot\\s+of\\b/i');
+    expect(source).toContain('/\\b(?:jail|prisoner)\\s+(?:van|transport)\\b/i');
+  });
 });
