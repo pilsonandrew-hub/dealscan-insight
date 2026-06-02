@@ -355,6 +355,63 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
         self.assertNotIn("run_id", update_payload)
 
+    def test_vin_duplicate_refreshes_existing_proxy_pricing_when_new_truth_is_market_comp(self):
+        row = {
+            "listing_id": "listing-durango",
+            "listing_url": "https://www.govdeals.com/asset/123/456",
+            "title": "2020 Dodge Durango SRT",
+            "vin": "1C4SDJGJ6LC324462",
+            "current_bid": 10600,
+            "dos_score": 86.9,
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+            "pricing_updated_at": "2026-06-02T10:53:00+00:00",
+            "retail_asking_price_estimate": 46004,
+            "retail_comp_price_estimate": 46004,
+            "retail_comp_low": 41536,
+            "retail_comp_high": 55171,
+            "retail_comp_count": 5,
+            "retail_comp_confidence": 0.89,
+            "expected_close_bid": 13685.15,
+            "current_bid_trust_score": 0.75,
+            "expected_close_source": "auction_stage_adjusted",
+            "acquisition_price_basis": 14000,
+            "acquisition_basis_source": "expected_close_bid",
+            "gross_margin": 15300,
+            "max_bid": 23270,
+            "bid_headroom": 12670,
+            "ceiling_reason": "score_deal_v3_two_lane",
+            "score_version": "score_deal_v3_two_lane",
+        }
+        existing_row = {
+            "pricing_maturity": "proxy",
+            "pricing_source": "model:durango",
+            "pricing_updated_at": None,
+        }
+        vehicle = {"dos_score": 86.9, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(row, "unused", existing_row)
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: ("existing-durango", False)):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-durango")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_pricing_refreshed")
+        self.assertEqual(len(supabase._table.update_calls), 1)
+        update_payload, filters = supabase._table.update_calls[0]
+        self.assertEqual(filters, [("id", "existing-durango")])
+        self.assertEqual(update_payload["pricing_maturity"], "market_comp")
+        self.assertEqual(update_payload["pricing_source"], "retail_market_cache")
+        self.assertEqual(update_payload["retail_comp_price_estimate"], 46004)
+        self.assertEqual(update_payload["retail_comp_count"], 5)
+        self.assertEqual(update_payload["expected_close_bid"], 13685.15)
+        self.assertEqual(update_payload["max_bid"], 23270)
+        self.assertEqual(update_payload["bid_headroom"], 12670)
+        self.assertNotIn("vin", update_payload)
+        self.assertNotIn("listing_url", update_payload)
+        self.assertIn("updated_at", update_payload)
+
     def test_pgrst204_still_falls_back_to_direct_pg(self):
         row = {
             "listing_id": "listing-3",

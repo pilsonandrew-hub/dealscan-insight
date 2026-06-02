@@ -1095,9 +1095,22 @@ async def _process_webhook_items(
                 "saved_direct_pg",
                 "saved_direct_pg_duplicate",
             }
-            existing_success = save_status in {"duplicate_existing", "vin_dedup_skipped", "vin_dedup_updated"}
+            existing_success = save_status in {
+                "duplicate_existing",
+                "duplicate_pricing_refreshed",
+                "vin_dedup_skipped",
+                "vin_dedup_updated",
+                "vin_dedup_pricing_refreshed",
+            }
             save_succeeded = inserted_success or existing_success
-            is_existing_listing = save_status in {"duplicate_existing", "duplicate_unresolved", "vin_dedup_skipped", "vin_dedup_updated"} or is_dup
+            is_existing_listing = save_status in {
+                "duplicate_existing",
+                "duplicate_pricing_refreshed",
+                "duplicate_unresolved",
+                "vin_dedup_skipped",
+                "vin_dedup_updated",
+                "vin_dedup_pricing_refreshed",
+            } or is_dup
             if save_succeeded:
                 processed += 1
                 if inserted_success:
@@ -2716,6 +2729,155 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
         return {}
 
 
+_PRICING_MATURITY_RANK = {
+    "": 0,
+    "unknown": 0,
+    "proxy": 1,
+    "market_comp": 2,
+    "live_market": 3,
+}
+
+
+_PRICING_TRUTH_REFRESH_FIELDS = (
+    "dos_score",
+    "current_bid",
+    "mmr",
+    "estimated_transport",
+    "buyer_premium",
+    "auction_fees",
+    "recon_reserve",
+    "total_cost",
+    "projected_total_cost",
+    "acquisition_price_basis",
+    "acquisition_basis_source",
+    "gross_margin",
+    "retail_asking_price_estimate",
+    "retail_comp_price_estimate",
+    "retail_comp_low",
+    "retail_comp_high",
+    "retail_comp_count",
+    "retail_comp_confidence",
+    "pricing_source",
+    "pricing_maturity",
+    "pricing_updated_at",
+    "expected_close_bid",
+    "current_bid_trust_score",
+    "expected_close_source",
+    "auction_stage_hours_remaining",
+    "manheim_mmr_mid",
+    "manheim_mmr_low",
+    "manheim_mmr_high",
+    "manheim_range_width_pct",
+    "manheim_confidence",
+    "manheim_source_status",
+    "manheim_updated_at",
+    "retail_proxy_multiplier",
+    "ctm_pct",
+    "wholesale_ctm_pct",
+    "retail_ctm_pct",
+    "segment_tier",
+    "estimated_days_to_sale",
+    "roi_per_day",
+    "mmr_lookup_basis",
+    "mmr_confidence_proxy",
+    "investment_grade",
+    "max_bid",
+    "bid_headroom",
+    "ceiling_reason",
+    "score_version",
+    "legacy_dos_score",
+    "designated_lane",
+    "dos_premium",
+    "dos_standard",
+    "risk_flags",
+    "vehicle_tier",
+    "bid_ceiling_pct",
+    "min_margin_target",
+    "pipeline_step",
+    "step_status",
+    "processed_at",
+    "run_id",
+    "source_run_id",
+)
+
+
+def _pricing_maturity_rank(value: Optional[str]) -> int:
+    return _PRICING_MATURITY_RANK.get(str(value or "").lower(), 0)
+
+
+def _existing_pricing_truth_snapshot(existing_id: str) -> dict:
+    if supabase_client is None:
+        return {}
+    try:
+        result = (
+            supabase_client.table("opportunities")
+            .select("pricing_maturity,pricing_source,pricing_updated_at")
+            .eq("id", existing_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(result, "data", None) or []
+        return rows[0] if rows else {}
+    except Exception as lookup_err:
+        logger.warning(
+            "[INGEST] Duplicate pricing truth lookup failed for %s: %s",
+            existing_id,
+            lookup_err,
+        )
+        return {}
+
+
+def _duplicate_pricing_truth_update(row: dict, existing: Optional[dict] = None) -> dict:
+    """Return scoring/pricing fields when a duplicate row has stronger pricing truth.
+
+    Existing live rows should not stay proxy-priced when a fresh ingest computes
+    market-comp/live-market evidence. This intentionally excludes identity,
+    listing URL, VIN, mileage, and raw detail fields; those remain governed by
+    the enrichment backfill path.
+    """
+    existing = existing or {}
+    incoming_rank = _pricing_maturity_rank(row.get("pricing_maturity"))
+    existing_rank = _pricing_maturity_rank(existing.get("pricing_maturity"))
+    if incoming_rank <= existing_rank:
+        return {}
+
+    update = {
+        field: row.get(field)
+        for field in _PRICING_TRUTH_REFRESH_FIELDS
+        if row.get(field) not in (None, "", {}, [])
+    }
+    if not update:
+        return {}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return update
+
+
+def _refresh_existing_opportunity_pricing_truth(existing_id: str, row: dict) -> bool:
+    if supabase_client is None:
+        return False
+    if _pricing_maturity_rank(row.get("pricing_maturity")) <= 1:
+        return False
+    existing = _existing_pricing_truth_snapshot(existing_id)
+    update_payload = _duplicate_pricing_truth_update(row, existing)
+    if not update_payload:
+        return False
+    try:
+        supabase_client.table("opportunities").update(update_payload).eq("id", existing_id).execute()
+        logger.info(
+            "[INGEST] Refreshed pricing truth for duplicate opportunity %s: %s",
+            existing_id,
+            sorted(update_payload.keys()),
+        )
+        return True
+    except Exception as update_err:
+        logger.warning(
+            "[INGEST] Duplicate pricing truth refresh failed for %s: %s",
+            existing_id,
+            update_err,
+        )
+        return False
+
+
 def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> dict:
     """Return missing enrichment fields worth backfilling onto an existing row.
 
@@ -2958,7 +3120,10 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                         "[DEDUP] Duplicate VIN %s skipped — already exists as %s",
                         normalized_vin, existing_id,
                     )
-                    _mark_save_outcome(vehicle, "vin_dedup_skipped", opportunity_id=existing_id)
+                    if _refresh_existing_opportunity_pricing_truth(existing_id, row):
+                        _mark_save_outcome(vehicle, "vin_dedup_pricing_refreshed", opportunity_id=existing_id)
+                    else:
+                        _mark_save_outcome(vehicle, "vin_dedup_skipped", opportunity_id=existing_id)
                     return existing_id
         except Exception as dedup_err:
             logger.warning("[DEDUP] VIN dedup logic error for VIN %s: %s", normalized_vin, dedup_err)
@@ -2975,7 +3140,10 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
             if existing_id:
                 _backfill_existing_opportunity_enrichment(existing_id, row)
-                _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
+                if _refresh_existing_opportunity_pricing_truth(existing_id, row):
+                    _mark_save_outcome(vehicle, "duplicate_pricing_refreshed", opportunity_id=existing_id)
+                else:
+                    _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                 return existing_id
         except Exception as e:
             title = vehicle.get("title", "unknown")[:80]
@@ -3003,7 +3171,10 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                 if existing_id:
                     logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
                     _backfill_existing_opportunity_enrichment(existing_id, row)
-                    _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
+                    if _refresh_existing_opportunity_pricing_truth(existing_id, row):
+                        _mark_save_outcome(vehicle, "duplicate_pricing_refreshed", opportunity_id=existing_id)
+                    else:
+                        _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                     return existing_id
                 _mark_save_outcome(vehicle, "duplicate_unresolved", error_message=error_text)
                 return None
