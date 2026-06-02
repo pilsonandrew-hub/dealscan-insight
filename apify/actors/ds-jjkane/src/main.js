@@ -94,6 +94,17 @@ function normalizeText(v) {
     return String(v ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function extractVin(text) {
+    const normalized = normalizeText(text).toUpperCase();
+    const labeled = normalized.match(
+        /\b(?:VIN|V\.I\.N\.|S\/N|SERIAL(?:\s+NUMBER)?)\s*[:#-]?\s*([A-HJ-NPR-Z0-9]{17})\b/
+    );
+    if (labeled) return labeled[1];
+
+    const anyVin = normalized.match(/\b([A-HJ-NPR-Z0-9]{17})\b/);
+    return anyVin ? anyVin[1] : null;
+}
+
 function parseYear(v) {
     const y = parseInt(String(v ?? '').replace(/\D/g, ''), 10);
     return (y >= 1980 && y <= new Date().getFullYear() + 1) ? y : null;
@@ -352,12 +363,13 @@ for (const state of targetStates) {
                 const state_code = normalizeText(hit.offSitePhysicalState || state);
                 const city = normalizeText(hit.offSitePhysicalCity || '');
                 const catalogDescription = normalizeText(hit.catalogDescription || '');
-                const vin = normalizeText(hit.vin || '');
                 const conditionText = [
                     title,
                     catalogDescription,
                     normalizeText(hit.webDescription || ''),
+                    normalizeText(hit.shortDescription || ''),
                 ].filter(Boolean).join(' ');
+                const vin = normalizeText(hit.vin || extractVin(conditionText) || '');
 
                 // ── Filters ──────────────────────────────────────────────────
                 if (hasConditionReject(conditionText)) continue;
@@ -436,6 +448,7 @@ for (const state of targetStates) {
                     auction_id: String(hit.auctionId || ''),
                     category: normalizeText(hit.category || ''),
                     description: catalogDescription,
+                    vin_source: hit.vin ? 'algolia_vin' : (vin ? 'jjkane_serial_text' : null),
                     agency_name: 'JJ Kane Government Surplus',
                     source_site: SOURCE,
                     scraped_at: new Date().toISOString(),
