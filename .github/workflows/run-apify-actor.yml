@@ -19,6 +19,26 @@ on:
         description: "Comma-separated Proxibid category slugs, e.g. sedans,suv-s,coupes"
         required: false
         default: ""
+      max_pages:
+        description: "GovDeals maxPages input for bounded proof runs"
+        required: false
+        default: "1"
+      runtime_budget_ms:
+        description: "GovDeals runtimeBudgetMs input for bounded proof runs"
+        required: false
+        default: "240000"
+      min_bid:
+        description: "GovDeals minBid input"
+        required: false
+        default: "500"
+      max_bid:
+        description: "GovDeals maxBid input"
+        required: false
+        default: "75000"
+      search_query:
+        description: "Optional GovDeals searchQuery input"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -35,6 +55,11 @@ jobs:
           MAX_ITEMS: ${{ inputs.max_items }}
           MAX_DETAIL_PAGES: ${{ inputs.max_detail_pages }}
           TARGET_CATEGORIES: ${{ inputs.target_categories }}
+          MAX_PAGES: ${{ inputs.max_pages }}
+          RUNTIME_BUDGET_MS: ${{ inputs.runtime_budget_ms }}
+          MIN_BID: ${{ inputs.min_bid }}
+          MAX_BID: ${{ inputs.max_bid }}
+          SEARCH_QUERY: ${{ inputs.search_query }}
         run: |
           set -euo pipefail
           python3 <<'PY'
@@ -48,6 +73,7 @@ jobs:
           actor_name = os.environ.get("ACTOR_NAME", "ds-proxibid")
           actor_map = {
               "ds-proxibid": "bxhncvtHEP712WX2e",
+              "ds-govdeals": "CuKaIAcWyFS0EPrAz",
           }
           actor_id = actor_map.get(actor_name)
           if not actor_id:
@@ -66,13 +92,24 @@ jobs:
               with urllib.request.urlopen(req, timeout=60) as resp:
                   return json.loads(resp.read().decode())
 
-          actor_input = {
-              "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
-              "maxDetailPages": int(os.environ.get("MAX_DETAIL_PAGES") or "200"),
-          }
-          target_categories = (os.environ.get("TARGET_CATEGORIES") or "").strip()
-          if target_categories:
-              actor_input["targetCategories"] = target_categories
+          if actor_name == "ds-govdeals":
+              actor_input = {
+                  "maxPages": int(os.environ.get("MAX_PAGES") or "1"),
+                  "runtimeBudgetMs": int(os.environ.get("RUNTIME_BUDGET_MS") or "240000"),
+                  "minBid": int(os.environ.get("MIN_BID") or "500"),
+                  "maxBid": int(os.environ.get("MAX_BID") or "75000"),
+              }
+              search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
+              if search_query:
+                  actor_input["searchQuery"] = search_query
+          else:
+              actor_input = {
+                  "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
+                  "maxDetailPages": int(os.environ.get("MAX_DETAIL_PAGES") or "200"),
+              }
+              target_categories = (os.environ.get("TARGET_CATEGORIES") or "").strip()
+              if target_categories:
+                  actor_input["targetCategories"] = target_categories
           started = api("POST", f"/acts/{actor_id}/runs", actor_input).get("data", {})
           run_id = started.get("id")
           if not run_id:
@@ -109,6 +146,18 @@ jobs:
                   summary["source_quality_proof"] = {
                       key: proof.get(key)
                       for key in (
+                          "found_rows_total",
+                          "prefilter_passed_rows_total",
+                          "pushed_rows_total",
+                          "pushed_rows_with_vin",
+                          "pushed_rows_with_mileage",
+                          "pushed_rows_missing_vin",
+                          "pushed_rows_missing_mileage",
+                          "rows_excluded_missing_required_data",
+                          "rows_excluded_missing_vin",
+                          "rows_excluded_missing_mileage",
+                          "rows_excluded_after_detail_attempt",
+                          "rows_excluded_without_detail_attempt",
                           "detail_pages_attempted",
                           "detail_pages_fetched",
                           "detail_pages_failed",
@@ -119,6 +168,21 @@ jobs:
                           "rejection_reasons",
                       )
                   }
+              opportunity_items = [
+                  item for item in items
+                  if isinstance(item, dict) and item.get("record_type") != "source_quality_proof"
+              ]
+              summary["pushed_rows_with_description"] = sum(bool(item.get("description")) for item in opportunity_items)
+              summary["pushed_rows_with_detail_text"] = sum(bool(item.get("detail_text")) for item in opportunity_items)
+              summary["description_samples"] = [
+                  {
+                      "title": str(item.get("title") or "")[:120],
+                      "description_present": bool(item.get("description")),
+                      "detail_text_present": bool(item.get("detail_text")),
+                      "description_excerpt": str(item.get("description") or item.get("detail_text") or "")[:240],
+                  }
+                  for item in opportunity_items[:5]
+              ]
           print(json.dumps(summary, indent=2, sort_keys=True))
           if last.get("status") != "SUCCEEDED":
               raise SystemExit(1)
