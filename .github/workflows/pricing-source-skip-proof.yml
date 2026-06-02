@@ -1,0 +1,75 @@
+name: Pricing Source Skip Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Source skip lookback window in days"
+        required: true
+        default: "14"
+      max_mileage:
+        description: "Maximum mileage for clean candidate reporting"
+        required: true
+        default: "50000"
+      max_age_years:
+        description: "Maximum model age for clean candidate reporting"
+        required: true
+        default: "4"
+      limit:
+        description: "Maximum candidates to print"
+        required: true
+        default: "50"
+      include_dirty:
+        description: "Include dirty source rows"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOOKBACK_DAYS: ${{ inputs.lookback_days }}
+      MAX_MILEAGE: ${{ inputs.max_mileage }}
+      MAX_AGE_YEARS: ${{ inputs.max_age_years }}
+      LIMIT: ${{ inputs.limit }}
+      INCLUDE_DIRTY: ${{ inputs.include_dirty }}
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
+      - name: Run source skip pricing proof through Supabase REST
+        run: |
+          set -euo pipefail
+
+          args=(
+            --via-rest
+            --lookback-days "${LOOKBACK_DAYS}"
+            --max-mileage "${MAX_MILEAGE}"
+            --max-age-years "${MAX_AGE_YEARS}"
+            --limit "${LIMIT}"
+          )
+
+          if [[ "${INCLUDE_DIRTY}" == "true" ]]; then
+            args+=(--include-dirty)
+          fi
+
+          python3 scripts/report_pricing_blocked_source_candidates.py "${args[@]}"

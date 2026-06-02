@@ -1,6 +1,8 @@
 import importlib.util
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
+from urllib import error as urllib_error
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "report_pricing_blocked_source_candidates.py"
@@ -94,3 +96,163 @@ def test_format_candidate_includes_status_and_source_fields():
     assert "status=active_clean_pricing_gap" in formatted
     assert "source=allsurplus" in formatted
     assert "2023 Toyota Tacoma" in formatted
+
+
+def test_fetch_rows_via_rest_marks_candidate_covered_after_market_price(monkeypatch):
+    calls = []
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        calls.append((base_url, service_role_key, table, query))
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-1",
+                    "listing_id": "asset-1",
+                    "listing_url": "https://example.com/asset-1",
+                    "error_message": "pricing_maturity_proxy | bid=$22,000 mmr=$31,000 tier=premium",
+                    "created_at": "2026-06-02T12:00:00+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "source_site": "allsurplus",
+                    "year": 2023,
+                    "make": "Toyota",
+                    "model": "Tacoma",
+                    "state": "FL",
+                    "mileage": 16808,
+                    "vin": "3TMAZ5CN0PM202309",
+                    "current_bid": 22000,
+                    "auction_end_date": None,
+                    "created_at": "2026-06-02T11:59:00+00:00",
+                    "title": "2023 Toyota Tacoma",
+                    "listing_id": "asset-1",
+                    "listing_url": "https://example.com/asset-1",
+                }
+            ]
+        if table == "market_prices":
+            return [
+                {
+                    "year": 2023,
+                    "make": "toyota",
+                    "model": "tacoma",
+                    "state": "fl",
+                    "avg_price": 36001,
+                    "low_price": 31343,
+                    "high_price": 40944,
+                    "sample_size": 4,
+                    "expires_at": "2026-06-16T12:00:00+00:00",
+                }
+            ]
+        if table == "dealer_sales":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates, "_fetch_postgrest_rows", fake_fetch)
+    rows = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=14,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 2, 12, 30, tzinfo=timezone.utc),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["has_market_price"] is True
+    assert rows[0]["has_usable_dealer_sales"] is False
+    assert report_pricing_blocked_source_candidates.classify_source_candidate(rows[0]) == "covered_after_skip"
+    assert calls[0][0] == "https://example.supabase.co/rest/v1"
+
+
+def test_fetch_rows_via_rest_filters_dirty_rows_by_default(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "listing_id": "asset-dirty",
+                    "listing_url": "https://example.com/dirty",
+                    "error_message": "pricing_maturity_proxy | bid=$10,000 mmr=$20,000 tier=standard",
+                    "created_at": "2026-06-02T12:00:00+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "source_site": "allsurplus",
+                    "year": 2023,
+                    "make": "Toyota",
+                    "model": "Tacoma",
+                    "state": "FL",
+                    "mileage": None,
+                    "vin": None,
+                    "current_bid": 10000,
+                    "auction_end_date": None,
+                    "created_at": "2026-06-02T11:59:00+00:00",
+                    "title": "Dirty Tacoma",
+                    "listing_id": "asset-dirty",
+                    "listing_url": "https://example.com/dirty",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates, "_fetch_postgrest_rows", fake_fetch)
+
+    clean_only = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_days=14,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 2, 12, 30, tzinfo=timezone.utc),
+    )
+    dirty_included = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_days=14,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=True,
+        limit=50,
+        now=datetime(2026, 6, 2, 12, 30, tzinfo=timezone.utc),
+    )
+
+    assert clean_only == []
+    assert len(dirty_included) == 1
+    assert report_pricing_blocked_source_candidates.classify_source_candidate(dirty_included[0]) == "dirty_source_row"
+
+
+def test_postgrest_416_range_is_treated_as_empty_page(monkeypatch):
+    class EmptyBody:
+        def read(self):
+            return b'{"code":"PGRST103","message":"Requested range not satisfiable"}'
+
+        def close(self):
+            return None
+
+    def fake_urlopen(request, timeout):
+        raise urllib_error.HTTPError(
+            request.full_url,
+            416,
+            "Range Not Satisfiable",
+            hdrs={},
+            fp=EmptyBody(),
+        )
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates.urllib_request, "urlopen", fake_urlopen)
+
+    rows = report_pricing_blocked_source_candidates._postgrest_get_json(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        "sonar_listings",
+        [("select", "*")],
+        offset=1000,
+        limit=1000,
+    )
+
+    assert rows == []

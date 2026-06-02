@@ -4,14 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import sys
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 import psycopg2
 import psycopg2.extras
 
-from live_verification_support import get_database_url
+from live_verification_support import DEFAULT_ENV_FILES, get_database_url
+
+
+POSTGREST_PAGE_SIZE = 1000
+SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 
 
 PROXY_SKIP_SQL = """
@@ -149,6 +161,313 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
+def _parse_env_file(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key:
+            values[key] = value
+    return values
+
+
+def _get_env_value(keys: tuple[str, ...], env_file: Optional[str]) -> Optional[str]:
+    for key in keys:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    search_paths = [Path(env_file)] if env_file else [Path(candidate) for candidate in DEFAULT_ENV_FILES]
+    for path in search_paths:
+        file_values = _parse_env_file(path)
+        for key in keys:
+            value = (file_values.get(key) or "").strip()
+            if value:
+                return value
+    return None
+
+
+def _normalize_supabase_rest_url(supabase_url: str) -> str:
+    base = supabase_url.rstrip("/")
+    if base.endswith("/rest/v1"):
+        return base
+    return f"{base}/rest/v1"
+
+
+def resolve_rest_config(env_file: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    supabase_url = _get_env_value(SUPABASE_URL_KEYS, env_file)
+    service_role_key = _get_env_value(SUPABASE_SERVICE_ROLE_KEY_KEYS, env_file)
+    if not supabase_url or not service_role_key:
+        return None, None, None
+    return _normalize_supabase_rest_url(supabase_url), service_role_key, "env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY"
+
+
+def _build_postgrest_url(base_url: str, table: str, query: list[tuple[str, str]]) -> str:
+    encoded = urllib_parse.urlencode(query, doseq=True)
+    return f"{base_url}/{table}?{encoded}" if encoded else f"{base_url}/{table}"
+
+
+def _postgrest_get_json(
+    base_url: str,
+    service_role_key: str,
+    table: str,
+    query: list[tuple[str, str]],
+    offset: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    request = urllib_request.Request(
+        _build_postgrest_url(base_url, table, query),
+        headers={
+            "apikey": service_role_key,
+            "Authorization": f"Bearer {service_role_key}",
+            "Accept": "application/json",
+            "Range-Unit": "items",
+            "Range": f"{offset}-{offset + limit - 1}",
+        },
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=30) as response:
+            payload = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        if exc.code == 416:
+            return []
+        raise RuntimeError(f"Supabase REST API error for {table}: HTTP {exc.code} {body[:300]}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"Supabase REST API unreachable for {table}: {exc}") from exc
+    try:
+        data = json.loads(payload or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Supabase REST API returned invalid JSON for {table}") from exc
+    if not isinstance(data, list):
+        raise RuntimeError(f"Supabase REST API returned a non-list payload for {table}")
+    return [row for row in data if isinstance(row, dict)]
+
+
+def _fetch_postgrest_rows(
+    base_url: str,
+    service_role_key: str,
+    table: str,
+    query: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = _postgrest_get_json(
+            base_url=base_url,
+            service_role_key=service_role_key,
+            table=table,
+            query=query,
+            offset=offset,
+            limit=POSTGREST_PAGE_SIZE,
+        )
+        rows.extend(page)
+        if len(page) < POSTGREST_PAGE_SIZE:
+            return rows
+        offset += POSTGREST_PAGE_SIZE
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _row_key(row: dict[str, Any]) -> str:
+    return _norm_text(row.get("listing_id")) or _norm_text(row.get("listing_url"))
+
+
+def _positive_number(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _valid_market_price(row: dict[str, Any], now: datetime) -> bool:
+    expires_at = _parse_datetime(row.get("expires_at"))
+    return (
+        _positive_number(row.get("avg_price"))
+        and _positive_number(row.get("low_price"))
+        and _positive_number(row.get("high_price"))
+        and int(row.get("sample_size") or 0) >= 2
+        and expires_at is not None
+        and expires_at >= now
+    )
+
+
+def _has_market_price(row: dict[str, Any], market_rows: list[dict[str, Any]], now: datetime) -> bool:
+    state = _norm_text(row.get("state"))
+    for market in market_rows:
+        if not _valid_market_price(market, now):
+            continue
+        if (
+            int(market.get("year") or 0) == int(row.get("year") or 0)
+            and _norm_text(market.get("make")) == _norm_text(row.get("make"))
+            and _norm_text(market.get("model")) == _norm_text(row.get("model"))
+            and _norm_text(market.get("state")) == state
+        ):
+            return True
+    return False
+
+
+def _has_usable_dealer_sales(row: dict[str, Any], dealer_sales_rows: list[dict[str, Any]]) -> bool:
+    year = int(row.get("year") or 0)
+    make = _norm_text(row.get("make"))
+    model = _norm_text(row.get("model"))
+    state = _norm_text(row.get("state"))
+    count = 0
+    for sale in dealer_sales_rows:
+        sale_year = int(sale.get("year") or 0)
+        if not (year - 1 <= sale_year <= year + 1):
+            continue
+        if _norm_text(sale.get("make")) != make or _norm_text(sale.get("model")) != model:
+            continue
+        if state and _norm_text(sale.get("state")) != state:
+            continue
+        if not _positive_number(sale.get("sale_price")):
+            continue
+        count += 1
+        if count >= 2:
+            return True
+    return False
+
+
+def _is_clean_candidate(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now: datetime) -> bool:
+    if int(row.get("year") or 0) < now.year - max_age_years:
+        return False
+    mileage = row.get("mileage")
+    try:
+        parsed_mileage = int(mileage)
+    except (TypeError, ValueError):
+        return False
+    return 0 < parsed_mileage <= max_mileage and bool(str(row.get("vin") or "").strip())
+
+
+def fetch_rows_via_rest(
+    supabase_url: str,
+    service_role_key: str,
+    *,
+    lookback_days: int,
+    max_mileage: int,
+    max_age_years: int,
+    include_dirty: bool,
+    limit: int,
+    now: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    current_time = now or datetime.now(timezone.utc)
+    base_url = _normalize_supabase_rest_url(supabase_url)
+    since = (current_time - timedelta(days=lookback_days)).isoformat()
+    listing_since = (current_time - timedelta(days=lookback_days + 30)).isoformat()
+    sales_since = (current_time - timedelta(days=365)).isoformat()
+
+    proxy_skip_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "ingest_delivery_log",
+        [
+            ("select", "run_id,listing_id,listing_url,error_message,created_at"),
+            ("created_at", f"gte.{since}"),
+            ("status", "eq.skipped_ceiling"),
+            ("error_message", "like.pricing_maturity_proxy*"),
+            ("order", "created_at.desc"),
+            ("limit", str(max(limit * 5, 100))),
+        ],
+    )
+    latest_skips: dict[str, dict[str, Any]] = {}
+    for skip in proxy_skip_rows:
+        key = _row_key(skip)
+        if key and key not in latest_skips:
+            latest_skips[key] = skip
+    if not latest_skips:
+        return []
+
+    sonar_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "sonar_listings",
+        [
+            (
+                "select",
+                "source_site,year,make,model,state,mileage,vin,current_bid,auction_end_date,created_at,title,listing_id,listing_url",
+            ),
+            ("created_at", f"gte.{listing_since}"),
+            ("order", "created_at.desc"),
+            ("limit", str(max(limit * 20, 1000))),
+        ],
+    )
+    latest_listings: dict[str, dict[str, Any]] = {}
+    for listing in sonar_rows:
+        key = _row_key(listing)
+        if key and key in latest_skips and key not in latest_listings:
+            latest_listings[key] = listing
+
+    market_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "market_prices",
+        [
+            ("select", "year,make,model,state,avg_price,low_price,high_price,sample_size,expires_at"),
+            ("expires_at", f"gte.{current_time.isoformat()}"),
+            ("sample_size", "gte.2"),
+        ],
+    )
+    dealer_sales_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "dealer_sales",
+        [
+            ("select", "year,make,model,state,sale_price,sale_date"),
+            ("sale_date", f"gte.{sales_since}"),
+            ("sale_price", "gt.0"),
+        ],
+    )
+
+    joined: list[dict[str, Any]] = []
+    for key, skip in latest_skips.items():
+        listing = latest_listings.get(key)
+        if not listing:
+            continue
+        auction_end = _parse_datetime(listing.get("auction_end_date"))
+        row = {
+            **listing,
+            "run_id": skip.get("run_id"),
+            "error_message": skip.get("error_message"),
+            "skip_created_at": skip.get("created_at"),
+            "sonar_created_at": listing.get("created_at"),
+            "has_market_price": _has_market_price(listing, market_rows, current_time),
+            "has_usable_dealer_sales": _has_usable_dealer_sales(listing, dealer_sales_rows),
+            "auction_active": None if auction_end is None else auction_end >= current_time,
+        }
+        if include_dirty or _is_clean_candidate(row, max_mileage=max_mileage, max_age_years=max_age_years, now=current_time):
+            joined.append(row)
+
+    joined.sort(
+        key=lambda row: (
+            0 if row.get("auction_active") is True else 1 if row.get("auction_active") is None else 2,
+            -(_parse_datetime(row.get("skip_created_at")) or datetime(1970, 1, 1, tzinfo=timezone.utc)).timestamp(),
+        )
+    )
+    return joined[:limit]
+
+
 def fetch_rows(
     dsn: str,
     *,
@@ -182,29 +501,49 @@ def main() -> int:
     parser.add_argument("--max-age-years", type=int, default=4)
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--include-dirty", action="store_true")
+    parser.add_argument(
+        "--via-rest",
+        action="store_true",
+        help="Read through Supabase REST service-role API instead of direct Postgres.",
+    )
     args = parser.parse_args()
 
     if args.lookback_days <= 0 or args.max_mileage <= 0 or args.max_age_years < 0 or args.limit <= 0:
         print("lookback, mileage, age, and limit arguments must be positive", file=sys.stderr)
         return 2
 
-    dsn = get_database_url(args.dsn, env_file=args.env_file)
-    if not dsn:
-        print(
-            "No database DSN found. Set SUPABASE_DB_URL, SUPABASE_DATABASE_URL, "
-            "SUPABASE_DIRECT_DB_URL, DATABASE_URL, or pass --dsn.",
-            file=sys.stderr,
+    rest_base_url, service_role_key, rest_source = resolve_rest_config(args.env_file)
+    dsn = None if args.via_rest else get_database_url(args.dsn, env_file=args.env_file)
+    if dsn:
+        rows = fetch_rows(
+            dsn,
+            lookback_days=args.lookback_days,
+            max_mileage=args.max_mileage,
+            max_age_years=args.max_age_years,
+            include_dirty=args.include_dirty,
+            limit=args.limit,
         )
-        return 2
-
-    rows = fetch_rows(
-        dsn,
-        lookback_days=args.lookback_days,
-        max_mileage=args.max_mileage,
-        max_age_years=args.max_age_years,
-        include_dirty=args.include_dirty,
-        limit=args.limit,
-    )
+    else:
+        if not rest_base_url or not service_role_key:
+            print(
+                "No live database read path found. Set a direct DB DSN, or set "
+                "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for --via-rest.",
+                file=sys.stderr,
+            )
+            return 2
+        if args.via_rest:
+            print(f"db_path=rest:{rest_source or 'unknown'}")
+        else:
+            print(f"db_path=rest:{rest_source or 'unknown'} (direct DSN unavailable)")
+        rows = fetch_rows_via_rest(
+            rest_base_url,
+            service_role_key,
+            lookback_days=args.lookback_days,
+            max_mileage=args.max_mileage,
+            max_age_years=args.max_age_years,
+            include_dirty=args.include_dirty,
+            limit=args.limit,
+        )
     summary = summarize(rows)
     print(
         f"pricing_proxy_source_candidates={len(rows)} "
