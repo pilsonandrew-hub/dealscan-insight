@@ -475,7 +475,6 @@ function isBroadVehiclePayload(candidate, reference = null) {
 async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage));
     const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
-    sourceQualityStats.detail_pages_attempted += toScrape.length;
 
     if (toScrape.length === 0) {
         log.info('[DETAIL ENRICH] All lots already have VIN/mileage or no detail URLs — skipping detail scrape');
@@ -485,9 +484,12 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     log.info(`[DETAIL ENRICH] Scraping detail pages for ${toScrape.length} lots missing VIN/mileage`);
     let vinFound = 0;
     let mileageFound = 0;
+    let detailAttempts = 0;
 
     for (const lot of toScrape) {
         if (!budget.shouldContinue(DETAIL_PAGE_REQUIRED_MS, 'GovDeals detail enrichment')) break;
+        sourceQualityStats.detail_pages_attempted++;
+        detailAttempts++;
         sourceQualityStats.detail_attempted_urls.add(lot.listing_url);
         try {
             await page.goto(lot.listing_url, { waitUntil: 'domcontentloaded', timeout: DETAIL_PAGE_TIMEOUT_MS });
@@ -530,7 +532,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
         }
     }
 
-    log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
+    log.info(`[DETAIL ENRICH] Complete: attempted ${detailAttempts} of ${toScrape.length} planned pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
 function extractDetailDiagnostics(bodyText, metadata = {}) {

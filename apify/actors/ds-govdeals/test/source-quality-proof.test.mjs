@@ -72,6 +72,14 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('rows_excluded_without_detail_attempt');
   });
 
+  test('counts only actually attempted detail pages when runtime budget stops enrichment', () => {
+    expect(source).not.toContain('sourceQualityStats.detail_pages_attempted += toScrape.length;');
+    expect(source).toContain('let detailAttempts = 0;');
+    expect(source).toContain('sourceQualityStats.detail_pages_attempted++;');
+    expect(source).toContain('detailAttempts++;');
+    expect(source).toContain('Complete: attempted ${detailAttempts} of ${toScrape.length} planned pages');
+  });
+
   test('samples attempted and unattempted exclusion rows for cap diagnosis', () => {
     expect(source).toContain('function sampleExcludedLots(lots, limit = 10)');
     expect(source).toContain('excluded_after_detail_attempt_samples: []');
