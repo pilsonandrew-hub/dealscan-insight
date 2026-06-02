@@ -223,6 +223,13 @@ _EXPLICIT_NEGATIVE_CONDITION_SIGNALS = frozenset({
     "rebuilt",
     "odometer rollback",
     "lemon",
+    "engine performance concerns",
+    "dash warning indicators",
+    "warning indicators",
+    "major components missing",
+    "interior defects",
+    "ac issues",
+    "a/c issues",
 })
 
 

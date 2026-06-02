@@ -45,6 +45,13 @@ _NEGATIVE_SIGNALS: dict[str, int] = {
     "branded title": -10,
     "odometer rollback": -10,
     "lemon": -8,
+    "engine performance concerns": -8,
+    "dash warning indicators": -6,
+    "warning indicators": -5,
+    "major components missing": -10,
+    "interior defects": -4,
+    "ac issues": -3,
+    "a/c issues": -3,
 }
 
 # Positive signals → raise score

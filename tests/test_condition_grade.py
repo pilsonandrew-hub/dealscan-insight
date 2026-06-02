@@ -4,7 +4,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from backend.ingest.condition import compute_condition_grade
+from backend.ingest.condition import compute_condition_grade, score_condition
 
 import datetime as _dt
 CURRENT_YEAR = _dt.datetime.now(_dt.timezone.utc).year
@@ -24,6 +24,22 @@ def test_no_start_description_is_poor():
 
 def test_not_running_description_is_poor():
     assert compute_condition_grade(description="This unit is not running.") == "Poor"
+
+
+def test_jjkane_defect_phrases_are_explicit_condition_signals():
+    result = score_condition(
+        description=(
+            "Runs & Moves, Engine Performance Concerns, Dash Warning Indicators On, "
+            "AC Issues Not Cold, Interior Defects See Photos, Major Components Missing"
+        ),
+        year=CURRENT_YEAR - 8,
+        mileage=76389,
+    )
+
+    assert result["condition_grade"] in {"D", "F"}
+    assert "engine performance concerns" in result["condition_signals"]
+    assert "dash warning indicators" in result["condition_signals"]
+    assert "major components missing" in result["condition_signals"]
 
 
 def test_runs_and_drives_bumps_fair_to_good():
