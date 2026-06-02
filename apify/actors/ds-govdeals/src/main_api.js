@@ -52,7 +52,7 @@ const DETAIL_PAGE_TIMEOUT_MS = 12000;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
-const MAX_DETAIL_PAGES = 30;  // Keep under memory limit for 1GB actor
+const MAX_DETAIL_PAGES = 60;  // Keep bounded while allowing one-page proof runs to enrich all candidates
 const CONDITION_REJECT_PATTERNS = [
     /\bsalvage\b/i,
     /\bflood\b/i,
@@ -174,7 +174,7 @@ function extractVinFromLot(lot) {
 
 const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: 20,
-    requestHandlerTimeoutSecs: 360, // extended for detail page scraping
+    requestHandlerTimeoutSecs: 600, // extended for bounded detail page proof runs
     async requestHandler({ page, log }) {
         log.info('Loading GovDeals and capturing maestro /search/list traffic...');
 

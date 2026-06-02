@@ -37,4 +37,10 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain("const lotId = String(lot.assetId ?? lot.id ?? '');");
     expect(source).toContain('if (lotId) seenIds.add(lotId);');
   });
+
+  test('sets detail capacity and request timeout high enough for bounded proof runs', () => {
+    expect(source).not.toContain('const MAX_DETAIL_PAGES = 30;');
+    expect(source).toContain('const MAX_DETAIL_PAGES = 60;');
+    expect(source).toContain('requestHandlerTimeoutSecs: 600');
+  });
 });
