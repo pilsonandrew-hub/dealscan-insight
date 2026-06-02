@@ -47,7 +47,8 @@ const HARD_MAX_PAGES = 200;
 const DEFAULT_RUNTIME_BUDGET_MS = 330000;
 const NAVIGATION_BUDGET_REQUIRED_MS = 90000;
 const PAGINATION_PAGE_REQUIRED_MS = 12000;
-const DETAIL_PAGE_REQUIRED_MS = 45000;
+const DETAIL_PAGE_REQUIRED_MS = 12000;
+const DETAIL_PAGE_TIMEOUT_MS = 12000;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -446,7 +447,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     for (const lot of toScrape) {
         if (!budget.shouldContinue(DETAIL_PAGE_REQUIRED_MS, 'GovDeals detail enrichment')) break;
         try {
-            await page.goto(lot.listing_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.goto(lot.listing_url, { waitUntil: 'domcontentloaded', timeout: DETAIL_PAGE_TIMEOUT_MS });
             sourceQualityStats.detail_pages_fetched++;
             // GovDeals is Angular SPA — wait for content to render
             await page.waitForTimeout(2000);

@@ -25,4 +25,10 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).not.toContain('Math.max(totalPages, Math.ceil(totalCount / pageSize))');
     expect(source).toMatch(/Math\.min\(\s*totalPages,\s*Math\.ceil\(totalCount \/ pageSize\),\s*HARD_MAX_PAGES,\s*\)/);
   });
+
+  test('keeps detail enrichment budget aligned to observed page fetch cost', () => {
+    expect(source).not.toContain('const DETAIL_PAGE_REQUIRED_MS = 45000;');
+    expect(source).toContain('const DETAIL_PAGE_REQUIRED_MS = 12000;');
+    expect(source).toContain('const DETAIL_PAGE_TIMEOUT_MS = 12000;');
+  });
 });
