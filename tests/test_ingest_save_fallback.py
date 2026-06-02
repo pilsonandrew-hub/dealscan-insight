@@ -312,7 +312,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
         self.assertIn("updated_at", update_payload)
 
-    def test_duplicate_recovery_does_not_overwrite_existing_enrichment_fields(self):
+    def test_duplicate_recovery_merges_missing_raw_data_without_overwriting_existing_enrichment_fields(self):
         row = {
             "listing_id": "listing-3",
             "listing_url": "https://example.com/vehicle/3",
@@ -320,7 +320,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             "vin": "1HGCM82633A004352",
             "mileage": 32100,
             "condition_grade": "good",
-            "raw_data": {"detail_enriched": True},
+            "raw_data": {"detail_enriched": True, "description": "New detail-page condition text."},
             "source_run_id": "run-123",
             "run_id": "run-123",
         }
@@ -328,7 +328,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             "vin": "EXISTINGVIN1234567",
             "mileage": None,
             "condition_grade": "fair",
-            "raw_data": {"original": True},
+            "raw_data": {"original": True, "description": "Existing source text wins."},
             "source_run_id": None,
             "run_id": "old-run",
         }
@@ -351,9 +351,70 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertNotIn("vin", update_payload)
         self.assertEqual(update_payload["mileage"], row["mileage"])
         self.assertNotIn("condition_grade", update_payload)
-        self.assertNotIn("raw_data", update_payload)
+        self.assertEqual(
+            update_payload["raw_data"],
+            {
+                "original": True,
+                "description": "Existing source text wins.",
+                "detail_enriched": True,
+            },
+        )
         self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
         self.assertNotIn("run_id", update_payload)
+
+    def test_vin_duplicate_merges_missing_raw_data_condition_text_without_new_insert(self):
+        row = {
+            "listing_id": "listing-durango",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "title": "2020 Dodge Durango SRT",
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 13983,
+            "condition_grade": "Poor",
+            "raw_data": {
+                "title": "2020 Dodge Durango SRT",
+                "description": "Starts, runs and drives. Minor scratches noted.",
+                "detail_text": "Starts, runs and drives. Minor scratches noted.",
+            },
+            "source_run_id": "bu9WOTzo6VpaGa0be",
+            "run_id": "bu9WOTzo6VpaGa0be",
+            "dos_score": 86.9,
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+        }
+        existing_row = {
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 13983,
+            "condition_grade": "Poor",
+            "raw_data": {"title": "2020 Dodge Durango SRT"},
+            "source_run_id": "old-run",
+            "run_id": "old-run",
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+        }
+        vehicle = {"dos_score": 86.9, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(row, "unused", existing_row)
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: ("existing-durango", False)):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-durango")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
+        self.assertEqual(len(supabase._table.update_calls), 1)
+        update_payload, filters = supabase._table.update_calls[0]
+        self.assertEqual(filters, [("id", "existing-durango")])
+        self.assertEqual(
+            update_payload["raw_data"],
+            {
+                "title": "2020 Dodge Durango SRT",
+                "description": "Starts, runs and drives. Minor scratches noted.",
+                "detail_text": "Starts, runs and drives. Minor scratches noted.",
+            },
+        )
+        self.assertNotIn("source_run_id", update_payload)
+        self.assertNotIn("vin", update_payload)
+        self.assertIn("updated_at", update_payload)
 
     def test_vin_duplicate_refreshes_existing_proxy_pricing_when_new_truth_is_market_comp(self):
         row = {

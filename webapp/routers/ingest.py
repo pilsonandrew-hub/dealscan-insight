@@ -2891,7 +2891,6 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
         "vin",
         "mileage",
         "condition_grade",
-        "raw_data",
         "source_run_id",
         "run_id",
     ):
@@ -2899,6 +2898,18 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
         current_value = existing.get(key)
         if value not in (None, "", {}, []) and current_value in (None, "", {}, []):
             update[key] = value
+    incoming_raw = row.get("raw_data")
+    existing_raw = existing.get("raw_data")
+    if isinstance(incoming_raw, dict):
+        if not isinstance(existing_raw, dict) or existing_raw in ({}, []):
+            update["raw_data"] = incoming_raw
+        else:
+            merged_raw = dict(existing_raw)
+            for key, value in incoming_raw.items():
+                if value not in (None, "", {}, []) and merged_raw.get(key) in (None, "", {}, []):
+                    merged_raw[key] = value
+            if merged_raw != existing_raw:
+                update["raw_data"] = merged_raw
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
     return update
