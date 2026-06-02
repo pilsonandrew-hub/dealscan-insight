@@ -16,6 +16,8 @@ def test_external_market_comp_seed_workflow_is_manual_and_guarded():
     assert "SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}" in text
     assert "SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}" in text
     assert "SUPABASE_URL: ${{ secrets.SUPABASE_URL }}" in text
+    assert "SUPABASE_USE_POOLER: \"true\"" in text
+    assert "SUPABASE_DB_POOLER_HOST: aws-0-us-west-1.pooler.supabase.com" in text
     assert "scripts/prepare_external_market_comp_seed.py" in text
     assert "scripts/verify_pricing_substrate.py --require-ready" in text
     assert "scripts/report_pricing_blocked_source_candidates.py" in text

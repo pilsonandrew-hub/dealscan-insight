@@ -41,6 +41,8 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_USE_POOLER: "true"
+      SUPABASE_DB_POOLER_HOST: aws-0-us-west-1.pooler.supabase.com
       EVIDENCE_FILE: ${{ inputs.evidence_file }}
       APPLY_EXTERNAL_COMP: ${{ inputs.apply }}
       CONFIRMATION: ${{ inputs.confirmation }}

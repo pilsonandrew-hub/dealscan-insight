@@ -24,6 +24,8 @@ DIRECT_DATABASE_URL_KEYS = (
 DATABASE_URL_KEYS = (*DIRECT_DATABASE_URL_KEYS, "DATABASE_URL")
 PROJECT_ID_KEYS = ("SUPABASE_PROJECT_ID", "VITE_SUPABASE_PROJECT_ID")
 SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
+POOLER_HOST_KEYS = ("SUPABASE_DB_POOLER_HOST", "SUPABASE_POOLER_HOST")
+POOLER_PORT_KEYS = ("SUPABASE_DB_POOLER_PORT", "SUPABASE_POOLER_PORT")
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -45,6 +47,57 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_project_ref(values: Mapping[str, str]) -> str:
+    for key in PROJECT_ID_KEYS:
+        project_ref = (values.get(key) or "").strip()
+        if project_ref:
+            return project_ref
+
+    for key in SUPABASE_URL_KEYS:
+        supabase_url = (values.get(key) or "").strip()
+        if not supabase_url:
+            continue
+        match = re.search(r"https://([a-z0-9]+)\.supabase\.co", supabase_url)
+        if match:
+            return match.group(1)
+
+    return ""
+
+
+def _derive_supabase_pooler_db_url(values: Mapping[str, str]) -> Optional[str]:
+    if not _truthy(values.get("SUPABASE_USE_POOLER")):
+        return None
+
+    db_password = (values.get("SUPABASE_DB_PASSWORD") or "").strip()
+    project_ref = _resolve_project_ref(values)
+    if not db_password or not project_ref:
+        return None
+
+    pooler_host = ""
+    for key in POOLER_HOST_KEYS:
+        pooler_host = (values.get(key) or "").strip()
+        if pooler_host:
+            break
+    if not pooler_host:
+        return None
+
+    pooler_port = "6543"
+    for key in POOLER_PORT_KEYS:
+        configured_port = (values.get(key) or "").strip()
+        if configured_port:
+            pooler_port = configured_port
+            break
+
+    return (
+        f"postgresql://postgres.{project_ref}:{quote(db_password, safe='')}"
+        f"@{pooler_host}:{pooler_port}/postgres?sslmode=require"
+    )
+
+
 def _derive_supabase_direct_db_url(values: Mapping[str, str]) -> Optional[str]:
     for key in DIRECT_DATABASE_URL_KEYS:
         candidate = (values.get(key) or "").strip()
@@ -55,22 +108,7 @@ def _derive_supabase_direct_db_url(values: Mapping[str, str]) -> Optional[str]:
     if not db_password:
         return None
 
-    project_ref = ""
-    for key in PROJECT_ID_KEYS:
-        project_ref = (values.get(key) or "").strip()
-        if project_ref:
-            break
-
-    if not project_ref:
-        for key in SUPABASE_URL_KEYS:
-            supabase_url = (values.get(key) or "").strip()
-            if not supabase_url:
-                continue
-            match = re.search(r"https://([a-z0-9]+)\.supabase\.co", supabase_url)
-            if match:
-                project_ref = match.group(1)
-                break
-
+    project_ref = _resolve_project_ref(values)
     if not project_ref:
         return None
 
@@ -88,6 +126,10 @@ def _resolve_database_url_from_values(
         candidate = (values.get(key) or "").strip()
         if candidate:
             return candidate, f"{scope}.{key}"
+
+    pooler = _derive_supabase_pooler_db_url(values)
+    if pooler:
+        return pooler, f"{scope}.derived_supabase_pooler"
 
     derived = _derive_supabase_direct_db_url(values)
     if derived:
