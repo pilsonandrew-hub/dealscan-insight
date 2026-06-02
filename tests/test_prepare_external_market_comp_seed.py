@@ -1,6 +1,8 @@
 import importlib.util
+import json
 import sys
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -111,3 +113,78 @@ def test_validate_external_comp_document_rejects_proxy_like_bad_values():
 
     with pytest.raises(prepare_external_market_comp_seed.ExternalCompError, match="mileage"):
         prepare_external_market_comp_seed.validate_external_comp_document(evidence)
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def test_insert_seed_row_via_rest_posts_when_no_existing_row(monkeypatch):
+    seed = prepare_external_market_comp_seed.validate_external_comp_document(_evidence())
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        if request.get_method() == "GET":
+            parsed = urlparse(request.full_url)
+            query = parse_qs(parsed.query)
+            assert query["year"] == ["eq.2020"]
+            assert query["make"] == ["eq.dodge"]
+            assert query["model"] == ["eq.durango"]
+            assert query["state"] == ["eq.ms"]
+            assert query["source"] == ["eq.external_retail_listing_comp"]
+            assert query["source_run_id"] == ["eq.manual-2026-06-02-durango"]
+            return _FakeResponse([])
+        assert request.get_method() == "POST"
+        payload = json.loads(request.data.decode("utf-8"))
+        assert payload["year"] == 2020
+        assert payload["make"] == "dodge"
+        assert payload["model"] == "durango"
+        assert payload["source"] == "external_retail_listing_comp"
+        assert payload["metadata"]["evidence_count"] == 3
+        assert "last_updated" in payload
+        assert "expires_at" in payload
+        return _FakeResponse([{"id": "row-1", "avg_price": "47468.33", "sample_size": 3}])
+
+    monkeypatch.setattr(prepare_external_market_comp_seed.urllib_request, "urlopen", fake_urlopen)
+
+    inserted = prepare_external_market_comp_seed.insert_seed_row_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        seed,
+        ttl_days=14,
+    )
+
+    assert inserted == {"id": "row-1", "avg_price": "47468.33", "sample_size": 3}
+    assert [call.get_method() for call in calls] == ["GET", "POST"]
+
+
+def test_insert_seed_row_via_rest_noops_when_existing_row_found(monkeypatch):
+    seed = prepare_external_market_comp_seed.validate_external_comp_document(_evidence())
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        return _FakeResponse([{"id": "existing-row"}])
+
+    monkeypatch.setattr(prepare_external_market_comp_seed.urllib_request, "urlopen", fake_urlopen)
+
+    inserted = prepare_external_market_comp_seed.insert_seed_row_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        seed,
+        ttl_days=14,
+    )
+
+    assert inserted is None
+    assert [call.get_method() for call in calls] == ["GET"]

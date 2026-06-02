@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 import psycopg2
@@ -239,12 +243,100 @@ def insert_seed_row(dsn: str, seed_row: dict, *, ttl_days: int) -> Optional[dict
     return dict(inserted) if inserted else None
 
 
+def _normalize_rest_base_url(supabase_url: str) -> str:
+    return supabase_url.rstrip("/").removesuffix("/rest/v1")
+
+
+def _rest_json_request(method: str, url: str, service_role_key: str, payload: Optional[dict] = None):
+    data = None
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Accept": "application/json",
+    }
+    if payload is not None:
+        data = json.dumps(payload, sort_keys=True).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+        headers["Prefer"] = "return=representation"
+
+    request = urllib_request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib_request.urlopen(request, timeout=30) as response:
+            raw_payload = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase REST API error: HTTP {exc.code} {body[:300]}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"Supabase REST API unreachable: {exc}") from exc
+
+    try:
+        return json.loads(raw_payload or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Supabase REST API returned invalid JSON") from exc
+
+
+def _market_price_rest_query(seed_row: dict) -> str:
+    query = [
+        ("select", "id,year,make,model,state,avg_price,sample_size"),
+        ("year", f"eq.{seed_row['year']}"),
+        ("make", f"eq.{seed_row['make']}"),
+        ("model", f"eq.{seed_row['model']}"),
+        ("source", f"eq.{seed_row['source']}"),
+        ("source_run_id", f"eq.{seed_row['source_run_id']}"),
+        ("limit", "1"),
+    ]
+    state = seed_row.get("state")
+    if state:
+        query.append(("state", f"eq.{state}"))
+    else:
+        query.append(("state", "is.null"))
+    return urllib_parse.urlencode(query)
+
+
+def insert_seed_row_via_rest(
+    supabase_url: str,
+    service_role_key: str,
+    seed_row: dict,
+    *,
+    ttl_days: int,
+) -> Optional[dict]:
+    base_url = _normalize_rest_base_url(supabase_url)
+    query = _market_price_rest_query(seed_row)
+    existing = _rest_json_request(
+        "GET",
+        f"{base_url}/rest/v1/market_prices?{query}",
+        service_role_key,
+    )
+    if existing:
+        return None
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        **seed_row,
+        "avg_price": float(seed_row["avg_price"]),
+        "low_price": float(seed_row["low_price"]),
+        "high_price": float(seed_row["high_price"]),
+        "last_updated": now.isoformat(),
+        "expires_at": (now + timedelta(days=ttl_days)).isoformat(),
+    }
+    inserted = _rest_json_request(
+        "POST",
+        f"{base_url}/rest/v1/market_prices",
+        service_role_key,
+        payload,
+    )
+    if not isinstance(inserted, list) or not inserted:
+        raise RuntimeError("Supabase REST insert returned no row")
+    return dict(inserted[0])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, help="JSON evidence file.")
     parser.add_argument("--dsn", help="Postgres DSN. Defaults to env/.env live helpers.")
     parser.add_argument("--env-file", help="Env file to read when DSN is not provided.")
     parser.add_argument("--apply", action="store_true", help="Insert after validation. Default is dry-run.")
+    parser.add_argument("--apply-via-rest", action="store_true", help="Use Supabase REST service-role insert for apply.")
     parser.add_argument("--ttl-days", type=int, default=14)
     parser.add_argument("--min-sample-size", type=int, default=DEFAULT_MIN_SAMPLE_SIZE)
     args = parser.parse_args()
@@ -272,6 +364,27 @@ def main() -> int:
 
     if not args.apply:
         print("Dry-run only. Re-run with --apply to insert after review.")
+        return 0
+
+    if args.apply_via_rest:
+        supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+        service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        if not supabase_url or not service_role_key:
+            print("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for --apply-via-rest.", file=sys.stderr)
+            return 2
+        inserted = insert_seed_row_via_rest(
+            supabase_url,
+            service_role_key,
+            seed_row,
+            ttl_days=args.ttl_days,
+        )
+        if inserted:
+            print(
+                "Inserted external market_prices row via Supabase REST: "
+                f"id={inserted['id']} avg={inserted['avg_price']} samples={inserted['sample_size']}"
+            )
+        else:
+            print("No row inserted via Supabase REST; matching source/source_run_id already exists.")
         return 0
 
     dsn = get_database_url(args.dsn, env_file=args.env_file)
