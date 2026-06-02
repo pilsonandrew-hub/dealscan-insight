@@ -12,7 +12,7 @@ function loadHelperExports() {
   const helperStart = source.indexOf('const HIGH_RUST');
   const helperEnd = source.indexOf('// ── Parse quickviews');
   const helperSource = source.slice(helperStart, helperEnd) + `
-({ extractVin, parseDetailVin, parseAuctionEnd, passesFilters })`;
+({ extractVin, parseDetailVin, parseAuctionEnd, passesFilters, isGovPlanetMarketplace })`;
   return vm.runInNewContext(helperSource, {});
 }
 
@@ -75,6 +75,17 @@ describe('ds-govplanet source contract', () => {
     expect(source).toContain('maxAgeYears = 4');
     expect(inputSchema.properties.maxMileage.default).toBe(50000);
     expect(inputSchema.properties.maxAgeYears.default).toBe(4);
+  });
+
+  test('keeps IronPlanet family aggregate rows out of the GovPlanet actor', () => {
+    const helpers = loadHelperExports();
+
+    expect(helpers.isGovPlanetMarketplace({ marketplace: 'G' })).toBe(true);
+    expect(helpers.isGovPlanetMarketplace({ marketplace: 'I' })).toBe(false);
+    expect(helpers.isGovPlanetMarketplace({ marketplace: 'M' })).toBe(false);
+    expect(helpers.isGovPlanetMarketplace({ marketplace: 'T' })).toBe(false);
+    expect(helpers.isGovPlanetMarketplace({ marketplace: 'S' })).toBe(false);
+    expect(source).toContain('rows_excluded_non_govplanet_marketplace');
   });
 
   test('queues capped detail enrichment before rejecting list rows without VIN', () => {

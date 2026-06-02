@@ -228,6 +228,10 @@ function isAgeOverLimit(year, maxAgeYears, now = new Date()) {
     return (now.getFullYear() - year) > maxAgeYears;
 }
 
+function isGovPlanetMarketplace(item = {}) {
+    return String(item.marketplace || '').toUpperCase() === 'G';
+}
+
 function passesFilters({ year, price, state, locationText = '', mileage = null, maxMileage = 50000, maxAgeYears = 4 }) {
     // Accept DC regardless of state extraction
     const isDC = DC_PATTERN.test(locationText);
@@ -303,6 +307,7 @@ let totalPushedWithAuctionEnd = 0;
 let totalMissingVinWithoutDetail = 0;
 let totalMileageOverLimit = 0;
 let totalAgeOverLimit = 0;
+let totalNonGovPlanetMarketplace = 0;
 const excludedMissingVinSamples = [];
 const detailCaptchaSamples = [];
 const seenEquipIds = new Set();
@@ -396,6 +401,12 @@ const crawler = new CheerioCrawler({
             const equipId = String(item.equipId || '');
             if (!equipId || seenEquipIds.has(equipId)) continue;
             seenEquipIds.add(equipId);
+
+            if (!isGovPlanetMarketplace(item)) {
+                totalSkipped++;
+                totalNonGovPlanetMarketplace++;
+                continue;
+            }
 
             const desc     = (item.description || '').trim();
             const flagPath = (item.flagPath || '');
@@ -534,6 +545,7 @@ const sourceQualityProof = {
     rows_excluded_missing_vin: totalDetailMissingVin + totalMissingVinWithoutDetail,
     rows_excluded_mileage_over_limit: totalMileageOverLimit,
     rows_excluded_age_over_limit: totalAgeOverLimit,
+    rows_excluded_non_govplanet_marketplace: totalNonGovPlanetMarketplace,
     detail_pages_queued: totalDetailQueued,
     detail_pages_attempted: totalDetailAttempted,
     detail_pages_fetched: totalDetailFetched,
