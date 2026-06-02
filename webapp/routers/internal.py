@@ -422,7 +422,7 @@ def build_opportunity_condition_proof(opportunity_id: str) -> dict[str, Any]:
 
     rows = _safe_rows(
         "opportunities",
-        "id,listing_id,title,year,mileage,condition_grade,source_site,created_at,updated_at,raw_data,description",
+        "id,title,year,mileage,condition_grade,source_site,created_at,raw_data",
         limit=1,
         filters=[("eq", "id", clean_id)],
     )
