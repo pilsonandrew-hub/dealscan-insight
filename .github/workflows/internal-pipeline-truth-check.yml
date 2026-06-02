@@ -79,6 +79,10 @@ jobs:
               "opportunities": {
                   "active_dos80_sample": opportunities.get("active_dos80_sample"),
                   "active_dos80_gate_breakdown_count": len(gate_breakdown),
+                  "active_dos80_alert_eligible_sample": opportunities.get("active_dos80_alert_eligible_sample"),
+                  "active_dos80_gate_blocker_counts_sample": opportunities.get("active_dos80_gate_blocker_counts_sample"),
+                  "active_dos80_condition_counts_sample": opportunities.get("active_dos80_condition_counts_sample"),
+                  "active_dos80_pricing_maturity_counts_sample": opportunities.get("active_dos80_pricing_maturity_counts_sample"),
                   "active_dos80_gate_breakdown_sample": gate_breakdown[:5],
               },
           }
