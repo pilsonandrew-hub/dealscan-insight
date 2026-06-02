@@ -141,3 +141,35 @@ def test_sweeper_archives_active_high_dos_rows_with_missing_or_invalid_mileage()
         "ids": ["missing-mileage-1", "missing-mileage-2", "zero-mileage-1"],
         "filters": [("in", "id", ("missing-mileage-1", "missing-mileage-2", "zero-mileage-1"))],
     } in client.updates
+
+
+def test_sweeper_archives_active_high_dos_rows_with_missing_vin():
+    now = datetime(2026, 6, 2, 8, 18, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", 80),
+                ("is", "vin", "null"),
+            ): [{"id": "missing-vin-1"}, {"id": "missing-vin-2"}],
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", 80),
+                ("eq", "vin", ""),
+            ): [{"id": "blank-vin-1"}],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["archived_untrusted_active_high_dos_missing_vin"] == 3
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_no_vin",
+        },
+        "ids": ["missing-vin-1", "missing-vin-2", "blank-vin-1"],
+        "filters": [("in", "id", ("missing-vin-1", "missing-vin-2", "blank-vin-1"))],
+    } in client.updates

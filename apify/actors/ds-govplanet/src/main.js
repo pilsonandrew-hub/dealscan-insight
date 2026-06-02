@@ -272,10 +272,19 @@ const crawler = new CheerioCrawler({
             const listingUrl = item.itemPageUri
                 ? `${BASE}${item.itemPageUri.split('?')[0]}`
                 : null;
+            const vin = (() => {
+                const m = (item.vin || item.vehicleVin || item.vinNumber || item.title || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
+                return m ? m[1].toUpperCase() : null;
+            })();
 
             if (!isVehicle(desc)) { totalSkipped++; continue; }
             if (!passesFilters({ year, price, state, locationText: item.eumeLocation || '' })) { totalSkipped++; continue; }
             if (price < minBid || (maxBid > 0 && price > maxBid)) { totalSkipped++; continue; }
+            if (!vin) {
+                totalSkipped++;
+                log.info(`[${label}] Skipped missing_vin: ${desc} (${equipId})`);
+                continue;
+            }
 
             records.push({
                 title:            desc,
@@ -297,7 +306,7 @@ const crawler = new CheerioCrawler({
                 })(),
                 listing_url:      listingUrl,
                 photo_url:        item.photo || item.photoThumb || null,
-                vin:              (() => { const m = (item.vin || item.vehicleVin || item.vinNumber || item.title || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i); return m ? m[1].toUpperCase() : null; })(),
+                vin,
                 source_site:      SOURCE,
                 equip_id:         equipId,
                 scraped_at:       new Date().toISOString(),

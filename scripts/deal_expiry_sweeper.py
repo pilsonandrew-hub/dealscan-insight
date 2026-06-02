@@ -68,6 +68,8 @@ def build_message(summary: dict[str, Any]) -> str:
         f"<b>{summary['archived_stale_saved_inactive']}</b>\n"
         "Archived active high-DOS missing-mileage deals: "
         f"<b>{summary['archived_untrusted_active_high_dos_missing_mileage']}</b>\n"
+        "Archived active high-DOS missing-VIN deals: "
+        f"<b>{summary['archived_untrusted_active_high_dos_missing_vin']}</b>\n"
         f"Run time: {summary['run_time']}"
     )
 
@@ -123,6 +125,24 @@ def run_sweep(
             ],
         ),
     ])
+    active_high_dos_missing_vin_ids = _dedupe_preserving_order([
+        *_fetch_ids(
+            supabase,
+            [
+                lambda q: q.eq("is_active", True),
+                lambda q: q.gte("dos_score", 80),
+                lambda q: q.is_("vin", "null"),
+            ],
+        ),
+        *_fetch_ids(
+            supabase,
+            [
+                lambda q: q.eq("is_active", True),
+                lambda q: q.gte("dos_score", 80),
+                lambda q: q.eq("vin", ""),
+            ],
+        ),
+    ])
 
     summary = {
         "expired": _update_batches(
@@ -147,6 +167,15 @@ def run_sweep(
                 "is_active": False,
                 "pipeline_step": "archived",
                 "step_status": "q_no_mileage",
+            },
+        ),
+        "archived_untrusted_active_high_dos_missing_vin": _update_batches(
+            supabase,
+            active_high_dos_missing_vin_ids,
+            {
+                "is_active": False,
+                "pipeline_step": "archived",
+                "step_status": "q_no_vin",
             },
         ),
         "run_time": now.strftime("%Y-%m-%d %H:%M UTC"),
