@@ -149,6 +149,23 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     allowed = next(item for item in breakdown if item["id"] == "2")
     assert allowed["eligible"] is True
     assert allowed["blocking_reasons"] == []
+    assert result["opportunities"]["active_dos80_gate_blocker_counts_sample"] == {
+        "mileage_missing": 1,
+        "pricing_maturity=proxy": 1,
+        "insufficient_pricing": 1,
+        "vin_unverified": 1,
+        "grade=Rejected": 1,
+        "condition_unverified": 1,
+    }
+    assert result["opportunities"]["active_dos80_alert_eligible_sample"] == 1
+    assert result["opportunities"]["active_dos80_condition_counts_sample"] == {
+        "Poor": 1,
+        "Good": 1,
+    }
+    assert result["opportunities"]["active_dos80_pricing_maturity_counts_sample"] == {
+        "proxy": 1,
+        "market_comp": 1,
+    }
     assert "latest" in result["webhooks"]
     assert result["pricing_substrate"] == {
         "market_prices_table": "missing",

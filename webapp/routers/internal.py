@@ -185,6 +185,14 @@ def _alert_gate_breakdown(rows: list[dict[str, Any]], *, limit: int = 25) -> lis
     return breakdown
 
 
+def _gate_blocker_counts(breakdown: list[dict[str, Any]]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for item in breakdown:
+        for reason in item.get("blocking_reasons") or []:
+            counter[str(reason)] += 1
+    return dict(counter.most_common(20))
+
+
 def build_pipeline_truth() -> dict[str, Any]:
     if supabase_client is None:
         raise HTTPException(status_code=503, detail="Supabase service client unavailable")
@@ -202,6 +210,7 @@ def build_pipeline_truth() -> dict[str, Any]:
         row for row in active_rows
         if float(row.get("dos_score") or row.get("score") or 0) >= 80
     ]
+    active_dos80_gate_breakdown = _alert_gate_breakdown(active_dos80)
 
     webhook_rows = _safe_rows(
         "webhook_log",
@@ -239,7 +248,11 @@ def build_pipeline_truth() -> dict[str, Any]:
             "active_dos80_missing_vin_sample": sum(1 for row in active_dos80 if not row.get("vin")),
             "active_dos80_condition_unverified_sample": sum(1 for row in active_dos80 if str(row.get("condition_grade") or "").lower() in {"", "poor", "unknown"}),
             "source_counts_sample": _status_counts(active_dos80, "source_site"),
-            "active_dos80_gate_breakdown": _alert_gate_breakdown(active_dos80),
+            "active_dos80_condition_counts_sample": _status_counts(active_dos80, "condition_grade"),
+            "active_dos80_pricing_maturity_counts_sample": _status_counts(active_dos80, "pricing_maturity"),
+            "active_dos80_alert_eligible_sample": sum(1 for row in active_dos80_gate_breakdown if row.get("eligible") is True),
+            "active_dos80_gate_blocker_counts_sample": _gate_blocker_counts(active_dos80_gate_breakdown),
+            "active_dos80_gate_breakdown": active_dos80_gate_breakdown,
         },
         "webhooks": {
             "recent_count": len(webhook_rows),
