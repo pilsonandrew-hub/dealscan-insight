@@ -61,4 +61,13 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('for (const lot of pushableLots)');
     expect(source).toContain('await pushSourceQualityProof(log, pushableLots)');
   });
+
+  test('separates attempted detail misses from unattempted capacity exclusions', () => {
+    expect(source).toContain('detail_attempted_urls: new Set()');
+    expect(source).toContain('sourceQualityStats.detail_attempted_urls.add(lot.listing_url)');
+    expect(source).toContain('const excludedAfterDetailAttempt = incompleteLots.filter(lot => sourceQualityStats.detail_attempted_urls.has(lot.listing_url));');
+    expect(source).toContain('const excludedWithoutDetailAttempt = incompleteLots.filter(lot => !sourceQualityStats.detail_attempted_urls.has(lot.listing_url));');
+    expect(source).toContain('rows_excluded_after_detail_attempt');
+    expect(source).toContain('rows_excluded_without_detail_attempt');
+  });
 });
