@@ -13,6 +13,9 @@ import psycopg2.extras
 from live_verification_support import get_database_url
 
 
+MIN_SEEDABLE_HISTORY_ROWS = 5
+
+
 REPORT_SQL = """
 with clean_proxy as (
   select
@@ -32,7 +35,14 @@ with clean_proxy as (
     dos_score,
     processed_at,
     bid_headroom,
-    investment_grade
+    investment_grade,
+    current_bid,
+    expected_close_bid,
+    acquisition_price_basis,
+    projected_total_cost,
+    max_bid,
+    retail_asking_price_estimate,
+    listing_url
   from public.opportunities
   where processed_at >= timezone('utc', now()) - (%(lookback_days)s::int * interval '1 day')
     and pricing_maturity = 'proxy'
@@ -114,6 +124,40 @@ limit %(limit)s
 """
 
 
+def classify_gap(row: dict, *, min_seedable_history_rows: int = MIN_SEEDABLE_HISTORY_ROWS) -> str:
+    """Classify whether a clean proxy row has trusted internal comp evidence."""
+
+    if int(row.get("usable_market_prices_matches") or 0) > 0:
+        return "covered_by_market_prices"
+    if int(row.get("usable_dealer_sales_matches") or 0) >= 2:
+        return "covered_by_dealer_sales"
+
+    usable_history = int(row.get("usable_opportunity_history") or 0)
+    if usable_history >= min_seedable_history_rows:
+        return "seedable_from_internal_history"
+    if usable_history > 0:
+        return "insufficient_internal_history"
+    return "blocked_no_internal_comp_evidence"
+
+
+def format_gap_row(row: dict) -> str:
+    evidence_status = classify_gap(row)
+    return (
+        "- "
+        f"{row['year']} {row['make']} {row['model']} "
+        f"state={row.get('state') or 'unknown'} source={row.get('source') or row.get('source_site')} "
+        f"active={row.get('is_active')} dos={row.get('dos_score')} "
+        f"grade={row.get('investment_grade')} headroom={row.get('bid_headroom')} "
+        f"bid={row.get('current_bid')} expected_close={row.get('expected_close_bid')} "
+        f"retail_proxy={row.get('retail_asking_price_estimate')} "
+        f"market={row.get('usable_market_prices_matches')}/{row.get('market_prices_matches')} "
+        f"dealer_sales={row.get('usable_dealer_sales_matches')}/{row.get('dealer_sales_matches')} "
+        f"history={row.get('usable_opportunity_history')}/{row.get('market_comp_opportunity_history')} "
+        f"evidence={evidence_status} "
+        f"title={row.get('title')}"
+    )
+
+
 def fetch_gap_rows(
     dsn: str,
     *,
@@ -173,16 +217,7 @@ def main() -> int:
         f"lookback_days={args.lookback_days} max_mileage={args.max_mileage}"
     )
     for row in rows:
-        print(
-            "- "
-            f"{row['year']} {row['make']} {row['model']} "
-            f"state={row.get('state') or 'unknown'} source={row.get('source') or row.get('source_site')} "
-            f"active={row.get('is_active')} dos={row.get('dos_score')} "
-            f"market={row.get('usable_market_prices_matches')}/{row.get('market_prices_matches')} "
-            f"dealer_sales={row.get('usable_dealer_sales_matches')}/{row.get('dealer_sales_matches')} "
-            f"history={row.get('usable_opportunity_history')}/{row.get('market_comp_opportunity_history')} "
-            f"title={row.get('title')}"
-        )
+        print(format_gap_row(row))
     return 0
 
 
