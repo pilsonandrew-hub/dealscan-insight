@@ -85,6 +85,13 @@ const GOVDEALS_VEHICLE_SEARCH_URL = searchQuery
     : GOVDEALS_VEHICLE_SEARCH_URL_BASE;
 
 let totalFound = 0, totalPassed = 0;
+const sourceQualityStats = {
+    detail_pages_attempted: 0,
+    detail_pages_fetched: 0,
+    detail_pages_failed: 0,
+    detail_vins_found: 0,
+    detail_mileages_found: 0,
+};
 const capturedApi = {
     apiKey: null,
     userId: null,
@@ -336,6 +343,7 @@ const crawler = new PlaywrightCrawler({
             for (const lot of passingLots) {
                 await Actor.pushData(lot);
             }
+            await pushSourceQualityProof(log);
             log.info(`[GOVDEALS] Pushed ${passingLots.length} lots to dataset`);
         } else {
             log.warning('❌ No maestro x-api-key captured');
@@ -424,6 +432,7 @@ function isBroadVehiclePayload(candidate, reference = null) {
 async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage));
     const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
+    sourceQualityStats.detail_pages_attempted += toScrape.length;
 
     if (toScrape.length === 0) {
         log.info('[DETAIL ENRICH] All lots already have VIN/mileage or no detail URLs — skipping detail scrape');
@@ -438,6 +447,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
         if (!budget.shouldContinue(DETAIL_PAGE_REQUIRED_MS, 'GovDeals detail enrichment')) break;
         try {
             await page.goto(lot.listing_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            sourceQualityStats.detail_pages_fetched++;
             // GovDeals is Angular SPA — wait for content to render
             await page.waitForTimeout(2000);
 
@@ -451,6 +461,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
             if (!lot.vin && rawMatch) {
                 lot.vin = rawMatch[1].toUpperCase();
                 vinFound++;
+                sourceQualityStats.detail_vins_found++;
                 log.info(`[VIN FOUND] ${lot.vin} — ${lot.title}`);
             }
 
@@ -462,6 +473,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
                 if (!Number.isNaN(mileage) && mileage > 0) {
                     lot.mileage = mileage;
                     mileageFound++;
+                    sourceQualityStats.detail_mileages_found++;
                     log.info(`[MILEAGE FOUND] ${mileage} — ${lot.title}`);
                 }
             }
@@ -469,11 +481,43 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
             // ~1 req/sec
             await page.waitForTimeout(1000);
         } catch (err) {
+            sourceQualityStats.detail_pages_failed++;
             log.warning(`[DETAIL ENRICH] Failed for ${lot.listing_url}: ${err.message}`);
         }
     }
 
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
+}
+
+async function pushSourceQualityProof(log) {
+    const pushedRowsWithVin = passingLots.filter(lot => Boolean(lot.vin)).length;
+    const pushedRowsWithMileage = passingLots.filter(lot => Boolean(lot.mileage)).length;
+    const proof = {
+        record_type: 'source_quality_proof',
+        source_site: 'govdeals',
+        generated_at: new Date().toISOString(),
+        found_rows_total: totalFound,
+        prefilter_passed_rows_total: totalPassed,
+        pushed_rows_total: passingLots.length,
+        pushed_rows_with_vin: pushedRowsWithVin,
+        pushed_rows_with_mileage: pushedRowsWithMileage,
+        pushed_rows_missing_vin: Math.max(0, passingLots.length - pushedRowsWithVin),
+        pushed_rows_missing_mileage: Math.max(0, passingLots.length - pushedRowsWithMileage),
+        detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
+        detail_pages_fetched: sourceQualityStats.detail_pages_fetched,
+        detail_pages_failed: sourceQualityStats.detail_pages_failed,
+        detail_vins_found: sourceQualityStats.detail_vins_found,
+        detail_mileages_found: sourceQualityStats.detail_mileages_found,
+        target_contract: {
+            maxPages,
+            minBid,
+            maxBid,
+            searchQuery,
+            runtimeBudgetMs,
+        },
+    };
+    await Actor.pushData(proof);
+    log.info(`[SOURCE QUALITY PROOF] ${JSON.stringify(proof)}`);
 }
 
 
