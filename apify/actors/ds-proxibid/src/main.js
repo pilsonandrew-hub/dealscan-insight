@@ -212,7 +212,7 @@ function parseBid(text) {
 function parseMileage(text) {
     const normalized = normalize(text).replace(/,/g, '');
     const patterns = [
-        /\b(?:mileage|odometer(?:\s+shows)?|odometer\s+reading)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i,
+        /\b(?:mileage|odometer(?:\s+shows)?|odometer\s+reading|od\s+reads?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i,
         /\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\s+on\s+(?:meter|odometer)\b/i,
     ];
     for (const pattern of patterns) {

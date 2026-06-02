@@ -48,6 +48,7 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
   test('still extracts odometer-labeled mileage from detail text', () => {
     expect(scraper.parseMileage('Odometer shows 12,345 miles. VIN: 1GTHK24K58E139687')).toBe(12345);
     expect(scraper.parseMileage('Seller notes: 44,321 Miles on Meter Serial Number: 1GTHK24K58E139687')).toBe(44321);
+    expect(scraper.parseMileage('2017 FORD FUSION 4 DOOR CAR, S/N 3FA6P0HD0HR334611, 4CYL, AUTO, OD READS 135620 MILES')).toBe(135620);
   });
 
   test('targets the Cars menu selections directly before VIN/odometer detail extraction', () => {
