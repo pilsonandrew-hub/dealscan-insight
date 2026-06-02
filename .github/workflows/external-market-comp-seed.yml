@@ -1,0 +1,84 @@
+name: External Market Comp Seed
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_file:
+        description: "Governed evidence JSON under reports/external-comp-evidence-*.json"
+        required: true
+        default: "reports/external-comp-evidence-tacoma-2026-06-02.json"
+      apply:
+        description: "Insert the validated row"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      confirmation:
+        description: "Required only when apply=true: INSERT_EXTERNAL_MARKET_COMP"
+        required: false
+        default: ""
+      ttl_days:
+        description: "Market price TTL in days"
+        required: true
+        default: "14"
+      min_sample_size:
+        description: "Minimum external comp sample size"
+        required: true
+        default: "3"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      EVIDENCE_FILE: ${{ inputs.evidence_file }}
+      APPLY_EXTERNAL_COMP: ${{ inputs.apply }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      TTL_DAYS: ${{ inputs.ttl_days }}
+      MIN_SAMPLE_SIZE: ${{ inputs.min_sample_size }}
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
+      - name: Validate and optionally insert governed external comp seed
+        run: |
+          set -euo pipefail
+
+          case "${EVIDENCE_FILE}" in
+            reports/external-comp-evidence-*.json) ;;
+            *)
+              echo "Evidence file must live under reports/external-comp-evidence-*.json" >&2
+              exit 2
+              ;;
+          esac
+
+          args=(
+            --input "${EVIDENCE_FILE}"
+            --ttl-days "${TTL_DAYS}"
+            --min-sample-size "${MIN_SAMPLE_SIZE}"
+          )
+
+          if [[ "${APPLY_EXTERNAL_COMP}" == "true" ]]; then
+            if [[ "${CONFIRMATION}" != "INSERT_EXTERNAL_MARKET_COMP" ]]; then
+              echo "Apply requires confirmation=INSERT_EXTERNAL_MARKET_COMP" >&2
+              exit 2
+            fi
+            args+=(--apply)
+          fi
+
+          python3 scripts/prepare_external_market_comp_seed.py "${args[@]}"
