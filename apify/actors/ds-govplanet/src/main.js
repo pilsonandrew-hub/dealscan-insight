@@ -119,6 +119,35 @@ function parseMileage(usageStr = '') {
     return null;
 }
 
+function extractVin(text = '') {
+    const m = String(text || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
+    return m ? m[1].toUpperCase() : null;
+}
+
+function parseDetailVin(html = '') {
+    const text = String(html || '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&#39;/g, "'")
+        .replace(/&quot;/gi, '"')
+        .replace(/&amp;/gi, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const patterns = [
+        /\bVIN\b\s*[:#\-]?\s*([A-HJ-NPR-Z0-9]{17})\b/i,
+        /\bVehicle\s+Identification\s+Number\b\s*[:#\-]?\s*([A-HJ-NPR-Z0-9]{17})\b/i,
+        /\bSerial\s+(?:Number|No\.?|#)\b\s*[:#\-]?\s*([A-HJ-NPR-Z0-9]{17})\b/i,
+        /\bS\/N\b\s*[:#\-]?\s*([A-HJ-NPR-Z0-9]{17})\b/i,
+    ];
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) return extractVin(match[1]);
+    }
+    return null;
+}
+
 function parsePrice(priceStr = '') {
     const m = priceStr.replace(/,/g, '').match(/[\d]+(?:\.\d+)?/);
     return m ? parseFloat(m[0]) : 0;
@@ -205,6 +234,7 @@ const {
     maxBid = 40000,
     maxMileage = 100000,
     maxAgeYears = 10,
+    maxDetailPages = 120,
     searchQuery = '',
     webhookUrl = null,
     webhookSecret = null,
@@ -217,6 +247,10 @@ const startUrls = searchQuery
 
 let totalPushed = 0;
 let totalSkipped = 0;
+let totalDetailQueued = 0;
+let totalDetailAttempted = 0;
+let totalDetailVinFound = 0;
+let totalDetailMissingVin = 0;
 const seenEquipIds = new Set();
 const pendingPages  = new Map(); // categoryLabel → Set of pstart values already queued
 
@@ -246,6 +280,28 @@ const crawler = new CheerioCrawler({
         const { label, baseUrl, pstart } = request.userData;
         const html = typeof body === 'string' ? body : body.toString('utf-8');
 
+        if (request.userData?.kind === 'detail') {
+            const vehicle = request.userData.vehicle;
+            totalDetailAttempted++;
+            const detailVin = parseDetailVin(html);
+            if (!detailVin) {
+                totalDetailMissingVin++;
+                totalSkipped++;
+                log.info(`[${label}] Skipped missing_vin_after_detail: ${vehicle.title} (${vehicle.equip_id})`);
+                return;
+            }
+            const enriched = {
+                ...vehicle,
+                vin: detailVin,
+                detail_enriched_by_detail_page: true,
+            };
+            await Actor.pushData(enriched);
+            totalPushed++;
+            totalDetailVinFound++;
+            log.info(`[${label}] Detail enriched VIN for ${vehicle.title} (${vehicle.equip_id})`);
+            return;
+        }
+
         // ── Parse total items ──
         const totalMatch = html.match(/sr_total_results.*?value="(\d+)"/);
         const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
@@ -272,21 +328,13 @@ const crawler = new CheerioCrawler({
             const listingUrl = item.itemPageUri
                 ? `${BASE}${item.itemPageUri.split('?')[0]}`
                 : null;
-            const vin = (() => {
-                const m = (item.vin || item.vehicleVin || item.vinNumber || item.title || '').match(/\b([A-HJ-NPR-Z0-9]{17})\b/i);
-                return m ? m[1].toUpperCase() : null;
-            })();
+            const vin = extractVin(item.vin || item.vehicleVin || item.vinNumber || item.title || '');
 
             if (!isVehicle(desc)) { totalSkipped++; continue; }
             if (!passesFilters({ year, price, state, locationText: item.eumeLocation || '' })) { totalSkipped++; continue; }
             if (price < minBid || (maxBid > 0 && price > maxBid)) { totalSkipped++; continue; }
-            if (!vin) {
-                totalSkipped++;
-                log.info(`[${label}] Skipped missing_vin: ${desc} (${equipId})`);
-                continue;
-            }
 
-            records.push({
+            const vehicle = {
                 title:            desc,
                 year,
                 make,
@@ -310,7 +358,24 @@ const crawler = new CheerioCrawler({
                 source_site:      SOURCE,
                 equip_id:         equipId,
                 scraped_at:       new Date().toISOString(),
-            });
+            };
+
+            if (!vin) {
+                if (listingUrl && totalDetailQueued < maxDetailPages) {
+                    totalDetailQueued++;
+                    await queue.addRequest({
+                        url: listingUrl,
+                        uniqueKey: `detail:${equipId}`,
+                        userData: { kind: 'detail', label, vehicle },
+                    });
+                    continue;
+                }
+                totalSkipped++;
+                log.info(`[${label}] Skipped missing_vin_without_detail: ${desc} (${equipId})`);
+                continue;
+            }
+
+            records.push(vehicle);
         }
 
         if (records.length > 0) {
@@ -344,7 +409,7 @@ const crawler = new CheerioCrawler({
 
 await crawler.run();
 
-console.log(`[GOVPLANET] Done. Pushed: ${totalPushed} | Skipped: ${totalSkipped} | Unique equipIds: ${seenEquipIds.size}`);
+console.log(`[GOVPLANET] Done. Pushed: ${totalPushed} | Skipped: ${totalSkipped} | Unique equipIds: ${seenEquipIds.size} | Detail queued: ${totalDetailQueued} | Detail attempted: ${totalDetailAttempted} | Detail VIN found: ${totalDetailVinFound} | Detail missing VIN: ${totalDetailMissingVin}`);
 
 // ── Webhook notification ──────────────────────────────────────────────────────
 if (webhookUrl && totalPushed > 0) {
