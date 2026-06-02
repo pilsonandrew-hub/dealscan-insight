@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(__dirname, '../src/main.js'), 'utf8');
+const inputSchema = JSON.parse(readFileSync(join(__dirname, '../.actor/input_schema.json'), 'utf8'));
 
 function loadHelperExports() {
   const helperStart = source.indexOf('const HIGH_RUST');
@@ -67,6 +68,13 @@ describe('ds-govplanet source contract', () => {
       maxMileage: 100000,
       maxAgeYears: 4,
     })).toBe(false);
+  });
+
+  test('defaults GovPlanet source gates to DealerScope buyer-grade limits', () => {
+    expect(source).toContain('maxMileage = 50000');
+    expect(source).toContain('maxAgeYears = 4');
+    expect(inputSchema.properties.maxMileage.default).toBe(50000);
+    expect(inputSchema.properties.maxAgeYears.default).toBe(4);
   });
 
   test('queues capped detail enrichment before rejecting list rows without VIN', () => {

@@ -228,7 +228,7 @@ function isAgeOverLimit(year, maxAgeYears, now = new Date()) {
     return (now.getFullYear() - year) > maxAgeYears;
 }
 
-function passesFilters({ year, price, state, locationText = '', mileage = null, maxMileage = 100000, maxAgeYears = 10 }) {
+function passesFilters({ year, price, state, locationText = '', mileage = null, maxMileage = 50000, maxAgeYears = 4 }) {
     // Accept DC regardless of state extraction
     const isDC = DC_PATTERN.test(locationText);
     if (!isDC && (!state || !US_STATES.has(state))) return false;
@@ -270,8 +270,8 @@ const {
     maxItemsPerCategory = 500,   // safety cap per category (override to 0 for unlimited)
     minBid = 200,
     maxBid = 40000,
-    maxMileage = 100000,
-    maxAgeYears = 10,
+    maxMileage = 50000,
+    maxAgeYears = 4,
     maxDetailPages = 120,
     searchQuery = '',
     webhookUrl = null,
