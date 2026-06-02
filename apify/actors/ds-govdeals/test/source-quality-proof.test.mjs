@@ -70,4 +70,16 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('rows_excluded_after_detail_attempt');
     expect(source).toContain('rows_excluded_without_detail_attempt');
   });
+
+  test('samples attempted and unattempted exclusion rows for cap diagnosis', () => {
+    expect(source).toContain('function sampleExcludedLots(lots, limit = 10)');
+    expect(source).toContain('excluded_after_detail_attempt_samples: []');
+    expect(source).toContain('excluded_without_detail_attempt_samples: []');
+    expect(source).toContain('sourceQualityStats.excluded_after_detail_attempt_samples = sampleExcludedLots(excludedAfterDetailAttempt);');
+    expect(source).toContain('sourceQualityStats.excluded_without_detail_attempt_samples = sampleExcludedLots(excludedWithoutDetailAttempt);');
+    expect(source).toContain('excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples');
+    expect(source).toContain('excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples');
+    expect(source).toContain('missing_vin: !lot.vin');
+    expect(source).toContain('missing_mileage: !lot.mileage');
+  });
 });

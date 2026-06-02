@@ -110,6 +110,8 @@ const sourceQualityStats = {
     rows_excluded_missing_mileage: 0,
     rows_excluded_after_detail_attempt: 0,
     rows_excluded_without_detail_attempt: 0,
+    excluded_after_detail_attempt_samples: [],
+    excluded_without_detail_attempt_samples: [],
 };
 const capturedApi = {
     apiKey: null,
@@ -369,6 +371,8 @@ const crawler = new PlaywrightCrawler({
             sourceQualityStats.rows_excluded_missing_mileage = incompleteLots.filter(lot => !lot.mileage).length;
             sourceQualityStats.rows_excluded_after_detail_attempt = excludedAfterDetailAttempt.length;
             sourceQualityStats.rows_excluded_without_detail_attempt = excludedWithoutDetailAttempt.length;
+            sourceQualityStats.excluded_after_detail_attempt_samples = sampleExcludedLots(excludedAfterDetailAttempt);
+            sourceQualityStats.excluded_without_detail_attempt_samples = sampleExcludedLots(excludedWithoutDetailAttempt);
             for (const lot of incompleteLots) {
                 const reasons = [
                     !lot.vin ? 'missing_vin' : null,
@@ -528,6 +532,19 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
+function sampleExcludedLots(lots, limit = 10) {
+    return lots.slice(0, limit).map((lot) => ({
+        title: lot.title || '',
+        listing_url: lot.listing_url || '',
+        current_bid: lot.current_bid || 0,
+        year: lot.year || null,
+        make: lot.make || '',
+        model: lot.model || '',
+        missing_vin: !lot.vin,
+        missing_mileage: !lot.mileage,
+    }));
+}
+
 async function pushSourceQualityProof(log, pushedLots = passingLots) {
     const pushedRowsWithVin = pushedLots.filter(lot => Boolean(lot.vin)).length;
     const pushedRowsWithMileage = pushedLots.filter(lot => Boolean(lot.mileage)).length;
@@ -547,6 +564,8 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_missing_mileage: sourceQualityStats.rows_excluded_missing_mileage,
         rows_excluded_after_detail_attempt: sourceQualityStats.rows_excluded_after_detail_attempt,
         rows_excluded_without_detail_attempt: sourceQualityStats.rows_excluded_without_detail_attempt,
+        excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples,
+        excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples,
         detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
         detail_pages_fetched: sourceQualityStats.detail_pages_fetched,
         detail_pages_failed: sourceQualityStats.detail_pages_failed,
