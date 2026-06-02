@@ -68,12 +68,29 @@ def _resolve_project_ref(values: Mapping[str, str]) -> str:
     return ""
 
 
+def _resolve_project_ref_from_url_first(values: Mapping[str, str]) -> str:
+    for key in SUPABASE_URL_KEYS:
+        supabase_url = (values.get(key) or "").strip()
+        if not supabase_url:
+            continue
+        match = re.search(r"https://([a-z0-9]+)\.supabase\.co", supabase_url)
+        if match:
+            return match.group(1)
+
+    for key in PROJECT_ID_KEYS:
+        project_ref = (values.get(key) or "").strip()
+        if project_ref:
+            return project_ref
+
+    return ""
+
+
 def _derive_supabase_pooler_db_url(values: Mapping[str, str]) -> Optional[str]:
     if not _truthy(values.get("SUPABASE_USE_POOLER")):
         return None
 
     db_password = (values.get("SUPABASE_DB_PASSWORD") or "").strip()
-    project_ref = _resolve_project_ref(values)
+    project_ref = _resolve_project_ref_from_url_first(values)
     if not db_password or not project_ref:
         return None
 

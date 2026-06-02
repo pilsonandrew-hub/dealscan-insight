@@ -68,6 +68,26 @@ class LiveVerificationSupportTests(unittest.TestCase):
         )
         self.assertEqual(source, "env.derived_supabase_pooler")
 
+    def test_pooler_derivation_prefers_supabase_url_project_ref(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_DB_PASSWORD": "secret",
+                "SUPABASE_PROJECT_ID": "staleproject",
+                "SUPABASE_URL": "https://freshproject.supabase.co",
+                "SUPABASE_DB_POOLER_HOST": "aws-0-us-west-1.pooler.supabase.com",
+                "SUPABASE_USE_POOLER": "true",
+            },
+            clear=True,
+        ):
+            dsn, source = support.resolve_database_url(None)
+
+        self.assertEqual(
+            dsn,
+            "postgresql://postgres.freshproject:secret@aws-0-us-west-1.pooler.supabase.com:6543/postgres?sslmode=require",
+        )
+        self.assertEqual(source, "env.derived_supabase_pooler")
+
     def test_resolve_database_url_uses_env_file_direct_supabase_credentials(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             env_file = Path(tmpdir) / ".env.live"
