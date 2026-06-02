@@ -52,6 +52,9 @@ _NEGATIVE_SIGNALS: dict[str, int] = {
     "interior defects": -4,
     "ac issues": -3,
     "a/c issues": -3,
+    "need jumpstart": -5,
+    "check engine": -6,
+    "repairs required": -7,
 }
 
 # Positive signals → raise score

@@ -230,6 +230,9 @@ _EXPLICIT_NEGATIVE_CONDITION_SIGNALS = frozenset({
     "interior defects",
     "ac issues",
     "a/c issues",
+    "need jumpstart",
+    "check engine",
+    "repairs required",
 })
 
 

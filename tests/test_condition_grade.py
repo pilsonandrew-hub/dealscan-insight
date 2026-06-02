@@ -42,6 +42,21 @@ def test_jjkane_defect_phrases_are_explicit_condition_signals():
     assert "major components missing" in result["condition_signals"]
 
 
+def test_gsa_repair_warning_phrases_are_explicit_condition_signals():
+    result = score_condition(
+        title="2017 FORD EXPLORER",
+        description=(
+            "Need Jumpstart. LIGHTS ON: Check Engine. Repairs required include "
+            "battery and diagnostic work."
+        ),
+    )
+
+    assert result["condition_grade"] in {"D", "F"}
+    assert "need jumpstart" in result["condition_signals"]
+    assert "check engine" in result["condition_signals"]
+    assert "repairs required" in result["condition_signals"]
+
+
 def test_runs_and_drives_bumps_fair_to_good():
     # Fair baseline (old year, average mileage), plus "runs and drives" → Good
     result = compute_condition_grade(
