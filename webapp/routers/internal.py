@@ -253,13 +253,35 @@ def _pick_row_or_raw(row: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _condition_description(row: dict[str, Any]) -> str:
+    """Combine source condition text without letting title-like fields shadow detail text."""
+    title_text = " ".join(str(_pick_row_or_raw(row, "title") or "").split()).strip().lower()
+    parts: list[str] = []
+    seen: set[str] = set()
+    for key in ("description", "details", "condition_notes", "detail_text", "assetLongDesc"):
+        value = _pick_row_or_raw(row, key)
+        if value in (None, ""):
+            continue
+        text = " ".join(str(value).split()).strip()
+        if not text:
+            continue
+        normalized = text.lower()
+        if normalized == title_text:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        parts.append(text)
+    return " ".join(parts)
+
+
 def _condition_blocker_basis(row: dict[str, Any]) -> Optional[str]:
     condition_grade = str(row.get("condition_grade") or "").strip().lower()
     if condition_grade not in {"", "poor", "unknown"}:
         return None
 
     title = str(_pick_row_or_raw(row, "title") or "")
-    description = str(_pick_row_or_raw(row, "description", "details", "condition_notes") or "")
+    description = _condition_description(row)
     damage_type = str(_pick_row_or_raw(row, "damage_type", "damage", "title_status") or "")
     mileage = _pick_row_or_raw(row, "mileage")
     year = _pick_row_or_raw(row, "year")
@@ -287,7 +309,7 @@ def _condition_blocker_basis_sample(row: dict[str, Any]) -> Optional[dict[str, A
         return None
 
     title = str(_pick_row_or_raw(row, "title") or "")
-    description = str(_pick_row_or_raw(row, "description", "details", "condition_notes") or "")
+    description = _condition_description(row)
     damage_type = str(_pick_row_or_raw(row, "damage_type", "damage", "title_status") or "")
     mileage = _pick_row_or_raw(row, "mileage")
     year = _pick_row_or_raw(row, "year")

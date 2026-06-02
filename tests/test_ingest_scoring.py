@@ -965,6 +965,26 @@ def test_normalize_apify_vehicle_uses_detail_text_description_alias():
     assert normalized["description"] == "Vehicle does not start. No start condition."
 
 
+def test_normalize_apify_vehicle_prefers_richer_detail_text_over_title_description():
+    item = {
+        "title": "2020 Dodge Durango SRT",
+        "year": 2020,
+        "make": "Dodge",
+        "model": "Durango SRT",
+        "state": "CA",
+        "current_bid": 10000,
+        "mileage": 13983,
+        "listing_url": "https://www.govdeals.com/asset/197/5804",
+        "description": "2020 Dodge Durango SRT",
+        "detail_text": "Starts, runs and drives. Minor scratches noted.",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="run-detail-text-title-shadow")
+
+    assert normalized is not None
+    assert normalized["description"] == "Starts, runs and drives. Minor scratches noted."
+
+
 
 def _strong_proxy_priced_score_kwargs(**overrides):
     base = {

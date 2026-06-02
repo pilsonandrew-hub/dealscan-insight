@@ -145,10 +145,15 @@ telegram_router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 logger = logging.getLogger(__name__)
 
 try:
-    from backend.ingest.condition import compute_condition_grade as _compute_condition_grade
+    from backend.ingest.condition import (
+        compute_condition_grade as _compute_condition_grade,
+        score_condition as _score_condition,
+    )
 except ImportError:
     def _compute_condition_grade(**kwargs):  # type: ignore[misc]
         return None
+    def _score_condition(**kwargs):  # type: ignore[misc]
+        return {}
 
 import time as _time
 
@@ -1555,6 +1560,21 @@ def normalize_apify_vehicle(
             or item.get("apify_run_id")
             or run_id
         )
+        raw_description = item.get("description") or ""
+        detail_text = item.get("detail_text") or item.get("assetLongDesc") or ""
+
+        def _is_title_like_description(value: Any) -> bool:
+            value_text = " ".join(str(value or "").split()).strip().lower()
+            title_text = " ".join(str(title or "").split()).strip().lower()
+            return bool(value_text and title_text and value_text == title_text)
+
+        description = raw_description or detail_text
+        if detail_text and (
+            not raw_description
+            or _is_title_like_description(raw_description)
+            or len(str(detail_text)) > len(str(raw_description)) + 40
+        ):
+            description = detail_text
 
         normalized = {
             "listing_id": _compute_listing_id(source, listing_url),
@@ -1568,7 +1588,8 @@ def normalize_apify_vehicle(
             "doc_fee": doc_fee,
             "auction_fees": auction_fees,
             "mileage": mileage,
-            "description": item.get("description") or item.get("detail_text") or item.get("assetLongDesc") or "",
+            "description": description,
+            "detail_text": detail_text,
             "photos": photos,
             "damage_type": item.get("damage_type") or item.get("damageType") or "",
             "state": state,
@@ -2878,12 +2899,100 @@ def _refresh_existing_opportunity_pricing_truth(existing_id: str, row: dict) -> 
         return False
 
 
+_EXPLICIT_DUPLICATE_CONDITION_NEGATIVES = frozenset({
+    "flood",
+    "fire",
+    "hail",
+    "storm",
+    "water damage",
+    "salvage",
+    "frame damage",
+    "structural damage",
+    "rollover",
+    "totaled",
+    "no start",
+    "not running",
+    "does not run",
+    "non-runner",
+    "non runner",
+    "will not start",
+    "won't start",
+    "grade_1",
+    "grade_2",
+    "needs work",
+    "parts only",
+    "wrecked",
+    "branded title",
+    "rebuilt",
+    "odometer rollback",
+    "lemon",
+    "engine performance concerns",
+    "dash warning indicators",
+    "warning indicators",
+    "major components missing",
+    "interior defects",
+    "ac issues",
+    "a/c issues",
+    "need jumpstart",
+    "check engine",
+    "repairs required",
+})
+
+
+def _raw_condition_text(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    parts = []
+    for key in ("description", "details", "condition_notes", "detail_text", "damage_type", "damage", "title_status"):
+        value = raw.get(key)
+        if value not in (None, "", {}, []):
+            parts.append(str(value))
+    return " ".join(" ".join(parts).split())
+
+
+def _has_condition_proof(raw: Any) -> bool:
+    return bool(_raw_condition_text(raw))
+
+
+def _has_explicit_negative_condition_evidence(row: dict) -> bool:
+    raw = row.get("raw_data") if isinstance(row, dict) else {}
+    raw_text = _raw_condition_text(raw)
+    if not raw_text:
+        return False
+    raw = raw if isinstance(raw, dict) else {}
+    scored = _score_condition(
+        title=str(raw.get("title") or row.get("title") or ""),
+        description=raw_text,
+        mileage=row.get("mileage") or raw.get("mileage") or 0,
+        year=row.get("year") or raw.get("year") or 0,
+        damage_type=str(raw.get("damage_type") or raw.get("damage") or row.get("damage_type") or ""),
+    )
+    signals = {str(signal).lower() for signal in scored.get("condition_signals") or []}
+    return bool(signals & _EXPLICIT_DUPLICATE_CONDITION_NEGATIVES)
+
+
+def _should_backfill_condition_grade(row: dict, existing: dict) -> bool:
+    incoming_grade = str(row.get("condition_grade") or "").strip().lower()
+    current_grade = str(existing.get("condition_grade") or "").strip().lower()
+    if current_grade not in {"", "poor", "unknown"}:
+        return False
+    if incoming_grade in {"", "poor", "unknown"}:
+        return False
+    if not _has_condition_proof(row.get("raw_data")):
+        return False
+    if _has_explicit_negative_condition_evidence(existing):
+        return False
+    return True
+
+
 def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> dict:
     """Return missing enrichment fields worth backfilling onto an existing row.
 
     This is intentionally narrow: duplicate recovery must not rewrite score, bid,
-    grade, pricing truth, or existing enrichment evidence. It only carries source-
-    detail evidence into fields that are currently empty on the existing row.
+    pricing truth, or existing enrichment evidence. It only carries source-detail
+    evidence into empty fields, with one guarded exception for stale Poor/unknown
+    condition grades when newer non-Poor source proof has no conflicting explicit
+    negative condition evidence.
     """
     existing = existing or {}
     update: dict = {}
@@ -2910,6 +3019,8 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
                     merged_raw[key] = value
             if merged_raw != existing_raw:
                 update["raw_data"] = merged_raw
+    if _should_backfill_condition_grade(row, existing):
+        update["condition_grade"] = row.get("condition_grade")
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
     return update

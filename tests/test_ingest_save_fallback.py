@@ -416,6 +416,87 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertNotIn("vin", update_payload)
         self.assertIn("updated_at", update_payload)
 
+    def test_vin_duplicate_upgrades_stale_poor_condition_when_new_detail_proves_non_poor(self):
+        row = {
+            "listing_id": "listing-durango",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "title": "2020 Dodge Durango SRT",
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 13983,
+            "condition_grade": "Fair",
+            "raw_data": {
+                "title": "2020 Dodge Durango SRT",
+                "description": "Starts, runs and drives. Minor scratches noted.",
+                "detail_text": "Starts, runs and drives. Minor scratches noted.",
+            },
+            "source_run_id": "run-with-detail-text",
+            "run_id": "run-with-detail-text",
+            "dos_score": 86.9,
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+        }
+        existing_row = {
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 13983,
+            "condition_grade": "Poor",
+            "raw_data": {"title": "2020 Dodge Durango SRT"},
+            "source_run_id": "old-run",
+            "run_id": "old-run",
+            "pricing_maturity": "market_comp",
+            "pricing_source": "retail_market_cache",
+        }
+        vehicle = {"dos_score": 86.9, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(row, "unused", existing_row)
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: ("existing-durango", False)):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-durango")
+        update_payload, _filters = supabase._table.update_calls[0]
+        self.assertEqual(update_payload["condition_grade"], "Fair")
+        self.assertEqual(update_payload["raw_data"]["detail_text"], "Starts, runs and drives. Minor scratches noted.")
+
+    def test_vin_duplicate_does_not_upgrade_condition_when_existing_has_negative_evidence(self):
+        row = {
+            "listing_id": "listing-durango",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "title": "2020 Dodge Durango SRT",
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 13983,
+            "condition_grade": "Fair",
+            "raw_data": {
+                "description": "Starts, runs and drives. Minor scratches noted.",
+                "detail_text": "Starts, runs and drives. Minor scratches noted.",
+            },
+            "source_run_id": "run-with-detail-text",
+            "run_id": "run-with-detail-text",
+        }
+        existing_row = {
+            "vin": "1C4SDJGJ6LC324462",
+            "mileage": 13983,
+            "condition_grade": "Poor",
+            "raw_data": {
+                "title": "2020 Dodge Durango SRT",
+                "description": "Vehicle does not run. No start condition.",
+            },
+            "source_run_id": "old-run",
+            "run_id": "old-run",
+        }
+        vehicle = {"dos_score": 86.9, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(row, "unused", existing_row)
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: ("existing-durango", False)):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-durango")
+        update_payload, _filters = supabase._table.update_calls[0]
+        self.assertNotIn("condition_grade", update_payload)
+        self.assertEqual(update_payload["raw_data"]["detail_text"], "Starts, runs and drives. Minor scratches noted.")
+
     def test_vin_duplicate_refreshes_existing_proxy_pricing_when_new_truth_is_market_comp(self):
         row = {
             "listing_id": "listing-durango",

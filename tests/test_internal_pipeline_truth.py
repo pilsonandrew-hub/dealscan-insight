@@ -337,6 +337,50 @@ def test_pipeline_truth_classifies_gsa_repair_warning_phrases_as_explicit(monkey
     assert sample["condition_signals"] == ["need jumpstart", "check engine", "repairs required"]
 
 
+def test_pipeline_truth_uses_detail_text_when_description_is_title_like(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "govdeals-detail-text",
+                "is_active": True,
+                "dos_score": 86.9,
+                "mileage": 13983,
+                "year": 2020,
+                "title": "2020 Dodge Durango SRT",
+                "pricing_maturity": "market_comp",
+                "vin": "1C4SDJGJ6LC324462",
+                "condition_grade": "Poor",
+                "source_site": "govdeals",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.95,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": "2020 Dodge Durango SRT",
+                    "detail_text": "Starts, runs and drives. Minor scratches noted.",
+                },
+            },
+        ],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    sample = result["opportunities"]["active_dos80_condition_blocker_basis_samples"][0]
+    assert sample["condition_signals"] == ["runs and drives"]
+    assert sample["source_text_excerpt"] == (
+        "2020 Dodge Durango SRT Starts, runs and drives. Minor scratches noted."
+    )
+
+
 def test_pipeline_truth_requires_usable_market_prices(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "market_prices": [
