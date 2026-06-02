@@ -496,6 +496,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
             await page.waitForTimeout(2000);
 
             const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+            lot.detail_diagnostics = extractDetailDiagnostics(bodyText);
 
             // Look for explicit VIN label first
             const vinLabelMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)
@@ -533,6 +534,29 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
     log.info(`[DETAIL ENRICH] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs and ${mileageFound} mileages`);
 }
 
+function extractDetailDiagnostics(bodyText) {
+    const text = String(bodyText || '').replace(/\s+/g, ' ').trim();
+    const fieldPattern = /\b(?:VIN|Vehicle Identification Number|Mileage|Odometer|Miles|Meter|Serial)\b/ig;
+    const field_snippets = [];
+    let match;
+    while ((match = fieldPattern.exec(text)) && field_snippets.length < 8) {
+        const start = Math.max(0, match.index - 90);
+        const end = Math.min(text.length, match.index + 160);
+        const snippet = text.slice(start, end).trim();
+        if (snippet && !field_snippets.includes(snippet)) field_snippets.push(snippet);
+    }
+
+    return {
+        vin_candidates: [...new Set(text.match(VIN_PATTERN) || [])].slice(0, 5),
+        mileage_candidates: [...new Set([
+            ...(text.match(/\bMileage[:\s#\-]*[\d,]+/ig) || []),
+            ...(text.match(/\bOdometer[:\s#\-]*[\d,]+/ig) || []),
+            ...(text.match(/\b[\d,]{2,6}\s*(?:miles?|mi\b)/ig) || []),
+        ])].slice(0, 8),
+        field_snippets,
+    };
+}
+
 function sampleExcludedLots(lots, limit = 10) {
     return lots.slice(0, limit).map((lot) => ({
         title: lot.title || '',
@@ -543,6 +567,7 @@ function sampleExcludedLots(lots, limit = 10) {
         model: lot.model || '',
         missing_vin: !lot.vin,
         missing_mileage: !lot.mileage,
+        detail_diagnostics: lot.detail_diagnostics || null,
     }));
 }
 

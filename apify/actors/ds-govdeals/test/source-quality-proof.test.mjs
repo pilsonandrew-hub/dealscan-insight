@@ -83,4 +83,13 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('missing_vin: !lot.vin');
     expect(source).toContain('missing_mileage: !lot.mileage');
   });
+
+  test('adds sanitized detail diagnostics to attempted exclusion samples', () => {
+    expect(source).toContain('function extractDetailDiagnostics(bodyText)');
+    expect(source).toContain('lot.detail_diagnostics = extractDetailDiagnostics(bodyText);');
+    expect(source).toContain('detail_diagnostics: lot.detail_diagnostics || null');
+    expect(source).toContain('vin_candidates');
+    expect(source).toContain('mileage_candidates');
+    expect(source).toContain('field_snippets');
+  });
 });
