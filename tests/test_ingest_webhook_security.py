@@ -849,6 +849,131 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertTrue(len(webhook_updates) > 0)
         self.assertIn("save_outcomes={'candidate_staged': 1}", webhook_updates[-1][1]["error_message"])
 
+    def test_govdeals_sold_webhook_stages_raw_items_before_opportunity_normalization(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-sold-raw", "defaultDatasetId": "dataset-sold-raw"},
+        }
+        raw_items = [
+            {
+                "source_site": "govdeals-sold",
+                "url": "https://www.govdeals.com/asset/1/25917",
+                "title": "Visit Our Subsidiary Marketplace Sierra Auction at www.sierraauction.com",
+                "sold_price": 100000,
+            },
+            {
+                "source_site": "govdeals-sold",
+                "url": "https://www.govdeals.com/asset/99/31398",
+                "title": "2021 Mercedes-Benz G-Class",
+                "year": 2021,
+                "make": "Mercedes-Benz",
+                "model": "G-63",
+                "sold_price": 99000,
+            },
+            {
+                "source_site": "govdeals-sold",
+                "url": "https://www.govdeals.com/asset/504/24329",
+                "title": "2014 Winnebago Ellipse 42GD RV",
+                "year": 2014,
+                "make": "WINNEBAGO",
+                "model": "ELLIPSE 42GD",
+                "sold_price": 83000,
+            },
+        ]
+        delivery_calls = []
+        webhook_updates = []
+        staged_candidates = []
+
+        class _SoldHTTPXAsyncClient(_HTTPXAsyncClient):
+            async def get(self, url, *args, **kwargs):
+                if "/datasets/" not in url:
+                    raise AssertionError(f"unexpected url: {url}")
+                return _HTTPXResponse(raw_items)
+
+        fake_httpx = types.SimpleNamespace(AsyncClient=_SoldHTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", _NoDealerSalesSupabase()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-sold-raw"
+        ), patch.object(
+            ingest,
+            "update_webhook_log",
+            lambda *args, **kwargs: webhook_updates.append((args, kwargs)),
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("sold comps must bypass opportunity normalization"))
+        ), patch.object(
+            ingest,
+            "stage_sold_comp_candidate",
+            lambda **kwargs: staged_candidates.append(kwargs),
+            create=True,
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(len(staged_candidates), 3)
+        self.assertEqual([call["item_index"] for call in staged_candidates], [0, 1, 2])
+        self.assertEqual(staged_candidates[1]["vehicle"]["make"], "Mercedes-Benz")
+        self.assertEqual(staged_candidates[2]["vehicle"]["model"], "ELLIPSE 42GD")
+        self.assertEqual(len(delivery_calls), 3)
+        self.assertEqual([call["status"] for call in delivery_calls], ["candidate_staged"] * 3)
+        self.assertTrue(len(webhook_updates) > 0)
+        self.assertIn("save_outcomes={'candidate_staged': 3}", webhook_updates[-1][1]["error_message"])
+
+    def test_sold_comp_candidate_row_rejects_missing_vehicle_identity(self):
+        raw_item = {
+            "source_site": "govdeals-sold",
+            "url": "https://www.govdeals.com/asset/1/25917",
+            "title": "Visit Our Subsidiary Marketplace Sierra Auction at www.sierraauction.com",
+            "sold_price": 100000,
+        }
+        vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-rejected", source_hint=None)
+
+        row = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle,
+            raw_item=raw_item,
+            run_id="run-rejected",
+            item_index=0,
+        )
+
+        self.assertEqual(row["candidate_status"], "rejected")
+        self.assertEqual(row["rejection_reason"], "missing_year_make_model")
+        self.assertEqual(row["source_name"], "govdeals-sold")
+        self.assertEqual(row["listing_url"], raw_item["url"])
+
+    def test_sold_comp_candidate_row_accepts_complete_raw_vehicle_identity(self):
+        raw_item = {
+            "source_site": "govdeals-sold",
+            "url": "https://www.govdeals.com/asset/99/31398",
+            "title": "2021 Mercedes-Benz G-Class",
+            "year": 2021,
+            "make": "Mercedes-Benz",
+            "model": "G-63",
+            "sold_price": 99000,
+        }
+        vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-candidate", source_hint=None)
+
+        row = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle,
+            raw_item=raw_item,
+            run_id="run-candidate",
+            item_index=0,
+        )
+
+        self.assertEqual(row["candidate_status"], "candidate")
+        self.assertIsNone(row["rejection_reason"])
+        self.assertEqual(row["year"], 2021)
+        self.assertEqual(row["make"], "Mercedes-Benz")
+        self.assertEqual(row["model"], "G-63")
+
     def test_stage_sold_comp_candidate_creates_run_ledger_before_candidate(self):
         supabase = _RecordingSupabase()
         vehicle = {
@@ -881,8 +1006,9 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(operations[0][2]["run_id"], "run-sold-ledger")
         self.assertEqual(operations[0][3]["on_conflict"], "run_id")
         self.assertEqual(operations[1][0], "sold_comp_candidates")
-        self.assertEqual(operations[1][1], "insert")
+        self.assertEqual(operations[1][1], "upsert")
         self.assertEqual(operations[1][2]["run_id"], "run-sold-ledger")
+        self.assertEqual(operations[1][3]["on_conflict"], "source_name,source_listing_id")
 
 
 if __name__ == "__main__":

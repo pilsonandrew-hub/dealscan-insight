@@ -785,6 +785,53 @@ async def _process_webhook_items(
         )
 
         for item_index, item in enumerate(items):
+            raw_source_site = _canonical_source_site(
+                item.get("source_site") or item.get("source") or metadata.get("source") or metadata.get("actor_id")
+            )
+            if raw_source_site == "govdeals-sold":
+                vehicle = _sold_comp_vehicle_from_raw_item(
+                    item,
+                    run_id=apify_run_id,
+                    source_hint=metadata.get("source") or metadata.get("actor_id"),
+                )
+                try:
+                    stage_sold_comp_candidate(
+                        vehicle=vehicle,
+                        raw_item=item,
+                        run_id=apify_run_id,
+                        item_index=item_index,
+                    )
+                    processed += 1
+                    increment_reason_counter(save_outcomes, "candidate_staged")
+                    logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
+                    _record_delivery_log(
+                        run_id=vehicle.get("run_id") or apify_run_id,
+                        listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                        listing_url=vehicle.get("listing_url"),
+                        opportunity_id=None,
+                        channel="db_save",
+                        status="candidate_staged",
+                        error_message=None,
+                        require_durable=True,
+                        audit_state=audit_state,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[SOLD_COMP] Candidate staging failed: {exc}")
+                    failed_save_count += 1
+                    increment_reason_counter(skip_reasons, "candidate_staging_failed")
+                    _record_delivery_log(
+                        run_id=vehicle.get("run_id") or apify_run_id,
+                        listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                        listing_url=vehicle.get("listing_url"),
+                        opportunity_id=None,
+                        channel="db_save",
+                        status="failed",
+                        error_message=str(exc),
+                        require_durable=True,
+                        audit_state=audit_state,
+                    )
+                continue
+
             try:
                 vehicle = normalize_apify_vehicle(
                     item,
@@ -3096,6 +3143,80 @@ def _sold_comp_source_listing_id(vehicle: dict, raw_item: dict) -> str:
     return _compute_listing_id(vehicle.get("source_site") or "sold-comp", listing_url)
 
 
+def _first_present(mapping: dict, *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _sold_comp_vehicle_from_raw_item(raw_item: dict, *, run_id: str, source_hint: Optional[str] = None) -> dict:
+    listing_url = _first_present(raw_item, "listing_url", "url", "auction_url") or ""
+    source_site = (
+        _canonical_source_site(raw_item.get("source_site") or raw_item.get("source"))
+        or _canonical_source_site(source_hint)
+        or "govdeals-sold"
+    )
+    source_listing_id = _sold_comp_source_listing_id(
+        {"source_site": source_site, "listing_url": listing_url},
+        raw_item,
+    )
+    sold_price = _first_present(
+        raw_item,
+        "sold_price",
+        "sale_price",
+        "soldPrice",
+        "current_bid",
+        "currentBid",
+        "winning_bid",
+        "winningBid",
+    )
+    description = _first_present(
+        raw_item,
+        "condition_text",
+        "description",
+        "detail_text",
+        "assetLongDesc",
+    )
+
+    return {
+        "run_id": run_id,
+        "source_run_id": run_id,
+        "actor_run_id": raw_item.get("actor_run_id") or raw_item.get("actorRunId") or run_id,
+        "apify_run_id": raw_item.get("apify_run_id") or raw_item.get("apifyRunId") or run_id,
+        "listing_id": source_listing_id,
+        "source_listing_id": source_listing_id,
+        "listing_url": listing_url,
+        "source_site": source_site,
+        "title": raw_item.get("title") or raw_item.get("name") or "",
+        "current_bid": sold_price or 0,
+        "year": raw_item.get("year"),
+        "make": raw_item.get("make"),
+        "model": raw_item.get("model"),
+        "trim": raw_item.get("trim"),
+        "vin": raw_item.get("vin"),
+        "mileage": _first_present(raw_item, "mileage", "meterCount", "odometer"),
+        "condition_text": raw_item.get("condition_text"),
+        "description": description,
+        "title_status": _first_present(raw_item, "title_status", "titleStatus", "title_brand_status"),
+        "city": _first_present(raw_item, "city", "locationCity"),
+        "state": _first_present(raw_item, "state", "locationState"),
+        "seller": _first_present(raw_item, "seller", "agency_name", "agencyName"),
+        "auction_end_time": _first_present(raw_item, "sale_date", "auction_end_time", "auctionEndUtc"),
+    }
+
+
+def _sold_comp_candidate_rejection_reason(*, vehicle: dict, raw_item: dict, sold_price: Any, listing_url: Any) -> Optional[str]:
+    if not listing_url:
+        return "missing_listing_url"
+    if sold_price in (None, "", 0):
+        return "missing_sold_price"
+    if not (vehicle.get("year") and vehicle.get("make") and vehicle.get("model")):
+        return "missing_year_make_model"
+    return None
+
+
 def _build_sold_comp_candidate_row(
     *,
     vehicle: dict,
@@ -3103,10 +3224,24 @@ def _build_sold_comp_candidate_row(
     run_id: str,
     item_index: int,
 ) -> dict:
-    sold_price = raw_item.get("sold_price") or raw_item.get("sale_price") or vehicle.get("current_bid") or 0
+    sold_price = (
+        raw_item.get("sold_price")
+        or raw_item.get("sale_price")
+        or raw_item.get("soldPrice")
+        or raw_item.get("current_bid")
+        or raw_item.get("currentBid")
+        or vehicle.get("current_bid")
+        or 0
+    )
     source_name = _canonical_source_site(vehicle.get("source_site") or raw_item.get("source_site") or raw_item.get("source")) or "unknown"
     listing_url = vehicle.get("listing_url") or raw_item.get("listing_url") or raw_item.get("url")
     source_listing_id = _sold_comp_source_listing_id(vehicle, raw_item)
+    rejection_reason = _sold_comp_candidate_rejection_reason(
+        vehicle=vehicle,
+        raw_item=raw_item,
+        sold_price=sold_price,
+        listing_url=listing_url,
+    )
     dedup_basis = "|".join(
         str(part or "")
         for part in [
@@ -3161,8 +3296,8 @@ def _build_sold_comp_candidate_row(
         "source_policy_version": "govdeals-sold-alpha-v1",
         "extraction_confidence": None,
         "field_completeness_pct": None,
-        "candidate_status": "candidate",
-        "rejection_reason": None,
+        "candidate_status": "rejected" if rejection_reason else "candidate",
+        "rejection_reason": rejection_reason,
         "duplicate_of": None,
         "dedup_key": hashlib.sha256(dedup_basis.encode("utf-8")).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -3253,12 +3388,42 @@ def stage_sold_comp_candidate(
     run_row = _build_market_scout_run_row(row=row, vehicle=vehicle, raw_item=raw_item)
     if supabase_client is not None:
         supabase_client.table("market_scout_runs").upsert(run_row, on_conflict="run_id").execute()
-        supabase_client.table("sold_comp_candidates").insert(row).execute()
+        supabase_client.table("sold_comp_candidates").upsert(
+            row,
+            on_conflict="source_name,source_listing_id",
+        ).execute()
         return
     if not _direct_supabase_db_url:
         raise RuntimeError("candidate_staging_unavailable")
     _upsert_market_scout_run_direct_pg(run_row)
-    _insert_row_direct_pg("sold_comp_candidates", row, returning_id=False)
+    _upsert_sold_comp_candidate_direct_pg(row)
+
+
+def _upsert_sold_comp_candidate_direct_pg(row: dict) -> None:
+    columns = list(row.keys())
+    values = [prepare_direct_pg_value(row[column]) for column in columns]
+    assignments = [
+        psycopg2_sql.SQL("{} = EXCLUDED.{}").format(
+            psycopg2_sql.Identifier(column),
+            psycopg2_sql.Identifier(column),
+        )
+        for column in columns
+        if column not in {"source_name", "source_listing_id", "created_at"}
+    ]
+    insert_sql = psycopg2_sql.SQL(
+        """
+        INSERT INTO public.sold_comp_candidates ({fields})
+        VALUES ({values})
+        ON CONFLICT (source_name, source_listing_id) DO UPDATE SET {assignments}
+        """
+    ).format(
+        fields=psycopg2_sql.SQL(", ").join(psycopg2_sql.Identifier(column) for column in columns),
+        values=psycopg2_sql.SQL(", ").join(psycopg2_sql.Placeholder() for _ in columns),
+        assignments=psycopg2_sql.SQL(", ").join(assignments),
+    )
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(insert_sql, values)
 
 
 def _insert_row_direct_pg(table_name: str, row: dict, *, returning_id: bool = True) -> Optional[str]:
