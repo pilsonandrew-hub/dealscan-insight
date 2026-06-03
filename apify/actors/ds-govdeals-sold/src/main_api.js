@@ -33,6 +33,24 @@ const capturedApi = {
 // Collect passing lots in memory so we can VIN-enrich before pushing
 const passingLots = [];
 
+function replayHeadersFromBrowser(headers) {
+    const required = [
+        'x-api-key',
+        'x-user-id',
+        'x-api-correlation-id',
+    ];
+    const replay = {};
+    for (const key of required) {
+        if (headers[key]) replay[key] = headers[key];
+    }
+    replay.accept = headers.accept || 'application/json, text/plain, */*';
+    replay['content-type'] = headers['content-type'] || 'application/json';
+    replay.origin = 'https://www.govdeals.com';
+    replay.referer = 'https://www.govdeals.com/';
+    if (headers['user-agent']) replay['user-agent'] = headers['user-agent'];
+    return replay;
+}
+
 // ── Helper: extract lots from any known Liquidity Services API shape ──
 function extractLots(json) {
     if (!json || typeof json !== 'object') return [];
@@ -85,15 +103,12 @@ const crawler = new PlaywrightCrawler({
 
             if (!capturedApi.apiKey && headers['x-api-key']) {
                 capturedApi.apiKey = headers['x-api-key'];
-                capturedApi.requestHeaders = {
-                    accept: headers.accept || 'application/json, text/plain, */*',
-                    'content-type': headers['content-type'] || 'application/json',
-                    'x-api-key': headers['x-api-key'],
-                };
+                capturedApi.requestHeaders = replayHeadersFromBrowser(headers);
                 log.info(`[API KEY CAPTURED] ${headers['x-api-key'].slice(0, 8)}*** via ${url}`);
             }
 
             if (url.includes('/search/list') && request.method() === 'POST') {
+                capturedApi.requestHeaders = replayHeadersFromBrowser(headers);
                 const postData = request.postData();
                 if (!postData) return;
                 try {
@@ -271,7 +286,6 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             displayRows: searchPayload.displayRows || 24,
             requestType: searchPayload.requestType || 'search',
             responseStyle: searchPayload.responseStyle || 'productsOnly',
-            timing: 'completed',  // Filter for completed/sold auctions
         };
 
         log.info(`Fetching page ${pageNum} via Node fetch: ${searchUrl}`);
@@ -280,23 +294,20 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             // Use Node.js fetch (no CORS restrictions, unlike page.evaluate browser fetch)
             const nodeResp = await fetch(searchUrl, {
                 method: 'POST',
-                headers: {
-                    ...requestHeaders,
-                    'content-type': 'application/json',
-                    'origin': 'https://www.govdeals.com',
-                    'referer': 'https://www.govdeals.com/',
-                },
+                headers: requestHeaders,
                 body: JSON.stringify(payload),
             });
+            const responseText = await nodeResp.text();
             const resp = {
                 ok: nodeResp.ok,
                 status: nodeResp.status,
                 total: nodeResp.headers.get('x-total-count'),
-                json: nodeResp.ok ? await nodeResp.json() : null,
+                json: nodeResp.ok ? JSON.parse(responseText) : null,
+                body: responseText,
             };
 
             if (!resp?.ok || !resp.json) {
-                log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'})`);
+                log.info(`Page ${pageNum}: no response (status ${resp?.status ?? 'unknown'}): ${String(resp?.body || '').slice(0, 240)}`);
                 break;
             }
 
