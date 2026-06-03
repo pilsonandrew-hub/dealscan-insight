@@ -545,6 +545,54 @@ def test_pipeline_truth_classifies_gsa_repair_warning_phrases_as_explicit(monkey
     assert sample["condition_signals"] == ["need jumpstart", "check engine", "repairs required"]
 
 
+def test_pipeline_truth_classifies_open_recall_without_remedy_as_explicit(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "jjkane-recall",
+                "is_active": True,
+                "dos_score": 81,
+                "mileage": 94998,
+                "year": 2018,
+                "title": "2018 Ford Explorer Police 4WD",
+                "pricing_maturity": "market_comp",
+                "vin": "1FM5K8AR3JGA99780",
+                "condition_grade": "Poor",
+                "source_site": "jjkane",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.95,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": (
+                        "Open Manufacturer Recall Number 24S02 Remedy Not Yet Available. "
+                        "Exterior A-pillar applique trim may be loose, missing or become detached."
+                    ),
+                },
+            },
+        ],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["opportunities"]["active_dos80_condition_blocker_basis_counts_sample"] == {
+        "explicit_negative_condition_signal": 1,
+    }
+    sample = result["opportunities"]["active_dos80_condition_blocker_basis_samples"][0]
+    assert sample["condition_blocker_basis"] == "explicit_negative_condition_signal"
+    assert "open manufacturer recall" in sample["condition_signals"]
+    assert "remedy not yet available" in sample["condition_signals"]
+
+
 def test_pipeline_truth_uses_detail_text_when_description_is_title_like(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "opportunities": [

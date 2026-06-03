@@ -234,6 +234,8 @@ _EXPLICIT_NEGATIVE_CONDITION_SIGNALS = frozenset({
     "need jumpstart",
     "check engine",
     "repairs required",
+    "open manufacturer recall",
+    "remedy not yet available",
 })
 
 

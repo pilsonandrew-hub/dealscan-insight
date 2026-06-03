@@ -57,6 +57,22 @@ def test_gsa_repair_warning_phrases_are_explicit_condition_signals():
     assert "repairs required" in result["condition_signals"]
 
 
+def test_open_recall_without_remedy_is_explicit_condition_signal():
+    result = score_condition(
+        title="2018 Ford Explorer Police 4WD",
+        description=(
+            "Open Manufacturer Recall Number 24S02 Remedy Not Yet Available. "
+            "Exterior A-pillar applique trim may be loose, missing or become detached."
+        ),
+        year=CURRENT_YEAR - 8,
+        mileage=94998,
+    )
+
+    assert result["condition_grade"] in {"D", "F"}
+    assert "open manufacturer recall" in result["condition_signals"]
+    assert "remedy not yet available" in result["condition_signals"]
+
+
 def test_runs_and_drives_bumps_fair_to_good():
     # Fair baseline (old year, average mileage), plus "runs and drives" → Good
     result = compute_condition_grade(

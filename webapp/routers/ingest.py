@@ -2936,6 +2936,8 @@ _EXPLICIT_DUPLICATE_CONDITION_NEGATIVES = frozenset({
     "need jumpstart",
     "check engine",
     "repairs required",
+    "open manufacturer recall",
+    "remedy not yet available",
 })
 
 
