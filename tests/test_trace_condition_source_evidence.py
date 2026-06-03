@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 
 from scripts.trace_condition_source_evidence import (
     build_source_evidence_trace,
@@ -106,3 +108,52 @@ def test_trace_output_is_json_serializable():
     trace = build_source_evidence_trace({"opportunity": {"id": "row-1"}}, [])
 
     json.dumps(trace, sort_keys=True)
+
+
+def test_cli_runs_from_repo_root_with_offline_payloads(tmp_path):
+    condition_proof_path = tmp_path / "condition-proof.json"
+    dataset_items_path = tmp_path / "dataset-items.json"
+    condition_proof_path.write_text(
+        json.dumps(
+            {
+                "opportunity": {
+                    "id": "durango-row",
+                    "title": "2020 Dodge Durango SRT",
+                    "source_identity": {
+                        "listing_url": "https://www.govdeals.com/asset/197/5804",
+                        "vin_suffix": "324462",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    dataset_items_path.write_text(
+        json.dumps(
+            [
+                {
+                    "listing_url": "https://www.govdeals.com/asset/197/5804",
+                    "vin": "1C4SDJGJ6LC324462",
+                    "detail_text": "Sold as is.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/trace_condition_source_evidence.py",
+            "--condition-proof-json",
+            str(condition_proof_path),
+            "--dataset-items-json",
+            str(dataset_items_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["source_trace"]["matched"] is True
