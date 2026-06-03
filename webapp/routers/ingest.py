@@ -810,57 +810,36 @@ async def _process_webhook_items(
                 )
                 continue
 
-            # Handle completed auction sources — write to dealer_sales for DOS calibration
+            # Handle completed auction sources as untrusted comp candidates.
+            # Verified promotion is intentionally separate from outcome tracking.
             source_site = _canonical_source_site(vehicle.get("source_site") or vehicle.get("source")) or None
             vehicle["source_site"] = source_site  # persist normalized value (source and source_site are kept in sync via build_opportunity_row)
             if source_site == "govdeals-sold":
-                sold_row = {
-                    "vin": vehicle.get("vin"),
-                    "make": vehicle.get("make") or "Unknown",
-                    "model": vehicle.get("model") or "Unknown",
-                    "year": int(vehicle.get("year") or 0) or None,
-                    "mileage": vehicle.get("mileage"),
-                    "sale_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
-                    "sold_price": item.get("sold_price") or vehicle.get("current_bid") or 0,
-                    "state": vehicle.get("state"),
-                    "source_type": "govdeals_sold",
-                    "source": "govdeals_sold",
-                    "metadata": {"listing_url": vehicle.get("listing_url"), "run_id": apify_run_id},
-                }
-                dealer_sales_status = "unknown"
                 try:
-                    if supabase_client is not None:
-                        supabase_client.table("dealer_sales").insert(sold_row).execute()
-                        dealer_sales_status = "saved_supabase"
-                    else:
-                        saved_direct_pg, dealer_sales_status = _save_dealer_sale_direct_pg(sold_row)
-                        if not saved_direct_pg:
-                            raise RuntimeError(dealer_sales_status)
-                    processed += 1
-                    saved_count += 1
-                    logger.info(
-                        "[DEALER_SALES] Saved (%s): %s %s %s @ $%s",
-                        dealer_sales_status,
-                        vehicle.get("year"),
-                        vehicle.get("make"),
-                        vehicle.get("model"),
-                        f"{float(sold_row['sold_price']):,.0f}",
+                    stage_sold_comp_candidate(
+                        vehicle=vehicle,
+                        raw_item=item,
+                        run_id=apify_run_id,
+                        item_index=item_index,
                     )
+                    processed += 1
+                    increment_reason_counter(save_outcomes, "candidate_staged")
+                    logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
                         listing_url=vehicle.get("listing_url"),
                         opportunity_id=None,
                         channel="db_save",
-                        status=dealer_sales_status,
+                        status="candidate_staged",
                         error_message=None,
                         require_durable=True,
                         audit_state=audit_state,
                     )
                 except Exception as exc:
-                    logger.warning(f"[DEALER_SALES] Insert failed: {exc}")
+                    logger.warning(f"[SOLD_COMP] Candidate staging failed: {exc}")
                     failed_save_count += 1
-                    increment_reason_counter(skip_reasons, f"dealer_sales:{dealer_sales_status if dealer_sales_status != 'unknown' else 'error'}")
+                    increment_reason_counter(skip_reasons, "candidate_staging_failed")
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -3106,6 +3085,180 @@ def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Option
     except Exception as lookup_err:
         logger.warning("[INGEST] Direct PG lookup fallback failed: %s", lookup_err)
         return None
+
+
+def _sold_comp_source_listing_id(vehicle: dict, raw_item: dict) -> str:
+    for key in ("source_listing_id", "assetId", "asset_id", "listing_id", "id"):
+        value = raw_item.get(key) or vehicle.get(key)
+        if value not in (None, ""):
+            return str(value)
+    listing_url = vehicle.get("listing_url") or raw_item.get("listing_url") or raw_item.get("url") or ""
+    return _compute_listing_id(vehicle.get("source_site") or "sold-comp", listing_url)
+
+
+def _build_sold_comp_candidate_row(
+    *,
+    vehicle: dict,
+    raw_item: dict,
+    run_id: str,
+    item_index: int,
+) -> dict:
+    sold_price = raw_item.get("sold_price") or raw_item.get("sale_price") or vehicle.get("current_bid") or 0
+    source_name = _canonical_source_site(vehicle.get("source_site") or raw_item.get("source_site") or raw_item.get("source")) or "unknown"
+    listing_url = vehicle.get("listing_url") or raw_item.get("listing_url") or raw_item.get("url")
+    source_listing_id = _sold_comp_source_listing_id(vehicle, raw_item)
+    dedup_basis = "|".join(
+        str(part or "")
+        for part in [
+            source_name,
+            source_listing_id,
+            vehicle.get("vin"),
+            vehicle.get("year"),
+            vehicle.get("make"),
+            vehicle.get("model"),
+            sold_price,
+        ]
+    )
+
+    return {
+        "run_id": run_id,
+        "source_name": source_name,
+        "source_listing_id": source_listing_id,
+        "listing_url": listing_url,
+        "evidence_ref": listing_url,
+        "sale_status_raw": raw_item.get("sale_status") or raw_item.get("status") or "completed",
+        "sale_status_normalized": "candidate_completed",
+        "sale_date": raw_item.get("sale_date") or raw_item.get("auction_end_time") or vehicle.get("auction_end_time"),
+        "sold_price_raw": sold_price,
+        "sold_price_normalized": sold_price,
+        "sold_price_hammer": sold_price,
+        "buyer_premium": raw_item.get("buyer_premium"),
+        "fees": raw_item.get("fees"),
+        "price_includes_fees": raw_item.get("price_includes_fees"),
+        "sold_price_all_in": raw_item.get("sold_price_all_in") or sold_price,
+        "price_basis": raw_item.get("price_basis") or "source_reported",
+        "currency": raw_item.get("currency") or "USD",
+        "year": vehicle.get("year"),
+        "make": vehicle.get("make"),
+        "model": vehicle.get("model"),
+        "trim": vehicle.get("trim"),
+        "vin": vehicle.get("vin"),
+        "mileage": vehicle.get("mileage"),
+        "condition_text": vehicle.get("condition_text") or vehicle.get("description") or raw_item.get("condition_text"),
+        "defect_signals": raw_item.get("defect_signals"),
+        "title_brand_status": raw_item.get("title_brand_status") or vehicle.get("title_status"),
+        "location_city": vehicle.get("city") or raw_item.get("city"),
+        "location_state": vehicle.get("state") or raw_item.get("state"),
+        "seller_name": vehicle.get("seller") or raw_item.get("seller"),
+        "raw_payload": raw_item,
+        "scraper_run_id": run_id,
+        "channel": "gov",
+        "vehicle_class": raw_item.get("vehicle_class") or "unknown",
+        "target_match": None,
+        "target_reason": None,
+        "extractor_version": "apify-webhook-govdeals-sold",
+        "schema_version": "comp-evidence-ledger-v1",
+        "source_policy_version": "govdeals-sold-alpha-v1",
+        "extraction_confidence": None,
+        "field_completeness_pct": None,
+        "candidate_status": "candidate",
+        "rejection_reason": None,
+        "duplicate_of": None,
+        "dedup_key": hashlib.sha256(dedup_basis.encode("utf-8")).hexdigest(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "metadata": {
+            "item_index": item_index,
+            "source_site": vehicle.get("source_site"),
+            "title": vehicle.get("title"),
+        },
+    }
+
+
+def _build_market_scout_run_row(*, row: dict, vehicle: dict, raw_item: dict) -> dict:
+    return {
+        "run_id": row["run_id"],
+        "source_name": row["source_name"],
+        "actor_id": raw_item.get("actor_id") or raw_item.get("actorId"),
+        "scraper_run_id": row.get("scraper_run_id") or row["run_id"],
+        "schedule_name": raw_item.get("schedule_name"),
+        "policy_version": row["source_policy_version"],
+        "extractor_version": row["extractor_version"],
+        "schema_version": row["schema_version"],
+        "status": "collecting",
+        "vehicle_scope": [
+            {
+                "year": vehicle.get("year"),
+                "make": vehicle.get("make"),
+                "model": vehicle.get("model"),
+                "trim": vehicle.get("trim"),
+            }
+        ],
+        "source_policy": {
+            "source_name": row["source_name"],
+            "channel": row["channel"],
+            "initial_status": "candidate_only",
+        },
+        "records_scanned": 0,
+        "records_found": 0,
+        "records_candidate": 0,
+        "raw_summary": {
+            "source_site": vehicle.get("source_site"),
+            "candidate_staging_seen": True,
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _upsert_market_scout_run_direct_pg(run_row: dict) -> None:
+    columns = list(run_row.keys())
+    values = [prepare_direct_pg_value(run_row[column]) for column in columns]
+    assignments = [
+        psycopg2_sql.SQL("{} = EXCLUDED.{}").format(
+            psycopg2_sql.Identifier(column),
+            psycopg2_sql.Identifier(column),
+        )
+        for column in columns
+        if column not in {"run_id", "created_at"}
+    ]
+    insert_sql = psycopg2_sql.SQL(
+        """
+        INSERT INTO public.market_scout_runs ({fields})
+        VALUES ({values})
+        ON CONFLICT (run_id) DO UPDATE SET {assignments}
+        """
+    ).format(
+        fields=psycopg2_sql.SQL(", ").join(psycopg2_sql.Identifier(column) for column in columns),
+        values=psycopg2_sql.SQL(", ").join(psycopg2_sql.Placeholder() for _ in columns),
+        assignments=psycopg2_sql.SQL(", ").join(assignments),
+    )
+    with psycopg2.connect(_direct_supabase_db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(insert_sql, values)
+
+
+def stage_sold_comp_candidate(
+    *,
+    vehicle: dict,
+    raw_item: dict,
+    run_id: str,
+    item_index: int,
+) -> None:
+    row = _build_sold_comp_candidate_row(
+        vehicle=vehicle,
+        raw_item=raw_item,
+        run_id=run_id,
+        item_index=item_index,
+    )
+    run_row = _build_market_scout_run_row(row=row, vehicle=vehicle, raw_item=raw_item)
+    if supabase_client is not None:
+        supabase_client.table("market_scout_runs").upsert(run_row, on_conflict="run_id").execute()
+        supabase_client.table("sold_comp_candidates").insert(row).execute()
+        return
+    if not _direct_supabase_db_url:
+        raise RuntimeError("candidate_staging_unavailable")
+    _upsert_market_scout_run_direct_pg(run_row)
+    _insert_row_direct_pg("sold_comp_candidates", row, returning_id=False)
 
 
 def _insert_row_direct_pg(table_name: str, row: dict, *, returning_id: bool = True) -> Optional[str]:

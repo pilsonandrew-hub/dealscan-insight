@@ -77,6 +77,8 @@ if "fastapi" not in sys.modules:
     fastapi_stub.Request = object
     fastapi_stub.HTTPException = _StubHTTPException
     fastapi_stub.Header = lambda default=None, **kwargs: default
+    fastapi_stub.Path = lambda default=None, **kwargs: default
+    fastapi_stub.Query = lambda default=None, **kwargs: default
     fastapi_stub.BackgroundTasks = _StubBackgroundTasks
     fastapi_stub.Depends = lambda f=None: f
     fastapi_stub.status = types.SimpleNamespace(
@@ -177,6 +179,44 @@ class _Supabase:
         if name != "webhook_log":
             raise AssertionError(f"unexpected table: {name}")
         return _Query(self.rows)
+
+
+class _NoDealerSalesSupabase:
+    def table(self, name):
+        if name == "dealer_sales":
+            raise AssertionError("govdeals-sold must stage candidates, not write dealer_sales")
+        if name == "opportunities":
+            return _Query([])
+        raise AssertionError(f"unexpected table: {name}")
+
+
+class _RecordingExecute:
+    def execute(self):
+        return types.SimpleNamespace(data=[])
+
+
+class _RecordingTable:
+    def __init__(self, operations, name):
+        self.operations = operations
+        self.name = name
+
+    def insert(self, payload):
+        self.operations.append((self.name, "insert", payload))
+        return _RecordingExecute()
+
+    def upsert(self, payload, **kwargs):
+        self.operations.append((self.name, "upsert", payload, kwargs))
+        return _RecordingExecute()
+
+
+class _RecordingSupabase:
+    def __init__(self):
+        self.operations = []
+
+    def table(self, name):
+        if name == "dealer_sales":
+            raise AssertionError("sold comp staging must not write dealer_sales")
+        return _RecordingTable(self.operations, name)
 
 
 class _HTTPXResponse:
@@ -736,6 +776,113 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertIn("failed:1", webhook_updates[-1][1]["error_message"])
         self.assertIn("save_outcomes={'save_exception': 1}", webhook_updates[-1][1]["error_message"])
         self.assertIn("skip_reasons={'save_exception': 1}", webhook_updates[-1][1]["error_message"])
+
+    def test_govdeals_sold_webhook_stages_candidate_instead_of_dealer_sales(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-sold-1", "defaultDatasetId": "dataset-sold-1"},
+        }
+        vehicle = {
+            "run_id": "run-sold-1",
+            "listing_id": "govdeals-sold-asset-1",
+            "listing_url": "https://www.govdeals.com/asset/123/456",
+            "title": "2016 Ford F-150",
+            "year": 2016,
+            "make": "Ford",
+            "model": "F-150",
+            "current_bid": 3650,
+            "state": "TX",
+            "mileage": 98000,
+            "vin": "1FTFW1EF1GFA00001",
+            "source_site": "govdeals-sold",
+        }
+        raw_item = {
+            "sold_price": 3650,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+        }
+        delivery_calls = []
+        webhook_updates = []
+        staged_candidates = []
+
+        class _SoldHTTPXAsyncClient(_HTTPXAsyncClient):
+            async def get(self, url, *args, **kwargs):
+                if "/datasets/" not in url:
+                    raise AssertionError(f"unexpected url: {url}")
+                return _HTTPXResponse([raw_item])
+
+        fake_httpx = types.SimpleNamespace(AsyncClient=_SoldHTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", _NoDealerSalesSupabase()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-sold-1"
+        ), patch.object(
+            ingest,
+            "update_webhook_log",
+            lambda *args, **kwargs: webhook_updates.append((args, kwargs)),
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: dict(vehicle)
+        ), patch.object(
+            ingest,
+            "stage_sold_comp_candidate",
+            lambda **kwargs: staged_candidates.append(kwargs),
+            create=True,
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(len(staged_candidates), 1)
+        self.assertEqual(staged_candidates[0]["vehicle"]["source_site"], "govdeals-sold")
+        self.assertEqual(staged_candidates[0]["raw_item"], raw_item)
+        self.assertEqual(staged_candidates[0]["run_id"], "run-sold-1")
+        self.assertEqual(len(delivery_calls), 1)
+        self.assertEqual(delivery_calls[0]["status"], "candidate_staged")
+        self.assertTrue(len(webhook_updates) > 0)
+        self.assertIn("save_outcomes={'candidate_staged': 1}", webhook_updates[-1][1]["error_message"])
+
+    def test_stage_sold_comp_candidate_creates_run_ledger_before_candidate(self):
+        supabase = _RecordingSupabase()
+        vehicle = {
+            "run_id": "run-sold-ledger",
+            "listing_id": "asset-ledger-1",
+            "listing_url": "https://www.govdeals.com/asset/321/654",
+            "source_site": "govdeals-sold",
+            "year": 2018,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "TX",
+        }
+        raw_item = {
+            "sold_price": 9100,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+        }
+
+        with patch.object(ingest, "supabase_client", supabase):
+            ingest.stage_sold_comp_candidate(
+                vehicle=vehicle,
+                raw_item=raw_item,
+                run_id="run-sold-ledger",
+                item_index=0,
+            )
+
+        operations = supabase.operations
+        self.assertEqual(operations[0][0], "market_scout_runs")
+        self.assertEqual(operations[0][1], "upsert")
+        self.assertEqual(operations[0][2]["run_id"], "run-sold-ledger")
+        self.assertEqual(operations[0][3]["on_conflict"], "run_id")
+        self.assertEqual(operations[1][0], "sold_comp_candidates")
+        self.assertEqual(operations[1][1], "insert")
+        self.assertEqual(operations[1][2]["run_id"], "run-sold-ledger")
 
 
 if __name__ == "__main__":
