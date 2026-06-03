@@ -220,6 +220,25 @@ def _apify_get(path: str, token: str) -> Any:
         raise RuntimeError(f"Apify HTTP {exc.code} for {path}: {body}") from exc
 
 
+def dataset_id_from_run_payload(payload: Any) -> str:
+    """Extract default dataset id from direct or data-wrapped Apify run payloads."""
+    if not isinstance(payload, dict):
+        return ""
+    candidates = [payload]
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(data)
+    for candidate in candidates:
+        dataset_id = _clean_text(
+            candidate.get("defaultDatasetId")
+            or candidate.get("defaultDatasetID")
+            or candidate.get("default_dataset_id")
+        )
+        if dataset_id:
+            return dataset_id
+    return ""
+
+
 def _load_json_file(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -254,7 +273,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 print("No dataset id or run id available for Apify source trace.", file=sys.stderr)
                 return 2
             run_payload = _apify_get(f"/actor-runs/{run_id}", token)
-            dataset_id = run_payload.get("defaultDatasetId")
+            dataset_id = dataset_id_from_run_payload(run_payload)
         if not dataset_id:
             print("Unable to resolve Apify dataset id.", file=sys.stderr)
             return 2

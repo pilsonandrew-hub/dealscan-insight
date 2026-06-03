@@ -4,6 +4,7 @@ import sys
 
 from scripts.trace_condition_source_evidence import (
     build_source_evidence_trace,
+    dataset_id_from_run_payload,
     select_dataset_item,
 )
 
@@ -157,3 +158,17 @@ def test_cli_runs_from_repo_root_with_offline_payloads(tmp_path):
 
     payload = json.loads(result.stdout)
     assert payload["source_trace"]["matched"] is True
+
+
+def test_dataset_id_from_run_payload_accepts_apify_data_wrapper():
+    assert (
+        dataset_id_from_run_payload(
+            {
+                "data": {
+                    "id": "run-1",
+                    "defaultDatasetId": "dataset-1",
+                }
+            }
+        )
+        == "dataset-1"
+    )
