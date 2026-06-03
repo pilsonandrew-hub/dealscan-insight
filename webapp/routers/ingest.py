@@ -2950,8 +2950,18 @@ def _raw_condition_text(raw: Any) -> str:
     return " ".join(" ".join(parts).split())
 
 
-def _has_condition_proof(raw: Any) -> bool:
-    return bool(_raw_condition_text(raw))
+def _has_non_title_condition_proof(raw: Any, title: Any = "") -> bool:
+    if not isinstance(raw, dict):
+        return False
+    title_text = " ".join(str(title or raw.get("title") or "").split()).strip().lower()
+    for key in ("description", "details", "condition_notes", "detail_text", "damage_type", "damage", "title_status"):
+        value = raw.get(key)
+        if value in (None, "", {}, []):
+            continue
+        text = " ".join(str(value).split()).strip()
+        if text and text.lower() != title_text:
+            return True
+    return False
 
 
 def _has_explicit_negative_condition_evidence(row: dict) -> bool:
@@ -2978,7 +2988,7 @@ def _should_backfill_condition_grade(row: dict, existing: dict) -> bool:
         return False
     if incoming_grade in {"", "poor", "unknown"}:
         return False
-    if not _has_condition_proof(row.get("raw_data")):
+    if not _has_non_title_condition_proof(row.get("raw_data"), row.get("title")):
         return False
     if _has_explicit_negative_condition_evidence(existing):
         return False
