@@ -18,6 +18,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+
       - name: Fetch sanitized internal pipeline truth
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -115,6 +117,8 @@ jobs:
               if "condition_evidence_fields" not in opportunity:
                   print("opportunity condition proof missing condition_evidence_fields", file=sys.stderr)
                   raise SystemExit(1)
+              with open("/tmp/opportunity-condition-proof.json", "w", encoding="utf-8") as handle:
+                  json.dump(condition_proof, handle, indent=2, sort_keys=True)
               sanitized["opportunity_condition_proof"] = {
                   "selector": condition_proof.get("selector"),
                   "opportunity": {
@@ -137,4 +141,36 @@ jobs:
                   },
               }
           print(json.dumps(sanitized, indent=2, sort_keys=True))
+          PY
+
+      - name: Trace recovered source condition evidence
+        if: ${{ github.event.inputs.opportunity_id != '' }}
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(python3 - <<'PY'
+          import json
+
+          with open("/tmp/opportunity-condition-proof.json", "r", encoding="utf-8") as handle:
+              proof = json.load(handle)
+          opportunity = proof.get("opportunity") or {}
+          source_identity = opportunity.get("source_identity") or {}
+          print(source_identity.get("actor_run_id") or source_identity.get("apify_run_id") or "")
+          PY
+          )"
+          if [ -z "$RUN_ID" ]; then
+            echo "source condition trace missing source run id" >&2
+            exit 1
+          fi
+          python3 scripts/trace_condition_source_evidence.py \
+            --condition-proof-json /tmp/opportunity-condition-proof.json \
+            --run-id "$RUN_ID" \
+            > /tmp/source-condition-trace.json
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/source-condition-trace.json", "r", encoding="utf-8") as handle:
+              trace = json.load(handle)
+          print(json.dumps({"source_condition_trace": trace}, indent=2, sort_keys=True))
           PY

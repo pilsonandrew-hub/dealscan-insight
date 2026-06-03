@@ -23,3 +23,14 @@ def test_internal_pipeline_truth_workflow_prints_gate_aggregates():
     assert "condition_evidence_fields" in text
     assert "source_identity" in text
     assert "condition_backfill_assessment" in text
+
+
+def test_internal_pipeline_truth_workflow_can_trace_recovered_source_evidence():
+    text = WORKFLOW.read_text()
+
+    assert "Trace recovered source condition evidence" in text
+    assert "APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}" in text
+    assert "scripts/trace_condition_source_evidence.py" in text
+    assert "--condition-proof-json /tmp/opportunity-condition-proof.json" in text
+    assert "--run-id" in text
+    assert "source_condition_trace" in text
