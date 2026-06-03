@@ -41,6 +41,18 @@ def _digits(value: Any) -> str:
     return re.sub(r"\D+", "", _clean_text(value))
 
 
+def _number(value: Any) -> Any:
+    if isinstance(value, (int, float)):
+        return value
+    text = _digits(value)
+    if not text:
+        return 0
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+
+
 def _item_text(item: dict[str, Any], keys: Iterable[str]) -> str:
     return " ".join(_clean_text(item.get(key)) for key in keys if _clean_text(item.get(key)))
 
@@ -109,8 +121,8 @@ def _score_recovered_item(item: dict[str, Any], opportunity: dict[str, Any]) -> 
             "raw_description",
         ),
     )
-    mileage = item.get("mileage") or item.get("odometer") or opportunity.get("mileage") or 0
-    year = item.get("year") or opportunity.get("year") or 0
+    mileage = _number(item.get("mileage") or item.get("odometer") or opportunity.get("mileage"))
+    year = _number(item.get("year") or opportunity.get("year"))
     damage_type = _item_text(item, ("damage_type", "damage", "title_status"))
     vin = _clean_text(item.get("vin") or item.get("VIN"))
 

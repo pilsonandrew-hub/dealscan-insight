@@ -81,6 +81,33 @@ def test_trace_marks_recovered_poor_source_as_not_backfill_safe():
     assert trace["backfill_recommendation"]["mutate_row"] is False
 
 
+def test_trace_scores_recovered_source_with_string_year_and_mileage():
+    condition_proof = {
+        "opportunity": {
+            "id": "durango-row",
+            "title": "2020 Dodge Durango SRT",
+            "source_identity": {
+                "listing_url": "https://www.govdeals.com/asset/197/5804",
+                "vin_suffix": "324462",
+            },
+        }
+    }
+    dataset_items = [
+        {
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "vin": "1C4SDJGJ6LC324462",
+            "year": "2020",
+            "mileage": "13,983",
+            "detail_text": "Sold as is.",
+        }
+    ]
+
+    trace = build_source_evidence_trace(condition_proof, dataset_items)
+
+    assert trace["source_trace"]["matched"] is True
+    assert trace["recovered_source_condition"]["condition_grade"] in {"D", "F"}
+
+
 def test_trace_reports_missing_dataset_match_without_mutation_recommendation():
     condition_proof = {
         "opportunity": {
