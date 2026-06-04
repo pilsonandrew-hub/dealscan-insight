@@ -42,6 +42,7 @@ const DEFAULT_MAX_SEARCH_QUERIES = DEFAULT_TARGET_TERMS.length;
 const DEFAULT_SEO_ASSETS_PER_QUERY = 1;
 const DEFAULT_SEO_TIME_BUDGET_MS = 90000;
 const DEFAULT_SEO_FETCH_TIMEOUT_MS = 15000;
+const SEO_FETCH_ATTEMPTS = 3;
 const runStartedAt = new Date();
 
 await Actor.init();
@@ -237,21 +238,42 @@ function buildCompletedSearchPayload(searchText, basePayload = {}) {
 }
 
 async function fetchText(url, log) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(seoFetchTimeoutMs) || DEFAULT_SEO_FETCH_TIMEOUT_MS));
-    const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'user-agent': 'Mozilla/5.0 (compatible; DealerScopeBot/1.0; +https://dealerscope.local)',
-        },
-    }).finally(() => clearTimeout(timeout));
-    if (!response.ok) {
-        throw new Error(`status ${response.status}`);
+    const headers = {
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9',
+        'cache-control': 'no-cache',
+        pragma: 'no-cache',
+        referer: 'https://www.govdeals.com/',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'none',
+        'upgrade-insecure-requests': '1',
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
+    };
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= SEO_FETCH_ATTEMPTS; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(seoFetchTimeoutMs) || DEFAULT_SEO_FETCH_TIMEOUT_MS));
+        try {
+            const response = await fetch(url, { signal: controller.signal, headers });
+            if (!response.ok) {
+                throw new Error(`status ${response.status}`);
+            }
+            const text = await response.text();
+            log.info(`[SEO] Fetched ${url}`);
+            return text;
+        } catch (err) {
+            lastError = err;
+            if (attempt < SEO_FETCH_ATTEMPTS) {
+                log.warning(`[SEO] Fetch attempt ${attempt} failed for ${url}: ${err.message}; retrying`);
+                await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            }
+        } finally {
+            clearTimeout(timeout);
+        }
     }
-    const text = await response.text();
-    log.info(`[SEO] Fetched ${url}`);
-    return text;
+    throw lastError || new Error('fetch failed');
 }
 
 async function collectSeoSoldAssets(log, seenIds = new Set()) {

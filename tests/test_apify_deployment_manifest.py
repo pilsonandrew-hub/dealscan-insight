@@ -133,6 +133,15 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("if (!useSeoSearch) return", source)
         self.assertIn("(useSeoSearch || explicitSeoAssetUrls.length > 0)", source)
 
+    def test_govdeals_sold_seo_fetch_uses_browser_headers_and_retries(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertIn("SEO_FETCH_ATTEMPTS", source)
+        self.assertIn("Chrome/125.0 Safari/537.36", source)
+        self.assertIn("'sec-fetch-site': 'none'", source)
+        self.assertIn("attempt < SEO_FETCH_ATTEMPTS", source)
+
 
 if __name__ == "__main__":
     unittest.main()
