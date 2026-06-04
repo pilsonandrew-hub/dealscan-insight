@@ -60,6 +60,28 @@ def test_sold_comp_candidates_preserve_provenance_price_basis_and_bias_controls(
     assert "source_name, source_listing_id" in sql
 
 
+def test_market_scout_run_status_is_constrained():
+    sql = _migration_sql()
+
+    assert "constraint chk_market_scout_run_status" in sql
+    assert "status in ('started', 'collecting', 'completed', 'failed')" in sql
+
+
+def test_comp_evidence_ledger_rls_has_explicit_service_role_policies():
+    sql = _migration_sql()
+
+    for table in [
+        "market_scout_runs",
+        "sold_comp_candidates",
+        "sold_comp_reviews",
+        "verified_sold_comps",
+        "market_scout_artifacts",
+    ]:
+        assert f"alter table public.{table} enable row level security" in sql
+        assert f"on public.{table}" in sql
+        assert "to service_role" in sql
+
+
 def test_sold_comp_reviews_are_idempotent_per_verifier_version():
     sql = _migration_sql()
 

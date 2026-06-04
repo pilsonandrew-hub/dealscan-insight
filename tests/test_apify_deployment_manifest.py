@@ -36,6 +36,16 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn('"auction_end_time"', workflow)
         self.assertIn('"auction_end_date"', workflow)
 
+    def test_govdeals_sold_actor_uses_safe_json_parse_and_fresh_correlation_ids(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertIn("safeJsonParse", source)
+        self.assertIn("randomUUID", source)
+        self.assertIn("headersForReplayPage", source)
+        self.assertNotIn("json: nodeResp.ok ? JSON.parse(responseText) : null", source)
+        self.assertNotIn("'x-api-correlation-id',", source)
+
 
 if __name__ == "__main__":
     unittest.main()

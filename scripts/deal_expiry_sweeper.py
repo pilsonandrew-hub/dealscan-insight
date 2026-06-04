@@ -23,11 +23,12 @@ def _fetch_ids(supabase: Any, filters: Iterable[Callable[[Any], Any]]) -> list[s
 
 def _fetch_rows(supabase: Any, select: str, filters: Iterable[Callable[[Any], Any]]) -> list[dict[str, Any]]:
     rows_all: list[dict[str, Any]] = []
+    filter_fns = tuple(filters)
     offset = 0
     page_size = 500
     while True:
         query = supabase.table("opportunities").select(select).order("id")
-        for filter_fn in filters:
+        for filter_fn in filter_fns:
             query = filter_fn(query)
         response = query.range(offset, offset + page_size - 1).execute()
         rows = response.data or []
@@ -65,7 +66,7 @@ def _update_batches(supabase: Any, ids: list[str], payload: dict[str, Any]) -> i
 
 
 def _source_listing_id(row: dict[str, Any]) -> str | None:
-    for key in ("source_listing_id", "listing_id", "external_id", "id"):
+    for key in ("source_listing_id", "listing_id", "external_id"):
         value = row.get(key)
         if value not in (None, ""):
             return str(value)
@@ -106,6 +107,7 @@ def _upsert_post_close_outcome_requests(supabase: Any, rows: list[dict[str, Any]
     supabase.table("post_close_outcome_requests").upsert(
         requests,
         on_conflict="source_site,source_listing_id",
+        ignore_duplicates=True,
     ).execute()
     return len(requests)
 
@@ -206,22 +208,24 @@ def run_sweep(
         ),
     ])
 
-    eligible_post_close_requests = [
-        request
-        for row in expired_rows
-        if (request := _build_post_close_outcome_request(row)) is not None
-    ]
+    post_close_request_count = (
+        len([
+            request
+            for row in expired_rows
+            if (request := _build_post_close_outcome_request(row)) is not None
+        ])
+        if dry_run
+        else _upsert_post_close_outcome_requests(supabase, expired_rows)
+    )
 
     summary = {
         "dry_run": dry_run,
+        "post_close_outcome_requests": post_close_request_count,
         "expired": len(expired_ids) if dry_run else _update_batches(
             supabase,
             expired_ids,
             {"is_active": False, "pipeline_step": "expired"},
         ),
-        "post_close_outcome_requests": len(eligible_post_close_requests)
-        if dry_run
-        else _upsert_post_close_outcome_requests(supabase, expired_rows),
         "archived_passed": len(archived_passed_ids) if dry_run else _update_batches(
             supabase,
             archived_passed_ids,

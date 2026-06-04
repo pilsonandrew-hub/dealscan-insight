@@ -48,6 +48,14 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
                 "rejection_reason": "missing_year_make_model",
                 "created_at": "2026-06-03T00:00:02Z",
             },
+            {
+                "run_id": "run-1",
+                "source_name": "publicsurplus-sold",
+                "source_listing_id": "asset-1",
+                "channel": "surplus",
+                "candidate_status": "candidate",
+                "created_at": "2026-06-03T00:00:03Z",
+            },
         ],
     }
 
@@ -62,13 +70,42 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
 
     assert report["market_scout_runs"]["row_count"] == 1
     assert report["market_scout_runs"]["source_counts"] == {"govdeals-sold": 1}
-    assert report["sold_comp_candidates"]["row_count"] == 2
+    assert report["sold_comp_candidates"]["row_count"] == 3
     assert report["sold_comp_candidates"]["distinct_source_listing_ids"] == 2
-    assert report["sold_comp_candidates"]["status_counts"] == {"candidate": 1, "rejected": 1}
+    assert report["sold_comp_candidates"]["distinct_source_listing_keys"] == 3
+    assert report["sold_comp_candidates"]["status_counts"] == {"candidate": 2, "rejected": 1}
     assert report["sold_comp_candidates"]["rejection_reason_counts"] == {"missing_year_make_model": 1}
     assert "listing_url" not in str(report)
     assert "raw_payload" not in str(report)
     assert "2021 Mercedes-Benz G-Class" not in str(report)
+
+
+def test_run_id_truth_audit_surfaces_comp_ledger_read_failures(monkeypatch):
+    columns = {
+        "ingest_delivery_log": {"run_id", "status"},
+        "webhook_log": {"run_id", "processing_status"},
+        "opportunities": {"id", "run_id"},
+        "market_scout_runs": {"run_id", "source_name"},
+        "sold_comp_candidates": {"run_id", "source_name"},
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+
+    def fake_request(_base_url, _service_key, table, _params, **_kwargs):
+        if table == "market_scout_runs":
+            raise RuntimeError("permission denied for market_scout_runs")
+        if table == "sold_comp_candidates":
+            raise RuntimeError("network timeout while reading candidates")
+        return 200, {}, []
+
+    monkeypatch.setattr(inspection, "_request", fake_request)
+
+    report = inspection._run_id_truth_audit("https://example.supabase.co", "service-key", "run-1")
+
+    assert report["market_scout_runs"]["failure"] == "permission denied for market_scout_runs"
+    assert report["sold_comp_candidates"]["failure"] == "network timeout while reading candidates"
+    assert report["market_scout_runs"]["row_count"] is None
+    assert report["sold_comp_candidates"]["row_count"] is None
 
 
 def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeypatch):
@@ -156,8 +193,13 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
         "deal_expiry_sweeper": 2,
         "close_tracker": 1,
     }
+    assert report["post_close_outcome_requests"]["referral_reason_counts"] == {
+        "expired_opportunity": 2,
+        "scheduled_close_check": 1,
+    }
     assert report["post_close_outcome_requests"]["check_attempts_total"] == 3
     assert report["post_close_outcome_requests"]["latest_created_at"] == "2026-06-03T19:02:00Z"
+    assert report["post_close_outcome_requests"]["next_check_at"] == "2026-06-03T19:15:00Z"
     assert "private-listing" not in str(report)
     assert "1FTFW1E50PFA00000" not in str(report)
     assert "Sensitive listing title" not in str(report)
