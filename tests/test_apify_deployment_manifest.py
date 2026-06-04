@@ -46,6 +46,20 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertNotIn("json: nodeResp.ok ? JSON.parse(responseText) : null", source)
         self.assertNotIn("'x-api-correlation-id',", source)
 
+    def test_govdeals_sold_actor_targets_approved_comp_models(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
+        target_scope_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "target_scope.js"
+        target_scope_test_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "test" / "target-scope.node.mjs"
+        source = source_path.read_text(encoding="utf-8")
+        target_scope = target_scope_path.read_text(encoding="utf-8")
+
+        self.assertIn("DEFAULT_TARGET_TERMS", target_scope)
+        self.assertIn("targetTerms", source)
+        self.assertIn("matchesTargetTerms", source)
+        self.assertTrue(target_scope_test_path.exists())
+        for target in ["f-150", "f150", "f-250", "silverado 1500", "ram 1500"]:
+            self.assertIn(target, target_scope.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
