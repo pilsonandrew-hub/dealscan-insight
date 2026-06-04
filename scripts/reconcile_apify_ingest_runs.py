@@ -70,6 +70,7 @@ CURRENT_LANDING_ISSUES = {
     "missing_delivery_log",
     "missing_webhook",
     "no_db_landing",
+    "partial_db_save_ledger",
     "sonar_mirror_failures",
     "webhook_degraded",
     "webhook_error",
@@ -902,6 +903,8 @@ def classify_run(
             issues.append("sonar_mirror_failures")
         if item_count > 0 and not db_save_statuses:
             issues.append("missing_db_save_ledger")
+        if item_count > 0 and db_save_statuses and accounted_rows < item_count:
+            issues.append("partial_db_save_ledger")
         if (
             item_count > 0
             and opportunity_rows == 0
@@ -953,6 +956,13 @@ def infer_likely_cause(
 
     if "missing_delivery_log" in issues or "missing_db_save_ledger" in issues:
         return "app_started_but_observability_or_save_ledger_missing: inspect Railway logs for the run before replaying."
+
+    if "partial_db_save_ledger" in issues:
+        return (
+            "partial_db_save_ledger: webhook processed the actor run, but not every source item "
+            "has a db_save outcome. Inspect ingest item normalization, save-threshold exits, and "
+            "delivery logging before replaying."
+        )
 
     if "no_db_landing" in issues:
         return "dataset_fetched_but_nothing_landed: inspect save statuses and gating outcomes before replaying."
