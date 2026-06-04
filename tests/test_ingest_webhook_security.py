@@ -958,6 +958,7 @@ class WebhookSecurityTests(unittest.TestCase):
             "make": "Mercedes-Benz",
             "model": "G-63",
             "sold_price": 99000,
+            "auction_end_time": "2026-06-01T15:00:00Z",
         }
         vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-candidate", source_hint=None)
 
@@ -973,6 +974,30 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(row["year"], 2021)
         self.assertEqual(row["make"], "Mercedes-Benz")
         self.assertEqual(row["model"], "G-63")
+        self.assertEqual(row["sale_date"], "2026-06-01")
+
+    def test_sold_comp_candidate_row_rejects_missing_sale_date(self):
+        raw_item = {
+            "source_site": "govdeals-sold",
+            "url": "https://www.govdeals.com/asset/99/31398",
+            "title": "2021 Mercedes-Benz G-Class",
+            "year": 2021,
+            "make": "Mercedes-Benz",
+            "model": "G-63",
+            "sold_price": 99000,
+        }
+        vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-no-sale-date", source_hint=None)
+
+        row = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle,
+            raw_item=raw_item,
+            run_id="run-no-sale-date",
+            item_index=0,
+        )
+
+        self.assertEqual(row["candidate_status"], "rejected")
+        self.assertEqual(row["rejection_reason"], "invalid_sale_date")
+        self.assertIsNone(row["sale_date"])
 
     def test_stage_sold_comp_candidate_creates_run_ledger_before_candidate(self):
         supabase = _RecordingSupabase()
