@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 
 import {
     matchesTargetTerms,
+    normalizeTargetSearchQueries,
     normalizeTargetTerms,
 } from '../src/target_scope.js';
 
@@ -25,5 +26,33 @@ describe('GovDeals sold target scope', () => {
 
         assert.equal(matchesTargetTerms({ title: '2018 Honda Civic' }, terms), true);
         assert.equal(matchesTargetTerms({ title: '2018 Ford F-150' }, terms), false);
+    });
+
+    test('uses custom target terms as search queries when no explicit search override is provided', () => {
+        assert.deepEqual(
+            normalizeTargetSearchQueries({ targetTerms: ['tacoma', 'camry'] }),
+            ['tacoma', 'camry'],
+        );
+        assert.deepEqual(
+            normalizeTargetSearchQueries({
+                searchQuery: 'f-150',
+                targetTerms: ['tacoma'],
+            }),
+            ['f-150'],
+        );
+        assert.deepEqual(
+            normalizeTargetSearchQueries({
+                targetSearchQueries: ['silverado 2500'],
+                targetTerms: ['tacoma'],
+            }),
+            ['silverado 2500'],
+        );
+        assert.deepEqual(
+            normalizeTargetSearchQueries({
+                targetSearchQueries: ['Ford F-150', ' Silverado 1500 ', 'Ram 2500'],
+                maxSearchQueries: 2,
+            }),
+            ['Ford F-150', 'Silverado 1500'],
+        );
     });
 });

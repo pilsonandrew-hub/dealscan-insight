@@ -114,6 +114,9 @@ jobs:
                   "maxPages": int(os.environ.get("MAX_PAGES") or "1"),
                   "maxItems": int(os.environ.get("GOVDEALS_SOLD_MAX_ITEMS") or "25"),
               }
+              search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
+              if search_query:
+                  actor_input["searchQuery"] = search_query
           else:
               actor_input = {
                   "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
