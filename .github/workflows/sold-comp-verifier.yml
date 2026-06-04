@@ -1,0 +1,43 @@
+name: Sold Comp Verifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report deterministic verifier decisions without writing rows"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      limit:
+        description: "Maximum candidate rows to inspect"
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sold-comp-verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v6
+
+      - name: Run deterministic sold-comp verifier
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SOLD_COMP_VERIFIER_DRY_RUN: ${{ inputs.dry_run }}
+          SOLD_COMP_VERIFIER_LIMIT: ${{ inputs.limit }}
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir supabase==2.30.0
+          python3 scripts/run_sold_comp_verifier.py
