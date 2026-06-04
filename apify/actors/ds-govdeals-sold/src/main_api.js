@@ -5,7 +5,7 @@
  * 1. Load GovDeals with ?timing=completed in Playwright
  * 2. Intercept requests to maestro.lqdt1.com to capture x-api-key
  * 3. Call search API with timing: 'completed' to get closed auctions
- * 4. Capture ALL completed sales (no filtering) for dealer_sales DOS calibration
+ * 4. Capture approved DealerScope comp models for dealer_sales DOS calibration
  *
  * Key API parameter: timing: 'completed' in POST payload
  */
@@ -13,6 +13,10 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 import { randomUUID } from 'node:crypto';
+import {
+    matchesTargetTerms,
+    normalizeTargetTerms,
+} from './target_scope.js';
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -21,8 +25,9 @@ const MAX_DETAIL_PAGES = 100;  // Reduced for sold auctions
 await Actor.init();
 const input = await Actor.getInput() ?? {};
 const { maxPages = 10, maxItems = 500 } = input;
+const targetTerms = normalizeTargetTerms(input.targetTerms);
 
-let totalFound = 0, totalPassed = 0;
+let totalFound = 0, totalPassed = 0, totalSkippedOutOfScope = 0;
 const capturedApi = {
     apiKey: null,
     searchUrl: 'https://maestro.lqdt1.com/search/list',
@@ -64,6 +69,18 @@ function safeJsonParse(text) {
     } catch (_) {
         return null;
     }
+}
+
+function stageTargetLot(lot, seenIds = null) {
+    if (seenIds) seenIds.add(lot.assetId);
+    totalFound++;
+    if (!matchesTargetTerms(lot, targetTerms)) {
+        totalSkippedOutOfScope++;
+        return false;
+    }
+    totalPassed++;
+    passingLots.push(normalizeLot(lot));
+    return true;
 }
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
@@ -194,11 +211,7 @@ const crawler = new PlaywrightCrawler({
             if (capturedApi.interceptedLots.length > 0) {
                 log.info(`Processing ${capturedApi.interceptedLots.length} intercepted lots from page load`);
                 for (const lot of capturedApi.interceptedLots) {
-                    seenIds.add(lot.assetId);
-                    totalFound++;
-                    // No filtering for sold actor — capture ALL completed sales for DOS calibration
-                    totalPassed++;
-                    passingLots.push(normalizeLot(lot));
+                    stageTargetLot(lot, seenIds);
                     if (passingLots.length >= maxItems) break;
                 }
             }
@@ -213,6 +226,7 @@ const crawler = new PlaywrightCrawler({
                 await Actor.pushData(lot);
             }
             log.info(`[GOVDEALS-SOLD] Pushed ${passingLots.length} completed auction records`);
+            log.info(`[GOVDEALS-SOLD] Target filter skipped ${totalSkippedOutOfScope} out-of-scope completed lots`);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');
@@ -333,11 +347,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             log.info(`Page ${pageNum}: ${lots.length} lots (x-total-count: ${resp.total || 'n/a'})`);
             for (const lot of lots) {
                 if (seenIds.has(lot.assetId)) continue; // already saved from intercept
-                seenIds.add(lot.assetId);
-                totalFound++;
-                // No filtering for sold actor — capture ALL completed sales for DOS calibration
-                totalPassed++;
-                passingLots.push(normalizeLot(lot));
+                stageTargetLot(lot, seenIds);
                 if (passingLots.length >= maxItems) {
                     log.info(`Reached maxItems limit (${maxItems}) — stopping pagination`);
                     return;
@@ -353,6 +363,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
 
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
 console.log(`[GOVDEALS-SOLD] Found: ${totalFound} | Collected: ${totalPassed}`);
+console.log(`[GOVDEALS-SOLD] Skipped out-of-scope: ${totalSkippedOutOfScope}`);
 console.log(`[GOVDEALS-SOLD] Auth initialized`);
 console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} lots`);
 await Actor.exit();
