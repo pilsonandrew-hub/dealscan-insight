@@ -1,5 +1,6 @@
 from scripts.reconcile_condition_blocked_scores import (
     is_explicit_condition_blocked_hot_row,
+    is_recovered_source_condition_blocked_hot_row,
     rejection_payload,
 )
 
@@ -71,3 +72,67 @@ def test_rejection_payload_removes_hot_scoring_and_capital_ready_grade():
     assert payload["max_bid"] == 0.0
     assert payload["bid_headroom"] == 0.0
     assert payload["ceiling_reason"] == "condition_unverified"
+
+
+def test_targets_single_hot_storage_gap_row_with_recovered_negative_source_evidence():
+    row = {
+        "id": "durango-row",
+        "is_active": True,
+        "dos_score": 86.9,
+        "score": 86.9,
+        "investment_grade": "Platinum",
+        "source_site": "govdeals",
+        "title": "2020 Dodge Durango SRT",
+        "year": 2020,
+        "mileage": 13983,
+        "condition_grade": "Poor",
+        "raw_data": {
+            "description": "2020 Dodge Durango SRT",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "vin": "1C4SDJGJ6LC324462",
+            "actor_run_id": "4bCfV8noqOLBAPiyX",
+        },
+    }
+    dataset_items = [
+        {
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "vin": "1C4SDJGJ6LC324462",
+            "title": "2020 Dodge Durango SRT",
+            "description": "2020 Dodge Durango SRT",
+            "detail_text": "UNKNOWN MECHANICAL HISTORY. Sold as is. Clean title.",
+        }
+    ]
+
+    result = is_recovered_source_condition_blocked_hot_row(row, dataset_items)
+
+    assert result["target"] is True
+    assert result["reason"] == "recovered_source_condition_negative"
+    assert result["trace"]["source_trace"]["matched"] is True
+    assert result["trace"]["recovered_source_condition"]["condition_grade"] in {"D", "F"}
+
+
+def test_does_not_target_storage_gap_row_without_matching_source_evidence():
+    row = {
+        "id": "durango-row",
+        "is_active": True,
+        "dos_score": 86.9,
+        "score": 86.9,
+        "source_site": "govdeals",
+        "title": "2020 Dodge Durango SRT",
+        "year": 2020,
+        "mileage": 13983,
+        "condition_grade": "Poor",
+        "raw_data": {
+            "description": "2020 Dodge Durango SRT",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "vin": "1C4SDJGJ6LC324462",
+        },
+    }
+
+    result = is_recovered_source_condition_blocked_hot_row(
+        row,
+        [{"listing_url": "https://www.govdeals.com/asset/999/9999"}],
+    )
+
+    assert result["target"] is False
+    assert result["reason"] == "source_trace_not_negative"
