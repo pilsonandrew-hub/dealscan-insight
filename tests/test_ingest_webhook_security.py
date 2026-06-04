@@ -1242,6 +1242,92 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(row_two["rejection_reason"], "missing_listing_url")
         self.assertNotEqual(row_one["source_listing_id"], row_two["source_listing_id"])
 
+    def test_sold_comp_candidate_row_maps_visible_fee_price_basis_to_all_in(self):
+        raw_item = {
+            "source_site": "govdeals-sold",
+            "listing_url": "https://www.govdeals.com/asset/17167/7167",
+            "title": "3052A/ 2014 Ford F-150",
+            "year": 2014,
+            "make": "Ford",
+            "model": "F-150",
+            "sold_price": 3074,
+            "sold_price_all_in": 3458.25,
+            "price_basis": "source_sold_amount_with_visible_fees",
+            "auction_end_time": "2026-05-16T00:08:00Z",
+        }
+        vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-visible-fees", source_hint=None)
+
+        row = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle,
+            raw_item=raw_item,
+            run_id="run-visible-fees",
+            item_index=0,
+        )
+
+        self.assertEqual(row["price_basis"], "all_in")
+        self.assertEqual(row["sold_price_hammer"], 3074)
+        self.assertEqual(row["sold_price_all_in"], 3458.25)
+
+    def test_govdeals_sold_webhook_skips_source_quality_proof_before_candidate_staging(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-sold-proof-skip", "defaultDatasetId": "dataset-sold-proof-skip"},
+        }
+        raw_items = [
+            {
+                "record_type": "source_quality_proof",
+                "source_site": "govdeals-sold",
+                "source_quality_proof": {"pushed_rows_total": 1},
+            },
+            {
+                "source_site": "govdeals-sold",
+                "listing_url": "https://www.govdeals.com/asset/17167/7167",
+                "title": "3052A/ 2014 Ford F-150",
+                "year": 2014,
+                "make": "Ford",
+                "model": "F-150",
+                "sold_price": 3074,
+                "auction_end_time": "2026-05-16T00:08:00Z",
+            },
+        ]
+        delivery_calls = []
+        staged_candidates = []
+
+        class _SoldHTTPXAsyncClient(_HTTPXAsyncClient):
+            async def get(self, url, *args, **kwargs):
+                if "/datasets/" not in url:
+                    raise AssertionError(f"unexpected url: {url}")
+                return _HTTPXResponse(raw_items)
+
+        fake_httpx = types.SimpleNamespace(AsyncClient=_SoldHTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", _NoDealerSalesSupabase()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-sold-proof-skip"
+        ), patch.object(
+            ingest, "update_webhook_log", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest,
+            "stage_sold_comp_candidate",
+            lambda **kwargs: staged_candidates.append(kwargs) or "candidate_staged",
+            create=True,
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(len(staged_candidates), 1)
+        self.assertEqual(staged_candidates[0]["raw_item"]["title"], "3052A/ 2014 Ford F-150")
+        self.assertEqual([call["status"] for call in delivery_calls], ["candidate_staged"])
+
     def test_stage_sold_comp_candidate_creates_run_ledger_before_candidate(self):
         supabase = _ExistingCandidateSupabase([])
         vehicle = {

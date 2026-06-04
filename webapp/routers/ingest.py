@@ -785,6 +785,9 @@ async def _process_webhook_items(
         )
 
         for item_index, item in enumerate(items):
+            if isinstance(item, dict) and item.get("record_type") == "source_quality_proof":
+                logger.info("[INGEST] Skipping source quality proof record from sold-comp staging")
+                continue
             raw_source_site = _canonical_source_site(
                 item.get("source_site") or item.get("source") or metadata.get("source") or metadata.get("actor_id")
             )
@@ -3260,6 +3263,19 @@ def _sold_comp_candidate_rejection_reason(
     return None
 
 
+def _sold_comp_price_basis(raw_basis: Any) -> str:
+    basis = str(raw_basis or "").strip().lower()
+    if basis in {"hammer", "all_in", "source_reported", "unknown"}:
+        return basis
+    if basis in {
+        "source_sold_amount_with_visible_fees",
+        "source_sold_amount_with_fees",
+        "source_visible_fees",
+    }:
+        return "all_in"
+    return "source_reported"
+
+
 def _build_sold_comp_candidate_row(
     *,
     vehicle: dict,
@@ -3320,7 +3336,7 @@ def _build_sold_comp_candidate_row(
         "fees": raw_item.get("fees"),
         "price_includes_fees": raw_item.get("price_includes_fees"),
         "sold_price_all_in": raw_item.get("sold_price_all_in") or sold_price,
-        "price_basis": raw_item.get("price_basis") or "source_reported",
+        "price_basis": _sold_comp_price_basis(raw_item.get("price_basis")),
         "currency": raw_item.get("currency") or "USD",
         "year": vehicle.get("year"),
         "make": vehicle.get("make"),
