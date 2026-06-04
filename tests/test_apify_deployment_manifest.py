@@ -36,6 +36,14 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn('"auction_end_time"', workflow)
         self.assertIn('"auction_end_date"', workflow)
 
+    def test_manual_apify_runner_fails_govdeals_sold_future_date_output(self):
+        workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        self.assertIn('"future_sold_rows"', workflow)
+        self.assertIn("GovDeals sold actor emitted future-dated rows", workflow)
+        self.assertIn('raise SystemExit("GovDeals sold actor emitted future-dated rows")', workflow)
+
     def test_govdeals_sold_actor_uses_safe_json_parse_and_fresh_correlation_ids(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
         source = source_path.read_text(encoding="utf-8")
@@ -72,6 +80,8 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("buildCompletedSearchPayload", source)
         self.assertIn("remainingPageBudget", source)
         self.assertIn("pagesForQuery", source)
+        self.assertIn("completedSaleRejectionReason", source)
+        self.assertIn("rows_excluded_not_completed_sale", source)
         self.assertIn('actor_input["searchQuery"] = search_query', workflow)
 
 

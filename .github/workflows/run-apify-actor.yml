@@ -173,6 +173,11 @@ jobs:
                           "rows_excluded_missing_mileage",
                           "rows_excluded_after_detail_attempt",
                           "rows_excluded_without_detail_attempt",
+                          "rows_excluded_out_of_scope",
+                          "rows_excluded_not_completed_sale",
+                          "completed_sale_rejection_reasons",
+                          "target_search_queries",
+                          "max_pages_total",
                           "detail_pages_attempted",
                           "detail_pages_fetched",
                           "detail_pages_failed",
@@ -214,9 +219,18 @@ jobs:
                           "future": sum(value > now for value in valid),
                           "past_or_now": sum(value <= now for value in valid),
                       }
+                  future_sold_rows = sum(
+                      1
+                      for item in opportunity_items
+                      if any(
+                          (parsed := parse_date(item.get(field))) is not None and parsed > now
+                          for field in date_fields
+                      )
+                  )
                   summary["sold_date_diagnostics"] = {
                       "rows_sampled": len(opportunity_items),
                       "date_fields": field_summary,
+                      "future_sold_rows": future_sold_rows,
                       "rows_with_sold_price": sum(
                           item.get("sold_price") not in (None, "", 0) or item.get("sale_price") not in (None, "", 0)
                           for item in opportunity_items
@@ -226,6 +240,9 @@ jobs:
                           for item in opportunity_items
                       ),
                   }
+                  if future_sold_rows:
+                      print(json.dumps(summary, indent=2, sort_keys=True))
+                      raise SystemExit("GovDeals sold actor emitted future-dated rows")
               summary["pushed_rows_with_description"] = sum(bool(item.get("description")) for item in opportunity_items)
               summary["pushed_rows_with_detail_text"] = sum(bool(item.get("detail_text")) for item in opportunity_items)
               if actor_name != "ds-govdeals-sold":

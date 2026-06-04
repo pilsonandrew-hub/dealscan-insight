@@ -6,6 +6,10 @@ import {
     normalizeTargetSearchQueries,
     normalizeTargetTerms,
 } from '../src/target_scope.js';
+import {
+    completedSaleDate,
+    hasCompletedSaleEvidence,
+} from '../src/sold_date_contract.js';
 
 describe('GovDeals sold target scope', () => {
     test('matches approved DealerScope comp models with common separators', () => {
@@ -53,6 +57,31 @@ describe('GovDeals sold target scope', () => {
                 maxSearchQueries: 2,
             }),
             ['Ford F-150', 'Silverado 1500'],
+        );
+    });
+
+    test('accepts only parseable non-future completed sale dates', () => {
+        const now = new Date('2026-06-04T11:05:00.000Z');
+
+        assert.equal(
+            hasCompletedSaleEvidence({ auction_end_time: '2026-06-01T15:00:00Z' }, now),
+            true,
+        );
+        assert.equal(
+            completedSaleDate({ auction_end_time: '2026-06-01T15:00:00Z' }, now),
+            '2026-06-01T15:00:00.000Z',
+        );
+        assert.equal(
+            hasCompletedSaleEvidence({ auction_end_time: '2026-06-05T15:00:00Z' }, now),
+            false,
+        );
+        assert.equal(
+            hasCompletedSaleEvidence({ auction_end_time: 'not-a-date' }, now),
+            false,
+        );
+        assert.equal(
+            hasCompletedSaleEvidence({ title: '2019 Ford F-150' }, now),
+            false,
         );
     });
 });

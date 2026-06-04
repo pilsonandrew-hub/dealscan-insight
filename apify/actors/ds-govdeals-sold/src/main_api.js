@@ -14,6 +14,10 @@ import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 import { randomUUID } from 'node:crypto';
 import {
+    completedSaleDate,
+    completedSaleRejectionReason,
+} from './sold_date_contract.js';
+import {
     matchesTargetTerms,
     normalizeTargetSearchQueries,
     normalizeTargetTerms,
@@ -25,6 +29,7 @@ const MAX_DETAIL_PAGES = 100;  // Reduced for sold auctions
 const GOVDEALS_COMPLETED_SEARCH_URL_BASE = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100&timing=completed';
 const DEFAULT_DISPLAY_ROWS = 24;
 const DEFAULT_MAX_SEARCH_QUERIES = 5;
+const runStartedAt = new Date();
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
@@ -37,7 +42,8 @@ const targetSearchQueries = normalizeTargetSearchQueries({
     maxSearchQueries,
 });
 
-let totalFound = 0, totalPassed = 0, totalSkippedOutOfScope = 0;
+let totalFound = 0, totalPassed = 0, totalSkippedOutOfScope = 0, totalSkippedNotCompleted = 0;
+const completedSaleRejectionCounts = {};
 const capturedApi = {
     apiKey: null,
     searchUrl: 'https://maestro.lqdt1.com/search/list',
@@ -95,9 +101,35 @@ function stageTargetLot(lot, seenIds = null) {
         totalSkippedOutOfScope++;
         return false;
     }
+    const saleRejectionReason = completedSaleRejectionReason(lot, runStartedAt);
+    if (saleRejectionReason) {
+        totalSkippedNotCompleted++;
+        completedSaleRejectionCounts[saleRejectionReason] = (completedSaleRejectionCounts[saleRejectionReason] || 0) + 1;
+        return false;
+    }
     totalPassed++;
     passingLots.push(normalizeLot(lot));
     return true;
+}
+
+function sourceQualityProof() {
+    return {
+        record_type: 'source_quality_proof',
+        source_site: 'govdeals-sold',
+        found_rows_total: totalFound,
+        prefilter_passed_rows_total: totalPassed,
+        pushed_rows_total: passingLots.length,
+        pushed_rows_with_vin: passingLots.filter(lot => lot.vin).length,
+        pushed_rows_with_mileage: passingLots.filter(lot => lot.mileage !== null && lot.mileage !== undefined && lot.mileage !== '').length,
+        pushed_rows_missing_vin: passingLots.filter(lot => !lot.vin).length,
+        pushed_rows_missing_mileage: passingLots.filter(lot => lot.mileage === null || lot.mileage === undefined || lot.mileage === '').length,
+        rows_excluded_out_of_scope: totalSkippedOutOfScope,
+        rows_excluded_not_completed_sale: totalSkippedNotCompleted,
+        completed_sale_rejection_reasons: completedSaleRejectionCounts,
+        target_search_queries: targetSearchQueries,
+        max_pages_total: maxPages,
+        generated_at: new Date().toISOString(),
+    };
 }
 
 function buildCompletedSearchPayload(searchText, basePayload = {}) {
@@ -291,8 +323,10 @@ const crawler = new PlaywrightCrawler({
             for (const lot of passingLots) {
                 await Actor.pushData(lot);
             }
+            await Actor.pushData(sourceQualityProof());
             log.info(`[GOVDEALS-SOLD] Pushed ${passingLots.length} completed auction records`);
             log.info(`[GOVDEALS-SOLD] Target filter skipped ${totalSkippedOutOfScope} out-of-scope completed lots`);
+            log.info(`[GOVDEALS-SOLD] Completed-sale filter skipped ${totalSkippedNotCompleted} lots: ${JSON.stringify(completedSaleRejectionCounts)}`);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');
@@ -305,6 +339,7 @@ function normalizeLot(lot) {
     const soldPrice = lot.winningBid || lot.soldPrice || lot.assetWinningBid ||
                       lot.closingBid || lot.finalBid || lot.awardAmount ||
                       lot.currentBid || lot.assetBidPrice || 0;
+    const saleDate = completedSaleDate(lot, runStartedAt);
     return {
         title:         lot.assetShortDescription || lot.title || '',
         make:          lot.makebrand || lot.make || '',
@@ -314,7 +349,8 @@ function normalizeLot(lot) {
         sold_price:    soldPrice,
         state:         lot.locationState || lot.state || '',
         city:          lot.locationCity || lot.city || '',
-        auction_end_time: lot.assetAuctionEndDateUtc || lot.auctionEndUtc || lot.auctionEnd || null,
+        sale_date:      saleDate,
+        auction_end_time: saleDate,
         listing_url:   lot.url || `https://www.govdeals.com/asset/${lot.assetId}/${lot.accountId}`,
         seller:        lot.displaySellerName || lot.companyName || lot.seller || '',
         photo_url:     lot.imageUrl || (lot.photo ? `https://webassets.lqdt1.com/assets/photos/${lot.photo}` : ''),
@@ -434,6 +470,7 @@ async function paginateWithAuth(page, log, seenIds = new Set(), searchText = '',
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
 console.log(`[GOVDEALS-SOLD] Found: ${totalFound} | Collected: ${totalPassed}`);
 console.log(`[GOVDEALS-SOLD] Skipped out-of-scope: ${totalSkippedOutOfScope}`);
+console.log(`[GOVDEALS-SOLD] Skipped not-completed: ${totalSkippedNotCompleted}`);
 console.log(`[GOVDEALS-SOLD] Auth initialized`);
 console.log(`VINs extracted: ${passingLots.filter(l => l.vin).length} / ${passingLots.length} lots`);
 await Actor.exit();
