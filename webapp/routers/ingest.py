@@ -3218,6 +3218,16 @@ def _sold_comp_sale_date(raw_item: dict, vehicle: dict) -> Optional[str]:
     return parsed_sale_date.date().isoformat() if parsed_sale_date else None
 
 
+def _sold_comp_sale_date_is_future(sale_date: Any) -> bool:
+    if not sale_date:
+        return False
+    try:
+        parsed_sale_date = datetime.fromisoformat(str(sale_date)).date()
+    except ValueError:
+        return False
+    return parsed_sale_date > datetime.now(timezone.utc).date()
+
+
 def _sold_comp_candidate_rejection_reason(
     *,
     vehicle: dict,
@@ -3233,6 +3243,8 @@ def _sold_comp_candidate_rejection_reason(
     if not (vehicle.get("year") and vehicle.get("make") and vehicle.get("model")):
         return "missing_year_make_model"
     if not sale_date:
+        return "invalid_sale_date"
+    if _sold_comp_sale_date_is_future(sale_date):
         return "invalid_sale_date"
     return None
 
