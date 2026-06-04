@@ -123,7 +123,10 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('function buildDescriptionFromLot(lot)');
     expect(source).toContain('description:   buildDescriptionFromLot(lot)');
     expect(source).toContain('function descriptionNeedsDetailEvidence(lot)');
-    expect(source).toContain('const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage || descriptionNeedsDetailEvidence(l)));');
+    expect(source).toContain('function missingIdentityDetail(lot)');
+    expect(source).toContain('function detailEnrichmentPriority(lot)');
+    expect(source).toContain('.filter(l => l.listing_url && (missingIdentityDetail(l) || descriptionNeedsDetailEvidence(l)))');
+    expect(source).toContain('.sort((a, b) => detailEnrichmentPriority(a) - detailEnrichmentPriority(b));');
     expect(source).toContain('lot.detail_text = extractDetailText(bodyText);');
     expect(source).toContain('if (lot.detail_text && descriptionNeedsDetailEvidence(lot)) lot.description = lot.detail_text;');
   });
