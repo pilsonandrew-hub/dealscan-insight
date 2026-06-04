@@ -30,6 +30,7 @@ export function createQueryDiagnostics(queries = []) {
     return {
         query_counts,
         out_of_scope_examples: [],
+        out_of_scope_examples_by_query: {},
     };
 }
 
@@ -50,9 +51,16 @@ export function recordLotDecision(diagnostics, searchText, decision, lot = null)
 
     if (decision === 'out_of_scope') {
         counts.out_of_scope++;
+        const key = String(searchText || '').trim() || '(unknown)';
+        if (!diagnostics.out_of_scope_examples_by_query[key]) {
+            diagnostics.out_of_scope_examples_by_query[key] = [];
+        }
+        if (diagnostics.out_of_scope_examples_by_query[key].length < 3) {
+            diagnostics.out_of_scope_examples_by_query[key].push(sanitizedOutOfScopeExample(lot));
+        }
         if (diagnostics.out_of_scope_examples.length < 8) {
             diagnostics.out_of_scope_examples.push({
-                search_text: String(searchText || '').trim() || '(unknown)',
+                search_text: key,
                 ...sanitizedOutOfScopeExample(lot),
             });
         }

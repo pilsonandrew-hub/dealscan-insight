@@ -86,6 +86,7 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("out_of_scope_examples", source)
         self.assertIn('"query_diagnostics"', workflow)
         self.assertIn('"out_of_scope_examples"', workflow)
+        self.assertIn('"out_of_scope_examples_by_query"', workflow)
         self.assertIn('actor_input["searchQuery"] = search_query', workflow)
 
 

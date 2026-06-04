@@ -137,6 +137,7 @@ function sourceQualityProof() {
         target_search_queries: targetSearchQueries,
         query_diagnostics: queryDiagnostics.query_counts,
         out_of_scope_examples: queryDiagnostics.out_of_scope_examples,
+        out_of_scope_examples_by_query: queryDiagnostics.out_of_scope_examples_by_query,
         max_pages_total: maxPages,
         generated_at: new Date().toISOString(),
     };
