@@ -16,6 +16,7 @@ class _Query:
         self.filters = []
         self.payload = None
         self.ids = None
+        self.conflict = None
 
     def select(self, *_args, **_kwargs):
         self.mode = "select"
@@ -56,6 +57,12 @@ class _Query:
         self.payload = payload
         return self
 
+    def upsert(self, payload, **kwargs):
+        self.mode = "upsert"
+        self.payload = payload
+        self.conflict = kwargs.get("on_conflict")
+        return self
+
     def in_(self, column, values):
         self.ids = list(values)
         self.filters.append(("in", column, tuple(values)))
@@ -72,6 +79,15 @@ class _Query:
                 }
             )
             return _Result([{"id": value} for value in self.ids])
+        if self.mode == "upsert":
+            self.client.upserts.append(
+                {
+                    "table": self.table_name,
+                    "payload": self.payload,
+                    "on_conflict": self.conflict,
+                }
+            )
+            return _Result(self.payload if isinstance(self.payload, list) else [self.payload])
 
         key = tuple((method, column, value) for method, column, value in self.filters)
         rows = self.client.select_rows.get(key, [])
@@ -82,6 +98,7 @@ class _Client:
     def __init__(self, select_rows):
         self.select_rows = select_rows
         self.updates = []
+        self.upserts = []
 
     def table(self, name):
         return _Query(self, name)
@@ -173,3 +190,72 @@ def test_sweeper_archives_active_high_dos_rows_with_missing_vin():
         "ids": ["missing-vin-1", "missing-vin-2", "blank-vin-1"],
         "filters": [("in", "id", ("missing-vin-1", "missing-vin-2", "blank-vin-1"))],
     } in client.updates
+
+
+def test_sweeper_refers_expired_deals_for_post_close_outcome_check_without_creating_comp_candidates():
+    now = datetime(2026, 6, 2, 8, 18, tzinfo=timezone.utc)
+    expired_cutoff = "2026-06-01T08:18:00+00:00"
+    client = _Client(
+        {
+            (
+                ("lt", "auction_end_date", expired_cutoff),
+                ("neq", "pipeline_step", "expired"),
+                ("eq", "is_active", True),
+            ): [
+                {
+                    "id": "opp-1",
+                    "source_site": "govdeals",
+                    "listing_id": "asset-123",
+                    "listing_url": "https://www.govdeals.com/asset/123",
+                    "auction_end_date": "2026-06-01T06:00:00+00:00",
+                    "year": 2019,
+                    "make": "Ford",
+                    "model": "F-150",
+                    "vin": "1FTEW1E50KFA00001",
+                    "mileage": 82210,
+                }
+            ],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["post_close_outcome_requests"] == 1
+    assert {
+        "table": "post_close_outcome_requests",
+        "payload": [
+            {
+                "opportunity_id": "opp-1",
+                "source_site": "govdeals",
+                "source_listing_id": "asset-123",
+                "listing_url": "https://www.govdeals.com/asset/123",
+                "auction_end_date": "2026-06-01T06:00:00+00:00",
+                "referral_source": "deal_expiry_sweeper",
+                "referral_reason": "auction_expired",
+                "outcome_status": "pending_outcome_check",
+                "year": 2019,
+                "make": "Ford",
+                "model": "F-150",
+                "vin": "1FTEW1E50KFA00001",
+                "mileage": 82210,
+            }
+        ],
+        "on_conflict": "source_site,source_listing_id",
+    } in client.upserts
+    assert all(upsert["table"] != "sold_comp_candidates" for upsert in client.upserts)
+
+
+def test_sweeper_message_reports_post_close_outcome_referrals():
+    message = deal_expiry_sweeper.build_message(
+        {
+            "expired": 2,
+            "post_close_outcome_requests": 2,
+            "archived_passed": 0,
+            "archived_stale_saved_inactive": 0,
+            "archived_untrusted_active_high_dos_missing_mileage": 0,
+            "archived_untrusted_active_high_dos_missing_vin": 0,
+            "run_time": "2026-06-02 08:18 UTC",
+        }
+    )
+
+    assert "Post-close outcome referrals: <b>2</b>" in message

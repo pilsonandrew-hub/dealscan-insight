@@ -17,22 +17,27 @@ from supabase import create_client
 
 
 def _fetch_ids(supabase: Any, filters: Iterable[Callable[[Any], Any]]) -> list[str]:
-    ids: list[str] = []
+    rows = _fetch_rows(supabase, "id", filters)
+    return [row["id"] for row in rows if row.get("id")]
+
+
+def _fetch_rows(supabase: Any, select: str, filters: Iterable[Callable[[Any], Any]]) -> list[dict[str, Any]]:
+    rows_all: list[dict[str, Any]] = []
     offset = 0
     page_size = 500
     while True:
-        query = supabase.table("opportunities").select("id").order("id")
+        query = supabase.table("opportunities").select(select).order("id")
         for filter_fn in filters:
             query = filter_fn(query)
         response = query.range(offset, offset + page_size - 1).execute()
         rows = response.data or []
         if not rows:
             break
-        ids.extend(row["id"] for row in rows if row.get("id"))
+        rows_all.extend(rows)
         if len(rows) < page_size:
             break
         offset += page_size
-    return ids
+    return rows_all
 
 
 def _chunked(values: list[str], size: int = 200):
@@ -59,10 +64,58 @@ def _update_batches(supabase: Any, ids: list[str], payload: dict[str, Any]) -> i
     return count
 
 
+def _source_listing_id(row: dict[str, Any]) -> str | None:
+    for key in ("source_listing_id", "listing_id", "external_id", "id"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _build_post_close_outcome_request(row: dict[str, Any]) -> dict[str, Any] | None:
+    source_site = row.get("source_site") or row.get("source")
+    source_listing_id = _source_listing_id(row)
+    listing_url = row.get("listing_url") or row.get("url")
+    if not (source_site and source_listing_id and listing_url):
+        return None
+    return {
+        "opportunity_id": row.get("id"),
+        "source_site": str(source_site),
+        "source_listing_id": source_listing_id,
+        "listing_url": str(listing_url),
+        "auction_end_date": row.get("auction_end_date"),
+        "referral_source": "deal_expiry_sweeper",
+        "referral_reason": "auction_expired",
+        "outcome_status": "pending_outcome_check",
+        "year": row.get("year"),
+        "make": row.get("make"),
+        "model": row.get("model"),
+        "vin": row.get("vin"),
+        "mileage": row.get("mileage"),
+    }
+
+
+def _upsert_post_close_outcome_requests(supabase: Any, rows: list[dict[str, Any]]) -> int:
+    requests = [
+        request
+        for row in rows
+        if (request := _build_post_close_outcome_request(row)) is not None
+    ]
+    if not requests:
+        return 0
+    supabase.table("post_close_outcome_requests").upsert(
+        requests,
+        on_conflict="source_site,source_listing_id",
+    ).execute()
+    return len(requests)
+
+
 def build_message(summary: dict[str, Any]) -> str:
     return (
         "🧹 <b>DealerScope Deal Expiry Sweeper</b>\n\n"
         f"Expired deals: <b>{summary['expired']}</b>\n"
+        "Post-close outcome referrals: "
+        f"<b>{summary.get('post_close_outcome_requests', 0)}</b>\n"
         f"Archived passed deals: <b>{summary['archived_passed']}</b>\n"
         "Archived stale saved/inactive deals: "
         f"<b>{summary['archived_stale_saved_inactive']}</b>\n"
@@ -84,14 +137,17 @@ def run_sweep(
     expired_cutoff = (now - _datetime.timedelta(hours=24)).isoformat()
     archive_cutoff = (now - _datetime.timedelta(days=7)).isoformat()
 
-    expired_ids = _fetch_ids(
+    expired_filters = [
+        lambda q: q.lt("auction_end_date", expired_cutoff),
+        lambda q: q.neq("pipeline_step", "expired"),
+        lambda q: q.eq("is_active", True),
+    ]
+    expired_rows = _fetch_rows(
         supabase,
-        [
-            lambda q: q.lt("auction_end_date", expired_cutoff),
-            lambda q: q.neq("pipeline_step", "expired"),
-            lambda q: q.eq("is_active", True),
-        ],
+        "id,source_site,listing_id,listing_url,auction_end_date,year,make,model,vin,mileage",
+        expired_filters,
     )
+    expired_ids = [row["id"] for row in expired_rows if row.get("id")]
     archived_passed_ids = _fetch_ids(
         supabase,
         [
@@ -150,6 +206,7 @@ def run_sweep(
             expired_ids,
             {"is_active": False, "pipeline_step": "expired"},
         ),
+        "post_close_outcome_requests": _upsert_post_close_outcome_requests(supabase, expired_rows),
         "archived_passed": _update_batches(
             supabase,
             archived_passed_ids,
