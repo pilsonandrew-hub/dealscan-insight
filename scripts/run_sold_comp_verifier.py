@@ -74,14 +74,15 @@ def _truthy_env(value: str | None, *, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _fetch_candidates(supabase: Any, *, limit: int) -> list[dict[str, Any]]:
-    response = (
+def _fetch_candidates(supabase: Any, *, limit: int, run_id: str | None = None) -> list[dict[str, Any]]:
+    query = (
         supabase.table("sold_comp_candidates")
         .select(CANDIDATE_SELECT)
         .in_("candidate_status", ["candidate", "rejected", "needs_review"])
-        .limit(limit)
-        .execute()
     )
+    if run_id:
+        query = query.eq("run_id", run_id)
+    response = query.order("created_at", desc=True).limit(limit).execute()
     return response.data or []
 
 
@@ -153,11 +154,12 @@ def run_verifier(
     *,
     dry_run: bool = True,
     limit: int = 100,
+    run_id: str | None = None,
     today: date | None = None,
     reviewer: str = REVIEWER,
     reviewer_version: str = REVIEWER_VERSION,
 ) -> dict[str, Any]:
-    candidates = _fetch_candidates(supabase, limit=limit)
+    candidates = _fetch_candidates(supabase, limit=limit, run_id=run_id)
     existing_verified = _fetch_existing_verified_source_listing_ids(supabase)
     decision_counts: Counter[str] = Counter()
     rejection_reason_counts: Counter[str] = Counter()
@@ -217,6 +219,7 @@ def run_verifier(
         "dry_run": dry_run,
         "reviewer": reviewer,
         "reviewer_version": reviewer_version,
+        "run_id": run_id,
         "candidates_reviewed": len(candidates),
         "decision_counts": dict(decision_counts),
         "rejection_reason_counts": dict(rejection_reason_counts),
@@ -259,6 +262,7 @@ def main() -> int:
         supabase,
         dry_run=_truthy_env(os.environ.get("SOLD_COMP_VERIFIER_DRY_RUN"), default=True),
         limit=int(os.environ.get("SOLD_COMP_VERIFIER_LIMIT", "100")),
+        run_id=(os.environ.get("SOLD_COMP_VERIFIER_RUN_ID") or "").strip() or None,
     )
     print(build_message(summary))
     print(json.dumps(summary, sort_keys=True))
