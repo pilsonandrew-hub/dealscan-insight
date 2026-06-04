@@ -307,8 +307,6 @@ def insert_seed_row_via_rest(
         f"{base_url}/rest/v1/market_prices?{query}",
         service_role_key,
     )
-    if existing:
-        return None
 
     now = datetime.now(timezone.utc)
     payload = {
@@ -319,6 +317,17 @@ def insert_seed_row_via_rest(
         "last_updated": now.isoformat(),
         "expires_at": (now + timedelta(days=ttl_days)).isoformat(),
     }
+    if existing:
+        refreshed = _rest_json_request(
+            "PATCH",
+            f"{base_url}/rest/v1/market_prices?{query}",
+            service_role_key,
+            payload,
+        )
+        if not isinstance(refreshed, list) or not refreshed:
+            raise RuntimeError("Supabase REST refresh returned no row")
+        return dict(refreshed[0])
+
     inserted = _rest_json_request(
         "POST",
         f"{base_url}/rest/v1/market_prices",
@@ -380,11 +389,11 @@ def main() -> int:
         )
         if inserted:
             print(
-                "Inserted external market_prices row via Supabase REST: "
+                "Applied external market_prices row via Supabase REST: "
                 f"id={inserted['id']} avg={inserted['avg_price']} samples={inserted['sample_size']}"
             )
         else:
-            print("No row inserted via Supabase REST; matching source/source_run_id already exists.")
+            print("No market_prices row inserted or refreshed via Supabase REST.")
         return 0
 
     dsn = get_database_url(args.dsn, env_file=args.env_file)
