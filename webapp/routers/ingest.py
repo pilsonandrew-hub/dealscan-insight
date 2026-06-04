@@ -787,6 +787,16 @@ async def _process_webhook_items(
         for item_index, item in enumerate(items):
             if isinstance(item, dict) and item.get("record_type") == "source_quality_proof":
                 logger.info("[INGEST] Skipping source quality proof record from sold-comp staging")
+                skipped += 1
+                increment_reason_counter(skip_reasons, "source_quality_proof_record")
+                _record_pre_save_skip(
+                    item=item,
+                    run_id=apify_run_id,
+                    item_index=item_index,
+                    status="skipped_proof",
+                    error_message="source_quality_proof_record",
+                    audit_state=audit_state,
+                )
                 continue
             raw_source_site = _canonical_source_site(
                 item.get("source_site") or item.get("source") or metadata.get("source") or metadata.get("actor_id")
