@@ -10,6 +10,7 @@ def test_sold_comp_verifier_workflow_is_manual_and_defaults_to_dry_run():
 
     assert "workflow_dispatch:" in text
     assert "dry_run:" in text
+    assert "run_id:" in text
     assert 'default: "true"' in text
     assert "schedule:" not in text
     for trigger in ("push:", "pull_request:", "release:"):
@@ -19,6 +20,7 @@ def test_sold_comp_verifier_workflow_is_manual_and_defaults_to_dry_run():
     assert "contents: read" in text
     assert "python3 scripts/run_sold_comp_verifier.py" in text
     assert "SUPABASE_SERVICE_ROLE_KEY" in text
+    assert "SOLD_COMP_VERIFIER_RUN_ID: ${{ inputs.run_id }}" in text
     assert "DATABASE_URL:" not in text
     assert "SUPABASE_DB_PASSWORD:" not in text
     assert "set -x" not in lower

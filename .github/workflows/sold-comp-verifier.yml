@@ -15,6 +15,10 @@ on:
         description: "Maximum candidate rows to inspect"
         required: false
         default: "100"
+      run_id:
+        description: "Optional Apify run id / market scout run id to verify only one bounded run"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -38,6 +42,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SOLD_COMP_VERIFIER_DRY_RUN: ${{ inputs.dry_run }}
           SOLD_COMP_VERIFIER_LIMIT: ${{ inputs.limit }}
+          SOLD_COMP_VERIFIER_RUN_ID: ${{ inputs.run_id }}
         run: |
           python3 -m pip install --disable-pip-version-check --no-cache-dir supabase==2.30.0
           python3 scripts/run_sold_comp_verifier.py

@@ -40,6 +40,10 @@ class _Query:
         self.filters.append(("limit", value))
         return self
 
+    def order(self, column, **kwargs):
+        self.filters.append(("order", column, kwargs))
+        return self
+
     def upsert(self, payload, **kwargs):
         self.mode = "upsert"
         self.payload = payload
@@ -72,13 +76,30 @@ class _Query:
                 }
             )
             return _Result([self.payload])
-        return _Result(self.client.rows.get(self.table_name, []))
+        self.client.reads.append(
+            {
+                "table": self.table_name,
+                "filters": list(self.filters),
+            }
+        )
+        rows = list(self.client.rows.get(self.table_name, []))
+        for filter_item in self.filters:
+            if filter_item[0] == "in":
+                _kind, column, values = filter_item
+                rows = [row for row in rows if row.get(column) in values]
+            elif filter_item[0] == "eq":
+                _kind, column, value = filter_item
+                rows = [row for row in rows if row.get(column) == value]
+            elif filter_item[0] == "limit":
+                rows = rows[: filter_item[1]]
+        return _Result(rows)
 
 
 class _Client:
     def __init__(self, rows):
         self.rows = rows
         self.writes = []
+        self.reads = []
 
     def table(self, name):
         return _Query(self, name)
@@ -163,6 +184,32 @@ def test_verifier_runner_dry_run_reports_decisions_without_writes():
     assert summary["review_rows_written"] == 0
     assert summary["verified_rows_written"] == 0
     assert client.writes == []
+
+
+def test_verifier_runner_can_scope_candidates_to_one_run_id():
+    client = _Client(
+        {
+            "sold_comp_candidates": [
+                _candidate(id="old-candidate", run_id="old-run", source_listing_id="old-asset"),
+                _candidate(id="fresh-candidate", run_id="fresh-run", source_listing_id="fresh-asset"),
+            ],
+            "verified_sold_comps": [],
+        }
+    )
+
+    summary = run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=True,
+        today=date(2026, 6, 3),
+        run_id="fresh-run",
+        reviewer_version="test-v1",
+    )
+
+    assert summary["run_id"] == "fresh-run"
+    assert summary["candidates_reviewed"] == 1
+    assert summary["decision_counts"] == {"accepted": 1}
+    candidate_read = next(read for read in client.reads if read["table"] == "sold_comp_candidates")
+    assert ("eq", "run_id", "fresh-run") in candidate_read["filters"]
 
 
 def test_verifier_runner_write_mode_touches_only_comp_ledger_tables():
