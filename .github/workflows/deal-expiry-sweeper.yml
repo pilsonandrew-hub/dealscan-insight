@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '0 */12 * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report eligible sweeper actions without mutating rows"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read
@@ -27,6 +36,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "-1003672399222"
+          DEAL_EXPIRY_SWEEPER_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
         run: |
           python3 -m pip install --disable-pip-version-check --no-cache-dir supabase==2.30.0
           python3 scripts/deal_expiry_sweeper.py

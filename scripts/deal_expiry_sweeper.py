@@ -110,9 +110,14 @@ def _upsert_post_close_outcome_requests(supabase: Any, rows: list[dict[str, Any]
     return len(requests)
 
 
+def _truthy_env(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def build_message(summary: dict[str, Any]) -> str:
+    dry_run_label = " <b>DRY RUN</b>" if summary.get("dry_run") else ""
     return (
-        "🧹 <b>DealerScope Deal Expiry Sweeper</b>\n\n"
+        f"🧹 <b>DealerScope Deal Expiry Sweeper</b>{dry_run_label}\n\n"
         f"Expired deals: <b>{summary['expired']}</b>\n"
         "Post-close outcome referrals: "
         f"<b>{summary.get('post_close_outcome_requests', 0)}</b>\n"
@@ -132,6 +137,7 @@ def run_sweep(
     *,
     now: _datetime.datetime | None = None,
     notify: Callable[[str], bool] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     now = now or _datetime.datetime.now(_datetime.timezone.utc)
     expired_cutoff = (now - _datetime.timedelta(hours=24)).isoformat()
@@ -200,24 +206,35 @@ def run_sweep(
         ),
     ])
 
+    eligible_post_close_requests = [
+        request
+        for row in expired_rows
+        if (request := _build_post_close_outcome_request(row)) is not None
+    ]
+
     summary = {
-        "expired": _update_batches(
+        "dry_run": dry_run,
+        "expired": len(expired_ids) if dry_run else _update_batches(
             supabase,
             expired_ids,
             {"is_active": False, "pipeline_step": "expired"},
         ),
-        "post_close_outcome_requests": _upsert_post_close_outcome_requests(supabase, expired_rows),
-        "archived_passed": _update_batches(
+        "post_close_outcome_requests": len(eligible_post_close_requests)
+        if dry_run
+        else _upsert_post_close_outcome_requests(supabase, expired_rows),
+        "archived_passed": len(archived_passed_ids) if dry_run else _update_batches(
             supabase,
             archived_passed_ids,
             {"pipeline_step": "archived"},
         ),
-        "archived_stale_saved_inactive": _update_batches(
+        "archived_stale_saved_inactive": len(stale_saved_inactive_ids) if dry_run else _update_batches(
             supabase,
             stale_saved_inactive_ids,
             {"pipeline_step": "archived"},
         ),
-        "archived_untrusted_active_high_dos_missing_mileage": _update_batches(
+        "archived_untrusted_active_high_dos_missing_mileage": len(active_high_dos_missing_mileage_ids)
+        if dry_run
+        else _update_batches(
             supabase,
             active_high_dos_missing_mileage_ids,
             {
@@ -226,7 +243,9 @@ def run_sweep(
                 "step_status": "q_no_mileage",
             },
         ),
-        "archived_untrusted_active_high_dos_missing_vin": _update_batches(
+        "archived_untrusted_active_high_dos_missing_vin": len(active_high_dos_missing_vin_ids)
+        if dry_run
+        else _update_batches(
             supabase,
             active_high_dos_missing_vin_ids,
             {
@@ -278,7 +297,11 @@ def main() -> int:
         os.environ["SUPABASE_URL"],
         os.environ["SUPABASE_SERVICE_ROLE_KEY"],
     )
-    summary = run_sweep(supabase, notify=_safe_send_telegram)
+    summary = run_sweep(
+        supabase,
+        notify=_safe_send_telegram,
+        dry_run=_truthy_env(os.environ.get("DEAL_EXPIRY_SWEEPER_DRY_RUN")),
+    )
     print(build_message(summary).replace("<b>", "").replace("</b>", ""))
     if not summary.get("notification_ok", True):
         print(
