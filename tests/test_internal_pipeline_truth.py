@@ -194,6 +194,8 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
         "market_prices_table": "missing",
         "market_prices_rows": 0,
         "market_prices_usable_rows": 0,
+        "market_prices_unusable_reason_counts": {},
+        "market_prices_latest_expires_at": None,
         "dealer_sales_table": "present",
         "dealer_sales_rows": 2,
         "dealer_sales_usable_rows": 0,
@@ -657,10 +659,12 @@ def test_pipeline_truth_requires_usable_market_prices(monkeypatch):
     assert result["pricing_substrate"]["market_prices_table"] == "present"
     assert result["pricing_substrate"]["market_prices_rows"] == 1
     assert result["pricing_substrate"]["market_prices_usable_rows"] == 1
+    assert result["pricing_substrate"]["market_prices_unusable_reason_counts"] == {}
+    assert result["pricing_substrate"]["market_prices_latest_expires_at"] == "2099-01-01T00:00:00+00:00"
     assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is True
 
 
-def test_pipeline_truth_rejects_empty_or_stale_market_prices(monkeypatch):
+def test_pipeline_truth_reports_why_market_prices_are_not_usable(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "market_prices": [
             {
@@ -681,14 +685,39 @@ def test_pipeline_truth_rejects_empty_or_stale_market_prices(monkeypatch):
                 "expires_at": "2099-01-01T00:00:00+00:00",
                 "source": None,
             },
+            {
+                "id": "market-3",
+                "avg_price": 0,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+            {
+                "id": "market-4",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 1,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
         ],
     }))
 
     result = internal.build_pipeline_truth()
 
     assert result["pricing_substrate"]["market_prices_table"] == "present"
-    assert result["pricing_substrate"]["market_prices_rows"] == 2
+    assert result["pricing_substrate"]["market_prices_rows"] == 4
     assert result["pricing_substrate"]["market_prices_usable_rows"] == 0
+    assert result["pricing_substrate"]["market_prices_unusable_reason_counts"] == {
+        "expired": 1,
+        "source_missing": 1,
+        "nonpositive_price": 1,
+        "sample_size_lt_2": 1,
+    }
+    assert result["pricing_substrate"]["market_prices_latest_expires_at"] == "2099-01-01T00:00:00+00:00"
     assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is False
 
 
