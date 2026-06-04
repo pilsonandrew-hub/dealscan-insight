@@ -130,6 +130,7 @@ def _market_price_diagnostics(rows: list[dict[str, Any]], *, now: datetime) -> d
     failed_predicates: Counter[str] = Counter()
     latest_expires_at: Optional[str] = None
     latest_expires_dt: Optional[datetime] = None
+    usable_rows = 0
 
     for row in rows:
         expires_at = row.get("expires_at")
@@ -138,16 +139,22 @@ def _market_price_diagnostics(rows: list[dict[str, Any]], *, now: datetime) -> d
             latest_expires_at = str(expires_at)
             latest_expires_dt = expires_dt
 
+        row_failures: list[str] = []
         if not _as_positive_float(row.get("avg_price")) or not _as_positive_float(row.get("low_price")) or not _as_positive_float(row.get("high_price")):
-            failed_predicates["nonpositive_price"] += 1
+            row_failures.append("nonpositive_price")
         if _as_int(row.get("sample_size")) < 2:
-            failed_predicates["sample_size_lt_2"] += 1
+            row_failures.append("sample_size_lt_2")
         if not expires_dt or expires_dt < now:
-            failed_predicates["expired"] += 1
+            row_failures.append("expired")
         if not row.get("source"):
-            failed_predicates["source_missing"] += 1
+            row_failures.append("source_missing")
+        if row_failures:
+            failed_predicates.update(row_failures)
+        else:
+            usable_rows += 1
 
     return {
+        "market_prices_usable_rows": usable_rows,
         "market_prices_unusable_reason_counts": dict(failed_predicates),
         "market_prices_latest_expires_at": latest_expires_at,
     }
@@ -164,17 +171,6 @@ def _pricing_substrate_truth() -> dict[str, Any]:
         "market_prices_latest_expires_at": None,
     }
     if market_prices_status == "present":
-        market_prices_usable_rows = _optional_filtered_count(
-            "market_prices",
-            [
-                ("gt", "avg_price", 0),
-                ("gt", "low_price", 0),
-                ("gt", "high_price", 0),
-                ("gte", "sample_size", 2),
-                ("gte", "expires_at", now.isoformat()),
-                ("not_", "source", ("is", "null")),
-            ],
-        )
         market_price_rows = _optional_rows(
             "market_prices",
             "id,avg_price,low_price,high_price,sample_size,expires_at,source",
@@ -182,6 +178,7 @@ def _pricing_substrate_truth() -> dict[str, Any]:
             limit=200,
         )
         market_price_diagnostics = _market_price_diagnostics(market_price_rows, now=now)
+        market_prices_usable_rows = int(market_price_diagnostics["market_prices_usable_rows"])
 
     dealer_sales_status, dealer_sales_rows = _optional_count("dealer_sales")
     dealer_sales_usable_rows = 0

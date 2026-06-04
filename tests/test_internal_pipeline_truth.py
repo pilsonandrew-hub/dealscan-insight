@@ -664,6 +664,29 @@ def test_pipeline_truth_requires_usable_market_prices(monkeypatch):
     assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is True
 
 
+def test_pipeline_truth_uses_row_predicates_for_market_price_readiness(monkeypatch):
+    monkeypatch.setattr(internal, "_optional_filtered_count", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "market_prices": [
+            {
+                "id": "market-1",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+        ],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["pricing_substrate"]["market_prices_usable_rows"] == 1
+    assert result["pricing_substrate"]["market_prices_unusable_reason_counts"] == {}
+    assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is True
+
+
 def test_pipeline_truth_reports_why_market_prices_are_not_usable(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "market_prices": [
