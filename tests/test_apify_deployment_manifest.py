@@ -60,6 +60,20 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         for target in ["f-150", "f150", "f-250", "silverado 1500", "ram 1500"]:
             self.assertIn(target, target_scope.lower())
 
+    def test_govdeals_sold_actor_actively_searches_target_terms(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
+        workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
+        source = source_path.read_text(encoding="utf-8")
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        self.assertIn("searchQuery", source)
+        self.assertIn("targetSearchQueries", source)
+        self.assertIn("searchText", source)
+        self.assertIn("buildCompletedSearchPayload", source)
+        self.assertIn("remainingPageBudget", source)
+        self.assertIn("pagesForQuery", source)
+        self.assertIn('actor_input["searchQuery"] = search_query', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

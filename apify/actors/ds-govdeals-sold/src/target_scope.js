@@ -21,6 +21,32 @@ export function normalizeTargetTerms(terms) {
         .filter(Boolean);
 }
 
+export function normalizeTargetSearchQueries({
+    searchQuery = '',
+    targetSearchQueries = null,
+    targetTerms = null,
+    maxSearchQueries = null,
+} = {}) {
+    const explicitSearchQuery = String(searchQuery || '').trim();
+    const sourceQueries = explicitSearchQuery
+        ? [explicitSearchQuery]
+        : (Array.isArray(targetSearchQueries) && targetSearchQueries.length > 0
+            ? targetSearchQueries
+            : (Array.isArray(targetTerms) && targetTerms.length > 0 ? targetTerms : DEFAULT_TARGET_TERMS));
+    const seen = new Set();
+    const normalized = sourceQueries
+        .map(term => String(term).trim())
+        .filter(Boolean)
+        .filter((term) => {
+            const key = term.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    const limit = Number(maxSearchQueries);
+    return Number.isFinite(limit) && limit > 0 ? normalized.slice(0, limit) : normalized;
+}
+
 function termPattern(term) {
     const pattern = escapeRegex(term).replace(/[-\s]+/g, '[\\s-]?');
     return new RegExp(`\\b${pattern}\\b`, 'i');

@@ -15,17 +15,27 @@ import { PlaywrightCrawler } from 'crawlee';
 import { randomUUID } from 'node:crypto';
 import {
     matchesTargetTerms,
+    normalizeTargetSearchQueries,
     normalizeTargetTerms,
 } from './target_scope.js';
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
 const MAX_DETAIL_PAGES = 100;  // Reduced for sold auctions
+const GOVDEALS_COMPLETED_SEARCH_URL_BASE = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100&timing=completed';
+const DEFAULT_DISPLAY_ROWS = 24;
+const DEFAULT_MAX_SEARCH_QUERIES = 5;
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = 10, maxItems = 500 } = input;
+const { maxPages = 10, maxItems = 500, searchQuery = "", maxSearchQueries = DEFAULT_MAX_SEARCH_QUERIES } = input;
 const targetTerms = normalizeTargetTerms(input.targetTerms);
+const targetSearchQueries = normalizeTargetSearchQueries({
+    searchQuery,
+    targetSearchQueries: input.targetSearchQueries,
+    targetTerms: input.targetTerms,
+    maxSearchQueries,
+});
 
 let totalFound = 0, totalPassed = 0, totalSkippedOutOfScope = 0;
 const capturedApi = {
@@ -63,6 +73,13 @@ function headersForReplayPage(headers) {
     };
 }
 
+function completedSearchUrl(searchText) {
+    const trimmed = String(searchText || '').trim();
+    return trimmed
+        ? `${GOVDEALS_COMPLETED_SEARCH_URL_BASE}&kWord=${encodeURIComponent(trimmed)}`
+        : GOVDEALS_COMPLETED_SEARCH_URL_BASE;
+}
+
 function safeJsonParse(text) {
     try {
         return JSON.parse(text);
@@ -81,6 +98,37 @@ function stageTargetLot(lot, seenIds = null) {
     totalPassed++;
     passingLots.push(normalizeLot(lot));
     return true;
+}
+
+function buildCompletedSearchPayload(searchText, basePayload = {}) {
+    const payload = { ...(basePayload || {}) };
+    const query = String(searchText || '').trim() || '*';
+    const displayRows = Number(payload.displayRows || payload.pageSize || DEFAULT_DISPLAY_ROWS);
+
+    payload.categoryIds = payload.categoryIds || '4100';
+    payload.requestType = payload.requestType || 'search';
+    payload.responseStyle = payload.responseStyle || 'productsOnly';
+    payload.businessId = payload.businessId || 'GD';
+    payload.searchText = query;
+    payload.isQAL = payload.isQAL ?? false;
+    payload.page = 1;
+    payload.displayRows = displayRows > 0 ? displayRows : DEFAULT_DISPLAY_ROWS;
+    payload.sortField = payload.sortField || 'assetcloseutcdatetime';
+    payload.sortOrder = payload.sortOrder || 'desc';
+    payload.timeType = payload.timeType || 'completed';
+    payload.timing = payload.timing || 'completed';
+    payload.sellerTypeId = payload.sellerTypeId ?? null;
+    payload.accountIds = Array.isArray(payload.accountIds) ? payload.accountIds : [];
+    payload.facets = Array.isArray(payload.facets) ? payload.facets : [];
+
+    delete payload.pageSize;
+    delete payload.pageNumber;
+    delete payload.searchPg;
+    delete payload.offset;
+    delete payload.start;
+    delete payload.skip;
+
+    return payload;
 }
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
@@ -175,12 +223,10 @@ const crawler = new PlaywrightCrawler({
             } catch (_) {}
         });
 
-        // ── Load homepage and navigate to passenger vehicles ────────────
-        // GovDeals category URLs for passenger/light vehicles:
-        // /en/passenger-vehicles  (sedans, SUVs, trucks)
-        // /en/trucks-and-vans     (pickup trucks, vans)
-        // We hit both to maximize coverage
-        // Query completed/sold auctions for clearance price data
+        // ── Load homepage and navigate to completed target searches ─────
+        // Query completed/sold auctions for clearance price data. The
+        // direct target searches are the source-side guard; targetTerms
+        // remains the local safety filter before any row is pushed.
         const VEHICLE_CATEGORY_URLS = [
             'https://www.govdeals.com/en/passenger-vehicles?timing=completed',
             'https://www.govdeals.com/en/trucks-and-vans?timing=completed',
@@ -193,10 +239,19 @@ const crawler = new PlaywrightCrawler({
         });
         await page.waitForTimeout(4000);
 
-        // Navigate to first passenger vehicle category directly
+        for (const query of targetSearchQueries) {
+            if (capturedApi.interceptedLots.length >= 20) break;
+            const searchUrl = completedSearchUrl(query);
+            log.info(`Navigating to completed search for "${query}": ${searchUrl}`);
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForTimeout(6000);
+        }
+
+        // Keep one broad completed vehicle pass as a fallback auth/payload
+        // capture path, but every row still has to pass targetTerms.
         for (const categoryUrl of VEHICLE_CATEGORY_URLS) {
             if (capturedApi.interceptedLots.length >= 20) break;
-            log.info(`Navigating to: ${categoryUrl}`);
+            log.info(`Navigating to fallback completed category: ${categoryUrl}`);
             await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForTimeout(6000);
         }
@@ -216,9 +271,20 @@ const crawler = new PlaywrightCrawler({
                 }
             }
 
-            // Step 2: Attempt direct API pagination for pages 2+ (Node.js fetch, no CORS)
+            // Step 2: Fetch each target search from page 1 onward. Intercepted
+            // page-1 rows dedupe through seenIds; non-intercepted queries need
+            // their own page-1 fetch.
             if (capturedApi.searchPayload && passingLots.length < maxItems) {
-                await paginateWithAuth(page, log, seenIds);
+                let remainingPageBudget = Math.max(1, Number(maxPages) || 1);
+                for (let queryIndex = 0; queryIndex < targetSearchQueries.length; queryIndex++) {
+                    const query = targetSearchQueries[queryIndex];
+                    if (passingLots.length >= maxItems) break;
+                    if (remainingPageBudget <= 0) break;
+                    const remainingQueries = targetSearchQueries.length - queryIndex;
+                    const pagesForQuery = Math.max(1, Math.floor(remainingPageBudget / remainingQueries));
+                    const usedPages = await paginateWithAuth(page, log, seenIds, query, pagesForQuery);
+                    remainingPageBudget -= usedPages;
+                }
             }
 
             // Step 3: Push all lots immediately (before VIN scraping to avoid data loss)
@@ -305,19 +371,22 @@ async function scrapeDetailPagesForVin(page, lots, log) {
     log.info(`[VIN DETAIL] Complete: scraped ${toScrape.length} pages, found ${vinFound} VINs`);
 }
 
-async function paginateWithAuth(page, log, seenIds = new Set()) {
+async function paginateWithAuth(page, log, seenIds = new Set(), searchText = '', pageLimit = maxPages) {
     const { requestHeaders, searchPayload, searchUrl } = capturedApi;
+    const completedSearchPayload = buildCompletedSearchPayload(searchText, searchPayload);
+    let pagesAttempted = 0;
 
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+    for (let pageNum = 1; pageNum <= pageLimit; pageNum++) {
+        pagesAttempted++;
         const payload = {
-            ...searchPayload,
+            ...completedSearchPayload,
             page: pageNum,
-            displayRows: searchPayload.displayRows || 24,
-            requestType: searchPayload.requestType || 'search',
-            responseStyle: searchPayload.responseStyle || 'productsOnly',
+            displayRows: completedSearchPayload.displayRows || DEFAULT_DISPLAY_ROWS,
+            requestType: completedSearchPayload.requestType || 'search',
+            responseStyle: completedSearchPayload.responseStyle || 'productsOnly',
         };
 
-        log.info(`Fetching page ${pageNum} via Node fetch: ${searchUrl}`);
+        log.info(`Fetching completed search "${payload.searchText}" page ${pageNum} via Node fetch: ${searchUrl}`);
 
         try {
             // Use Node.js fetch (no CORS restrictions, unlike page.evaluate browser fetch)
@@ -350,7 +419,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
                 stageTargetLot(lot, seenIds);
                 if (passingLots.length >= maxItems) {
                     log.info(`Reached maxItems limit (${maxItems}) — stopping pagination`);
-                    return;
+                    return pagesAttempted;
                 }
             }
         } catch (err) {
@@ -359,6 +428,7 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
         }
         await page.waitForTimeout(1000);
     }
+    return pagesAttempted;
 }
 
 await crawler.run([{ url: 'https://www.govdeals.com/' }]);
