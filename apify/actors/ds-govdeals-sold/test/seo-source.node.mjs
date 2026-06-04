@@ -93,6 +93,7 @@ describe('GovDeals SEO sold source', () => {
         assert.equal(lot.sold_price, 3074);
         assert.equal(lot.sold_price_all_in, 3458.25);
         assert.equal(lot.total_price, 3700.33);
+        assert.equal(lot.price_basis, 'all_in');
         assert.equal(lot.sale_date, '2026-05-16T00:08:00.000Z');
         assert.equal(lot.auction_end_time, '2026-05-16T00:08:00.000Z');
         assert.equal(lot.vin, '1FTEX1CM9EFB48531');

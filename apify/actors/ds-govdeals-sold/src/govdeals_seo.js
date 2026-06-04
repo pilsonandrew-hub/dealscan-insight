@@ -140,7 +140,7 @@ export function parseGovDealsSeoAsset(html, assetUrl) {
         sold_price: hammerPrice,
         sold_price_all_in: soldAmount || totalPrice || hammerPrice,
         total_price: totalPrice,
-        price_basis: soldAmount ? 'source_sold_amount_with_visible_fees' : 'source_reported',
+        price_basis: soldAmount ? 'all_in' : 'source_reported',
         currency: offer?.priceCurrency || 'USD',
         locationCity: address.addressLocality || '',
         locationState: stateFromAddress(address),
