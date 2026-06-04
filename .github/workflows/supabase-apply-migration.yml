@@ -32,6 +32,7 @@ jobs:
           MIGRATION_FILE: ${{ inputs.migration_file }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_DB_POOLER_HOST: ${{ secrets.SUPABASE_DB_POOLER_HOST }}
           SUPABASE_DB_POOLER_PORT: ${{ secrets.SUPABASE_DB_POOLER_PORT }}
         run: |
@@ -69,9 +70,12 @@ jobs:
 
           DATABASE_URL="$(python3 - <<'PY'
           import os
+          import re
           from urllib.parse import quote
 
-          project_id = os.environ["SUPABASE_PROJECT_ID"].strip()
+          supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+          match = re.search(r"https://([a-z0-9]+)\.supabase\.co", supabase_url)
+          project_id = match.group(1) if match else os.environ["SUPABASE_PROJECT_ID"].strip()
           password = quote(os.environ["SUPABASE_DB_PASSWORD"], safe="")
           pooler_host = os.environ.get("SUPABASE_DB_POOLER_HOST", "").strip()
           if not pooler_host:
