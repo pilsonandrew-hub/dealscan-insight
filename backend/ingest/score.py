@@ -20,9 +20,9 @@ from backend.business_rules.gates import (
 from backend.ingest.transport import calc_transport_cost
 
 try:
-    from backend.ingest.condition import compute_condition_grade as _compute_condition_grade
+    from backend.ingest.condition import score_condition as _score_condition
 except ImportError:  # pragma: no cover - exercised in minimal local environments
-    def _compute_condition_grade(**kwargs):
+    def _score_condition(**kwargs):
         return None
 
 
@@ -54,6 +54,33 @@ HIGH_DEMAND_MODELS = {
     "tacoma",
     "wrangler",
 }
+
+_CONDITION_CAPITAL_READY_NON_BLOCK_SIGNALS = {
+    "carfax",
+    "clean title",
+    "fleet maintained",
+    "fleet vehicle",
+    "government fleet",
+    "grade_3",
+    "grade_4",
+    "grade_5",
+    "low miles",
+    "maintenance records",
+    "one owner",
+    "runs & drives",
+    "runs & moves",
+    "runs and drives",
+    "runs and moves",
+    "service records",
+    "well maintained",
+}
+
+
+def _legacy_condition_grade_label(condition_assessment: Optional[dict]) -> str:
+    if not isinstance(condition_assessment, dict):
+        return "Fair"
+    grade_map = {"A": "Excellent", "B": "Good", "C": "Fair", "D": "Poor", "F": "Poor"}
+    return grade_map.get(str(condition_assessment.get("condition_grade") or ""), "Fair")
 
 
 def _coerce_float(value: object) -> Optional[float]:
@@ -730,13 +757,21 @@ def score_deal(
         auction_fees = fee_lookup.get("doc_fee") or fee_lookup.get("auction_fees")
 
     transport = calc_transport_cost(state, rates_cfg=rates_cfg, miles_cfg=miles_cfg) if state else 350.0
-    condition_grade = _compute_condition_grade(
+    condition_assessment = _score_condition(
         title=title or f"{year or ''} {make or ''} {model or ''}".strip(),
         description=description or "",
         mileage=mileage or 0,
         year=year or 0,
         damage_type=damage_type or "",
     )
+    condition_grade = _legacy_condition_grade_label(condition_assessment)
+    condition_signals = []
+    if isinstance(condition_assessment, dict):
+        condition_signals = [
+            str(signal).strip().lower()
+            for signal in (condition_assessment.get("condition_signals") or [])
+            if str(signal).strip()
+        ]
     recon_reserve = 650.0
     if is_police_or_fleet:
         recon_reserve += 300.0
@@ -1025,10 +1060,21 @@ def score_deal(
     all_in_cost = bid_value + buyer_premium_amount + auction_fees_amount + transport + recon_reserve
     roi_pct = (gross_margin / all_in_cost * 100) if all_in_cost > 0 else 0
     pricing_trust_blocked = pricing_maturity == "proxy"
+    condition_trust_blocked = any(
+        signal not in _CONDITION_CAPITAL_READY_NON_BLOCK_SIGNALS
+        for signal in condition_signals
+    )
+    if condition_trust_blocked:
+        selected_dos = 0.0
+        ceiling_pass = False
+        max_bid = 0.0
+        bid_headroom = 0.0
     if pricing_trust_blocked:
         ceiling_pass = False
         max_bid = 0.0
         bid_headroom = 0.0
+        investment_grade = "Rejected"
+    elif condition_trust_blocked:
         investment_grade = "Rejected"
     elif vehicle_tier == "rejected" or hard_rejected_by_economics:
         investment_grade = "Rejected"
@@ -1143,6 +1189,8 @@ def score_deal(
         "pricing_updated_at": pricing_updated_at,
         "pricing_trust_blocked": pricing_trust_blocked,
         "pricing_trust_reason": "pricing_maturity_proxy" if pricing_trust_blocked else None,
+        "condition_trust_blocked": condition_trust_blocked,
+        "condition_trust_reason": "condition_unverified" if condition_trust_blocked else None,
         "expected_close_bid": round(expected_close_bid, 2),
         "expected_close_source": expected_close_source,
         "current_bid_trust_score": trust_score,
@@ -1152,6 +1200,7 @@ def score_deal(
         "transport": transport,
         "recon_reserve": recon_reserve,
         "condition_grade": condition_grade,
+        "condition_signals": condition_signals,
         "total_cost": all_in_cost,
         "projected_total_cost": all_in_cost,
         "manheim_mmr_mid": manheim_mmr_mid,
@@ -1180,6 +1229,8 @@ def score_deal(
             if bid_ceiling_exceeded
             else "margin_floor_failed"
             if margin_floor_failed
+            else "condition_unverified"
+            if condition_trust_blocked
             else "pricing_maturity_proxy"
             if pricing_trust_blocked
             else "score_deal_v3_two_lane"
