@@ -7,10 +7,10 @@ verified comps, candidate review status, and run aggregate counters only.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-from collections import Counter, defaultdict
+import json
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -30,6 +30,20 @@ from scripts.verify_sold_comp_candidates import (
 
 REVIEWER = "market_scout_verifier"
 REVIEWER_VERSION = "deterministic-v1"
+VERIFIED_ID_PAGE_SIZE = 1000
+RUN_STATUS_PAGE_SIZE = 1000
+CANONICAL_REJECTION_REASONS = {
+    "duplicate_source_listing",
+    "invalid_sale_date",
+    "invalid_vin",
+    "implausible_price",
+    "missing_evidence_ref",
+    "missing_listing_url",
+    "missing_sold_price",
+    "missing_year_make_model",
+    "outside_approved_vehicle_scope",
+}
+NONCANONICAL_REJECTION_REASON = "noncanonical_rejection_reason"
 
 CANDIDATE_SELECT = ",".join(
     [
@@ -78,7 +92,7 @@ def _fetch_candidates(supabase: Any, *, limit: int, run_id: str | None = None) -
     query = (
         supabase.table("sold_comp_candidates")
         .select(CANDIDATE_SELECT)
-        .in_("candidate_status", ["candidate", "rejected", "needs_review"])
+        .eq("candidate_status", "candidate")
     )
     if run_id:
         query = query.eq("run_id", run_id).order("created_at", desc=True)
@@ -86,18 +100,60 @@ def _fetch_candidates(supabase: Any, *, limit: int, run_id: str | None = None) -
     return response.data or []
 
 
-def _fetch_existing_verified_source_listing_ids(supabase: Any) -> set[str]:
-    response = (
-        supabase.table("verified_sold_comps")
-        .select("source_name,source_listing_id")
-        .execute()
-    )
-    rows = response.data or []
+def _fetch_existing_verified_source_listing_ids(
+    supabase: Any,
+    *,
+    page_size: int = VERIFIED_ID_PAGE_SIZE,
+) -> set[str]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        response = (
+            supabase.table("verified_sold_comps")
+            .select("source_name,source_listing_id")
+            .order("candidate_id", desc=False)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        page = response.data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
     return {
         f"{row.get('source_name')}:{row.get('source_listing_id')}"
         for row in rows
         if row.get("source_name") and row.get("source_listing_id")
     }
+
+
+def _fetch_run_candidate_status_counts(
+    supabase: Any,
+    *,
+    run_id: str,
+    page_size: int = RUN_STATUS_PAGE_SIZE,
+) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    offset = 0
+    while True:
+        response = (
+            supabase.table("sold_comp_candidates")
+            .select("candidate_status")
+            .eq("run_id", run_id)
+            .order("id", desc=False)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        page = response.data or []
+        counts.update(
+            str(row.get("candidate_status"))
+            for row in page
+            if row.get("candidate_status")
+        )
+        if len(page) < page_size:
+            break
+        offset += page_size
+    return counts
 
 
 def _candidate_status_for_review(review_status: str) -> str:
@@ -106,13 +162,19 @@ def _candidate_status_for_review(review_status: str) -> str:
     return review_status
 
 
+def _safe_rejection_reason(reason: str | None) -> str:
+    if reason in CANONICAL_REJECTION_REASONS:
+        return str(reason)
+    return NONCANONICAL_REJECTION_REASON
+
+
 def _write_rows(
     supabase: Any,
     *,
     review_rows: list[dict[str, Any]],
     verified_rows: list[dict[str, Any]],
     candidate_updates: list[dict[str, Any]],
-    run_updates: dict[str, Counter[str]],
+    run_updates: set[str],
 ) -> dict[str, int]:
     if review_rows:
         supabase.table("sold_comp_reviews").upsert(
@@ -131,13 +193,14 @@ def _write_rows(
                 "rejection_reason": update["rejection_reason"],
             }
         ).eq("id", update["candidate_id"]).execute()
-    for run_id, counts in run_updates.items():
+    for run_id in run_updates:
+        counts = _fetch_run_candidate_status_counts(supabase, run_id=run_id)
         supabase.table("market_scout_runs").update(
             {
-                "records_verified": counts.get("accepted", 0),
+                "records_verified": counts.get("verified", 0),
                 "records_rejected": counts.get("rejected", 0),
                 "records_needs_review": counts.get("needs_review", 0),
-                "records_promoted": counts.get("accepted", 0),
+                "records_promoted": counts.get("verified", 0),
             }
         ).eq("run_id", run_id).execute()
 
@@ -163,7 +226,7 @@ def run_verifier(
     existing_verified = _fetch_existing_verified_source_listing_ids(supabase)
     decision_counts: Counter[str] = Counter()
     rejection_reason_counts: Counter[str] = Counter()
-    run_updates: dict[str, Counter[str]] = defaultdict(Counter)
+    run_updates: set[str] = set()
     review_rows: list[dict[str, Any]] = []
     verified_rows: list[dict[str, Any]] = []
     candidate_updates: list[dict[str, Any]] = []
@@ -176,8 +239,8 @@ def run_verifier(
         )
         decision_counts[decision.review_status] += 1
         if decision.rejection_reason:
-            rejection_reason_counts[decision.rejection_reason] += 1
-        run_updates[str(candidate["run_id"])][decision.review_status] += 1
+            rejection_reason_counts[_safe_rejection_reason(decision.rejection_reason)] += 1
+        run_updates.add(str(candidate["run_id"]))
         review_rows.append(
             build_review_row(
                 candidate,
@@ -234,9 +297,15 @@ def build_message(summary: dict[str, Any]) -> str:
         f"{key}={value}" for key, value in sorted(decisions.items())
     ) or "none"
     rejection_reasons = summary.get("rejection_reason_counts") or {}
-    rejection_reason_text = ", ".join(
-        f"{key}={value}" for key, value in sorted(rejection_reasons.items())
-    ) or "none"
+    safe_rejection_reasons = Counter()
+    for reason, count in rejection_reasons.items():
+        safe_rejection_reasons[_safe_rejection_reason(str(reason))] += count
+    rejection_reason_text = (
+        ", ".join(
+            f"{key}={value}" for key, value in sorted(safe_rejection_reasons.items())
+        )
+        or "none"
+    )
     return (
         f"DealerScope Sold Comp Verifier{label}\n"
         f"Candidates reviewed: {summary.get('candidates_reviewed', 0)}\n"

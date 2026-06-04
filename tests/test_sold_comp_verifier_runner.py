@@ -40,6 +40,10 @@ class _Query:
         self.filters.append(("limit", value))
         return self
 
+    def range(self, start, end):
+        self.filters.append(("range", start, end))
+        return self
+
     def order(self, column, **kwargs):
         self.filters.append(("order", column, kwargs))
         return self
@@ -67,6 +71,17 @@ class _Query:
             )
             return _Result(self.payload if isinstance(self.payload, list) else [self.payload])
         if self.mode == "update":
+            rows = self.client.rows.setdefault(self.table_name, [])
+            for row in rows:
+                matches = True
+                for filter_item in self.filters:
+                    if filter_item[0] == "eq":
+                        _kind, column, value = filter_item
+                        if row.get(column) != value:
+                            matches = False
+                            break
+                if matches:
+                    row.update(self.payload)
             self.client.writes.append(
                 {
                     "table": self.table_name,
@@ -99,6 +114,9 @@ class _Query:
                 )
             elif filter_item[0] == "limit":
                 rows = rows[: filter_item[1]]
+            elif filter_item[0] == "range":
+                _kind, start, end = filter_item
+                rows = rows[start : end + 1]
         return _Result(rows)
 
 
@@ -162,8 +180,6 @@ def test_verifier_runner_dry_run_reports_decisions_without_writes():
                 _candidate(
                     id="candidate-3",
                     source_listing_id="asset-bad",
-                    candidate_status="rejected",
-                    rejection_reason="missing_year_make_model",
                     year=None,
                     make=None,
                     model=None,
@@ -191,6 +207,85 @@ def test_verifier_runner_dry_run_reports_decisions_without_writes():
     assert summary["review_rows_written"] == 0
     assert summary["verified_rows_written"] == 0
     assert client.writes == []
+
+
+def test_verifier_runner_fetches_only_fresh_candidate_rows():
+    client = _Client(
+        {
+            "sold_comp_candidates": [
+                _candidate(id="candidate-1", source_listing_id="asset-1"),
+                _candidate(
+                    id="rejected-1",
+                    source_listing_id="asset-rejected",
+                    candidate_status="rejected",
+                    rejection_reason="missing_year_make_model",
+                    year=None,
+                    make=None,
+                    model=None,
+                    dedup_key="dedup-rejected",
+                ),
+                _candidate(
+                    id="review-1",
+                    source_listing_id="asset-review",
+                    candidate_status="needs_review",
+                    rejection_reason="outside_approved_vehicle_scope",
+                    make="Mercedes-Benz",
+                    model="G-Class",
+                    dedup_key="dedup-review",
+                ),
+            ],
+            "verified_sold_comps": [],
+        }
+    )
+
+    summary = run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=True,
+        today=date(2026, 6, 3),
+        reviewer_version="test-v1",
+    )
+
+    assert summary["candidates_reviewed"] == 1
+    assert summary["decision_counts"] == {"accepted": 1}
+    candidate_read = next(read for read in client.reads if read["table"] == "sold_comp_candidates")
+    assert ("eq", "candidate_status", "candidate") in candidate_read["filters"]
+    assert not any(filter_item[0] == "in" for filter_item in candidate_read["filters"])
+
+
+def test_existing_verified_source_listing_ids_are_paginated():
+    client = _Client(
+        {
+            "verified_sold_comps": [
+                {"source_name": "govdeals-sold", "source_listing_id": f"asset-{index}"}
+                for index in range(5)
+            ],
+        }
+    )
+
+    existing_ids = run_sold_comp_verifier._fetch_existing_verified_source_listing_ids(
+        client,
+        page_size=2,
+    )
+
+    assert existing_ids == {
+        "govdeals-sold:asset-0",
+        "govdeals-sold:asset-1",
+        "govdeals-sold:asset-2",
+        "govdeals-sold:asset-3",
+        "govdeals-sold:asset-4",
+    }
+    verified_reads = [
+        read for read in client.reads if read["table"] == "verified_sold_comps"
+    ]
+    assert [filter_item for read in verified_reads for filter_item in read["filters"] if filter_item[0] == "range"] == [
+        ("range", 0, 1),
+        ("range", 2, 3),
+        ("range", 4, 5),
+    ]
+    assert all(
+        ("order", "candidate_id", {"desc": False}) in read["filters"]
+        for read in verified_reads
+    )
 
 
 def test_verifier_runner_can_scope_candidates_to_one_run_id():
@@ -293,6 +388,56 @@ def test_verifier_runner_write_mode_touches_only_comp_ledger_tables():
     assert all(write["table"] not in {"opportunities", "dealer_sales"} for write in client.writes)
 
 
+def test_verifier_runner_updates_run_counters_from_full_run_status_totals():
+    client = _Client(
+        {
+            "sold_comp_candidates": [
+                _candidate(id="candidate-1", source_listing_id="asset-1"),
+                _candidate(
+                    id="already-rejected",
+                    source_listing_id="asset-rejected",
+                    candidate_status="rejected",
+                    rejection_reason="missing_year_make_model",
+                    year=None,
+                    make=None,
+                    model=None,
+                    dedup_key="dedup-rejected",
+                ),
+                _candidate(
+                    id="already-review",
+                    source_listing_id="asset-review",
+                    candidate_status="needs_review",
+                    rejection_reason="outside_approved_vehicle_scope",
+                    make="Mercedes-Benz",
+                    model="G-Class",
+                    dedup_key="dedup-review",
+                ),
+            ],
+            "verified_sold_comps": [],
+            "market_scout_runs": [{"run_id": "run-1"}],
+        }
+    )
+
+    run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=False,
+        today=date(2026, 6, 3),
+        reviewer_version="test-v1",
+    )
+
+    run_write = next(write for write in client.writes if write["table"] == "market_scout_runs")
+    assert run_write["payload"] == {
+        "records_verified": 1,
+        "records_rejected": 1,
+        "records_needs_review": 1,
+        "records_promoted": 1,
+    }
+    status_reads = [
+        read for read in client.reads if read["table"] == "sold_comp_candidates"
+    ]
+    assert any(("order", "id", {"desc": False}) in read["filters"] for read in status_reads)
+
+
 def test_verifier_message_is_aggregate_only():
     message = run_sold_comp_verifier.build_message(
         {
@@ -315,6 +460,26 @@ def test_verifier_message_is_aggregate_only():
     assert "accepted=1" in message
     assert "missing_year_make_model=1" in message
     assert "https://" not in message
+    assert "1FTEW" not in message
+
+
+def test_verifier_message_sanitizes_noncanonical_rejection_reason_keys():
+    message = run_sold_comp_verifier.build_message(
+        {
+            "dry_run": True,
+            "candidates_reviewed": 1,
+            "decision_counts": {"rejected": 1},
+            "rejection_reason_counts": {
+                "vin 1FTEW1E50KFA00001 bad source text": 1,
+            },
+            "review_rows_written": 0,
+            "verified_rows_written": 0,
+            "candidate_rows_updated": 0,
+            "run_rows_updated": 0,
+        }
+    )
+
+    assert "noncanonical_rejection_reason=1" in message
     assert "1FTEW" not in message
 
 
@@ -341,4 +506,4 @@ def test_verifier_script_can_be_executed_from_repo_root_like_github_actions():
 
     assert result.returncode == 0
     assert "SOLD_COMP_VERIFIER_IMPORT_OK" in result.stdout
-    assert "ModuleNotFoundError: No module named 'scripts'" not in result.stderr
+    assert result.stderr == ""

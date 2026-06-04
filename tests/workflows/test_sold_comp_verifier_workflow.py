@@ -18,6 +18,8 @@ def test_sold_comp_verifier_workflow_is_manual_and_defaults_to_dry_run():
 
     assert "timeout-minutes: 10" in text
     assert "contents: read" in text
+    assert "actions/setup-python@" in text
+    assert 'python-version: "3.12"' in text
     assert "python3 scripts/run_sold_comp_verifier.py" in text
     assert "SUPABASE_SERVICE_ROLE_KEY" in text
     assert "SOLD_COMP_VERIFIER_RUN_ID: ${{ inputs.run_id }}" in text
