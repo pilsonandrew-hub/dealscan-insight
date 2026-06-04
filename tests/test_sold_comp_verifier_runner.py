@@ -59,6 +59,11 @@ class _Query:
         self.payload = payload
         return self
 
+    def insert(self, payload):
+        self.mode = "insert"
+        self.payload = payload
+        return self
+
     def execute(self):
         if self.mode == "upsert":
             self.client.writes.append(
@@ -70,6 +75,17 @@ class _Query:
                 }
             )
             return _Result(self.payload if isinstance(self.payload, list) else [self.payload])
+        if self.mode == "insert":
+            payloads = self.payload if isinstance(self.payload, list) else [self.payload]
+            self.client.rows.setdefault(self.table_name, []).extend(payloads)
+            self.client.writes.append(
+                {
+                    "table": self.table_name,
+                    "mode": self.mode,
+                    "payload": self.payload,
+                }
+            )
+            return _Result(payloads)
         if self.mode == "update":
             rows = self.client.rows.setdefault(self.table_name, [])
             for row in rows:
@@ -386,6 +402,47 @@ def test_verifier_runner_write_mode_touches_only_comp_ledger_tables():
         "market_scout_runs",
     }
     assert all(write["table"] not in {"opportunities", "dealer_sales"} for write in client.writes)
+
+
+def test_verifier_runner_writes_verified_rows_without_rest_upsert_conflict_target():
+    client = _Client(
+        {
+            "sold_comp_candidates": [_candidate()],
+            "verified_sold_comps": [],
+        }
+    )
+
+    run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=False,
+        today=date(2026, 6, 3),
+        reviewer_version="test-v1",
+    )
+
+    verified_writes = [write for write in client.writes if write["table"] == "verified_sold_comps"]
+    assert verified_writes
+    assert all(write["mode"] != "upsert" for write in verified_writes)
+
+
+def test_verifier_runner_writes_review_rows_without_rest_upsert_conflict_target():
+    client = _Client(
+        {
+            "sold_comp_candidates": [_candidate()],
+            "verified_sold_comps": [],
+            "sold_comp_reviews": [],
+        }
+    )
+
+    run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=False,
+        today=date(2026, 6, 3),
+        reviewer_version="test-v1",
+    )
+
+    review_writes = [write for write in client.writes if write["table"] == "sold_comp_reviews"]
+    assert review_writes
+    assert all(write["mode"] != "upsert" for write in review_writes)
 
 
 def test_verifier_runner_updates_run_counters_from_full_run_status_totals():

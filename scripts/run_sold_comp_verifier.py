@@ -177,15 +177,42 @@ def _write_rows(
     run_updates: set[str],
 ) -> dict[str, int]:
     if review_rows:
-        supabase.table("sold_comp_reviews").upsert(
-            review_rows,
-            on_conflict="candidate_id,reviewer,reviewer_version",
-        ).execute()
+        for row in review_rows:
+            existing = (
+                supabase.table("sold_comp_reviews")
+                .select("id")
+                .eq("candidate_id", row["candidate_id"])
+                .eq("reviewer", row["reviewer"])
+                .eq("reviewer_version", row["reviewer_version"])
+                .limit(1)
+                .execute()
+            ).data or []
+            if existing:
+                supabase.table("sold_comp_reviews").update(row).eq(
+                    "candidate_id",
+                    row["candidate_id"],
+                ).eq("reviewer", row["reviewer"]).eq(
+                    "reviewer_version",
+                    row["reviewer_version"],
+                ).execute()
+            else:
+                supabase.table("sold_comp_reviews").insert(row).execute()
     if verified_rows:
-        supabase.table("verified_sold_comps").upsert(
-            verified_rows,
-            on_conflict="candidate_id",
-        ).execute()
+        for row in verified_rows:
+            existing = (
+                supabase.table("verified_sold_comps")
+                .select("id")
+                .eq("candidate_id", row["candidate_id"])
+                .limit(1)
+                .execute()
+            ).data or []
+            if existing:
+                supabase.table("verified_sold_comps").update(row).eq(
+                    "candidate_id",
+                    row["candidate_id"],
+                ).execute()
+            else:
+                supabase.table("verified_sold_comps").insert(row).execute()
     for update in candidate_updates:
         supabase.table("sold_comp_candidates").update(
             {
