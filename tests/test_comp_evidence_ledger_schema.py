@@ -7,7 +7,7 @@ MIGRATION_DIR = Path(__file__).resolve().parents[1] / "supabase" / "migrations"
 def _migration_sql() -> str:
     return "\n".join(
         path.read_text(encoding="utf-8").lower()
-        for path in sorted(MIGRATION_DIR.glob("20260603*.sql"))
+        for path in sorted(MIGRATION_DIR.glob("*.sql"))
     )
 
 
@@ -87,6 +87,16 @@ def test_sold_comp_reviews_are_idempotent_per_verifier_version():
 
     assert "sold_comp_reviews" in sql
     assert "candidate_id, reviewer, reviewer_version" in sql
+
+
+def test_verified_sold_comps_support_candidate_id_upsert_conflict():
+    sql = _migration_sql()
+
+    assert "create unique index if not exists idx_verified_sold_comps_candidate_id" in sql
+    assert "on public.verified_sold_comps(candidate_id)" in sql
+    assert "constraint verified_sold_comps_candidate_id_key" in sql
+    assert "unique (candidate_id)" in sql
+    assert "notify pgrst, 'reload schema'" in sql
 
 
 def test_post_close_outcome_requests_are_separate_from_comp_evidence_ledger():

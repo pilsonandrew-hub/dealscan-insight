@@ -7,7 +7,9 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
         "webhook_log": {"run_id", "received_at", "processing_status", "error_message", "item_count", "actor_id"},
         "opportunities": {"id", "run_id", "source_site", "status", "vin", "mileage", "created_at"},
         "market_scout_runs": {"run_id", "source_name", "status", "records_found", "records_candidate", "records_rejected", "error_count", "created_at", "updated_at"},
-        "sold_comp_candidates": {"run_id", "source_name", "source_listing_id", "channel", "candidate_status", "rejection_reason", "created_at", "updated_at"},
+        "sold_comp_candidates": {"id", "run_id", "source_name", "source_listing_id", "channel", "candidate_status", "rejection_reason", "created_at", "updated_at"},
+        "sold_comp_reviews": {"candidate_id", "review_status", "reviewer", "reviewer_version", "created_at", "updated_at"},
+        "verified_sold_comps": {"candidate_id", "source_name", "channel", "created_at", "updated_at"},
     }
     rows = {
         "ingest_delivery_log": [
@@ -21,6 +23,7 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
         "market_scout_runs": [
             {
                 "run_id": "run-1",
+                "id": "candidate-1",
                 "source_name": "govdeals-sold",
                 "status": "collecting",
                 "records_found": 2,
@@ -33,6 +36,7 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
         "sold_comp_candidates": [
             {
                 "run_id": "run-1",
+                "id": "candidate-2",
                 "source_name": "govdeals-sold",
                 "source_listing_id": "asset-1",
                 "channel": "gov",
@@ -50,6 +54,7 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
             },
             {
                 "run_id": "run-1",
+                "id": "candidate-3",
                 "source_name": "publicsurplus-sold",
                 "source_listing_id": "asset-1",
                 "channel": "surplus",
@@ -57,12 +62,31 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
                 "created_at": "2026-06-03T00:00:03Z",
             },
         ],
+        "sold_comp_reviews": [
+            {"candidate_id": "candidate-1", "review_status": "accepted", "reviewer": "market_scout_verifier"},
+            {"candidate_id": "candidate-2", "review_status": "rejected", "reviewer": "market_scout_verifier"},
+            {"candidate_id": "candidate-3", "review_status": "accepted", "reviewer": "market_scout_verifier"},
+        ],
+        "verified_sold_comps": [
+            {"candidate_id": "candidate-1", "source_name": "govdeals-sold", "channel": "gov"},
+            {"candidate_id": "candidate-3", "source_name": "publicsurplus-sold", "channel": "surplus"},
+        ],
     }
 
     monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
 
-    def fake_request(_base_url, _service_key, table, _params, **_kwargs):
-        return 200, {}, rows[table]
+    requests = []
+
+    def fake_request(_base_url, _service_key, table, params, **_kwargs):
+        requests.append((table, dict(params)))
+        selected = str(params.get("select") or "").split(",")
+        selected = [column for column in selected if column]
+        if not selected:
+            return 200, {}, rows[table]
+        return 200, {}, [
+            {column: row[column] for column in selected if column in row}
+            for row in rows[table]
+        ]
 
     monkeypatch.setattr(inspection, "_request", fake_request)
 
@@ -75,6 +99,12 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
     assert report["sold_comp_candidates"]["distinct_source_listing_keys"] == 3
     assert report["sold_comp_candidates"]["status_counts"] == {"candidate": 2, "rejected": 1}
     assert report["sold_comp_candidates"]["rejection_reason_counts"] == {"missing_year_make_model": 1}
+    assert report["sold_comp_reviews"]["row_count"] == 3
+    assert report["sold_comp_reviews"]["review_status_counts"] == {"accepted": 2, "rejected": 1}
+    assert report["verified_sold_comps"]["row_count"] == 2
+    assert report["verified_sold_comps"]["source_counts"] == {"govdeals-sold": 1, "publicsurplus-sold": 1}
+    candidate_requests = [params for table, params in requests if table == "sold_comp_candidates"]
+    assert "id" in candidate_requests[0]["select"].split(",")
     assert "listing_url" not in str(report)
     assert "raw_payload" not in str(report)
     assert "2021 Mercedes-Benz G-Class" not in str(report)
@@ -86,7 +116,9 @@ def test_run_id_truth_audit_surfaces_comp_ledger_read_failures(monkeypatch):
         "webhook_log": {"run_id", "processing_status"},
         "opportunities": {"id", "run_id"},
         "market_scout_runs": {"run_id", "source_name"},
-        "sold_comp_candidates": {"run_id", "source_name"},
+        "sold_comp_candidates": {"id", "run_id", "source_name"},
+        "sold_comp_reviews": {"candidate_id", "review_status"},
+        "verified_sold_comps": {"candidate_id", "source_name"},
     }
 
     monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])

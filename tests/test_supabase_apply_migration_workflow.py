@@ -24,7 +24,7 @@ def test_supabase_apply_migration_workflow_uses_direct_db_secret_without_printin
     assert "SUPABASE_URL" in text
     assert "re.search" in text
     assert "SUPABASE_DB_POOLER_HOST" in text
-    assert "aws-0-us-west-2.pooler.supabase.com" not in text
+    assert "aws-0-us-west-2.pooler.supabase.com" in text
     assert 'or "5432"' in text
     assert "PROJECT_REF_RE" in text
     assert "POOLER_HOST_RE" in text
@@ -36,3 +36,33 @@ def test_supabase_apply_migration_workflow_uses_direct_db_secret_without_printin
     assert "echo ${DATABASE_URL}" not in text
     assert "echo \"$DATABASE_URL\"" not in text
     assert "psql \"${PSQL_CONN}\"" in text
+
+
+def test_supabase_apply_migration_workflow_can_fall_back_to_metadata_pooler():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    missing_secret_gate = next(
+        line for line in text.splitlines() if "Missing Supabase DB secret inputs." in line
+    )
+    preceding_if = text.split(missing_secret_gate, 1)[0].splitlines()[-1]
+    assert "SUPABASE_DB_POOLER_HOST" not in preceding_if
+    assert "aws-0-us-west-2.pooler.supabase.com" in text
+    assert "conn_source = \"pooler\"" in text
+    assert "CONN_SOURCE" in text
+
+
+def test_supabase_apply_migration_workflow_ignores_stale_database_url_secret():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "DATABASE_URL:" not in text
+    assert "database_url = os.environ.get(\"DATABASE_URL\", \"\").strip()" not in text
+    assert "user=postgres.{project_id}" in text
+
+
+def test_supabase_apply_migration_workflow_direct_host_uses_ipv4_hostaddr():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "import socket" in text
+    assert "socket.AF_INET" in text
+    assert "hostaddr={direct_hostaddr}" in text
+    assert "Unable to resolve Supabase direct database IPv4 address." in text

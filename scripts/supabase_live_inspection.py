@@ -396,6 +396,52 @@ def _summarize_sold_comp_candidate_rows(rows: list[dict[str, Any]]) -> dict[str,
     }
 
 
+def _summarize_sold_comp_review_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    review_status_counts: Counter[str] = Counter()
+    reviewer_counts: Counter[str] = Counter()
+    latest_created_at = None
+    latest_updated_at = None
+    for row in rows:
+        review_status_counts[str(row.get("review_status") or "unknown")[:80]] += 1
+        reviewer_counts[str(row.get("reviewer") or "unknown")[:80]] += 1
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
+            latest_created_at = created_at
+        if updated_at and (latest_updated_at is None or str(updated_at) > str(latest_updated_at)):
+            latest_updated_at = updated_at
+    return {
+        "row_count": len(rows),
+        "review_status_counts": dict(review_status_counts.most_common(20)),
+        "reviewer_counts": dict(reviewer_counts.most_common(20)),
+        "latest_created_at": latest_created_at,
+        "latest_updated_at": latest_updated_at,
+    }
+
+
+def _summarize_verified_sold_comp_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    channel_counts: Counter[str] = Counter()
+    latest_created_at = None
+    latest_updated_at = None
+    for row in rows:
+        source_counts[str(row.get("source_name") or "unknown")[:80]] += 1
+        channel_counts[str(row.get("channel") or "unknown")[:80]] += 1
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
+            latest_created_at = created_at
+        if updated_at and (latest_updated_at is None or str(updated_at) > str(latest_updated_at)):
+            latest_updated_at = updated_at
+    return {
+        "row_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "channel_counts": dict(channel_counts.most_common(20)),
+        "latest_created_at": latest_created_at,
+        "latest_updated_at": latest_updated_at,
+    }
+
+
 def _summarize_post_close_outcome_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     source_counts: Counter[str] = Counter()
     outcome_status_counts: Counter[str] = Counter()
@@ -481,6 +527,7 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         market_scout_columns = _available_columns(base_url, service_key, "market_scout_runs")
         market_scout_select = ",".join([
             col for col in [
+                "id",
                 "run_id",
                 "source_name",
                 "status",
@@ -508,6 +555,7 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         candidate_columns = _available_columns(base_url, service_key, "sold_comp_candidates")
         candidate_select = ",".join([
             col for col in [
+                "id",
                 "run_id",
                 "source_name",
                 "source_listing_id",
@@ -526,8 +574,54 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
             {"select": candidate_select, "run_id": f"eq.{run_id}", "order": "created_at.asc", "limit": "200"},
         )
         sold_comp_candidate_report = _summarize_sold_comp_candidate_rows(rows if isinstance(rows, list) else [])
+        candidate_ids = [
+            str(row["id"])
+            for row in rows if isinstance(rows, list)
+            if row.get("id")
+        ]
     except Exception as exc:
         sold_comp_candidate_report = {"row_count": None, "failure": str(exc)[:500]}
+        candidate_ids = []
+
+    sold_comp_review_report: dict[str, Any]
+    try:
+        if candidate_ids:
+            review_columns = _available_columns(base_url, service_key, "sold_comp_reviews")
+            review_select = ",".join([
+                col for col in ["candidate_id", "review_status", "reviewer", "reviewer_version", "created_at", "updated_at"]
+                if col in review_columns
+            ]) or "candidate_id"
+            _, _, rows = _request(
+                base_url,
+                service_key,
+                "sold_comp_reviews",
+                {"select": review_select, "candidate_id": f"in.({','.join(candidate_ids)})", "limit": "200"},
+            )
+            sold_comp_review_report = _summarize_sold_comp_review_rows(rows if isinstance(rows, list) else [])
+        else:
+            sold_comp_review_report = _summarize_sold_comp_review_rows([])
+    except Exception as exc:
+        sold_comp_review_report = {"row_count": None, "failure": str(exc)[:500]}
+
+    verified_sold_comp_report: dict[str, Any]
+    try:
+        if candidate_ids:
+            verified_columns = _available_columns(base_url, service_key, "verified_sold_comps")
+            verified_select = ",".join([
+                col for col in ["candidate_id", "source_name", "channel", "created_at", "updated_at"]
+                if col in verified_columns
+            ]) or "candidate_id"
+            _, _, rows = _request(
+                base_url,
+                service_key,
+                "verified_sold_comps",
+                {"select": verified_select, "candidate_id": f"in.({','.join(candidate_ids)})", "limit": "200"},
+            )
+            verified_sold_comp_report = _summarize_verified_sold_comp_rows(rows if isinstance(rows, list) else [])
+        else:
+            verified_sold_comp_report = _summarize_verified_sold_comp_rows([])
+    except Exception as exc:
+        verified_sold_comp_report = {"row_count": None, "failure": str(exc)[:500]}
 
     return {
         "run_id": run_id,
@@ -536,6 +630,8 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         "opportunities": _summarize_run_opportunity_rows(list(opportunity_by_id.values())),
         "market_scout_runs": market_scout_report,
         "sold_comp_candidates": sold_comp_candidate_report,
+        "sold_comp_reviews": sold_comp_review_report,
+        "verified_sold_comps": verified_sold_comp_report,
         "truth_boundary": "Run-level sanitized aggregate only. Does not print titles, VIN values, listing URLs, raw payloads, user data, or secrets.",
     }
 

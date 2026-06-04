@@ -8,7 +8,7 @@
     },
     "ds-govdeals-sold": {
       "id": "Ui7FeFY4mIVPnU1fH",
-      "webhookId": "NQkX63Hk9gXWUNvPe",
+      "webhookId": "OqpMiGHSE8BIgtXP2",
       "status": "enabled",
       "notes": "Completed GovDeals sold-comp collector. No schedule until Comp Evidence Ledger proof is stable; run bounded manual proofs only."
     },

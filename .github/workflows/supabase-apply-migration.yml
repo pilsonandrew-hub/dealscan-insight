@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${SUPABASE_DB_PASSWORD}" ] || [ -z "${SUPABASE_PROJECT_ID}" ] || [ -z "${SUPABASE_DB_POOLER_HOST}" ]; then
+          if [ -z "${SUPABASE_DB_PASSWORD}" ] || { [ -z "${SUPABASE_PROJECT_ID}" ] && [ -z "${SUPABASE_URL}" ]; }; then
             echo "Missing Supabase DB secret inputs." >&2
             exit 2
           fi
@@ -47,6 +47,7 @@ jobs:
           import os
           import re
           import shlex
+          import socket
           from pathlib import Path
           from urllib.parse import urlparse
 
@@ -72,20 +73,38 @@ jobs:
           supabase_url = os.environ.get("SUPABASE_URL", "").strip()
           parsed = urlparse(supabase_url)
           match = re.search(r"^([a-z0-9][a-z0-9-]{2,63})\.supabase\.co$", parsed.netloc)
-          project_id = match.group(1) if match else os.environ["SUPABASE_PROJECT_ID"].strip()
+          project_id = match.group(1) if match else os.environ.get("SUPABASE_PROJECT_ID", "").strip()
           if not PROJECT_REF_RE.fullmatch(project_id):
               raise SystemExit("Invalid Supabase project reference.")
-          pooler_host = os.environ.get("SUPABASE_DB_POOLER_HOST", "").strip()
-          if not POOLER_HOST_RE.fullmatch(pooler_host):
-              raise SystemExit("Invalid Supabase pooler host.")
-          pooler_port = os.environ.get("SUPABASE_DB_POOLER_PORT", "").strip() or "5432"
-          if not PORT_RE.fullmatch(pooler_port) or not (1 <= int(pooler_port) <= 65535):
-              raise SystemExit("Invalid Supabase pooler port.")
 
-          conn = f"host={pooler_host} port={pooler_port} dbname=postgres user=postgres.{project_id} sslmode=require"
+          pooler_host = os.environ.get("SUPABASE_DB_POOLER_HOST", "").strip() or "aws-0-us-west-2.pooler.supabase.com"
+          if pooler_host:
+              if not POOLER_HOST_RE.fullmatch(pooler_host):
+                  raise SystemExit("Invalid Supabase pooler host.")
+              pooler_port = os.environ.get("SUPABASE_DB_POOLER_PORT", "").strip() or "5432"
+              if not PORT_RE.fullmatch(pooler_port) or not (1 <= int(pooler_port) <= 65535):
+                  raise SystemExit("Invalid Supabase pooler port.")
+              conn = f"host={pooler_host} port={pooler_port} dbname=postgres user=postgres.{project_id} sslmode=require"
+              conn_source = "pooler"
+          else:
+              direct_host = f"db.{project_id}.supabase.co"
+              direct_hostaddr = ""
+              try:
+                  direct_hostaddr = socket.getaddrinfo(
+                      direct_host,
+                      5432,
+                      family=socket.AF_INET,
+                      type=socket.SOCK_STREAM,
+                  )[0][4][0]
+              except OSError as exc:
+                  raise SystemExit("Unable to resolve Supabase direct database IPv4 address.") from exc
+              conn = f"host={direct_host} hostaddr={direct_hostaddr} port=5432 dbname=postgres user=postgres sslmode=require"
+              conn_source = "direct"
           print(f"MIGRATION_PATH={shlex.quote(str(migration_path))}")
           print(f"PSQL_CONN={shlex.quote(conn)}")
+          print(f"CONN_SOURCE={shlex.quote(conn_source)}")
           PY
           )"
 
+          echo "Applying Supabase migration via ${CONN_SOURCE} database connection."
           PGPASSWORD="${SUPABASE_DB_PASSWORD}" psql "${PSQL_CONN}" -v ON_ERROR_STOP=1 -f "${MIGRATION_PATH}"

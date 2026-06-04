@@ -23,6 +23,7 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         actor = payload["actors"].get("ds-govdeals-sold")
         self.assertIsNotNone(actor)
         self.assertEqual(actor["id"], "Ui7FeFY4mIVPnU1fH")
+        self.assertEqual(actor["webhookId"], "OqpMiGHSE8BIgtXP2")
         self.assertEqual(actor["status"], "enabled")
         self.assertIn('"ds-govdeals-sold": "Ui7FeFY4mIVPnU1fH"', workflow)
 
