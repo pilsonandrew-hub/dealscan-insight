@@ -16,6 +16,11 @@ on:
         required: true
         default: "1000"
         type: string
+      opportunity_id:
+        description: "Optional single opportunity id requiring recovered Apify source condition proof"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -39,11 +44,16 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           APPLY: ${{ github.event.inputs.apply }}
           LIMIT: ${{ github.event.inputs.limit }}
+          OPPORTUNITY_ID: ${{ github.event.inputs.opportunity_id }}
         run: |
           set -euo pipefail
           args=(--limit "${LIMIT:-1000}")
+          if [ -n "${OPPORTUNITY_ID:-}" ]; then
+            args+=(--opportunity-id "${OPPORTUNITY_ID}")
+          fi
           if [ "${APPLY}" = "true" ]; then
             args+=(--apply)
           fi
