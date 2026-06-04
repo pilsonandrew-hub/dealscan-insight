@@ -9,11 +9,17 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections import Counter, defaultdict
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from supabase import create_client
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.verify_sold_comp_candidates import (
     build_review_row,
@@ -232,6 +238,10 @@ def build_message(summary: dict[str, Any]) -> str:
 
 
 def main() -> int:
+    if _truthy_env(os.environ.get("SOLD_COMP_VERIFIER_IMPORT_CHECK")):
+        print("SOLD_COMP_VERIFIER_IMPORT_OK")
+        return 0
+
     supabase = create_client(
         os.environ["SUPABASE_URL"],
         os.environ["SUPABASE_SERVICE_ROLE_KEY"],
