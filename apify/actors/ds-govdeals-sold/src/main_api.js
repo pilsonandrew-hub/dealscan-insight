@@ -22,6 +22,7 @@ import {
     recordLotDecision,
 } from './source_quality_diagnostics.js';
 import {
+    DEFAULT_TARGET_TERMS,
     matchesTargetTerms,
     normalizeTargetSearchQueries,
     normalizeTargetTerms,
@@ -32,7 +33,7 @@ const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
 const MAX_DETAIL_PAGES = 100;  // Reduced for sold auctions
 const GOVDEALS_COMPLETED_SEARCH_URL_BASE = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100&timing=completed';
 const DEFAULT_DISPLAY_ROWS = 24;
-const DEFAULT_MAX_SEARCH_QUERIES = 5;
+const DEFAULT_MAX_SEARCH_QUERIES = DEFAULT_TARGET_TERMS.length;
 const runStartedAt = new Date();
 
 await Actor.init();

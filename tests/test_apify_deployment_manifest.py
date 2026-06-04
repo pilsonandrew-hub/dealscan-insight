@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 import unittest
 
 
@@ -67,12 +68,18 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertTrue(target_scope_test_path.exists())
         for target in ["f-150", "f150", "f-250", "silverado 1500", "ram 1500"]:
             self.assertIn(target, target_scope.lower())
+        self.assertIn("DEFAULT_TARGET_TERMS", source)
+        self.assertIn("DEFAULT_MAX_SEARCH_QUERIES = DEFAULT_TARGET_TERMS.length", source)
 
     def test_govdeals_sold_actor_actively_searches_target_terms(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
+        target_scope_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "target_scope.js"
         source = source_path.read_text(encoding="utf-8")
         workflow = workflow_path.read_text(encoding="utf-8")
+        target_scope = target_scope_path.read_text(encoding="utf-8")
+        default_target_terms = re.findall(r"'([^']+)'", target_scope.split("];", 1)[0])
+        default_target_count = len(default_target_terms)
 
         self.assertIn("searchQuery", source)
         self.assertIn("targetSearchQueries", source)
@@ -88,6 +95,14 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn('"out_of_scope_examples"', workflow)
         self.assertIn('"out_of_scope_examples_by_query"', workflow)
         self.assertIn('actor_input["searchQuery"] = search_query', workflow)
+        self.assertIn("govdeals_sold_max_pages", workflow)
+        self.assertIn(f'default: "{default_target_count}"', workflow)
+        self.assertIn(f'"maxPages": int(os.environ.get("GOVDEALS_SOLD_MAX_PAGES") or "{default_target_count}")', workflow)
+        self.assertIn("max_search_queries", workflow)
+        self.assertIn("MAX_SEARCH_QUERIES", workflow)
+        self.assertIn('if max_search_queries:', workflow)
+        self.assertIn('actor_input["maxSearchQueries"] = int(max_search_queries)', workflow)
+        self.assertNotIn('"maxSearchQueries": int(os.environ.get("MAX_SEARCH_QUERIES") or "10")', workflow)
 
 
 if __name__ == "__main__":

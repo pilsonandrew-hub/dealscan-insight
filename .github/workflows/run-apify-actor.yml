@@ -15,6 +15,10 @@ on:
         description: "Max items for bounded GovDeals sold proof runs"
         required: false
         default: "25"
+      govdeals_sold_max_pages:
+        description: "Max pages for GovDeals sold proof runs; default covers one replay page per approved target query"
+        required: false
+        default: "10"
       max_detail_pages:
         description: "Max detail pages input"
         required: false
@@ -43,6 +47,10 @@ on:
         description: "Optional GovDeals searchQuery input"
         required: false
         default: ""
+      max_search_queries:
+        description: "Optional GovDeals sold maxSearchQueries override; blank uses actor default"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -58,6 +66,7 @@ jobs:
           ACTOR_NAME: ${{ inputs.actor }}
           MAX_ITEMS: ${{ inputs.max_items }}
           GOVDEALS_SOLD_MAX_ITEMS: ${{ inputs.govdeals_sold_max_items }}
+          GOVDEALS_SOLD_MAX_PAGES: ${{ inputs.govdeals_sold_max_pages }}
           MAX_DETAIL_PAGES: ${{ inputs.max_detail_pages }}
           TARGET_CATEGORIES: ${{ inputs.target_categories }}
           MAX_PAGES: ${{ inputs.max_pages }}
@@ -65,6 +74,7 @@ jobs:
           MIN_BID: ${{ inputs.min_bid }}
           MAX_BID: ${{ inputs.max_bid }}
           SEARCH_QUERY: ${{ inputs.search_query }}
+          MAX_SEARCH_QUERIES: ${{ inputs.max_search_queries }}
         run: |
           set -euo pipefail
           python3 <<'PY'
@@ -111,9 +121,12 @@ jobs:
                   actor_input["searchQuery"] = search_query
           elif actor_name == "ds-govdeals-sold":
               actor_input = {
-                  "maxPages": int(os.environ.get("MAX_PAGES") or "1"),
+                  "maxPages": int(os.environ.get("GOVDEALS_SOLD_MAX_PAGES") or "10"),
                   "maxItems": int(os.environ.get("GOVDEALS_SOLD_MAX_ITEMS") or "25"),
               }
+              max_search_queries = (os.environ.get("MAX_SEARCH_QUERIES") or "").strip()
+              if max_search_queries:
+                  actor_input["maxSearchQueries"] = int(max_search_queries)
               search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
               if search_query:
                   actor_input["searchQuery"] = search_query
