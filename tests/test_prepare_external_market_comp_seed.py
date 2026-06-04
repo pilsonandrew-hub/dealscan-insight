@@ -169,13 +169,21 @@ def test_insert_seed_row_via_rest_posts_when_no_existing_row(monkeypatch):
     assert [call.get_method() for call in calls] == ["GET", "POST"]
 
 
-def test_insert_seed_row_via_rest_noops_when_existing_row_found(monkeypatch):
+def test_insert_seed_row_via_rest_refreshes_existing_row(monkeypatch):
     seed = prepare_external_market_comp_seed.validate_external_comp_document(_evidence())
     calls = []
 
     def fake_urlopen(request, timeout):
         calls.append(request)
-        return _FakeResponse([{"id": "existing-row"}])
+        if request.get_method() == "GET":
+            return _FakeResponse([{"id": "existing-row"}])
+        assert request.get_method() == "PATCH"
+        payload = json.loads(request.data.decode("utf-8"))
+        assert payload["avg_price"] == float(seed["avg_price"])
+        assert payload["sample_size"] == seed["sample_size"]
+        assert "last_updated" in payload
+        assert "expires_at" in payload
+        return _FakeResponse([{"id": "existing-row", "avg_price": "47468.33", "sample_size": 3}])
 
     monkeypatch.setattr(prepare_external_market_comp_seed.urllib_request, "urlopen", fake_urlopen)
 
@@ -186,5 +194,5 @@ def test_insert_seed_row_via_rest_noops_when_existing_row_found(monkeypatch):
         ttl_days=14,
     )
 
-    assert inserted is None
-    assert [call.get_method() for call in calls] == ["GET"]
+    assert inserted == {"id": "existing-row", "avg_price": "47468.33", "sample_size": 3}
+    assert [call.get_method() for call in calls] == ["GET", "PATCH"]
