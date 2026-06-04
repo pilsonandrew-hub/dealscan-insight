@@ -3207,13 +3207,33 @@ def _sold_comp_vehicle_from_raw_item(raw_item: dict, *, run_id: str, source_hint
     }
 
 
-def _sold_comp_candidate_rejection_reason(*, vehicle: dict, raw_item: dict, sold_price: Any, listing_url: Any) -> Optional[str]:
+def _sold_comp_sale_date(raw_item: dict, vehicle: dict) -> Optional[str]:
+    raw_sale_date = (
+        raw_item.get("sale_date")
+        or raw_item.get("auction_end_time")
+        or raw_item.get("auctionEndUtc")
+        or vehicle.get("auction_end_time")
+    )
+    parsed_sale_date = _parse_datetime_utc(raw_sale_date)
+    return parsed_sale_date.date().isoformat() if parsed_sale_date else None
+
+
+def _sold_comp_candidate_rejection_reason(
+    *,
+    vehicle: dict,
+    raw_item: dict,
+    sold_price: Any,
+    listing_url: Any,
+    sale_date: Any,
+) -> Optional[str]:
     if not listing_url:
         return "missing_listing_url"
     if sold_price in (None, "", 0):
         return "missing_sold_price"
     if not (vehicle.get("year") and vehicle.get("make") and vehicle.get("model")):
         return "missing_year_make_model"
+    if not sale_date:
+        return "invalid_sale_date"
     return None
 
 
@@ -3236,11 +3256,13 @@ def _build_sold_comp_candidate_row(
     source_name = _canonical_source_site(vehicle.get("source_site") or raw_item.get("source_site") or raw_item.get("source")) or "unknown"
     listing_url = vehicle.get("listing_url") or raw_item.get("listing_url") or raw_item.get("url")
     source_listing_id = _sold_comp_source_listing_id(vehicle, raw_item)
+    sale_date = _sold_comp_sale_date(raw_item, vehicle)
     rejection_reason = _sold_comp_candidate_rejection_reason(
         vehicle=vehicle,
         raw_item=raw_item,
         sold_price=sold_price,
         listing_url=listing_url,
+        sale_date=sale_date,
     )
     dedup_basis = "|".join(
         str(part or "")
@@ -3263,7 +3285,7 @@ def _build_sold_comp_candidate_row(
         "evidence_ref": listing_url,
         "sale_status_raw": raw_item.get("sale_status") or raw_item.get("status") or "completed",
         "sale_status_normalized": "candidate_completed",
-        "sale_date": raw_item.get("sale_date") or raw_item.get("auction_end_time") or vehicle.get("auction_end_time"),
+        "sale_date": sale_date,
         "sold_price_raw": sold_price,
         "sold_price_normalized": sold_price,
         "sold_price_hammer": sold_price,
