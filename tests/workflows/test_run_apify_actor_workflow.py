@@ -17,3 +17,12 @@ def test_run_apify_actor_workflow_supports_bounded_govdeals_proof():
     assert "pushed_rows_with_detail_text" in text
     assert "description_samples" in text
     assert "source_quality_proof" in text
+
+
+def test_run_apify_actor_workflow_supports_manual_jjkane_proof():
+    text = WORKFLOW.read_text()
+
+    assert "ds-jjkane" in text
+    assert "lvb7T6VMFfNUQpqlq" in text
+    assert "JJ_KANE_MAX_ITEMS" in text
+    assert '"maxItems": int(os.environ.get("JJ_KANE_MAX_ITEMS") or "75")' in text
