@@ -429,6 +429,13 @@ function buildDescriptionFromLot(lot) {
     ].filter(Boolean).join(' '));
 }
 
+function descriptionNeedsDetailEvidence(lot) {
+    const description = normalizeDetailText(lot.description || '');
+    const title = normalizeDetailText(lot.title || '');
+    if (!description) return true;
+    return Boolean(title && description.toLowerCase() === title.toLowerCase());
+}
+
 function ensureBroadVehiclePayload(payload) {
     const normalized = { ...payload };
     const displayRows = Number(normalized.displayRows || normalized.pageSize || DEFAULT_DISPLAY_ROWS);
@@ -487,7 +494,7 @@ function isBroadVehiclePayload(candidate, reference = null) {
  * Caps at MAX_DETAIL_PAGES to keep scheduled runs bounded and rate-limited.
  */
 async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
-    const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage || !l.description));
+    const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage || descriptionNeedsDetailEvidence(l)));
     const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
 
     if (toScrape.length === 0) {
@@ -518,7 +525,7 @@ async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
                 currentUrl: page.url(),
             });
             lot.detail_text = extractDetailText(bodyText);
-            if (lot.detail_text && !lot.description) lot.description = lot.detail_text;
+            if (lot.detail_text && descriptionNeedsDetailEvidence(lot)) lot.description = lot.detail_text;
 
             // Look for explicit VIN label first
             const vinLabelMatch = bodyText.match(/\bVIN[:\s#\-]*([A-HJ-NPR-Z0-9]{17})\b/i)

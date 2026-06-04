@@ -59,3 +59,36 @@ def test_hot_alert_policy_blocks_proxy_maturity():
     )
     assert allowed is False
     assert reason
+
+
+def test_market_comp_label_without_comp_evidence_does_not_allow_hot_alert():
+    result = classify_pricing_confidence({
+        "pricing_maturity": "market_comp",
+        "mmr_estimated": 24000,
+        "retail_comp_count": 0,
+    })
+
+    assert result.confidence == PricingConfidence.INSUFFICIENT
+    assert result.maturity == "market_comp"
+    assert result.allows_hot_alert is False
+    assert result.blocking_reason == "market_comp_evidence_missing"
+
+    allowed, reason = pricing_allows_hot_alert({
+        "pricing_maturity": "market_comp",
+        "mmr_estimated": 24000,
+        "retail_comp_count": 1,
+        "retail_comp_confidence": 0.9,
+    })
+
+    assert allowed is False
+    assert reason == "market_comp_evidence_missing"
+
+
+def test_market_comp_label_requires_comp_confidence_for_hot_alert():
+    allowed, reason = pricing_allows_hot_alert({
+        "pricing_maturity": "market_comp",
+        "retail_comp_count": 2,
+    })
+
+    assert allowed is False
+    assert reason == "market_comp_confidence_missing"

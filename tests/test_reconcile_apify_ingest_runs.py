@@ -228,6 +228,19 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_treats_sold_comp_candidate_staging_as_db_landing(self):
+        issues = reconcile.classify_run(
+            run_id="run-candidate-staged",
+            apify_run={"run_id": "run-candidate-staged", "status": "SUCCEEDED", "item_count": 3},
+            webhook={"latest_status": "processed"},
+            opportunities={"opportunity_rows": 0},
+            delivery={"channels": {"db_save": {"statuses": {"candidate_staged": 3}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
     def test_classify_run_flags_save_exception_as_db_save_failure(self):
         issues = reconcile.classify_run(
             run_id="run-save-exception",

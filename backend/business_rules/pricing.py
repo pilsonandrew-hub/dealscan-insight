@@ -37,6 +37,15 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
+def _to_int(value: Any) -> int:
+    if value is None or value == "":
+        return 0
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def classify_pricing_confidence(record: Mapping[str, Any]) -> PricingClassification:
     """Classify pricing evidence from an opportunity or score breakdown."""
     breakdown = record.get("score_breakdown")
@@ -60,6 +69,22 @@ def classify_pricing_confidence(record: Mapping[str, Any]) -> PricingClassificat
             maturity="live_market",
             allows_hot_alert=True,
         )
+    comp_count = _to_int(merged.get("retail_comp_count"))
+    comp_conf = _to_float(merged.get("retail_comp_confidence"))
+    if maturity == "market_comp" and comp_count < 2:
+        return PricingClassification(
+            confidence=PricingConfidence.INSUFFICIENT,
+            maturity="market_comp",
+            allows_hot_alert=False,
+            blocking_reason="market_comp_evidence_missing",
+        )
+    if maturity == "market_comp" and (comp_conf is None or comp_conf < 0.6):
+        return PricingClassification(
+            confidence=PricingConfidence.INSUFFICIENT,
+            maturity="market_comp",
+            allows_hot_alert=False,
+            blocking_reason="market_comp_confidence_missing",
+        )
     if maturity == "market_comp":
         return PricingClassification(
             confidence=PricingConfidence.MARKET_COMP,
@@ -67,8 +92,6 @@ def classify_pricing_confidence(record: Mapping[str, Any]) -> PricingClassificat
             allows_hot_alert=True,
         )
 
-    comp_count = int(merged.get("retail_comp_count") or 0)
-    comp_conf = _to_float(merged.get("retail_comp_confidence"))
     if comp_count >= 2 and comp_conf and comp_conf >= 0.6:
         return PricingClassification(
             confidence=PricingConfidence.RETAIL_COMP,

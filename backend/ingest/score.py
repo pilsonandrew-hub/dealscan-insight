@@ -34,6 +34,8 @@ CURRENT_YEAR = _current_year()
 
 SCORE_ENGINE_VERSION = "v3_two_lane"
 SCORE_ENGINE_IMPL = "score_deal_v3_two_lane"
+RETAIL_COMP_MIN_EVIDENCE_COUNT = 2
+RETAIL_COMP_MIN_CONFIDENCE = 0.60
 
 HIGH_DEMAND_MODELS = {
     "camry",
@@ -515,6 +517,18 @@ def _normalize_pct(value: Optional[float], default: float) -> float:
     return max(0.0, pct)
 
 
+def _has_usable_retail_comp_evidence(count: Optional[int], confidence: Optional[float]) -> bool:
+    try:
+        normalized_count = int(count or 0)
+    except (TypeError, ValueError):
+        normalized_count = 0
+    try:
+        normalized_confidence = float(confidence or 0)
+    except (TypeError, ValueError):
+        normalized_confidence = 0.0
+    return normalized_count >= RETAIL_COMP_MIN_EVIDENCE_COUNT and normalized_confidence >= RETAIL_COMP_MIN_CONFIDENCE
+
+
 def _normalized_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
@@ -981,7 +995,7 @@ def score_deal(
 
     if manheim_source_status == "live":
         pricing_maturity = "live_market"
-    elif retail_comp_count and retail_comp_count > 0:
+    elif _has_usable_retail_comp_evidence(retail_comp_count, retail_comp_confidence):
         pricing_maturity = "market_comp"
     else:
         pricing_maturity = "proxy"
