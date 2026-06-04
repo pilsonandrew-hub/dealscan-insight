@@ -26,3 +26,14 @@ def test_run_apify_actor_workflow_supports_manual_jjkane_proof():
     assert "lvb7T6VMFfNUQpqlq" in text
     assert "JJ_KANE_MAX_ITEMS" in text
     assert '"maxItems": int(os.environ.get("JJ_KANE_MAX_ITEMS") or "75")' in text
+
+
+def test_run_apify_actor_workflow_supports_bounded_govplanet_proof():
+    text = WORKFLOW.read_text()
+
+    assert "ds-govplanet" in text
+    assert "pO2t5UDoSVmO1gvKJ" in text
+    assert "GOVPLANET_MAX_ITEMS_PER_CATEGORY" in text
+    assert "GOVPLANET_MAX_DETAIL_PAGES" in text
+    assert '"maxItemsPerCategory": int(os.environ.get("GOVPLANET_MAX_ITEMS_PER_CATEGORY") or "1")' in text
+    assert '"maxDetailPages": int(os.environ.get("GOVPLANET_MAX_DETAIL_PAGES") or "1")' in text
