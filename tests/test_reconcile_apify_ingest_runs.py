@@ -199,6 +199,19 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_classify_run_treats_source_quality_proof_skip_as_accounted(self):
+        issues = reconcile.classify_run(
+            run_id="run-proof-skip",
+            apify_run={"run_id": "run-proof-skip", "status": "SUCCEEDED", "item_count": 2},
+            webhook={"latest_status": "processed"},
+            opportunities=None,
+            delivery={"channels": {"db_save": {"statuses": {"skipped_proof": 1, "skipped_ceiling": 1}}}},
+            now_utc=datetime.now(timezone.utc),
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(issues, [])
+
     def test_classify_run_flags_partial_db_save_ledger_before_generic_no_landing(self):
         issues = reconcile.classify_run(
             run_id="run-partial-ledger",

@@ -44,6 +44,7 @@ DB_SAVE_SKIPPED_STATUSES = {
     "skipped_gate",
     "skipped_margin",
     "skipped_norm",
+    "skipped_proof",
     "skipped_score",
 }
 DB_SAVE_FAILURE_STATUSES = {

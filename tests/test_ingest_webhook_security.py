@@ -1326,7 +1326,9 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(response["status"], "ok")
         self.assertEqual(len(staged_candidates), 1)
         self.assertEqual(staged_candidates[0]["raw_item"]["title"], "3052A/ 2014 Ford F-150")
-        self.assertEqual([call["status"] for call in delivery_calls], ["candidate_staged"])
+        self.assertEqual([call["status"] for call in delivery_calls], ["skipped_proof", "candidate_staged"])
+        self.assertEqual(delivery_calls[0]["channel"], "db_save")
+        self.assertEqual(delivery_calls[0]["error_message"], "source_quality_proof_record")
 
     def test_stage_sold_comp_candidate_creates_run_ledger_before_candidate(self):
         supabase = _ExistingCandidateSupabase([])
