@@ -18,6 +18,11 @@ import {
     completedSaleRejectionReason,
 } from './sold_date_contract.js';
 import {
+    extractSeoAssetUrls,
+    parseGovDealsSeoAsset,
+    seoSearchUrl,
+} from './govdeals_seo.js';
+import {
     createQueryDiagnostics,
     recordLotDecision,
 } from './source_quality_diagnostics.js';
@@ -34,11 +39,25 @@ const MAX_DETAIL_PAGES = 100;  // Reduced for sold auctions
 const GOVDEALS_COMPLETED_SEARCH_URL_BASE = 'https://www.govdeals.com/index.cfm?fa=Main.AdvSearchResultsNew&searchPg=1&category=4100&timing=completed';
 const DEFAULT_DISPLAY_ROWS = 24;
 const DEFAULT_MAX_SEARCH_QUERIES = DEFAULT_TARGET_TERMS.length;
+const DEFAULT_SEO_ASSETS_PER_QUERY = 1;
+const DEFAULT_SEO_TIME_BUDGET_MS = 90000;
+const DEFAULT_SEO_FETCH_TIMEOUT_MS = 15000;
 const runStartedAt = new Date();
 
 await Actor.init();
 const input = await Actor.getInput() ?? {};
-const { maxPages = 10, maxItems = 500, searchQuery = "", maxSearchQueries = DEFAULT_MAX_SEARCH_QUERIES } = input;
+const {
+    maxPages = 10,
+    maxItems = 500,
+    searchQuery = "",
+    maxSearchQueries = DEFAULT_MAX_SEARCH_QUERIES,
+    categoryIds = input.govdealsCategoryIds ?? input.categoryIds ?? null,
+    seoAssetUrls = input.govdealsSeoAssetUrls ?? input.seoAssetUrls ?? [],
+    useSeoSearch = false,
+    seoAssetsPerQuery = DEFAULT_SEO_ASSETS_PER_QUERY,
+    seoTimeBudgetMs = DEFAULT_SEO_TIME_BUDGET_MS,
+    seoFetchTimeoutMs = DEFAULT_SEO_FETCH_TIMEOUT_MS,
+} = input;
 const targetTerms = normalizeTargetTerms(input.targetTerms);
 const targetSearchQueries = normalizeTargetSearchQueries({
     searchQuery,
@@ -50,6 +69,17 @@ const targetSearchQueries = normalizeTargetSearchQueries({
 let totalFound = 0, totalPassed = 0, totalSkippedOutOfScope = 0, totalSkippedNotCompleted = 0;
 const completedSaleRejectionCounts = {};
 const queryDiagnostics = createQueryDiagnostics(['intercepted', ...targetSearchQueries]);
+const seoDiagnostics = {
+    enabled: Boolean(useSeoSearch),
+    search_pages_attempted: 0,
+    asset_urls_discovered: 0,
+    asset_pages_attempted: 0,
+    explicit_asset_urls: 0,
+    parsed_vehicle_pages: 0,
+    rejected_vehicle_pages: 0,
+    fetch_failures: 0,
+    timed_out: false,
+};
 const capturedApi = {
     apiKey: null,
     searchUrl: 'https://maestro.lqdt1.com/search/list',
@@ -60,6 +90,27 @@ const capturedApi = {
 
 // Collect passing lots in memory so we can VIN-enrich before pushing
 const passingLots = [];
+
+function normalizeSeoAssetUrls(urls) {
+    const sourceUrls = Array.isArray(urls) ? urls : String(urls || '').split(/[\n,]+/);
+    const seen = new Set();
+    return sourceUrls
+        .map(url => String(url || '').trim())
+        .filter(Boolean)
+        .map((url) => {
+            const match = url.match(/\/en\/asset\/(\d+)\/(\d+)/i);
+            return match ? `https://prod-seo.govdeals.com/en/asset/${match[1]}/${match[2]}` : null;
+        })
+        .filter(Boolean)
+        .filter((url) => {
+            if (seen.has(url)) return false;
+            seen.add(url);
+            return true;
+        });
+}
+
+const explicitSeoAssetUrls = normalizeSeoAssetUrls(seoAssetUrls);
+seoDiagnostics.explicit_asset_urls = explicitSeoAssetUrls.length;
 
 function replayHeadersFromBrowser(headers) {
     const required = [
@@ -140,6 +191,11 @@ function sourceQualityProof() {
         out_of_scope_examples: queryDiagnostics.out_of_scope_examples,
         out_of_scope_examples_by_query: queryDiagnostics.out_of_scope_examples_by_query,
         max_pages_total: maxPages,
+        discovery_surfaces: {
+            maestro_search_list: Boolean(capturedApi.apiKey),
+            govdeals_seo: Boolean(useSeoSearch || explicitSeoAssetUrls.length > 0),
+        },
+        seo_diagnostics: seoDiagnostics,
         generated_at: new Date().toISOString(),
     };
 }
@@ -149,7 +205,12 @@ function buildCompletedSearchPayload(searchText, basePayload = {}) {
     const query = String(searchText || '').trim() || '*';
     const displayRows = Number(payload.displayRows || payload.pageSize || DEFAULT_DISPLAY_ROWS);
 
-    payload.categoryIds = payload.categoryIds || '4100';
+    const categoryScope = String(categoryIds ?? '').trim();
+    if (categoryScope) {
+        payload.categoryIds = categoryScope;
+    } else {
+        delete payload.categoryIds;
+    }
     payload.requestType = payload.requestType || 'search';
     payload.responseStyle = payload.responseStyle || 'productsOnly';
     payload.businessId = payload.businessId || 'GD';
@@ -173,6 +234,102 @@ function buildCompletedSearchPayload(searchText, basePayload = {}) {
     delete payload.skip;
 
     return payload;
+}
+
+async function fetchText(url, log) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(seoFetchTimeoutMs) || DEFAULT_SEO_FETCH_TIMEOUT_MS));
+    const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'user-agent': 'Mozilla/5.0 (compatible; DealerScopeBot/1.0; +https://dealerscope.local)',
+        },
+    }).finally(() => clearTimeout(timeout));
+    if (!response.ok) {
+        throw new Error(`status ${response.status}`);
+    }
+    const text = await response.text();
+    log.info(`[SEO] Fetched ${url}`);
+    return text;
+}
+
+async function collectSeoSoldAssets(log, seenIds = new Set()) {
+    const perQueryLimit = Math.max(1, Number(seoAssetsPerQuery) || DEFAULT_SEO_ASSETS_PER_QUERY);
+    const deadline = Date.now() + Math.max(1000, Number(seoTimeBudgetMs) || DEFAULT_SEO_TIME_BUDGET_MS);
+
+    function budgetAvailable() {
+        if (Date.now() < deadline) return true;
+        seoDiagnostics.timed_out = true;
+        log.warning('[SEO] Time budget exhausted; stopping SEO discovery before crawler timeout');
+        return false;
+    }
+
+    for (const assetUrl of explicitSeoAssetUrls) {
+        if (!budgetAvailable()) break;
+        if (passingLots.length >= maxItems) break;
+        const assetKey = assetUrl.match(/\/en\/asset\/(\d+)\/(\d+)/i)?.[1];
+        if (assetKey && seenIds.has(assetKey)) continue;
+
+        try {
+            seoDiagnostics.asset_urls_discovered++;
+            seoDiagnostics.asset_pages_attempted++;
+            const assetHtml = await fetchText(assetUrl, log);
+            const lot = parseGovDealsSeoAsset(assetHtml, assetUrl);
+            if (!lot) {
+                seoDiagnostics.rejected_vehicle_pages++;
+                continue;
+            }
+            seoDiagnostics.parsed_vehicle_pages++;
+            stageTargetLot(lot, seenIds, 'seo: explicit_asset_urls');
+        } catch (err) {
+            seoDiagnostics.fetch_failures++;
+            log.warning(`[SEO] Explicit asset fetch failed for ${assetUrl}: ${err.message}`);
+        }
+    }
+
+    if (!useSeoSearch) return;
+
+    for (const query of targetSearchQueries) {
+        if (!budgetAvailable()) break;
+        if (passingLots.length >= maxItems) break;
+        const searchUrl = seoSearchUrl(query);
+        let assetUrls = [];
+
+        try {
+            seoDiagnostics.search_pages_attempted++;
+            const searchHtml = await fetchText(searchUrl, log);
+            assetUrls = extractSeoAssetUrls(searchHtml, perQueryLimit);
+            seoDiagnostics.asset_urls_discovered += assetUrls.length;
+            log.info(`[SEO] ${query}: discovered ${assetUrls.length} asset URLs`);
+        } catch (err) {
+            seoDiagnostics.fetch_failures++;
+            log.warning(`[SEO] Search fetch failed for "${query}": ${err.message}`);
+            continue;
+        }
+
+        for (const assetUrl of assetUrls) {
+            if (!budgetAvailable()) break;
+            if (passingLots.length >= maxItems) break;
+            const assetKey = assetUrl.match(/\/en\/asset\/(\d+)\/(\d+)/i)?.[1];
+            if (assetKey && seenIds.has(assetKey)) continue;
+
+            try {
+                seoDiagnostics.asset_pages_attempted++;
+                const assetHtml = await fetchText(assetUrl, log);
+                const lot = parseGovDealsSeoAsset(assetHtml, assetUrl);
+                if (!lot) {
+                    seoDiagnostics.rejected_vehicle_pages++;
+                    continue;
+                }
+                seoDiagnostics.parsed_vehicle_pages++;
+                stageTargetLot(lot, seenIds, `seo: ${query}`);
+            } catch (err) {
+                seoDiagnostics.fetch_failures++;
+                log.warning(`[SEO] Asset fetch failed for ${assetUrl}: ${err.message}`);
+            }
+        }
+    }
 }
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
@@ -301,12 +458,12 @@ const crawler = new PlaywrightCrawler({
         }
 
         // ── Save results ───────────────────────────────────────
+        const seenIds = new Set();
         if (capturedApi.apiKey) {
             log.info('✅ maestro x-api-key captured successfully');
             log.info(`Search API URL: ${capturedApi.searchUrl || 'NOT FOUND'}`);
 
             // Step 1: Collect intercepted lots from page load (page 1)
-            const seenIds = new Set();
             if (capturedApi.interceptedLots.length > 0) {
                 log.info(`Processing ${capturedApi.interceptedLots.length} intercepted lots from page load`);
                 for (const lot of capturedApi.interceptedLots) {
@@ -330,19 +487,24 @@ const crawler = new PlaywrightCrawler({
                     remainingPageBudget -= usedPages;
                 }
             }
-
-            // Step 3: Push all lots immediately (before VIN scraping to avoid data loss)
-            for (const lot of passingLots) {
-                await Actor.pushData(lot);
-            }
-            await Actor.pushData(sourceQualityProof());
-            log.info(`[GOVDEALS-SOLD] Pushed ${passingLots.length} completed auction records`);
-            log.info(`[GOVDEALS-SOLD] Target filter skipped ${totalSkippedOutOfScope} out-of-scope completed lots`);
-            log.info(`[GOVDEALS-SOLD] Completed-sale filter skipped ${totalSkippedNotCompleted} lots: ${JSON.stringify(completedSaleRejectionCounts)}`);
         } else {
             log.warning('❌ No maestro x-api-key captured');
             log.warning('Angular may not have hit maestro yet, or the request pattern changed');
         }
+
+        if ((useSeoSearch || explicitSeoAssetUrls.length > 0) && passingLots.length < maxItems) {
+            await collectSeoSoldAssets(log, seenIds);
+        }
+
+        // Push all lots immediately after discovery (before any optional detail scraping)
+        // to avoid data loss.
+        for (const lot of passingLots) {
+            await Actor.pushData(lot);
+        }
+        await Actor.pushData(sourceQualityProof());
+        log.info(`[GOVDEALS-SOLD] Pushed ${passingLots.length} completed auction records`);
+        log.info(`[GOVDEALS-SOLD] Target filter skipped ${totalSkippedOutOfScope} out-of-scope completed lots`);
+        log.info(`[GOVDEALS-SOLD] Completed-sale filter skipped ${totalSkippedNotCompleted} lots: ${JSON.stringify(completedSaleRejectionCounts)}`);
     },
 });
 
@@ -359,6 +521,10 @@ function normalizeLot(lot) {
         year:          lot.modelYear || lot.year || null,
         current_bid:   lot.currentBid || lot.current_bid || lot.assetBidPrice || 0,
         sold_price:    soldPrice,
+        sold_price_all_in: lot.sold_price_all_in || soldPrice,
+        total_price:    lot.total_price || null,
+        price_basis:    lot.price_basis || 'source_reported',
+        currency:       lot.currency || 'USD',
         state:         lot.locationState || lot.state || '',
         city:          lot.locationCity || lot.city || '',
         sale_date:      saleDate,
@@ -369,6 +535,7 @@ function normalizeLot(lot) {
         vin:           extractVinFromLot(lot),
         mileage:       lot.meterCount || null,
         source_site:   'govdeals-sold',
+        source_discovery: lot.source_discovery || 'maestro-search-list',
         scraped_at:    new Date().toISOString(),
     };
 }

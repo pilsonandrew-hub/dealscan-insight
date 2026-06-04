@@ -51,6 +51,10 @@ on:
         description: "Optional GovDeals sold maxSearchQueries override; blank uses actor default"
         required: false
         default: ""
+      govdeals_sold_seo_asset_urls:
+        description: "Optional GovDeals sold asset URLs for explicit SEO asset-page proof; comma or newline separated"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -75,6 +79,7 @@ jobs:
           MAX_BID: ${{ inputs.max_bid }}
           SEARCH_QUERY: ${{ inputs.search_query }}
           MAX_SEARCH_QUERIES: ${{ inputs.max_search_queries }}
+          GOVDEALS_SOLD_SEO_ASSET_URLS: ${{ inputs.govdeals_sold_seo_asset_urls }}
         run: |
           set -euo pipefail
           python3 <<'PY'
@@ -130,6 +135,14 @@ jobs:
               search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
               if search_query:
                   actor_input["searchQuery"] = search_query
+              seo_asset_urls = [
+                  value.strip()
+                  for chunk in (os.environ.get("GOVDEALS_SOLD_SEO_ASSET_URLS") or "").splitlines()
+                  for value in chunk.split(",")
+                  if value.strip()
+              ]
+              if seo_asset_urls:
+                  actor_input["seoAssetUrls"] = seo_asset_urls
           else:
               actor_input = {
                   "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
@@ -193,6 +206,8 @@ jobs:
                           "query_diagnostics",
                           "out_of_scope_examples",
                           "out_of_scope_examples_by_query",
+                          "discovery_surfaces",
+                          "seo_diagnostics",
                           "max_pages_total",
                           "detail_pages_attempted",
                           "detail_pages_fetched",

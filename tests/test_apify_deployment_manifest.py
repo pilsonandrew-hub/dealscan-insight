@@ -96,13 +96,42 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn('"out_of_scope_examples_by_query"', workflow)
         self.assertIn('actor_input["searchQuery"] = search_query', workflow)
         self.assertIn("govdeals_sold_max_pages", workflow)
+        self.assertIn("govdeals_sold_seo_asset_urls", workflow)
         self.assertIn(f'default: "{default_target_count}"', workflow)
         self.assertIn(f'"maxPages": int(os.environ.get("GOVDEALS_SOLD_MAX_PAGES") or "{default_target_count}")', workflow)
         self.assertIn("max_search_queries", workflow)
         self.assertIn("MAX_SEARCH_QUERIES", workflow)
         self.assertIn('if max_search_queries:', workflow)
         self.assertIn('actor_input["maxSearchQueries"] = int(max_search_queries)', workflow)
+        self.assertIn('actor_input["seoAssetUrls"] = seo_asset_urls', workflow)
+        govdeals_branch = workflow.split('if actor_name == "ds-govdeals":', 1)[1].split('elif actor_name == "ds-govdeals-sold":', 1)[0]
+        sold_branch = workflow.split('elif actor_name == "ds-govdeals-sold":', 1)[1].split("else:", 1)[0]
+        self.assertNotIn('actor_input["seoAssetUrls"] = seo_asset_urls', govdeals_branch)
+        self.assertIn('actor_input["seoAssetUrls"] = seo_asset_urls', sold_branch)
+        self.assertIn('"seo_diagnostics"', workflow)
+        self.assertIn('"discovery_surfaces"', workflow)
         self.assertNotIn('"maxSearchQueries": int(os.environ.get("MAX_SEARCH_QUERIES") or "10")', workflow)
+
+    def test_govdeals_sold_actor_does_not_force_passenger_vehicle_category(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertIn("categoryIds = input.govdealsCategoryIds ?? input.categoryIds ?? null", source)
+        self.assertIn("delete payload.categoryIds", source)
+        self.assertIn("payload.categoryIds = categoryScope", source)
+        self.assertNotIn("payload.categoryIds = payload.categoryIds || '4100'", source)
+
+    def test_govdeals_sold_actor_supports_explicit_seo_asset_urls_without_enabling_search(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertIn("seoAssetUrls = input.govdealsSeoAssetUrls ?? input.seoAssetUrls ?? []", source)
+        self.assertIn("normalizeSeoAssetUrls", source)
+        self.assertIn("explicit_asset_urls", source)
+        self.assertIn("'seo: explicit_asset_urls'", source)
+        self.assertIn("useSeoSearch = false", source)
+        self.assertIn("if (!useSeoSearch) return", source)
+        self.assertIn("(useSeoSearch || explicitSeoAssetUrls.length > 0)", source)
 
 
 if __name__ == "__main__":
