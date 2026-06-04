@@ -20,7 +20,9 @@ def test_supabase_apply_migration_workflow_uses_direct_db_secret_without_printin
 
     assert "SUPABASE_DB_PASSWORD" in text
     assert "SUPABASE_PROJECT_ID" in text
-    assert "postgresql://postgres:" in text
+    assert "SUPABASE_DB_POOLER_HOST" in text
+    assert "aws-0-us-west-1.pooler.supabase.com" in text
+    assert "postgresql://postgres.{project_id}:" in text
     assert "psql" in text
     assert "echo ${DATABASE_URL}" not in text
     assert "echo \"$DATABASE_URL\"" not in text
