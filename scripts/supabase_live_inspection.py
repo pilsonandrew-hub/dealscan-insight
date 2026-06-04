@@ -34,6 +34,10 @@ TABLES = {
         "timestamp_candidates": ["created_at", "updated_at", "delivered_at"],
         "status_candidates": ["status", "channel", "delivery_status"],
     },
+    "post_close_outcome_requests": {
+        "timestamp_candidates": ["created_at", "updated_at", "last_checked_at", "next_check_at"],
+        "status_candidates": ["outcome_status", "referral_source", "source_site"],
+    },
 }
 
 HIGH_RUST_STATES = {
@@ -387,6 +391,45 @@ def _summarize_sold_comp_candidate_rows(rows: list[dict[str, Any]]) -> dict[str,
     }
 
 
+def _summarize_post_close_outcome_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    outcome_status_counts: Counter[str] = Counter()
+    referral_source_counts: Counter[str] = Counter()
+    referral_reason_counts: Counter[str] = Counter()
+    check_attempts_total = 0
+    latest_created_at = None
+    latest_updated_at = None
+    next_check_at = None
+    for row in rows:
+        source_counts[str(row.get("source_site") or "unknown")[:80]] += 1
+        outcome_status_counts[str(row.get("outcome_status") or "unknown")[:80]] += 1
+        referral_source_counts[str(row.get("referral_source") or "unknown")[:80]] += 1
+        referral_reason = row.get("referral_reason")
+        if referral_reason:
+            referral_reason_counts[str(referral_reason)[:120]] += 1
+        check_attempts_total += _coerce_int(row.get("check_attempts")) or 0
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        row_next_check_at = row.get("next_check_at")
+        if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
+            latest_created_at = created_at
+        if updated_at and (latest_updated_at is None or str(updated_at) > str(latest_updated_at)):
+            latest_updated_at = updated_at
+        if row_next_check_at and (next_check_at is None or str(row_next_check_at) < str(next_check_at)):
+            next_check_at = row_next_check_at
+    return {
+        "sample_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "outcome_status_counts": dict(outcome_status_counts.most_common(20)),
+        "referral_source_counts": dict(referral_source_counts.most_common(20)),
+        "referral_reason_counts": dict(referral_reason_counts.most_common(20)),
+        "check_attempts_total": check_attempts_total,
+        "latest_created_at": latest_created_at,
+        "latest_updated_at": latest_updated_at,
+        "next_check_at": next_check_at,
+    }
+
+
 def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[str, Any]:
     delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
     delivery_select = ",".join([
@@ -535,6 +578,35 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         key = row.get("status") or row.get("processing_status") or row.get("db_save") or "unknown"
         webhook_status_counts[str(key)[:80]] += 1
 
+    post_close_report: dict[str, Any]
+    try:
+        post_close_columns = _available_columns(base_url, service_key, "post_close_outcome_requests")
+        post_close_select = ",".join([
+            col for col in [
+                "source_site",
+                "outcome_status",
+                "referral_source",
+                "referral_reason",
+                "check_attempts",
+                "created_at",
+                "updated_at",
+                "next_check_at",
+            ]
+            if col in post_close_columns
+        ]) or "created_at"
+        post_close_order = "created_at" if "created_at" in post_close_columns else post_close_select.split(",", 1)[0]
+        post_close_rows = _recent_rows(
+            base_url,
+            service_key,
+            "post_close_outcome_requests",
+            post_close_select,
+            post_close_order,
+            200,
+        )
+        post_close_report = _summarize_post_close_outcome_rows(post_close_rows)
+    except Exception as exc:
+        post_close_report = {"failure": str(exc)[:500]}
+
     return {
         "recent_opportunities": _summarize_recent_opportunity_truth(recent_opportunities),
         "recent_alerts": {
@@ -548,6 +620,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
             "status_counts": dict(webhook_status_counts.most_common(20)),
             "latest_received_at": next((row.get("received_at") for row in webhook_rows if row.get("received_at")), None),
         },
+        "post_close_outcome_requests": post_close_report,
         "truth_boundary": "Samples only sanitized aggregate fields from recent rows. Does not print VINs, titles, URLs, user data, tokens, or raw listing payloads.",
     }
 
