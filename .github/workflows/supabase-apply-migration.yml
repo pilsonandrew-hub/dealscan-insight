@@ -1,0 +1,78 @@
+name: DealerScope Supabase Apply Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      migration_file:
+        description: "Migration SQL file under supabase/migrations/"
+        required: true
+        default: "20260603_post_close_outcome_requests.sql"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  apply-migration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply allowlisted Supabase migration
+        env:
+          MIGRATION_FILE: ${{ inputs.migration_file }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+
+          case "${MIGRATION_FILE}" in
+            supabase/migrations/*.sql)
+              MIGRATION_PATH="${MIGRATION_FILE}"
+              ;;
+            *.sql)
+              MIGRATION_PATH="supabase/migrations/${MIGRATION_FILE}"
+              ;;
+            *)
+              echo "Migration file must be a SQL file under supabase/migrations." >&2
+              exit 2
+              ;;
+          esac
+
+          case "${MIGRATION_PATH}" in
+            *../*|../*|/*)
+              echo "Migration path traversal is not allowed." >&2
+              exit 2
+              ;;
+          esac
+
+          if [ ! -f "${MIGRATION_PATH}" ]; then
+            echo "Migration file was not found." >&2
+            exit 2
+          fi
+
+          if [ -z "${SUPABASE_DB_PASSWORD}" ] || [ -z "${SUPABASE_PROJECT_ID}" ]; then
+            echo "Missing Supabase DB secret inputs." >&2
+            exit 2
+          fi
+
+          DATABASE_URL="$(python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          project_id = os.environ["SUPABASE_PROJECT_ID"].strip()
+          password = quote(os.environ["SUPABASE_DB_PASSWORD"], safe="")
+          print(f"postgresql://postgres:{password}@db.{project_id}.supabase.co:5432/postgres?sslmode=require")
+          PY
+          )"
+
+          psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f "${MIGRATION_PATH}"
