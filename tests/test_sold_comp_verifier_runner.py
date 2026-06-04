@@ -1,6 +1,13 @@
 from datetime import date
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 from scripts import run_sold_comp_verifier
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Result:
@@ -198,3 +205,29 @@ def test_verifier_message_is_aggregate_only():
     assert "accepted=1" in message
     assert "https://" not in message
     assert "1FTEW" not in message
+
+
+def test_verifier_script_can_be_executed_from_repo_root_like_github_actions():
+    env = {
+        **os.environ,
+        "SUPABASE_URL": "https://example.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "test-service-role-key",
+        "SOLD_COMP_VERIFIER_DRY_RUN": "true",
+        "SOLD_COMP_VERIFIER_IMPORT_CHECK": "true",
+    }
+    env.pop("PYTHONPATH", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_sold_comp_verifier.py",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    assert "SOLD_COMP_VERIFIER_IMPORT_OK" in result.stdout
+    assert "ModuleNotFoundError: No module named 'scripts'" not in result.stderr
