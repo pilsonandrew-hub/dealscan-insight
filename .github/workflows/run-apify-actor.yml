@@ -177,6 +177,8 @@ jobs:
                           "rows_excluded_not_completed_sale",
                           "completed_sale_rejection_reasons",
                           "target_search_queries",
+                          "query_diagnostics",
+                          "out_of_scope_examples",
                           "max_pages_total",
                           "detail_pages_attempted",
                           "detail_pages_fetched",

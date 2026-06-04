@@ -10,6 +10,11 @@ import {
     completedSaleDate,
     hasCompletedSaleEvidence,
 } from '../src/sold_date_contract.js';
+import {
+    createQueryDiagnostics,
+    recordLotDecision,
+    sanitizedOutOfScopeExample,
+} from '../src/source_quality_diagnostics.js';
 
 describe('GovDeals sold target scope', () => {
     test('matches approved DealerScope comp models with common separators', () => {
@@ -83,5 +88,36 @@ describe('GovDeals sold target scope', () => {
             hasCompletedSaleEvidence({ title: '2019 Ford F-150' }, now),
             false,
         );
+    });
+
+    test('records sanitized per-query diagnostics without raw URLs or VINs', () => {
+        const diagnostics = createQueryDiagnostics(['f-150']);
+        const lot = {
+            assetShortDescription: 'Industrial generator trailer',
+            makebrand: 'Ford',
+            vin: '1FTFW1E50PFA00000',
+            url: 'https://example.invalid/private-listing',
+            assetId: '12345',
+        };
+
+        recordLotDecision(diagnostics, 'f-150', 'out_of_scope', lot);
+        recordLotDecision(diagnostics, 'f-150', 'future_sale_date', lot);
+
+        assert.deepEqual(diagnostics.query_counts['f-150'], {
+            found: 2,
+            passed: 0,
+            out_of_scope: 1,
+            not_completed_sale: 1,
+            future_sale_date: 1,
+            missing_sale_date: 0,
+            unparseable_sale_date: 0,
+        });
+        assert.deepEqual(sanitizedOutOfScopeExample(lot), {
+            asset_id_present: true,
+            keys_present: ['assetId', 'assetShortDescription', 'makebrand', 'url', 'vin'],
+            search_text_excerpt: 'industrial generator trailer ford',
+        });
+        assert.equal(JSON.stringify(diagnostics).includes('example.invalid'), false);
+        assert.equal(JSON.stringify(diagnostics).includes('1FTFW1E50PFA00000'), false);
     });
 });
