@@ -81,8 +81,8 @@ def _fetch_candidates(supabase: Any, *, limit: int, run_id: str | None = None) -
         .in_("candidate_status", ["candidate", "rejected", "needs_review"])
     )
     if run_id:
-        query = query.eq("run_id", run_id)
-    response = query.order("created_at", desc=True).limit(limit).execute()
+        query = query.eq("run_id", run_id).order("created_at", desc=True)
+    response = query.limit(limit).execute()
     return response.data or []
 
 

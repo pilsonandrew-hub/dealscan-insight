@@ -90,6 +90,13 @@ class _Query:
             elif filter_item[0] == "eq":
                 _kind, column, value = filter_item
                 rows = [row for row in rows if row.get(column) == value]
+            elif filter_item[0] == "order":
+                _kind, column, kwargs = filter_item
+                rows = sorted(
+                    rows,
+                    key=lambda row: row.get(column) or "",
+                    reverse=bool(kwargs.get("desc")),
+                )
             elif filter_item[0] == "limit":
                 rows = rows[: filter_item[1]]
         return _Result(rows)
@@ -210,6 +217,54 @@ def test_verifier_runner_can_scope_candidates_to_one_run_id():
     assert summary["decision_counts"] == {"accepted": 1}
     candidate_read = next(read for read in client.reads if read["table"] == "sold_comp_candidates")
     assert ("eq", "run_id", "fresh-run") in candidate_read["filters"]
+
+
+def test_verifier_runner_does_not_order_unscoped_default_query():
+    client = _Client(
+        {
+            "sold_comp_candidates": [
+                _candidate(id="first-candidate", source_listing_id="asset-first", created_at="2026-06-01T00:00:00Z"),
+                _candidate(id="second-candidate", source_listing_id="asset-second", created_at="2026-06-02T00:00:00Z"),
+            ],
+            "verified_sold_comps": [],
+        }
+    )
+
+    run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=True,
+        today=date(2026, 6, 3),
+        reviewer_version="test-v1",
+    )
+
+    candidate_read = next(read for read in client.reads if read["table"] == "sold_comp_candidates")
+    assert not any(filter_item[0] == "order" for filter_item in candidate_read["filters"])
+
+
+def test_verifier_runner_orders_scoped_query_by_newest_candidate():
+    client = _Client(
+        {
+            "sold_comp_candidates": [
+                _candidate(id="old-candidate", run_id="fresh-run", source_listing_id="old-asset", created_at="2026-06-01T00:00:00Z"),
+                _candidate(id="new-candidate", run_id="fresh-run", source_listing_id="new-asset", created_at="2026-06-02T00:00:00Z"),
+            ],
+            "verified_sold_comps": [],
+        }
+    )
+
+    summary = run_sold_comp_verifier.run_verifier(
+        client,
+        dry_run=True,
+        today=date(2026, 6, 3),
+        limit=1,
+        run_id="fresh-run",
+        reviewer_version="test-v1",
+    )
+
+    candidate_read = next(read for read in client.reads if read["table"] == "sold_comp_candidates")
+    assert ("order", "created_at", {"desc": True}) in candidate_read["filters"]
+    assert summary["candidates_reviewed"] == 1
+    assert summary["run_id"] == "fresh-run"
 
 
 def test_verifier_runner_write_mode_touches_only_comp_ledger_tables():

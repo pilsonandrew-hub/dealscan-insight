@@ -23,7 +23,7 @@ import re
 import os
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg2
 from psycopg2 import extras as psycopg2_extras
@@ -3203,7 +3203,7 @@ def _sold_comp_vehicle_from_raw_item(raw_item: dict, *, run_id: str, source_hint
         "city": _first_present(raw_item, "city", "locationCity"),
         "state": _first_present(raw_item, "state", "locationState"),
         "seller": _first_present(raw_item, "seller", "agency_name", "agencyName"),
-        "auction_end_time": _first_present(raw_item, "sale_date", "auction_end_time", "auctionEndUtc"),
+        "auction_end_time": _first_present(raw_item, "sale_date", "auction_end_time", "auction_end_date", "auctionEndUtc"),
     }
 
 
@@ -3211,6 +3211,7 @@ def _sold_comp_sale_date(raw_item: dict, vehicle: dict) -> Optional[str]:
     raw_sale_date = (
         raw_item.get("sale_date")
         or raw_item.get("auction_end_time")
+        or raw_item.get("auction_end_date")
         or raw_item.get("auctionEndUtc")
         or vehicle.get("auction_end_time")
     )
@@ -3222,7 +3223,7 @@ def _sold_comp_sale_date_is_future(sale_date: Any) -> bool:
     if not sale_date:
         return False
     try:
-        parsed_sale_date = datetime.fromisoformat(str(sale_date)).date()
+        parsed_sale_date = date.fromisoformat(str(sale_date))
     except ValueError:
         return False
     return parsed_sale_date > datetime.now(timezone.utc).date()
