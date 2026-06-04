@@ -3455,6 +3455,55 @@ def _existing_sold_comp_candidate_status_direct_pg(source_name: str, source_list
     return str(row[0]) if row and row[0] else None
 
 
+def _verify_sold_comp_candidate_durable(source_name: str, source_listing_id: str, run_id: str) -> None:
+    if supabase_client is None:
+        return
+    try:
+        response = (
+            supabase_client.table("sold_comp_candidates")
+            .select("id,run_id,candidate_status")
+            .eq("source_name", source_name)
+            .eq("source_listing_id", source_listing_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as lookup_err:
+        logger.warning("[INGEST] Sold comp candidate durability lookup failed: %s", lookup_err)
+        raise RuntimeError("sold_comp_candidate_durability_lookup_failed") from lookup_err
+    rows = response.data or []
+    if not rows:
+        raise RuntimeError("sold_comp_candidate_not_durable")
+    persisted_run_id = rows[0].get("run_id")
+    if persisted_run_id and persisted_run_id != run_id:
+        raise RuntimeError("sold_comp_candidate_run_mismatch")
+
+
+def _verify_sold_comp_candidate_durable_direct_pg(source_name: str, source_listing_id: str, run_id: str) -> None:
+    if not _direct_supabase_db_url:
+        return
+    try:
+        with psycopg2.connect(_direct_supabase_db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT run_id
+                    FROM public.sold_comp_candidates
+                    WHERE source_name = %s AND source_listing_id = %s
+                    LIMIT 1
+                    """,
+                    (source_name, source_listing_id),
+                )
+                row = cur.fetchone()
+    except Exception as lookup_err:
+        logger.warning("[INGEST] Direct PG sold comp candidate durability lookup failed: %s", lookup_err)
+        raise RuntimeError("sold_comp_candidate_durability_lookup_failed") from lookup_err
+    if not row:
+        raise RuntimeError("sold_comp_candidate_not_durable")
+    persisted_run_id = str(row[0]) if row and row[0] else None
+    if persisted_run_id and persisted_run_id != run_id:
+        raise RuntimeError("sold_comp_candidate_run_mismatch")
+
+
 def stage_sold_comp_candidate(
     *,
     vehicle: dict,
@@ -3483,6 +3532,7 @@ def stage_sold_comp_candidate(
             candidate_payload,
             on_conflict="source_name,source_listing_id",
         ).execute()
+        _verify_sold_comp_candidate_durable(row["source_name"], row["source_listing_id"], row["run_id"])
         return "candidate_staged"
     if not _direct_supabase_db_url:
         raise RuntimeError("candidate_staging_unavailable")
@@ -3491,6 +3541,7 @@ def stage_sold_comp_candidate(
         return "candidate_already_reviewed"
     _upsert_market_scout_run_direct_pg(run_row)
     _upsert_sold_comp_candidate_direct_pg(row)
+    _verify_sold_comp_candidate_durable_direct_pg(row["source_name"], row["source_listing_id"], row["run_id"])
     return "candidate_staged"
 
 
