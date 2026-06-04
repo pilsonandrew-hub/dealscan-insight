@@ -10,6 +10,8 @@ def test_deal_expiry_sweeper_workflow_uses_tested_script():
 
     assert "schedule:" in text
     assert "workflow_dispatch:" in text
+    assert "dry_run:" in text
+    assert 'DEAL_EXPIRY_SWEEPER_DRY_RUN: ${{ github.event_name == ' in text
     for trigger in ("push:", "pull_request:", "release:"):
         assert trigger not in text
 

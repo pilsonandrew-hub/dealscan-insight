@@ -245,6 +245,46 @@ def test_sweeper_refers_expired_deals_for_post_close_outcome_check_without_creat
     assert all(upsert["table"] != "sold_comp_candidates" for upsert in client.upserts)
 
 
+def test_sweeper_dry_run_reports_referrals_without_mutating_rows_or_queue():
+    now = datetime(2026, 6, 2, 8, 18, tzinfo=timezone.utc)
+    expired_cutoff = "2026-06-01T08:18:00+00:00"
+    client = _Client(
+        {
+            (
+                ("lt", "auction_end_date", expired_cutoff),
+                ("neq", "pipeline_step", "expired"),
+                ("eq", "is_active", True),
+            ): [
+                {
+                    "id": "opp-1",
+                    "source_site": "govdeals",
+                    "listing_id": "asset-123",
+                    "listing_url": "https://www.govdeals.com/asset/123",
+                    "auction_end_date": "2026-06-01T06:00:00+00:00",
+                    "year": 2019,
+                    "make": "Ford",
+                    "model": "F-150",
+                    "vin": "1FTEW1E50KFA00001",
+                    "mileage": 82210,
+                }
+            ],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(
+        client,
+        now=now,
+        notify=lambda _text: True,
+        dry_run=True,
+    )
+
+    assert summary["dry_run"] is True
+    assert summary["expired"] == 1
+    assert summary["post_close_outcome_requests"] == 1
+    assert client.updates == []
+    assert client.upserts == []
+
+
 def test_sweeper_message_reports_post_close_outcome_referrals():
     message = deal_expiry_sweeper.build_message(
         {
@@ -259,3 +299,20 @@ def test_sweeper_message_reports_post_close_outcome_referrals():
     )
 
     assert "Post-close outcome referrals: <b>2</b>" in message
+
+
+def test_sweeper_message_labels_dry_run():
+    message = deal_expiry_sweeper.build_message(
+        {
+            "dry_run": True,
+            "expired": 1,
+            "post_close_outcome_requests": 1,
+            "archived_passed": 0,
+            "archived_stale_saved_inactive": 0,
+            "archived_untrusted_active_high_dos_missing_mileage": 0,
+            "archived_untrusted_active_high_dos_missing_vin": 0,
+            "run_time": "2026-06-02 08:18 UTC",
+        }
+    )
+
+    assert "DRY RUN" in message
