@@ -11,6 +11,10 @@ on:
         description: "Max items input"
         required: false
         default: "200"
+      govdeals_sold_max_items:
+        description: "Max items for bounded GovDeals sold proof runs"
+        required: false
+        default: "25"
       max_detail_pages:
         description: "Max detail pages input"
         required: false
@@ -53,6 +57,7 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ACTOR_NAME: ${{ inputs.actor }}
           MAX_ITEMS: ${{ inputs.max_items }}
+          GOVDEALS_SOLD_MAX_ITEMS: ${{ inputs.govdeals_sold_max_items }}
           MAX_DETAIL_PAGES: ${{ inputs.max_detail_pages }}
           TARGET_CATEGORIES: ${{ inputs.target_categories }}
           MAX_PAGES: ${{ inputs.max_pages }}
@@ -66,6 +71,7 @@ jobs:
           import json
           import os
           import time
+          from datetime import datetime, timezone
           import urllib.parse
           import urllib.request
 
@@ -74,6 +80,7 @@ jobs:
           actor_map = {
               "ds-proxibid": "bxhncvtHEP712WX2e",
               "ds-govdeals": "CuKaIAcWyFS0EPrAz",
+              "ds-govdeals-sold": "Ui7FeFY4mIVPnU1fH",
           }
           actor_id = actor_map.get(actor_name)
           if not actor_id:
@@ -102,6 +109,11 @@ jobs:
               search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
               if search_query:
                   actor_input["searchQuery"] = search_query
+          elif actor_name == "ds-govdeals-sold":
+              actor_input = {
+                  "maxPages": int(os.environ.get("MAX_PAGES") or "1"),
+                  "maxItems": int(os.environ.get("GOVDEALS_SOLD_MAX_ITEMS") or "25"),
+              }
           else:
               actor_input = {
                   "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
@@ -172,17 +184,57 @@ jobs:
                   item for item in items
                   if isinstance(item, dict) and item.get("record_type") != "source_quality_proof"
               ]
+              if actor_name == "ds-govdeals-sold":
+                  now = datetime.now(timezone.utc)
+                  date_fields = ("sale_date", "auction_end_time", "auction_end_date", "auctionEndUtc", "assetAuctionEndDateUtc")
+
+                  def parse_date(value):
+                      if value in (None, ""):
+                          return None
+                      try:
+                          dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                          if dt.tzinfo is None:
+                              dt = dt.replace(tzinfo=timezone.utc)
+                          return dt
+                      except ValueError:
+                          return None
+
+                  field_summary = {}
+                  for field in date_fields:
+                      values = [item.get(field) for item in opportunity_items if item.get(field) not in (None, "")]
+                      parsed = [parse_date(value) for value in values]
+                      valid = [value for value in parsed if value is not None]
+                      field_summary[field] = {
+                          "present": len(values),
+                          "valid": len(valid),
+                          "invalid": len(values) - len(valid),
+                          "future": sum(value > now for value in valid),
+                          "past_or_now": sum(value <= now for value in valid),
+                      }
+                  summary["sold_date_diagnostics"] = {
+                      "rows_sampled": len(opportunity_items),
+                      "date_fields": field_summary,
+                      "rows_with_sold_price": sum(
+                          item.get("sold_price") not in (None, "", 0) or item.get("sale_price") not in (None, "", 0)
+                          for item in opportunity_items
+                      ),
+                      "rows_with_vehicle_identity": sum(
+                          bool(item.get("year") and item.get("make") and item.get("model"))
+                          for item in opportunity_items
+                      ),
+                  }
               summary["pushed_rows_with_description"] = sum(bool(item.get("description")) for item in opportunity_items)
               summary["pushed_rows_with_detail_text"] = sum(bool(item.get("detail_text")) for item in opportunity_items)
-              summary["description_samples"] = [
-                  {
-                      "title": str(item.get("title") or "")[:120],
-                      "description_present": bool(item.get("description")),
-                      "detail_text_present": bool(item.get("detail_text")),
-                      "description_excerpt": str(item.get("description") or item.get("detail_text") or "")[:240],
-                  }
-                  for item in opportunity_items[:5]
-              ]
+              if actor_name != "ds-govdeals-sold":
+                  summary["description_samples"] = [
+                      {
+                          "title": str(item.get("title") or "")[:120],
+                          "description_present": bool(item.get("description")),
+                          "detail_text_present": bool(item.get("detail_text")),
+                          "description_excerpt": str(item.get("description") or item.get("detail_text") or "")[:240],
+                      }
+                      for item in opportunity_items[:5]
+                  ]
           print(json.dumps(summary, indent=2, sort_keys=True))
           if last.get("status") != "SUCCEEDED":
               raise SystemExit(1)
