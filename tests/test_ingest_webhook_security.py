@@ -999,6 +999,54 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(row["rejection_reason"], "invalid_sale_date")
         self.assertIsNone(row["sale_date"])
 
+    def test_sold_comp_candidate_row_accepts_normalized_auction_end_date(self):
+        raw_item = {
+            "source_site": "govdeals-sold",
+            "url": "https://www.govdeals.com/asset/99/31398",
+            "title": "2021 Mercedes-Benz G-Class",
+            "year": 2021,
+            "make": "Mercedes-Benz",
+            "model": "G-63",
+            "sold_price": 99000,
+            "auction_end_date": "2020-06-01T15:00:00Z",
+        }
+        vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-auction-end-date", source_hint=None)
+
+        row = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle,
+            raw_item=raw_item,
+            run_id="run-auction-end-date",
+            item_index=0,
+        )
+
+        self.assertEqual(row["candidate_status"], "candidate")
+        self.assertIsNone(row["rejection_reason"])
+        self.assertEqual(row["sale_date"], "2020-06-01")
+
+    def test_sold_comp_candidate_row_rejects_unparseable_sale_date(self):
+        raw_item = {
+            "source_site": "govdeals-sold",
+            "url": "https://www.govdeals.com/asset/99/31398",
+            "title": "2021 Mercedes-Benz G-Class",
+            "year": 2021,
+            "make": "Mercedes-Benz",
+            "model": "G-63",
+            "sold_price": 99000,
+            "auction_end_time": "not-a-date",
+        }
+        vehicle = ingest._sold_comp_vehicle_from_raw_item(raw_item, run_id="run-bad-sale-date", source_hint=None)
+
+        row = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle,
+            raw_item=raw_item,
+            run_id="run-bad-sale-date",
+            item_index=0,
+        )
+
+        self.assertEqual(row["candidate_status"], "rejected")
+        self.assertEqual(row["rejection_reason"], "invalid_sale_date")
+        self.assertIsNone(row["sale_date"])
+
     def test_sold_comp_candidate_row_rejects_future_sale_date(self):
         raw_item = {
             "source_site": "govdeals-sold",
