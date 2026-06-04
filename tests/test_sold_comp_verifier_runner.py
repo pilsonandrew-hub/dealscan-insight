@@ -156,6 +156,10 @@ def test_verifier_runner_dry_run_reports_decisions_without_writes():
     assert summary["dry_run"] is True
     assert summary["candidates_reviewed"] == 3
     assert summary["decision_counts"] == {"accepted": 1, "needs_review": 1, "rejected": 1}
+    assert summary["rejection_reason_counts"] == {
+        "missing_year_make_model": 1,
+        "outside_approved_vehicle_scope": 1,
+    }
     assert summary["review_rows_written"] == 0
     assert summary["verified_rows_written"] == 0
     assert client.writes == []
@@ -193,6 +197,10 @@ def test_verifier_message_is_aggregate_only():
             "dry_run": True,
             "candidates_reviewed": 3,
             "decision_counts": {"accepted": 1, "needs_review": 1, "rejected": 1},
+            "rejection_reason_counts": {
+                "missing_year_make_model": 1,
+                "outside_approved_vehicle_scope": 1,
+            },
             "review_rows_written": 0,
             "verified_rows_written": 0,
             "candidate_rows_updated": 0,
@@ -203,6 +211,7 @@ def test_verifier_message_is_aggregate_only():
     assert "DRY RUN" in message
     assert "Candidates reviewed: 3" in message
     assert "accepted=1" in message
+    assert "missing_year_make_model=1" in message
     assert "https://" not in message
     assert "1FTEW" not in message
 

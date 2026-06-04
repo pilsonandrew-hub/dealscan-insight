@@ -160,6 +160,7 @@ def run_verifier(
     candidates = _fetch_candidates(supabase, limit=limit)
     existing_verified = _fetch_existing_verified_source_listing_ids(supabase)
     decision_counts: Counter[str] = Counter()
+    rejection_reason_counts: Counter[str] = Counter()
     run_updates: dict[str, Counter[str]] = defaultdict(Counter)
     review_rows: list[dict[str, Any]] = []
     verified_rows: list[dict[str, Any]] = []
@@ -172,6 +173,8 @@ def run_verifier(
             existing_verified_source_listing_ids=existing_verified,
         )
         decision_counts[decision.review_status] += 1
+        if decision.rejection_reason:
+            rejection_reason_counts[decision.rejection_reason] += 1
         run_updates[str(candidate["run_id"])][decision.review_status] += 1
         review_rows.append(
             build_review_row(
@@ -216,6 +219,7 @@ def run_verifier(
         "reviewer_version": reviewer_version,
         "candidates_reviewed": len(candidates),
         "decision_counts": dict(decision_counts),
+        "rejection_reason_counts": dict(rejection_reason_counts),
         **write_counts,
     }
 
@@ -226,10 +230,15 @@ def build_message(summary: dict[str, Any]) -> str:
     decision_text = ", ".join(
         f"{key}={value}" for key, value in sorted(decisions.items())
     ) or "none"
+    rejection_reasons = summary.get("rejection_reason_counts") or {}
+    rejection_reason_text = ", ".join(
+        f"{key}={value}" for key, value in sorted(rejection_reasons.items())
+    ) or "none"
     return (
         f"DealerScope Sold Comp Verifier{label}\n"
         f"Candidates reviewed: {summary.get('candidates_reviewed', 0)}\n"
         f"Decisions: {decision_text}\n"
+        f"Rejection reasons: {rejection_reason_text}\n"
         f"Review rows written: {summary.get('review_rows_written', 0)}\n"
         f"Verified rows written: {summary.get('verified_rows_written', 0)}\n"
         f"Candidate rows updated: {summary.get('candidate_rows_updated', 0)}\n"
