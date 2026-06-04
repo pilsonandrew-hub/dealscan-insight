@@ -7,6 +7,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from backend.ingest.manheim_market import get_manheim_market_data
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
+import backend.ingest.condition as condition_module
+import backend.ingest.score as score_module
 from backend.ingest.score import CURRENT_YEAR, determine_vehicle_tier, resolve_expected_close_bid, score_deal
 from webapp.routers.ingest import _normalize_auction_end_time, normalize_apify_vehicle, passes_basic_gates, score_vehicle
 
@@ -1039,6 +1041,110 @@ def test_score_deal_market_comp_pricing_can_remain_capital_ready_when_otherwise_
     assert result["investment_grade"] in {"Platinum", "Gold", "Silver", "Bronze"}
     assert result["investment_grade"] != "Rejected"
     assert result["pricing_trust_blocked"] is False
+
+
+def test_score_deal_rejects_explicit_poor_condition_even_with_market_comp_headroom():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        title="2018 Ford Explorer Police 4-Door Sport Utility Vehicle",
+        description=(
+            "Runs & Moves. Engine Performance Concerns. Dash Warning Indicators On. "
+            "Major components missing. As is sale."
+        ),
+        year=2018,
+        mileage=76000,
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+
+    assert result["condition_grade"] == "Poor"
+    assert result["dos_score"] == 0.0
+    assert result["investment_grade"] == "Rejected"
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "condition_unverified"
+
+
+def test_score_deal_rejects_govdeals_as_is_detail_text_before_hot_dos():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        title="2020 Dodge Durango SRT",
+        make="Dodge",
+        model="Durango SRT",
+        year=2020,
+        mileage=13983,
+        description="Clean title. Sold as is with no condition guarantees.",
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+
+    assert result["condition_grade"] == "Poor"
+    assert result["dos_score"] == 0.0
+    assert result["investment_grade"] == "Rejected"
+    assert result["ceiling_pass"] is False
+    assert result["ceiling_reason"] == "condition_unverified"
+
+
+def test_score_deal_rejects_no_start_condition_signal_before_hot_dos():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        description="Vehicle does not run.",
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+
+    assert result["condition_grade"] == "Poor"
+    assert "does not run" in result["condition_signals"]
+    assert result["dos_score"] == 0.0
+    assert result["investment_grade"] == "Rejected"
+    assert result["ceiling_reason"] == "condition_unverified"
+
+
+def test_score_deal_rejects_any_explicit_negative_condition_signal_not_just_curated_subset():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        description="Clean title fleet unit with warning indicators and lemon history noted.",
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+
+    assert "warning indicators" in result["condition_signals"]
+    assert "lemon" in result["condition_signals"]
+    assert result["dos_score"] == 0.0
+    assert result["investment_grade"] == "Rejected"
+    assert result["ceiling_reason"] == "condition_unverified"
+
+
+def test_score_deal_uses_single_condition_assessment(monkeypatch):
+    calls = []
+
+    def fake_score_condition(**kwargs):
+        calls.append(kwargs)
+        return {
+            "condition_grade": "B",
+            "condition_score": 70,
+            "condition_signals": ["clean title"],
+            "vin_suspicious": False,
+            "vin_decoded": None,
+        }
+
+    monkeypatch.setattr(condition_module, "score_condition", fake_score_condition)
+    monkeypatch.setattr(score_module, "_score_condition", fake_score_condition)
+
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        description="Clean title fleet unit.",
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+
+    assert len(calls) == 1
+    assert result["condition_grade"] == "Good"
+    assert result["condition_signals"] == ["clean title"]
 
 
 def test_score_deal_proxy_zero_bid_branch_never_surfaces_bronze():
