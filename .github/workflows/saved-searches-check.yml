@@ -1,9 +1,9 @@
 name: Saved Searches Check
 
-# Runs every 30 minutes to alert users when new deals match their saved searches.
+# Runs every 6 hours to protect GitHub Actions minutes while preserving saved-search checks.
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 permissions:
