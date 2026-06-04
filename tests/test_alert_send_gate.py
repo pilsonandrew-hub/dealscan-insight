@@ -64,6 +64,8 @@ def _send_eligible_deal(**overrides):
         "investment_grade": "Platinum",
         "pricing_maturity": "market_comp",
         "pricing_source": "market_comp",
+        "retail_comp_count": 3,
+        "retail_comp_confidence": 0.82,
         "current_bid_trust_score": 0.9,
         "mmr_confidence_proxy": 90.0,
         "bid_headroom": 5000,
@@ -79,6 +81,8 @@ def _send_eligible_deal(**overrides):
             "investment_grade": "Platinum",
             "pricing_maturity": "market_comp",
             "pricing_source": "market_comp",
+            "retail_comp_count": 3,
+            "retail_comp_confidence": 0.82,
             "mmr_confidence_proxy": 90.0,
         },
     }
@@ -93,7 +97,9 @@ def test_send_telegram_alert_recomputes_gate_and_blocks_missing_confidence_despi
         alert_gate={"eligible": True, "alert_type": "platinum", "blocking_reasons": []},
     )
     deal.pop("mmr_confidence_proxy")
+    deal.pop("retail_comp_confidence")
     deal["score_breakdown"].pop("mmr_confidence_proxy")
+    deal["score_breakdown"].pop("retail_comp_confidence")
 
     message_id = asyncio.run(ingest.send_telegram_alert(deal))
 
