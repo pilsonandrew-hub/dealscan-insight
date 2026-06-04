@@ -99,12 +99,70 @@ def _optional_rows(table: str, select: str, *, order: Optional[tuple[str, bool]]
         return []
 
 
+def _as_positive_float(value: Any) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_optional_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _market_price_diagnostics(rows: list[dict[str, Any]], *, now: datetime) -> dict[str, Any]:
+    failed_predicates: Counter[str] = Counter()
+    latest_expires_at: Optional[str] = None
+    latest_expires_dt: Optional[datetime] = None
+
+    for row in rows:
+        expires_at = row.get("expires_at")
+        expires_dt = _parse_optional_datetime(expires_at)
+        if expires_at and (latest_expires_dt is None or (expires_dt and expires_dt > latest_expires_dt)):
+            latest_expires_at = str(expires_at)
+            latest_expires_dt = expires_dt
+
+        if not _as_positive_float(row.get("avg_price")) or not _as_positive_float(row.get("low_price")) or not _as_positive_float(row.get("high_price")):
+            failed_predicates["nonpositive_price"] += 1
+        if _as_int(row.get("sample_size")) < 2:
+            failed_predicates["sample_size_lt_2"] += 1
+        if not expires_dt or expires_dt < now:
+            failed_predicates["expired"] += 1
+        if not row.get("source"):
+            failed_predicates["source_missing"] += 1
+
+    return {
+        "market_prices_unusable_reason_counts": dict(failed_predicates),
+        "market_prices_latest_expires_at": latest_expires_at,
+    }
+
+
 def _pricing_substrate_truth() -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     recent_sale_cutoff = (now - timedelta(days=365)).isoformat()
 
     market_prices_status, market_prices_rows = _optional_count("market_prices")
     market_prices_usable_rows = 0
+    market_price_diagnostics = {
+        "market_prices_unusable_reason_counts": {},
+        "market_prices_latest_expires_at": None,
+    }
     if market_prices_status == "present":
         market_prices_usable_rows = _optional_filtered_count(
             "market_prices",
@@ -117,6 +175,13 @@ def _pricing_substrate_truth() -> dict[str, Any]:
                 ("not_", "source", ("is", "null")),
             ],
         )
+        market_price_rows = _optional_rows(
+            "market_prices",
+            "id,avg_price,low_price,high_price,sample_size,expires_at,source",
+            order=("expires_at", True),
+            limit=200,
+        )
+        market_price_diagnostics = _market_price_diagnostics(market_price_rows, now=now)
 
     dealer_sales_status, dealer_sales_rows = _optional_count("dealer_sales")
     dealer_sales_usable_rows = 0
@@ -141,6 +206,7 @@ def _pricing_substrate_truth() -> dict[str, Any]:
         "market_prices_table": market_prices_status,
         "market_prices_rows": market_prices_rows,
         "market_prices_usable_rows": market_prices_usable_rows,
+        **market_price_diagnostics,
         "dealer_sales_table": dealer_sales_status,
         "dealer_sales_rows": dealer_sales_rows,
         "dealer_sales_usable_rows": dealer_sales_usable_rows,
