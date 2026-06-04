@@ -250,6 +250,17 @@ class _ExistingCandidateTable(_RecordingTable):
         self.operations.append((self.name, "select"))
         return _ExistingCandidateQuery(self.existing_rows, self.operations, self.name)
 
+    def upsert(self, payload, **kwargs):
+        self.operations.append((self.name, "upsert", payload, kwargs))
+        self.existing_rows[:] = [
+            {
+                "id": payload.get("id") or "candidate-created",
+                "run_id": payload.get("run_id"),
+                "candidate_status": payload.get("candidate_status") or "candidate",
+            }
+        ]
+        return _RecordingExecute()
+
 
 class _ExistingCandidateSupabase(_RecordingSupabase):
     def __init__(self, existing_rows):
@@ -261,6 +272,21 @@ class _ExistingCandidateSupabase(_RecordingSupabase):
             raise AssertionError("sold comp staging must not write dealer_sales")
         if name == "sold_comp_candidates":
             return _ExistingCandidateTable(self.operations, name, self.existing_rows)
+        return _RecordingTable(self.operations, name)
+
+
+class _NonDurableCandidateTable(_RecordingTable):
+    def select(self, *_args, **_kwargs):
+        self.operations.append((self.name, "select"))
+        return _ExistingCandidateQuery([], self.operations, self.name)
+
+
+class _NonDurableCandidateSupabase(_RecordingSupabase):
+    def table(self, name):
+        if name == "dealer_sales":
+            raise AssertionError("sold comp staging must not write dealer_sales")
+        if name == "sold_comp_candidates":
+            return _NonDurableCandidateTable(self.operations, name)
         return _RecordingTable(self.operations, name)
 
 
@@ -1256,6 +1282,39 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(operations[2][2]["run_id"], "run-sold-ledger")
         self.assertEqual(operations[2][3]["on_conflict"], "source_name,source_listing_id")
         self.assertNotIn("created_at", operations[2][2])
+
+    def test_stage_sold_comp_candidate_fails_if_upsert_is_not_durable(self):
+        supabase = _NonDurableCandidateSupabase()
+        vehicle = {
+            "run_id": "run-sold-ledger",
+            "listing_id": "asset-ledger-1",
+            "listing_url": "https://www.govdeals.com/asset/321/654",
+            "source_site": "govdeals-sold",
+            "year": 2018,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "TX",
+        }
+        raw_item = {
+            "sold_price": 9100,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+        }
+
+        with patch.object(ingest, "supabase_client", supabase):
+            with self.assertRaisesRegex(RuntimeError, "sold_comp_candidate_not_durable"):
+                ingest.stage_sold_comp_candidate(
+                    vehicle=vehicle,
+                    raw_item=raw_item,
+                    run_id="run-sold-ledger",
+                    item_index=0,
+                )
+
+        candidate_writes = [
+            operation for operation in supabase.operations
+            if operation[0] == "sold_comp_candidates" and operation[1] == "upsert"
+        ]
+        self.assertEqual(len(candidate_writes), 1)
 
     def test_stage_sold_comp_candidate_does_not_downgrade_already_reviewed_candidate(self):
         supabase = _ExistingCandidateSupabase(
