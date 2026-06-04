@@ -18,6 +18,10 @@ import {
     completedSaleRejectionReason,
 } from './sold_date_contract.js';
 import {
+    createQueryDiagnostics,
+    recordLotDecision,
+} from './source_quality_diagnostics.js';
+import {
     matchesTargetTerms,
     normalizeTargetSearchQueries,
     normalizeTargetTerms,
@@ -44,6 +48,7 @@ const targetSearchQueries = normalizeTargetSearchQueries({
 
 let totalFound = 0, totalPassed = 0, totalSkippedOutOfScope = 0, totalSkippedNotCompleted = 0;
 const completedSaleRejectionCounts = {};
+const queryDiagnostics = createQueryDiagnostics(['intercepted', ...targetSearchQueries]);
 const capturedApi = {
     apiKey: null,
     searchUrl: 'https://maestro.lqdt1.com/search/list',
@@ -94,20 +99,23 @@ function safeJsonParse(text) {
     }
 }
 
-function stageTargetLot(lot, seenIds = null) {
+function stageTargetLot(lot, seenIds = null, searchText = 'intercepted') {
     if (seenIds) seenIds.add(lot.assetId);
     totalFound++;
     if (!matchesTargetTerms(lot, targetTerms)) {
         totalSkippedOutOfScope++;
+        recordLotDecision(queryDiagnostics, searchText, 'out_of_scope', lot);
         return false;
     }
     const saleRejectionReason = completedSaleRejectionReason(lot, runStartedAt);
     if (saleRejectionReason) {
         totalSkippedNotCompleted++;
         completedSaleRejectionCounts[saleRejectionReason] = (completedSaleRejectionCounts[saleRejectionReason] || 0) + 1;
+        recordLotDecision(queryDiagnostics, searchText, saleRejectionReason, lot);
         return false;
     }
     totalPassed++;
+    recordLotDecision(queryDiagnostics, searchText, 'passed', lot);
     passingLots.push(normalizeLot(lot));
     return true;
 }
@@ -127,6 +135,8 @@ function sourceQualityProof() {
         rows_excluded_not_completed_sale: totalSkippedNotCompleted,
         completed_sale_rejection_reasons: completedSaleRejectionCounts,
         target_search_queries: targetSearchQueries,
+        query_diagnostics: queryDiagnostics.query_counts,
+        out_of_scope_examples: queryDiagnostics.out_of_scope_examples,
         max_pages_total: maxPages,
         generated_at: new Date().toISOString(),
     };
@@ -298,7 +308,7 @@ const crawler = new PlaywrightCrawler({
             if (capturedApi.interceptedLots.length > 0) {
                 log.info(`Processing ${capturedApi.interceptedLots.length} intercepted lots from page load`);
                 for (const lot of capturedApi.interceptedLots) {
-                    stageTargetLot(lot, seenIds);
+                    stageTargetLot(lot, seenIds, 'intercepted');
                     if (passingLots.length >= maxItems) break;
                 }
             }
@@ -452,7 +462,7 @@ async function paginateWithAuth(page, log, seenIds = new Set(), searchText = '',
             log.info(`Page ${pageNum}: ${lots.length} lots (x-total-count: ${resp.total || 'n/a'})`);
             for (const lot of lots) {
                 if (seenIds.has(lot.assetId)) continue; // already saved from intercept
-                stageTargetLot(lot, seenIds);
+                stageTargetLot(lot, seenIds, searchText);
                 if (passingLots.length >= maxItems) {
                     log.info(`Reached maxItems limit (${maxItems}) — stopping pagination`);
                     return pagesAttempted;

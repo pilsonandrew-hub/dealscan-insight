@@ -82,6 +82,10 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("pagesForQuery", source)
         self.assertIn("completedSaleRejectionReason", source)
         self.assertIn("rows_excluded_not_completed_sale", source)
+        self.assertIn("query_diagnostics", source)
+        self.assertIn("out_of_scope_examples", source)
+        self.assertIn('"query_diagnostics"', workflow)
+        self.assertIn('"out_of_scope_examples"', workflow)
         self.assertIn('actor_input["searchQuery"] = search_query', workflow)
 
 
