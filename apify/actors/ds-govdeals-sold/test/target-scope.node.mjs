@@ -120,4 +120,27 @@ describe('GovDeals sold target scope', () => {
         assert.equal(JSON.stringify(diagnostics).includes('example.invalid'), false);
         assert.equal(JSON.stringify(diagnostics).includes('1FTFW1E50PFA00000'), false);
     });
+
+    test('keeps out-of-scope examples bucketed by query', () => {
+        const diagnostics = createQueryDiagnostics(['intercepted', 'f-150']);
+
+        for (let index = 0; index < 5; index++) {
+            recordLotDecision(diagnostics, 'intercepted', 'out_of_scope', {
+                assetId: `intercepted-${index}`,
+                assetShortDescription: `Intercepted non-target ${index}`,
+            });
+        }
+        recordLotDecision(diagnostics, 'f-150', 'out_of_scope', {
+            assetId: 'query-row',
+            assetShortDescription: 'Direct query non-target row',
+        });
+
+        assert.equal(diagnostics.out_of_scope_examples.length, 6);
+        assert.equal(diagnostics.out_of_scope_examples_by_query.intercepted.length, 3);
+        assert.equal(diagnostics.out_of_scope_examples_by_query['f-150'].length, 1);
+        assert.equal(
+            diagnostics.out_of_scope_examples_by_query['f-150'][0].search_text_excerpt,
+            'direct query non-target row',
+        );
+    });
 });

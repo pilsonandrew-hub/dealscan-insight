@@ -179,6 +179,7 @@ jobs:
                           "target_search_queries",
                           "query_diagnostics",
                           "out_of_scope_examples",
+                          "out_of_scope_examples_by_query",
                           "max_pages_total",
                           "detail_pages_attempted",
                           "detail_pages_fetched",
