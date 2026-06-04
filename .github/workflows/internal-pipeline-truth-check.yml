@@ -85,6 +85,7 @@ jobs:
               "alerts_runtime": truth.get("alerts_runtime"),
               "alerts": truth.get("alerts"),
               "deliveries": truth.get("deliveries"),
+              "pricing_substrate": truth.get("pricing_substrate"),
               "opportunities": {
                   "active_dos80_sample": opportunities.get("active_dos80_sample"),
                   "active_dos80_gate_breakdown_count": len(gate_breakdown),

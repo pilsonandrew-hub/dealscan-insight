@@ -35,6 +35,7 @@ WEBHOOK_SUCCESS_STATUSES = {"processed", "ignored_replay"}
 SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
+DB_SAVE_CANDIDATE_STATUSES = {"candidate_staged"}
 DB_SAVE_EXISTING_STATUSES = {"duplicate_existing", "vin_dedup_skipped", "vin_dedup_updated"}
 DB_SAVE_SKIPPED_STATUSES = {
     "below_save_threshold",
@@ -823,10 +824,11 @@ def classify_run(
     db_save_channel = ((delivery or {}).get("channels") or {}).get("db_save", {}) or {}
     db_save_statuses = db_save_channel.get("statuses") or {}
     inserted_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_INSERT_STATUSES)
+    candidate_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_CANDIDATE_STATUSES)
     existing_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_EXISTING_STATUSES)
     skipped_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_SKIPPED_STATUSES)
     failed_rows = sum(int(db_save_statuses.get(status) or 0) for status in DB_SAVE_FAILURE_STATUSES)
-    accounted_rows = inserted_rows + existing_rows + skipped_rows + failed_rows
+    accounted_rows = inserted_rows + candidate_rows + existing_rows + skipped_rows + failed_rows
     opportunity_rows = int((opportunities or {}).get("opportunity_rows") or 0)
     sonar_channel = ((delivery or {}).get("channels") or {}).get("sonar_mirror", {}) or {}
     sonar_statuses = sonar_channel.get("statuses") or {}
@@ -840,7 +842,7 @@ def classify_run(
         AUDIT_FALLBACK_MARKER in latest_webhook_error
         and not used_rest_fallback_after_direct_pg_unavailable
     )
-    has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or existing_rows > 0
+    has_successful_db_landing = opportunity_rows > 0 or inserted_rows > 0 or candidate_rows > 0 or existing_rows > 0
     has_accounted_non_save_outcome = (
         inserted_rows == 0
         and existing_rows == 0
@@ -904,6 +906,7 @@ def classify_run(
             item_count > 0
             and opportunity_rows == 0
             and inserted_rows == 0
+            and candidate_rows == 0
             and existing_rows == 0
             and not has_accounted_non_save_outcome
         ):
