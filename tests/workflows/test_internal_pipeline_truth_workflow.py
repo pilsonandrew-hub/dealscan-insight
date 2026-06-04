@@ -19,6 +19,7 @@ def test_internal_pipeline_truth_workflow_prints_gate_aggregates():
     assert "active_dos80_condition_storage_gap_by_source_sample" in text
     assert "active_dos80_condition_storage_gap_samples" in text
     assert "active_dos80_pricing_maturity_counts_sample" in text
+    assert '"pricing_substrate": truth.get("pricing_substrate")' in text
     assert "/api/internal/opportunity-condition-proof/" in text
     assert "condition_evidence_fields" in text
     assert "source_identity" in text

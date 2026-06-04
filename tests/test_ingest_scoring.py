@@ -193,6 +193,8 @@ def _otherwise_alert_eligible_record(**overrides):
         "vin": "1HGCM82633A004352",
         "mileage": 42000,
         "condition_grade": "Good",
+        "retail_comp_count": 3,
+        "retail_comp_confidence": 0.82,
     }
     record.update(overrides)
     return record
@@ -209,6 +211,7 @@ def test_alert_gate_allows_valid_high_confidence_record_with_otherwise_strong_si
 def test_alert_gate_blocks_missing_confidence_even_with_otherwise_strong_signals():
     record = _otherwise_alert_eligible_record()
     del record["mmr_confidence_proxy"]
+    del record["retail_comp_confidence"]
 
     gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
 
@@ -739,7 +742,9 @@ def test_score_deal_keeps_weak_retail_evidence_on_proxy_path():
     )
 
     assert result["pricing_source"] == "retail_market_cache"
-    assert result["pricing_maturity"] == "market_comp"
+    assert result["pricing_maturity"] == "proxy"
+    assert result["investment_grade"] == "Rejected"
+    assert result["pricing_trust_reason"] == "pricing_maturity_proxy"
     assert result["retail_proxy_multiplier"] is not None
     assert result["retail_asking_price_estimate"] == 27000
     assert result["mmr_confidence_proxy"] == 90.0
