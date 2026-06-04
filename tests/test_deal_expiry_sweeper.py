@@ -61,6 +61,7 @@ class _Query:
         self.mode = "upsert"
         self.payload = payload
         self.conflict = kwargs.get("on_conflict")
+        self.upsert_kwargs = kwargs
         return self
 
     def in_(self, column, values):
@@ -85,6 +86,7 @@ class _Query:
                     "table": self.table_name,
                     "payload": self.payload,
                     "on_conflict": self.conflict,
+                    **getattr(self, "upsert_kwargs", {}),
                 }
             )
             return _Result(self.payload if isinstance(self.payload, list) else [self.payload])
@@ -99,6 +101,7 @@ class _Client:
         self.select_rows = select_rows
         self.updates = []
         self.upserts = []
+        self.operations = []
 
     def table(self, name):
         return _Query(self, name)
@@ -239,10 +242,86 @@ def test_sweeper_refers_expired_deals_for_post_close_outcome_check_without_creat
                 "vin": "1FTEW1E50KFA00001",
                 "mileage": 82210,
             }
-        ],
-        "on_conflict": "source_site,source_listing_id",
-    } in client.upserts
+            ],
+            "on_conflict": "source_site,source_listing_id",
+            "ignore_duplicates": True,
+        } in client.upserts
     assert all(upsert["table"] != "sold_comp_candidates" for upsert in client.upserts)
+
+
+def test_sweeper_referral_does_not_fallback_to_internal_opportunity_id():
+    row = {
+        "id": "internal-opportunity-uuid",
+        "source_site": "govdeals",
+        "listing_url": "https://www.govdeals.com/asset/missing",
+    }
+
+    assert deal_expiry_sweeper._build_post_close_outcome_request(row) is None
+
+
+def test_sweeper_upsert_preserves_existing_worker_outcomes():
+    client = _Client({})
+
+    count = deal_expiry_sweeper._upsert_post_close_outcome_requests(
+        client,
+        [
+            {
+                "id": "opp-1",
+                "source_site": "govdeals",
+                "listing_id": "asset-123",
+                "listing_url": "https://www.govdeals.com/asset/123",
+            }
+        ],
+    )
+
+    assert count == 1
+    assert client.upserts[0]["on_conflict"] == "source_site,source_listing_id"
+    assert client.upserts[0]["ignore_duplicates"] is True
+
+
+def test_sweeper_fetch_rows_reuses_generator_filters_on_every_page():
+    calls = []
+    rows_by_range = {
+        (0, 499): [{"id": "row-1"}] * 500,
+        (500, 999): [{"id": "row-2"}],
+    }
+
+    class PagingQuery:
+        def __init__(self):
+            self.filters = []
+            self.bounds = None
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def order(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, column, value):
+            self.filters.append(("eq", column, value))
+            return self
+
+        def range(self, start, end):
+            self.bounds = (start, end)
+            return self
+
+        def execute(self):
+            calls.append(tuple(self.filters))
+            return _Result(rows_by_range.get(self.bounds, []))
+
+    class PagingClient:
+        def table(self, _name):
+            return PagingQuery()
+
+    filters = (filter_fn for filter_fn in [lambda q: q.eq("is_active", True)])
+
+    rows = deal_expiry_sweeper._fetch_rows(PagingClient(), "id", filters)
+
+    assert len(rows) == 501
+    assert calls == [
+        (("eq", "is_active", True),),
+        (("eq", "is_active", True),),
+    ]
 
 
 def test_sweeper_dry_run_reports_referrals_without_mutating_rows_or_queue():

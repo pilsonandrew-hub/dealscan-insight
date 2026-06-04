@@ -82,6 +82,20 @@ def test_verifier_preserves_deterministic_staging_rejections():
     assert verifier.build_verified_comp_row(candidate, decision, verifier_version="test-v1") is None
 
 
+def test_verifier_rejects_pre_rejected_candidate_even_without_reason():
+    candidate = _candidate(
+        candidate_status="rejected",
+        rejection_reason=None,
+    )
+
+    decision = verifier.evaluate_candidate(candidate, today=date(2026, 6, 3))
+
+    assert decision.review_status == "rejected"
+    assert decision.rejection_reason == "pre_rejected_missing_reason"
+    assert decision.human_required is False
+    assert verifier.build_verified_comp_row(candidate, decision, verifier_version="test-v1") is None
+
+
 def test_verifier_routes_out_of_scope_vehicle_to_review_not_market_truth():
     candidate = _candidate(
         source_listing_id="asset-g-class",

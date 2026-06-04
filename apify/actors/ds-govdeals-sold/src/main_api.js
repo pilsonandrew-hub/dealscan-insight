@@ -12,6 +12,7 @@
 
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
+import { randomUUID } from 'node:crypto';
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -37,7 +38,6 @@ function replayHeadersFromBrowser(headers) {
     const required = [
         'x-api-key',
         'x-user-id',
-        'x-api-correlation-id',
     ];
     const replay = {};
     for (const key of required) {
@@ -49,6 +49,21 @@ function replayHeadersFromBrowser(headers) {
     replay.referer = 'https://www.govdeals.com/';
     if (headers['user-agent']) replay['user-agent'] = headers['user-agent'];
     return replay;
+}
+
+function headersForReplayPage(headers) {
+    return {
+        ...headers,
+        'x-api-correlation-id': randomUUID(),
+    };
+}
+
+function safeJsonParse(text) {
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return null;
+    }
 }
 
 // ── Helper: extract lots from any known Liquidity Services API shape ──
@@ -294,15 +309,16 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
             // Use Node.js fetch (no CORS restrictions, unlike page.evaluate browser fetch)
             const nodeResp = await fetch(searchUrl, {
                 method: 'POST',
-                headers: requestHeaders,
+                headers: headersForReplayPage(requestHeaders),
                 body: JSON.stringify(payload),
             });
             const responseText = await nodeResp.text();
+            const responseJson = nodeResp.ok ? safeJsonParse(responseText) : null;
             const resp = {
                 ok: nodeResp.ok,
                 status: nodeResp.status,
                 total: nodeResp.headers.get('x-total-count'),
-                json: nodeResp.ok ? JSON.parse(responseText) : null,
+                json: responseJson,
                 body: responseText,
             };
 

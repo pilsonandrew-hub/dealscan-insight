@@ -114,8 +114,8 @@ def evaluate_candidate(
         "approved_vehicle_scope": _approved_vehicle_scope(candidate),
     }
 
-    deterministic_rejection = candidate.get("rejection_reason") if candidate.get("candidate_status") == "rejected" else None
-    if deterministic_rejection:
+    if candidate.get("candidate_status") == "rejected":
+        deterministic_rejection = candidate.get("rejection_reason") or "pre_rejected_missing_reason"
         return _decision("rejected", str(deterministic_rejection), False, checks)
     if duplicate_source_listing:
         return _decision("rejected", "duplicate_source_listing", False, checks)

@@ -219,6 +219,65 @@ class _RecordingSupabase:
         return _RecordingTable(self.operations, name)
 
 
+class _ExistingCandidateQuery:
+    def __init__(self, rows, operations, table_name):
+        self.rows = rows
+        self.operations = operations
+        self.table_name = table_name
+        self.filters = []
+
+    def select(self, *_args, **_kwargs):
+        self.operations.append((self.table_name, "select"))
+        return self
+
+    def eq(self, column, value):
+        self.filters.append((column, value))
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        return types.SimpleNamespace(data=self.rows)
+
+
+class _ExistingCandidateTable(_RecordingTable):
+    def __init__(self, operations, name, existing_rows):
+        super().__init__(operations, name)
+        self.existing_rows = existing_rows
+
+    def select(self, *_args, **_kwargs):
+        self.operations.append((self.name, "select"))
+        return _ExistingCandidateQuery(self.existing_rows, self.operations, self.name)
+
+
+class _ExistingCandidateSupabase(_RecordingSupabase):
+    def __init__(self, existing_rows):
+        super().__init__()
+        self.existing_rows = existing_rows
+
+    def table(self, name):
+        if name == "dealer_sales":
+            raise AssertionError("sold comp staging must not write dealer_sales")
+        if name == "sold_comp_candidates":
+            return _ExistingCandidateTable(self.operations, name, self.existing_rows)
+        return _RecordingTable(self.operations, name)
+
+
+class _FailingCandidateLookupTable(_RecordingTable):
+    def select(self, *_args, **_kwargs):
+        raise RuntimeError("candidate lookup unavailable")
+
+
+class _FailingCandidateLookupSupabase(_RecordingSupabase):
+    def table(self, name):
+        if name == "dealer_sales":
+            raise AssertionError("sold comp staging must not write dealer_sales")
+        if name == "sold_comp_candidates":
+            return _FailingCandidateLookupTable(self.operations, name)
+        return _RecordingTable(self.operations, name)
+
+
 class _HTTPXResponse:
     def __init__(self, payload):
         self._payload = payload
@@ -847,7 +906,58 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(len(delivery_calls), 1)
         self.assertEqual(delivery_calls[0]["status"], "candidate_staged")
         self.assertTrue(len(webhook_updates) > 0)
-        self.assertIn("save_outcomes={'candidate_staged': 1}", webhook_updates[-1][1]["error_message"])
+        self.assertNotIn("save_outcomes={'candidate_staged': 1}", webhook_updates[-1][1]["error_message"])
+        self.assertIn("funnel=items:1", webhook_updates[-1][1]["error_message"])
+
+    def test_govdeals_sold_webhook_reports_existing_reviewed_candidate_as_skipped(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-sold-reviewed", "defaultDatasetId": "dataset-sold-reviewed"},
+        }
+        raw_item = {
+            "sold_price": 3650,
+            "source_site": "govdeals-sold",
+            "listing_url": "https://www.govdeals.com/asset/123/456",
+        }
+        delivery_calls = []
+        webhook_updates = []
+
+        class _SoldHTTPXAsyncClient(_HTTPXAsyncClient):
+            async def get(self, url, *args, **kwargs):
+                if "/datasets/" not in url:
+                    raise AssertionError(f"unexpected url: {url}")
+                return _HTTPXResponse([raw_item])
+
+        fake_httpx = types.SimpleNamespace(AsyncClient=_SoldHTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", _NoDealerSalesSupabase()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-sold-reviewed"
+        ), patch.object(
+            ingest,
+            "update_webhook_log",
+            lambda *args, **kwargs: webhook_updates.append((args, kwargs)),
+        ), patch.object(
+            ingest,
+            "stage_sold_comp_candidate",
+            lambda **_kwargs: "candidate_already_reviewed",
+            create=True,
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual([call["status"] for call in delivery_calls], ["candidate_already_reviewed"])
+        self.assertTrue(len(webhook_updates) > 0)
+        self.assertIn("save_outcomes={'candidate_already_reviewed': 1}", webhook_updates[-1][1]["error_message"])
 
     def test_govdeals_sold_webhook_stages_raw_items_before_opportunity_normalization(self):
         payload = {
@@ -926,7 +1036,8 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(len(delivery_calls), 3)
         self.assertEqual([call["status"] for call in delivery_calls], ["candidate_staged"] * 3)
         self.assertTrue(len(webhook_updates) > 0)
-        self.assertIn("save_outcomes={'candidate_staged': 3}", webhook_updates[-1][1]["error_message"])
+        self.assertNotIn("save_outcomes={'candidate_staged': 3}", webhook_updates[-1][1]["error_message"])
+        self.assertIn("funnel=items:3", webhook_updates[-1][1]["error_message"])
 
     def test_sold_comp_candidate_row_rejects_missing_vehicle_identity(self):
         raw_item = {
@@ -1071,8 +1182,42 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(row["rejection_reason"], "invalid_sale_date")
         self.assertEqual(row["sale_date"], "2999-01-25")
 
+    def test_missing_listing_url_rejections_use_unique_replay_safe_source_ids(self):
+        raw_item_one = {
+            "source_site": "govdeals-sold",
+            "title": "Incomplete sold listing one",
+            "year": 2019,
+            "make": "Ford",
+            "model": "F-150",
+            "sold_price": 9100,
+            "auction_end_date": "2020-06-01T15:00:00Z",
+        }
+        raw_item_two = {
+            **raw_item_one,
+            "title": "Incomplete sold listing two",
+        }
+        vehicle_one = ingest._sold_comp_vehicle_from_raw_item(raw_item_one, run_id="run-missing-url", source_hint=None)
+        vehicle_two = ingest._sold_comp_vehicle_from_raw_item(raw_item_two, run_id="run-missing-url", source_hint=None)
+
+        row_one = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle_one,
+            raw_item=raw_item_one,
+            run_id="run-missing-url",
+            item_index=0,
+        )
+        row_two = ingest._build_sold_comp_candidate_row(
+            vehicle=vehicle_two,
+            raw_item=raw_item_two,
+            run_id="run-missing-url",
+            item_index=1,
+        )
+
+        self.assertEqual(row_one["rejection_reason"], "missing_listing_url")
+        self.assertEqual(row_two["rejection_reason"], "missing_listing_url")
+        self.assertNotEqual(row_one["source_listing_id"], row_two["source_listing_id"])
+
     def test_stage_sold_comp_candidate_creates_run_ledger_before_candidate(self):
-        supabase = _RecordingSupabase()
+        supabase = _ExistingCandidateSupabase([])
         vehicle = {
             "run_id": "run-sold-ledger",
             "listing_id": "asset-ledger-1",
@@ -1090,7 +1235,7 @@ class WebhookSecurityTests(unittest.TestCase):
         }
 
         with patch.object(ingest, "supabase_client", supabase):
-            ingest.stage_sold_comp_candidate(
+            staging_status = ingest.stage_sold_comp_candidate(
                 vehicle=vehicle,
                 raw_item=raw_item,
                 run_id="run-sold-ledger",
@@ -1098,14 +1243,180 @@ class WebhookSecurityTests(unittest.TestCase):
             )
 
         operations = supabase.operations
+        self.assertEqual(staging_status, "candidate_staged")
         self.assertEqual(operations[0][0], "market_scout_runs")
         self.assertEqual(operations[0][1], "upsert")
         self.assertEqual(operations[0][2]["run_id"], "run-sold-ledger")
         self.assertEqual(operations[0][3]["on_conflict"], "run_id")
+        self.assertEqual(operations[0][3]["ignore_duplicates"], True)
         self.assertEqual(operations[1][0], "sold_comp_candidates")
-        self.assertEqual(operations[1][1], "upsert")
-        self.assertEqual(operations[1][2]["run_id"], "run-sold-ledger")
-        self.assertEqual(operations[1][3]["on_conflict"], "source_name,source_listing_id")
+        self.assertEqual(operations[1][1], "select")
+        self.assertEqual(operations[2][0], "sold_comp_candidates")
+        self.assertEqual(operations[2][1], "upsert")
+        self.assertEqual(operations[2][2]["run_id"], "run-sold-ledger")
+        self.assertEqual(operations[2][3]["on_conflict"], "source_name,source_listing_id")
+        self.assertNotIn("created_at", operations[2][2])
+
+    def test_stage_sold_comp_candidate_does_not_downgrade_already_reviewed_candidate(self):
+        supabase = _ExistingCandidateSupabase(
+            [{"id": "candidate-existing", "candidate_status": "verified"}]
+        )
+        vehicle = {
+            "run_id": "run-sold-ledger",
+            "listing_id": "asset-ledger-1",
+            "listing_url": "https://www.govdeals.com/asset/321/654",
+            "source_site": "govdeals-sold",
+            "year": 2018,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "TX",
+        }
+        raw_item = {
+            "sold_price": 9100,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+            "auction_end_date": "2020-06-01T15:00:00Z",
+        }
+
+        with patch.object(ingest, "supabase_client", supabase):
+            staging_status = ingest.stage_sold_comp_candidate(
+                vehicle=vehicle,
+                raw_item=raw_item,
+                run_id="run-sold-ledger",
+                item_index=0,
+            )
+
+        self.assertEqual(staging_status, "candidate_already_reviewed")
+        candidate_writes = [
+            operation for operation in supabase.operations
+            if operation[0] == "sold_comp_candidates" and operation[1] == "upsert"
+        ]
+        self.assertEqual(candidate_writes, [])
+
+    def test_stage_sold_comp_candidate_fails_closed_when_existing_status_lookup_fails(self):
+        supabase = _FailingCandidateLookupSupabase()
+        vehicle = {
+            "run_id": "run-sold-ledger",
+            "listing_id": "asset-ledger-1",
+            "listing_url": "https://www.govdeals.com/asset/321/654",
+            "source_site": "govdeals-sold",
+            "year": 2018,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "TX",
+        }
+        raw_item = {
+            "sold_price": 9100,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+            "auction_end_date": "2020-06-01T15:00:00Z",
+        }
+
+        with patch.object(ingest, "supabase_client", supabase):
+            with self.assertRaisesRegex(RuntimeError, "sold_comp_candidate_status_lookup_failed"):
+                ingest.stage_sold_comp_candidate(
+                    vehicle=vehicle,
+                    raw_item=raw_item,
+                    run_id="run-sold-ledger",
+                    item_index=0,
+                )
+
+        candidate_writes = [
+            operation for operation in supabase.operations
+            if operation[0] == "sold_comp_candidates" and operation[1] == "upsert"
+        ]
+        self.assertEqual(candidate_writes, [])
+
+    def test_stage_sold_comp_candidate_direct_pg_does_not_downgrade_already_reviewed_candidate(self):
+        vehicle = {
+            "run_id": "run-sold-ledger",
+            "listing_id": "asset-ledger-1",
+            "listing_url": "https://www.govdeals.com/asset/321/654",
+            "source_site": "govdeals-sold",
+            "year": 2018,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "TX",
+        }
+        raw_item = {
+            "sold_price": 9100,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+            "auction_end_date": "2020-06-01T15:00:00Z",
+        }
+        writes = []
+
+        with patch.object(ingest, "supabase_client", None), patch.object(
+            ingest, "_direct_supabase_db_url", "postgresql://example"
+        ), patch.object(
+            ingest,
+            "_existing_sold_comp_candidate_status_direct_pg",
+            lambda *_args, **_kwargs: "verified",
+        ), patch.object(
+            ingest,
+            "_upsert_market_scout_run_direct_pg",
+            lambda *_args, **_kwargs: writes.append("run"),
+        ), patch.object(
+            ingest,
+            "_upsert_sold_comp_candidate_direct_pg",
+            lambda *_args, **_kwargs: writes.append("candidate"),
+        ):
+            staging_status = ingest.stage_sold_comp_candidate(
+                vehicle=vehicle,
+                raw_item=raw_item,
+                run_id="run-sold-ledger",
+                item_index=0,
+            )
+
+        self.assertEqual(staging_status, "candidate_already_reviewed")
+        self.assertEqual(writes, [])
+
+    def test_stage_sold_comp_candidate_direct_pg_fails_closed_when_existing_status_lookup_fails(self):
+        vehicle = {
+            "run_id": "run-sold-ledger",
+            "listing_id": "asset-ledger-1",
+            "listing_url": "https://www.govdeals.com/asset/321/654",
+            "source_site": "govdeals-sold",
+            "year": 2018,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "TX",
+        }
+        raw_item = {
+            "sold_price": 9100,
+            "source_site": "govdeals-sold",
+            "listing_url": vehicle["listing_url"],
+            "auction_end_date": "2020-06-01T15:00:00Z",
+        }
+        writes = []
+
+        def _raise_lookup_failure(*_args, **_kwargs):
+            raise RuntimeError("sold_comp_candidate_status_lookup_failed")
+
+        with patch.object(ingest, "supabase_client", None), patch.object(
+            ingest, "_direct_supabase_db_url", "postgresql://example"
+        ), patch.object(
+            ingest,
+            "_existing_sold_comp_candidate_status_direct_pg",
+            _raise_lookup_failure,
+        ), patch.object(
+            ingest,
+            "_upsert_market_scout_run_direct_pg",
+            lambda *_args, **_kwargs: writes.append("run"),
+        ), patch.object(
+            ingest,
+            "_upsert_sold_comp_candidate_direct_pg",
+            lambda *_args, **_kwargs: writes.append("candidate"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "sold_comp_candidate_status_lookup_failed"):
+                ingest.stage_sold_comp_candidate(
+                    vehicle=vehicle,
+                    raw_item=raw_item,
+                    run_id="run-sold-ledger",
+                    item_index=0,
+                )
+
+        self.assertEqual(writes, [])
 
 
 if __name__ == "__main__":

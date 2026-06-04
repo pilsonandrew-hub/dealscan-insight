@@ -795,22 +795,25 @@ async def _process_webhook_items(
                     source_hint=metadata.get("source") or metadata.get("actor_id"),
                 )
                 try:
-                    stage_sold_comp_candidate(
+                    staging_status = stage_sold_comp_candidate(
                         vehicle=vehicle,
                         raw_item=item,
                         run_id=apify_run_id,
                         item_index=item_index,
-                    )
+                    ) or "candidate_staged"
                     processed += 1
-                    increment_reason_counter(save_outcomes, "candidate_staged")
-                    logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
+                    increment_reason_counter(save_outcomes, staging_status)
+                    if staging_status == "candidate_staged":
+                        logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
+                    else:
+                        logger.info("[SOLD_COMP] Candidate staging skipped: %s", staging_status)
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
                         listing_url=vehicle.get("listing_url"),
                         opportunity_id=None,
                         channel="db_save",
-                        status="candidate_staged",
+                        status=staging_status,
                         error_message=None,
                         require_durable=True,
                         audit_state=audit_state,
@@ -863,22 +866,25 @@ async def _process_webhook_items(
             vehicle["source_site"] = source_site  # persist normalized value (source and source_site are kept in sync via build_opportunity_row)
             if source_site == "govdeals-sold":
                 try:
-                    stage_sold_comp_candidate(
+                    staging_status = stage_sold_comp_candidate(
                         vehicle=vehicle,
                         raw_item=item,
                         run_id=apify_run_id,
                         item_index=item_index,
-                    )
+                    ) or "candidate_staged"
                     processed += 1
-                    increment_reason_counter(save_outcomes, "candidate_staged")
-                    logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
+                    increment_reason_counter(save_outcomes, staging_status)
+                    if staging_status == "candidate_staged":
+                        logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
+                    else:
+                        logger.info("[SOLD_COMP] Candidate staging skipped: %s", staging_status)
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
                         listing_url=vehicle.get("listing_url"),
                         opportunity_id=None,
                         channel="db_save",
-                        status="candidate_staged",
+                        status=staging_status,
                         error_message=None,
                         require_durable=True,
                         audit_state=audit_state,
@@ -1237,7 +1243,11 @@ async def _process_webhook_items(
             None
             if failed_save_count == 0
             and sonar_write_fail_count == 0
-            and (saved_count > 0 or save_outcomes.get("duplicate_existing", 0) > 0)
+            and (
+                saved_count > 0
+                or save_outcomes.get("duplicate_existing", 0) > 0
+                or save_outcomes.get("candidate_staged", 0) > 0
+            )
             else f"save_outcomes={save_outcomes}; skip_reasons={skip_reasons}"
         )
         combined_message = summary_message if not detail_message else f"{summary_message}; {detail_message}"
@@ -3268,7 +3278,11 @@ def _build_sold_comp_candidate_row(
     )
     source_name = _canonical_source_site(vehicle.get("source_site") or raw_item.get("source_site") or raw_item.get("source")) or "unknown"
     listing_url = vehicle.get("listing_url") or raw_item.get("listing_url") or raw_item.get("url")
-    source_listing_id = _sold_comp_source_listing_id(vehicle, raw_item)
+    source_listing_id = (
+        _sold_comp_source_listing_id(vehicle, raw_item)
+        if listing_url
+        else f"missing-listing-url:{run_id}:{item_index}"
+    )
     sale_date = _sold_comp_sale_date(raw_item, vehicle)
     rejection_reason = _sold_comp_candidate_rejection_reason(
         vehicle=vehicle,
@@ -3383,28 +3397,62 @@ def _build_market_scout_run_row(*, row: dict, vehicle: dict, raw_item: dict) -> 
 def _upsert_market_scout_run_direct_pg(run_row: dict) -> None:
     columns = list(run_row.keys())
     values = [prepare_direct_pg_value(run_row[column]) for column in columns]
-    assignments = [
-        psycopg2_sql.SQL("{} = EXCLUDED.{}").format(
-            psycopg2_sql.Identifier(column),
-            psycopg2_sql.Identifier(column),
-        )
-        for column in columns
-        if column not in {"run_id", "created_at"}
-    ]
     insert_sql = psycopg2_sql.SQL(
         """
         INSERT INTO public.market_scout_runs ({fields})
         VALUES ({values})
-        ON CONFLICT (run_id) DO UPDATE SET {assignments}
+        ON CONFLICT (run_id) DO NOTHING
         """
     ).format(
         fields=psycopg2_sql.SQL(", ").join(psycopg2_sql.Identifier(column) for column in columns),
         values=psycopg2_sql.SQL(", ").join(psycopg2_sql.Placeholder() for _ in columns),
-        assignments=psycopg2_sql.SQL(", ").join(assignments),
     )
     with psycopg2.connect(_direct_supabase_db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(insert_sql, values)
+
+
+def _existing_sold_comp_candidate_status(source_name: str, source_listing_id: str) -> Optional[str]:
+    if supabase_client is None:
+        return None
+    try:
+        response = (
+            supabase_client.table("sold_comp_candidates")
+            .select("id,candidate_status")
+            .eq("source_name", source_name)
+            .eq("source_listing_id", source_listing_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as lookup_err:
+        logger.warning("[INGEST] Sold comp candidate status lookup failed: %s", lookup_err)
+        raise RuntimeError("sold_comp_candidate_status_lookup_failed") from lookup_err
+    rows = response.data or []
+    if not rows:
+        return None
+    return rows[0].get("candidate_status")
+
+
+def _existing_sold_comp_candidate_status_direct_pg(source_name: str, source_listing_id: str) -> Optional[str]:
+    if not _direct_supabase_db_url:
+        return None
+    try:
+        with psycopg2.connect(_direct_supabase_db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT candidate_status
+                    FROM public.sold_comp_candidates
+                    WHERE source_name = %s AND source_listing_id = %s
+                    LIMIT 1
+                    """,
+                    (source_name, source_listing_id),
+                )
+                row = cur.fetchone()
+    except Exception as lookup_err:
+        logger.warning("[INGEST] Direct PG sold comp candidate status lookup failed: %s", lookup_err)
+        raise RuntimeError("sold_comp_candidate_status_lookup_failed") from lookup_err
+    return str(row[0]) if row and row[0] else None
 
 
 def stage_sold_comp_candidate(
@@ -3413,7 +3461,7 @@ def stage_sold_comp_candidate(
     raw_item: dict,
     run_id: str,
     item_index: int,
-) -> None:
+) -> str:
     row = _build_sold_comp_candidate_row(
         vehicle=vehicle,
         raw_item=raw_item,
@@ -3422,16 +3470,28 @@ def stage_sold_comp_candidate(
     )
     run_row = _build_market_scout_run_row(row=row, vehicle=vehicle, raw_item=raw_item)
     if supabase_client is not None:
-        supabase_client.table("market_scout_runs").upsert(run_row, on_conflict="run_id").execute()
+        supabase_client.table("market_scout_runs").upsert(
+            run_row,
+            on_conflict="run_id",
+            ignore_duplicates=True,
+        ).execute()
+        existing_status = _existing_sold_comp_candidate_status(row["source_name"], row["source_listing_id"])
+        if existing_status in {"verified", "rejected", "needs_review"}:
+            return "candidate_already_reviewed"
+        candidate_payload = {key: value for key, value in row.items() if key != "created_at"}
         supabase_client.table("sold_comp_candidates").upsert(
-            row,
+            candidate_payload,
             on_conflict="source_name,source_listing_id",
         ).execute()
-        return
+        return "candidate_staged"
     if not _direct_supabase_db_url:
         raise RuntimeError("candidate_staging_unavailable")
+    existing_status = _existing_sold_comp_candidate_status_direct_pg(row["source_name"], row["source_listing_id"])
+    if existing_status in {"verified", "rejected", "needs_review"}:
+        return "candidate_already_reviewed"
     _upsert_market_scout_run_direct_pg(run_row)
     _upsert_sold_comp_candidate_direct_pg(row)
+    return "candidate_staged"
 
 
 def _upsert_sold_comp_candidate_direct_pg(row: dict) -> None:
@@ -3443,7 +3503,7 @@ def _upsert_sold_comp_candidate_direct_pg(row: dict) -> None:
             psycopg2_sql.Identifier(column),
         )
         for column in columns
-        if column not in {"source_name", "source_listing_id", "created_at"}
+        if column not in {"source_name", "source_listing_id", "created_at", "candidate_status", "rejection_reason"}
     ]
     insert_sql = psycopg2_sql.SQL(
         """

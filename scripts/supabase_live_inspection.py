@@ -361,6 +361,7 @@ def _summarize_sold_comp_candidate_rows(rows: list[dict[str, Any]]) -> dict[str,
     status_counts: Counter[str] = Counter()
     rejection_reason_counts: Counter[str] = Counter()
     source_listing_ids: set[str] = set()
+    source_listing_keys: set[str] = set()
     latest_created_at = None
     latest_updated_at = None
     for row in rows:
@@ -372,7 +373,10 @@ def _summarize_sold_comp_candidate_rows(rows: list[dict[str, Any]]) -> dict[str,
             rejection_reason_counts[str(rejection_reason)[:120]] += 1
         source_listing_id = row.get("source_listing_id")
         if source_listing_id:
-            source_listing_ids.add(str(source_listing_id))
+            source_listing_id_text = str(source_listing_id)
+            source_name_text = str(row.get("source_name") or "unknown")
+            source_listing_ids.add(source_listing_id_text)
+            source_listing_keys.add(f"{source_name_text}:{source_listing_id_text}")
         created_at = row.get("created_at")
         updated_at = row.get("updated_at")
         if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
@@ -382,6 +386,7 @@ def _summarize_sold_comp_candidate_rows(rows: list[dict[str, Any]]) -> dict[str,
     return {
         "row_count": len(rows),
         "distinct_source_listing_ids": len(source_listing_ids),
+        "distinct_source_listing_keys": len(source_listing_keys),
         "source_counts": dict(source_counts.most_common(20)),
         "channel_counts": dict(channel_counts.most_common(20)),
         "status_counts": dict(status_counts.most_common(20)),
@@ -471,7 +476,7 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         for row in rows if isinstance(rows, list) else []:
             opportunity_by_id[str(row.get("id") or json.dumps(row, sort_keys=True))] = row
 
-    market_scout_rows: list[dict[str, Any]] = []
+    market_scout_report: dict[str, Any]
     try:
         market_scout_columns = _available_columns(base_url, service_key, "market_scout_runs")
         market_scout_select = ",".join([
@@ -494,11 +499,11 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
             "market_scout_runs",
             {"select": market_scout_select, "run_id": f"eq.{run_id}", "limit": "50"},
         )
-        market_scout_rows = rows if isinstance(rows, list) else []
-    except Exception:
-        market_scout_rows = []
+        market_scout_report = _summarize_market_scout_run_rows(rows if isinstance(rows, list) else [])
+    except Exception as exc:
+        market_scout_report = {"row_count": None, "failure": str(exc)[:500]}
 
-    sold_comp_candidate_rows: list[dict[str, Any]] = []
+    sold_comp_candidate_report: dict[str, Any]
     try:
         candidate_columns = _available_columns(base_url, service_key, "sold_comp_candidates")
         candidate_select = ",".join([
@@ -520,17 +525,17 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
             "sold_comp_candidates",
             {"select": candidate_select, "run_id": f"eq.{run_id}", "order": "created_at.asc", "limit": "200"},
         )
-        sold_comp_candidate_rows = rows if isinstance(rows, list) else []
-    except Exception:
-        sold_comp_candidate_rows = []
+        sold_comp_candidate_report = _summarize_sold_comp_candidate_rows(rows if isinstance(rows, list) else [])
+    except Exception as exc:
+        sold_comp_candidate_report = {"row_count": None, "failure": str(exc)[:500]}
 
     return {
         "run_id": run_id,
         "delivery_log": _summarize_run_delivery_rows(delivery_rows if isinstance(delivery_rows, list) else []),
         "webhook_log": _summarize_run_webhook_rows(webhook_rows if isinstance(webhook_rows, list) else []),
         "opportunities": _summarize_run_opportunity_rows(list(opportunity_by_id.values())),
-        "market_scout_runs": _summarize_market_scout_run_rows(market_scout_rows),
-        "sold_comp_candidates": _summarize_sold_comp_candidate_rows(sold_comp_candidate_rows),
+        "market_scout_runs": market_scout_report,
+        "sold_comp_candidates": sold_comp_candidate_report,
         "truth_boundary": "Run-level sanitized aggregate only. Does not print titles, VIN values, listing URLs, raw payloads, user data, or secrets.",
     }
 
