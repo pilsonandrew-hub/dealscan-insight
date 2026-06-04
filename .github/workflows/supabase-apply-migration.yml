@@ -79,7 +79,7 @@ jobs:
           password = quote(os.environ["SUPABASE_DB_PASSWORD"], safe="")
           pooler_host = os.environ.get("SUPABASE_DB_POOLER_HOST", "").strip()
           if not pooler_host:
-              pooler_host = "aws-0-us-west-1.pooler.supabase.com"
+              pooler_host = "aws-0-us-west-2.pooler.supabase.com"
           pooler_port = os.environ.get("SUPABASE_DB_POOLER_PORT", "").strip() or "5432"
           print(f"postgresql://postgres.{project_id}:{password}@{pooler_host}:{pooler_port}/postgres?sslmode=require")
           PY
