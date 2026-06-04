@@ -436,6 +436,15 @@ function descriptionNeedsDetailEvidence(lot) {
     return Boolean(title && description.toLowerCase() === title.toLowerCase());
 }
 
+function missingIdentityDetail(lot) {
+    return !lot.vin || !lot.mileage;
+}
+
+function detailEnrichmentPriority(lot) {
+    if (missingIdentityDetail(lot)) return 0;
+    return 1;
+}
+
 function ensureBroadVehiclePayload(payload) {
     const normalized = { ...payload };
     const displayRows = Number(normalized.displayRows || normalized.pageSize || DEFAULT_DISPLAY_ROWS);
@@ -494,7 +503,9 @@ function isBroadVehiclePayload(candidate, reference = null) {
  * Caps at MAX_DETAIL_PAGES to keep scheduled runs bounded and rate-limited.
  */
 async function enrichFromDetailPages(page, lots, log, budget = runtimeBudget) {
-    const lotsNeedingDetail = lots.filter(l => l.listing_url && (!l.vin || !l.mileage || descriptionNeedsDetailEvidence(l)));
+    const lotsNeedingDetail = lots
+        .filter(l => l.listing_url && (missingIdentityDetail(l) || descriptionNeedsDetailEvidence(l)))
+        .sort((a, b) => detailEnrichmentPriority(a) - detailEnrichmentPriority(b));
     const toScrape = lotsNeedingDetail.slice(0, MAX_DETAIL_PAGES);
 
     if (toScrape.length === 0) {
