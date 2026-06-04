@@ -23,7 +23,7 @@ def test_supabase_apply_migration_workflow_uses_direct_db_secret_without_printin
     assert "SUPABASE_URL" in text
     assert "re.search" in text
     assert "SUPABASE_DB_POOLER_HOST" in text
-    assert "aws-0-us-west-1.pooler.supabase.com" in text
+    assert "aws-0-us-west-2.pooler.supabase.com" in text
     assert 'or "5432"' in text
     assert "postgresql://postgres.{project_id}:" in text
     assert "psql" in text
