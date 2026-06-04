@@ -64,6 +64,7 @@ HISTORICAL_ARTIFACT_ISSUES = {
     "audit_backfilled",
     "db_only_run",
     "direct_pg_claim_rest_fallback",
+    "superseded_source_quality_proof_pre_ledger",
 }
 CURRENT_LANDING_ISSUES = {
     "db_save_failures",
@@ -451,7 +452,35 @@ def fetch_dataset_item_count(dataset_id: str, token: str, cache: dict[str, Optio
     return item_count
 
 
-def normalize_run(actor_name: str, actor_id: str, raw_run: dict[str, Any], token: Optional[str], dataset_cache: dict[str, Optional[int]]) -> dict[str, Any]:
+def fetch_dataset_record_type_counts(
+    dataset_id: str,
+    token: str,
+    cache: dict[str, dict[str, int]],
+) -> dict[str, int]:
+    if dataset_id in cache:
+        return cache[dataset_id]
+    payload = apify_get_json(
+        f"/datasets/{dataset_id}/items",
+        token,
+        query={"clean": "true", "limit": 100},
+    )
+    counts: Counter[str] = Counter()
+    for item in extract_items(payload):
+        record_type = str(item.get("record_type") or "").strip()
+        if record_type:
+            counts[record_type] += 1
+    cache[dataset_id] = dict(counts)
+    return cache[dataset_id]
+
+
+def normalize_run(
+    actor_name: str,
+    actor_id: str,
+    raw_run: dict[str, Any],
+    token: Optional[str],
+    dataset_cache: dict[str, Optional[int]],
+    record_type_cache: Optional[dict[str, dict[str, int]]] = None,
+) -> dict[str, Any]:
     dataset_id = (
         raw_run.get("defaultDatasetId")
         or (raw_run.get("stats") or {}).get("defaultDatasetId")
@@ -467,6 +496,16 @@ def normalize_run(actor_name: str, actor_id: str, raw_run: dict[str, Any], token
             item_count = fetch_dataset_item_count(dataset_id, token, dataset_cache)
         except Exception:
             item_count = None
+    record_type_counts: dict[str, int] = {}
+    if dataset_id and token and item_count is not None and item_count <= 100:
+        try:
+            record_type_counts = fetch_dataset_record_type_counts(
+                dataset_id,
+                token,
+                record_type_cache if record_type_cache is not None else {},
+            )
+        except Exception:
+            record_type_counts = {}
 
     started_at = parse_datetime(raw_run.get("startedAt") or raw_run.get("createdAt"))
     finished_at = parse_datetime(raw_run.get("finishedAt") or raw_run.get("modifiedAt"))
@@ -477,6 +516,8 @@ def normalize_run(actor_name: str, actor_id: str, raw_run: dict[str, Any], token
         "status": raw_run.get("status") or "unknown",
         "dataset_id": dataset_id or None,
         "item_count": item_count,
+        "record_type_counts": record_type_counts,
+        "source_quality_proof_count": record_type_counts.get("source_quality_proof", 0),
         "started_at": started_at,
         "finished_at": finished_at,
         "raw": raw_run,
@@ -491,6 +532,7 @@ def fetch_runs_from_apify(
     limit_per_actor: int,
 ) -> list[dict[str, Any]]:
     dataset_cache: dict[str, Optional[int]] = {}
+    record_type_cache: dict[str, dict[str, int]] = {}
     runs: list[dict[str, Any]] = []
     for actor_name, actor_id in actors.items():
         payload = apify_get_json(
@@ -499,7 +541,7 @@ def fetch_runs_from_apify(
             query={"limit": limit_per_actor, "desc": 1},
         )
         for raw_run in extract_items(payload):
-            run = normalize_run(actor_name, actor_id, raw_run, token, dataset_cache)
+            run = normalize_run(actor_name, actor_id, raw_run, token, dataset_cache, record_type_cache)
             started_at = run.get("started_at")
             finished_at = run.get("finished_at") or started_at
             if started_at and started_at > end:
@@ -1018,6 +1060,7 @@ def build_reports(
                 ),
             }
         )
+    reclassify_superseded_source_quality_proofs(reports)
     reports.sort(
         key=lambda report: (
             (report["apify"] or {}).get("started_at")
@@ -1028,6 +1071,76 @@ def build_reports(
         reverse=True,
     )
     return reports
+
+
+def _started_at_for_report(report: dict[str, Any]) -> datetime:
+    return (
+        (report.get("apify") or {}).get("started_at")
+        or parse_datetime((report.get("webhook") or {}).get("last_received_at"))
+        or datetime.min.replace(tzinfo=timezone.utc)
+    )
+
+
+def _is_source_quality_proof_only(report: dict[str, Any]) -> bool:
+    apify = report.get("apify") or {}
+    item_count = _first_int(apify.get("item_count")) or 0
+    proof_count = _first_int(apify.get("source_quality_proof_count")) or 0
+    return item_count > 0 and proof_count >= item_count
+
+
+def _has_clean_skipped_proof_ledger(report: dict[str, Any]) -> bool:
+    if report.get("issues"):
+        return False
+    delivery = report.get("delivery") or {}
+    db_save = ((delivery.get("channels") or {}).get("db_save") or {})
+    statuses = db_save.get("statuses") or {}
+    return (_first_int(statuses.get("skipped_proof")) or 0) > 0
+
+
+def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -> None:
+    """Mark old proof-only control runs historical once a later clean proof ledger exists.
+
+    This prevents broad lookback windows from reopening a fixed source-quality-proof
+    landing issue solely because they still include pre-ledger control rows. It only
+    applies when the dataset is proven proof-only and a later same-actor run has a
+    clean skipped_proof ledger row.
+    """
+    latest_clean_proof_by_actor: dict[str, datetime] = {}
+    for report in reports:
+        if not _is_source_quality_proof_only(report) or not _has_clean_skipped_proof_ledger(report):
+            continue
+        actor_name = str(((report.get("apify") or {}).get("actor_name")) or "")
+        if not actor_name:
+            continue
+        started_at = _started_at_for_report(report)
+        prior = latest_clean_proof_by_actor.get(actor_name)
+        if prior is None or started_at > prior:
+            latest_clean_proof_by_actor[actor_name] = started_at
+
+    if not latest_clean_proof_by_actor:
+        return
+
+    superseded_issues = {
+        "missing_delivery_log",
+        "missing_db_save_ledger",
+        "no_db_landing",
+    }
+    for report in reports:
+        if not _is_source_quality_proof_only(report):
+            continue
+        actor_name = str(((report.get("apify") or {}).get("actor_name")) or "")
+        latest_clean = latest_clean_proof_by_actor.get(actor_name)
+        if latest_clean is None or _started_at_for_report(report) >= latest_clean:
+            continue
+        issue_set = set(report.get("issues") or [])
+        if issue_set and issue_set <= superseded_issues:
+            report["issues"] = ["superseded_source_quality_proof_pre_ledger"]
+            report["issue_scope"] = "historical_artifact"
+            report["likely_cause"] = (
+                "superseded_source_quality_proof_pre_ledger: this older proof-only control "
+                "run predated the durable skipped_proof ledger path; a later same-actor "
+                "proof-only run has clean db_save=skipped_proof evidence."
+            )
 
 
 def print_issue_summary(reports: list[dict[str, Any]]) -> None:
