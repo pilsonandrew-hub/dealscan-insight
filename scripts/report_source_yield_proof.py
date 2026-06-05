@@ -455,6 +455,10 @@ def build_source_yield_report(
                 item["run_id"],
             ),
         )[:25]
+        run_classification_counts = Counter(str(item["classification"]) for item in run_summaries)
+        report["run_classification_counts"] = dict(run_classification_counts.most_common())
+        if run_classification_counts.get("webhook_without_delivery_gap"):
+            report["overall_verdict"] = "diagnostic_gap"
     return report
 
 

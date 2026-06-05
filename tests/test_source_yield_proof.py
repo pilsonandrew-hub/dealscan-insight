@@ -317,3 +317,77 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
     assert "title" not in run_output
     assert "vin" not in run_output
     assert "url" not in run_output
+
+
+def test_run_level_positive_item_gap_controls_overall_verdict(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if dict(query).get("select") == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-gap",
+                        "source": "hibid",
+                        "status": "processed",
+                        "item_count": 182,
+                        "received_at": "2026-06-05T04:00:00+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-rejected",
+                        "source_site": "hibid",
+                        "status": "skipped_gate",
+                        "error_message": "age_or_mileage_exceeded",
+                        "created_at": "2026-06-05T04:01:00+00:00",
+                    }
+                ]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-05T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-gap",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 182,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                },
+                {
+                    "run_id": "run-rejected",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 1,
+                    "received_at": "2026-06-05T03:00:00+00:00",
+                },
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-rejected",
+                    "source_site": "hibid",
+                    "status": "skipped_gate",
+                    "error_message": "age_or_mileage_exceeded",
+                    "created_at": "2026-06-05T04:01:00+00:00",
+                }
+            ]
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+        run_detail_source="hibid",
+    )
+
+    assert report["overall_verdict"] == "diagnostic_gap"
+    assert report["run_classification_counts"]["webhook_without_delivery_gap"] == 1
+    by_run = {item["run_id"]: item for item in report["run_summaries"]}
+    assert by_run["run-gap"]["classification"] == "webhook_without_delivery_gap"
+    assert by_run["run-rejected"]["classification"] == "source_quality_reject_dominant"
