@@ -80,6 +80,8 @@
       "scheduleId": "1tLdDDBUL2Kb6cBzl",
       "status": "enabled",
       "schedule": "0 */12 * * *",
+      "scheduleName": "ds-hibid-v2-every-12h",
+      "scheduleStatus": "enabled_live",
       "notes": "HiBid GraphQL API (pure fetch, no Playwright). Replaces lexis-solutions rented actor. Category 700006 = Cars & Vehicles. US-only via countryName filter. 24 vehicle make keywords. Test run confirmed working.",
       "webhookId": "Vz0rdeGFMDgiu3eR1"
     },

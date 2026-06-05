@@ -630,9 +630,12 @@ await Actor.pushData(proof);
 const effectiveWebhookUrl = webhookUrl
     || process.env.WEBHOOK_URL
     || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
-const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
+const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET;
 
 if (effectiveWebhookUrl) {
+    if (!effectiveWebhookSecret) {
+        throw new Error('WEBHOOK_SECRET is required when HiBid v2 webhook delivery is enabled');
+    }
     try {
         const resp = await fetch(effectiveWebhookUrl, {
             method: 'POST',

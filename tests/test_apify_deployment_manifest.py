@@ -71,6 +71,26 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("ds-bidspotter-12hr-apify-native", workflow)
         self.assertIn("FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}", workflow)
 
+    def test_hibid_v2_actor_is_enabled_on_secret_managed_apify_schedule(self):
+        manifest_path = self.repo_root / "apify" / "deployment.json"
+        workflow_path = self.repo_root / ".github" / "workflows" / "configure-hibid-v2-apify-schedule.yml"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        actor = payload["actors"].get("ds-hibid-v2")
+        self.assertIsNotNone(actor)
+        self.assertEqual(actor["id"], "7s9e0eATTt1kuGGfE")
+        self.assertEqual(actor["scheduleId"], "1tLdDDBUL2Kb6cBzl")
+        self.assertEqual(actor["status"], "enabled")
+        self.assertEqual(actor["schedule"], "0 */12 * * *")
+        self.assertEqual(actor["scheduleName"], "ds-hibid-v2-every-12h")
+        self.assertEqual(actor["scheduleStatus"], "enabled_live")
+        self.assertIn("WEBHOOK_SECRET: ${{ secrets.APIFY_WEBHOOK_SECRET }}", workflow)
+        self.assertIn('"minYear": CURRENT_YEAR - 4', workflow)
+        self.assertIn('"maxMileage": 50000', workflow)
+        self.assertNotIn('"webhookSecret"', workflow)
+        self.assertNotIn("rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA", workflow)
+
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
         workflow = workflow_path.read_text(encoding="utf-8")
