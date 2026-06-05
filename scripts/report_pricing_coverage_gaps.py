@@ -5,12 +5,21 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timedelta, timezone
+from typing import Any
 from typing import Optional
 
 import psycopg2
 import psycopg2.extras
 
 from live_verification_support import get_database_url
+from report_pricing_blocked_source_candidates import (
+    _fetch_postgrest_rows,
+    _normalize_supabase_rest_url,
+    _parse_datetime,
+    _positive_number,
+    resolve_rest_config,
+)
 
 
 MIN_SEEDABLE_HISTORY_ROWS = 5
@@ -158,6 +167,186 @@ def format_gap_row(row: dict) -> str:
     )
 
 
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int) -> dict[str, Any] | None:
+    if row.get("pricing_maturity") != "proxy":
+        return None
+    if not str(row.get("vin") or "").strip():
+        return None
+    try:
+        mileage = int(row.get("mileage") or 0)
+    except (TypeError, ValueError):
+        return None
+    if mileage <= 0 or mileage > max_mileage:
+        return None
+    cleaned = dict(row)
+    cleaned["make"] = _norm_text(cleaned.get("make"))
+    cleaned["model"] = _norm_text(cleaned.get("model"))
+    cleaned["state"] = _norm_text(cleaned.get("state")) or None
+    return cleaned
+
+
+def _market_price_matches(row: dict[str, Any], market_rows: list[dict[str, Any]], now: datetime) -> tuple[int, int]:
+    matches = 0
+    usable = 0
+    for market in market_rows:
+        if (
+            int(market.get("year") or 0) != int(row.get("year") or 0)
+            or _norm_text(market.get("make")) != _norm_text(row.get("make"))
+            or _norm_text(market.get("model")) != _norm_text(row.get("model"))
+            or (_norm_text(market.get("state")) or None) != (row.get("state") or None)
+        ):
+            continue
+        matches += 1
+        expires_at = _parse_datetime(market.get("expires_at"))
+        if (
+            _positive_number(market.get("avg_price"))
+            and _positive_number(market.get("low_price"))
+            and _positive_number(market.get("high_price"))
+            and int(market.get("sample_size") or 0) >= 2
+            and expires_at is not None
+            and expires_at >= now
+            and market.get("source")
+        ):
+            usable += 1
+    return matches, usable
+
+
+def _dealer_sales_matches(row: dict[str, Any], dealer_sales_rows: list[dict[str, Any]], now: datetime) -> tuple[int, int]:
+    matches = 0
+    usable = 0
+    for sale in dealer_sales_rows:
+        sale_year = int(sale.get("year") or 0)
+        if not int(row.get("year") or 0) - 1 <= sale_year <= int(row.get("year") or 0) + 1:
+            continue
+        if _norm_text(sale.get("make")) != row.get("make") or _norm_text(sale.get("model")) != row.get("model"):
+            continue
+        if row.get("state") and _norm_text(sale.get("state")) != row.get("state"):
+            continue
+        matches += 1
+        sale_date = _parse_datetime(sale.get("sale_date"))
+        if _positive_number(sale.get("sale_price")) and sale_date is not None and sale_date >= now - timedelta(days=365):
+            usable += 1
+    return matches, usable
+
+
+def _opportunity_history_matches(row: dict[str, Any], history_rows: list[dict[str, Any]]) -> tuple[int, int]:
+    matches = 0
+    usable = 0
+    for history in history_rows:
+        if history.get("id") == row.get("id"):
+            continue
+        if (
+            int(history.get("year") or 0) != int(row.get("year") or 0)
+            or _norm_text(history.get("make")) != row.get("make")
+            or _norm_text(history.get("model")) != row.get("model")
+            or (_norm_text(history.get("state")) or None) != (row.get("state") or None)
+        ):
+            continue
+        matches += 1
+        if (
+            history.get("pricing_maturity") == "market_comp"
+            and history.get("pricing_source") == "dealer_sales_history"
+            and _positive_number(history.get("retail_comp_price_estimate"))
+            and int(history.get("retail_comp_count") or 0) >= 2
+            and float(history.get("retail_comp_confidence") or 0) >= 0.60
+        ):
+            usable += 1
+    return matches, usable
+
+
+def fetch_gap_rows_via_rest(
+    supabase_url: str,
+    service_role_key: str,
+    *,
+    lookback_days: int,
+    max_mileage: int,
+    limit: int,
+    now: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    current_time = now or datetime.now(timezone.utc)
+    base_url = _normalize_supabase_rest_url(supabase_url)
+    since = (current_time - timedelta(days=lookback_days)).isoformat()
+    sales_since = (current_time - timedelta(days=365)).isoformat()
+
+    opportunity_select = (
+        "id,source,source_site,title,year,make,model,state,mileage,vin,pricing_maturity,"
+        "pricing_source,is_active,dos_score,processed_at,bid_headroom,investment_grade,"
+        "current_bid,expected_close_bid,acquisition_price_basis,projected_total_cost,max_bid,"
+        "retail_asking_price_estimate,listing_url,retail_comp_price_estimate,retail_comp_count,"
+        "retail_comp_confidence"
+    )
+    recent_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "opportunities",
+        [
+            ("select", opportunity_select),
+            ("processed_at", f"gte.{since}"),
+            ("order", "processed_at.desc"),
+            ("limit", str(max(limit * 10, 1000))),
+        ],
+    )
+    clean_proxy_rows = [
+        cleaned
+        for row in recent_rows
+        if (cleaned := _clean_proxy_row(row, max_mileage=max_mileage)) is not None
+    ][:limit]
+    if not clean_proxy_rows:
+        return []
+
+    market_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "market_prices",
+        [
+            ("select", "id,year,make,model,state,avg_price,low_price,high_price,sample_size,expires_at,source"),
+            ("expires_at", f"gte.{current_time.isoformat()}"),
+        ],
+    )
+    dealer_sales_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "dealer_sales",
+        [
+            ("select", "id,year,make,model,state,sale_price,sale_date"),
+            ("sale_date", f"gte.{sales_since}"),
+        ],
+    )
+    history_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "opportunities",
+        [
+            ("select", opportunity_select),
+            ("pricing_maturity", "eq.market_comp"),
+            ("pricing_source", "eq.dealer_sales_history"),
+            ("limit", str(max(limit * 20, 1000))),
+        ],
+    )
+
+    enriched: list[dict[str, Any]] = []
+    for row in clean_proxy_rows:
+        market_total, market_usable = _market_price_matches(row, market_rows, current_time)
+        sales_total, sales_usable = _dealer_sales_matches(row, dealer_sales_rows, current_time)
+        history_total, history_usable = _opportunity_history_matches(row, history_rows)
+        enriched.append(
+            {
+                **row,
+                "market_prices_matches": market_total,
+                "usable_market_prices_matches": market_usable,
+                "dealer_sales_matches": sales_total,
+                "usable_dealer_sales_matches": sales_usable,
+                "market_comp_opportunity_history": history_total,
+                "usable_opportunity_history": history_usable,
+            }
+        )
+    return enriched
+
+
 def fetch_gap_rows(
     dsn: str,
     *,
@@ -185,6 +374,11 @@ def main() -> int:
     parser.add_argument("--lookback-days", type=int, default=7)
     parser.add_argument("--max-mileage", type=int, default=50000)
     parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument(
+        "--via-rest",
+        action="store_true",
+        help="Read through Supabase REST service-role API instead of direct Postgres.",
+    )
     args = parser.parse_args()
 
     if args.lookback_days <= 0:
@@ -197,21 +391,34 @@ def main() -> int:
         print("--limit must be positive", file=sys.stderr)
         return 2
 
-    dsn = get_database_url(args.dsn, env_file=args.env_file)
-    if not dsn:
-        print(
-            "No database DSN found. Set SUPABASE_DB_URL, SUPABASE_DATABASE_URL, "
-            "SUPABASE_DIRECT_DB_URL, DATABASE_URL, or pass --dsn.",
-            file=sys.stderr,
+    rest_base_url, service_role_key, rest_source = resolve_rest_config(args.env_file)
+    dsn = None if args.via_rest else get_database_url(args.dsn, env_file=args.env_file)
+    if dsn:
+        rows = fetch_gap_rows(
+            dsn,
+            lookback_days=args.lookback_days,
+            max_mileage=args.max_mileage,
+            limit=args.limit,
         )
-        return 2
-
-    rows = fetch_gap_rows(
-        dsn,
-        lookback_days=args.lookback_days,
-        max_mileage=args.max_mileage,
-        limit=args.limit,
-    )
+    else:
+        if not rest_base_url or not service_role_key:
+            print(
+                "No live database read path found. Set a direct DB DSN, or set "
+                "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for --via-rest.",
+                file=sys.stderr,
+            )
+            return 2
+        if args.via_rest:
+            print(f"db_path=rest:{rest_source or 'unknown'}")
+        else:
+            print(f"db_path=rest:{rest_source or 'unknown'} (direct DSN unavailable)")
+        rows = fetch_gap_rows_via_rest(
+            rest_base_url,
+            service_role_key,
+            lookback_days=args.lookback_days,
+            max_mileage=args.max_mileage,
+            limit=args.limit,
+        )
     print(
         f"clean_proxy_candidates={len(rows)} "
         f"lookback_days={args.lookback_days} max_mileage={args.max_mileage}"

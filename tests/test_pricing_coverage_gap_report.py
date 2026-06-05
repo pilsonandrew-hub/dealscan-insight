@@ -86,3 +86,136 @@ def test_format_gap_row_includes_evidence_and_economics():
     assert "evidence=blocked_no_internal_comp_evidence" in formatted
     assert "expected_close=16162.13" in formatted
     assert "retail_proxy=40500" in formatted
+
+
+def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        assert base_url == "https://example.supabase.co/rest/v1"
+        assert service_role_key == "service-key"
+        if table == "opportunities":
+            return [
+                {
+                    "id": "proxy-covered-market",
+                    "source": "govdeals",
+                    "source_site": "govdeals",
+                    "title": "2022 BMW X1",
+                    "year": 2022,
+                    "make": "BMW",
+                    "model": "X1",
+                    "state": "TN",
+                    "mileage": 40718,
+                    "vin": "WBXJG7C02N5U88160",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "dos_score": 0,
+                    "processed_at": "2026-06-05T03:41:16+00:00",
+                    "bid_headroom": -1,
+                    "investment_grade": "Rejected",
+                    "current_bid": 20900,
+                    "expected_close_bid": 20900,
+                    "acquisition_price_basis": "current_bid",
+                    "projected_total_cost": 25675,
+                    "max_bid": 0,
+                    "retail_asking_price_estimate": 26000,
+                    "listing_url": "https://example.test/1",
+                    "retail_comp_price_estimate": 0,
+                    "retail_comp_count": 0,
+                    "retail_comp_confidence": 0,
+                },
+                {
+                    "id": "proxy-seedable-history",
+                    "source": "govdeals",
+                    "source_site": "govdeals",
+                    "title": "2020 Dodge Durango",
+                    "year": 2020,
+                    "make": "Dodge",
+                    "model": "Durango",
+                    "state": "MS",
+                    "mileage": 43092,
+                    "vin": "1C4RDJFG5NC184072",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "dos_score": 0,
+                    "processed_at": "2026-06-02T20:16:08+00:00",
+                    "bid_headroom": -1,
+                    "investment_grade": "Rejected",
+                    "current_bid": 20000,
+                    "expected_close_bid": 20000,
+                    "acquisition_price_basis": "current_bid",
+                    "projected_total_cost": 24000,
+                    "max_bid": 0,
+                    "retail_asking_price_estimate": 30000,
+                    "listing_url": "https://example.test/2",
+                    "retail_comp_price_estimate": 0,
+                    "retail_comp_count": 0,
+                    "retail_comp_confidence": 0,
+                },
+                *[
+                    {
+                        "id": f"history-{index}",
+                        "source": "govdeals",
+                        "source_site": "govdeals",
+                        "title": "Historical Durango",
+                        "year": 2020,
+                        "make": "Dodge",
+                        "model": "Durango",
+                        "state": "MS",
+                        "mileage": 30000,
+                        "vin": f"HISTORY{index}",
+                        "pricing_maturity": "market_comp",
+                        "pricing_source": "dealer_sales_history",
+                        "is_active": False,
+                        "dos_score": 82,
+                        "processed_at": "2026-05-01T00:00:00+00:00",
+                        "bid_headroom": 1000,
+                        "investment_grade": "Gold",
+                        "current_bid": 15000,
+                        "expected_close_bid": 15000,
+                        "acquisition_price_basis": "current_bid",
+                        "projected_total_cost": 18000,
+                        "max_bid": 17000,
+                        "retail_asking_price_estimate": 30000,
+                        "listing_url": f"https://example.test/history/{index}",
+                        "retail_comp_price_estimate": 30000,
+                        "retail_comp_count": 2,
+                        "retail_comp_confidence": 0.7,
+                    }
+                    for index in range(5)
+                ],
+            ]
+        if table == "market_prices":
+            return [
+                {
+                    "id": "market-1",
+                    "year": 2022,
+                    "make": "bmw",
+                    "model": "x1",
+                    "state": "tn",
+                    "avg_price": 26000,
+                    "low_price": 23000,
+                    "high_price": 29000,
+                    "sample_size": 3,
+                    "expires_at": "2026-07-01T00:00:00+00:00",
+                    "source": "seeded_market_comp",
+                }
+            ]
+        if table == "dealer_sales":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=14,
+        max_mileage=50000,
+        limit=20,
+        now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T04:00:00+00:00"),
+    )
+
+    by_id = {row["id"]: row for row in rows}
+    assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-covered-market"]) == "covered_by_market_prices"
+    assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-seedable-history"]) == "seedable_from_internal_history"
