@@ -468,7 +468,7 @@ def test_score_vehicle_preserves_market_comp_wholesale_value(monkeypatch):
         manheim_market,
         "get_manheim_market_data",
         lambda **_kwargs: {
-            "manheim_mmr_mid": None,
+            "manheim_mmr_mid": 22000,
             "manheim_mmr_low": None,
             "manheim_mmr_high": None,
             "manheim_range_width_pct": None,
@@ -1123,6 +1123,8 @@ def test_score_deal_uses_conservative_market_comp_wholesale_value_when_proxy_is_
         retail_comp_price_estimate=41182.33,
         retail_comp_confidence=0.69,
         pricing_source="retail_market_cache",
+        manheim_mmr_mid=22000,
+        manheim_source_status="fallback",
     )
 
     assert result["pricing_maturity"] == "market_comp"
@@ -1153,6 +1155,31 @@ def test_score_deal_does_not_label_market_comp_when_comp_price_missing():
 
     assert result["pricing_maturity"] == "proxy"
     assert result["mmr_estimated"] == 22000
+
+
+def test_score_deal_prefers_live_manheim_over_market_comp_when_available():
+    result = score_deal(
+        bid=31000,
+        mmr_ca=22000,
+        state="NJ",
+        source_site="GovDeals",
+        model="Explorer",
+        make="Ford",
+        year=CURRENT_YEAR - 1,
+        mileage=1435,
+        title_status="clean",
+        description="clean low mileage sport utility vehicle",
+        photos=["https://example.com/photo.jpg"],
+        retail_comp_count=3,
+        retail_comp_price_estimate=41182.33,
+        retail_comp_confidence=0.69,
+        pricing_source="retail_market_cache",
+        manheim_mmr_mid=36000,
+        manheim_source_status="live",
+    )
+
+    assert result["pricing_maturity"] == "live_market"
+    assert result["mmr_estimated"] == 36000
 
 
 def test_score_deal_rejects_explicit_poor_condition_even_with_market_comp_headroom():
