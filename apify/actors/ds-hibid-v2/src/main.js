@@ -281,6 +281,10 @@ function passesFilters(listing, log) {
     }
 
     // Mileage
+    if (listing.mileage === null) {
+        log.debug(`[SKIP-MILES-MISSING] ${listing.title?.slice(0, 60)}`);
+        return false;
+    }
     if (listing.mileage !== null && listing.mileage > maxMileage) {
         log.debug(`[SKIP-MILES] ${listing.mileage}`);
         return false;

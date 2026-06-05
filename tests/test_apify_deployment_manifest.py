@@ -141,6 +141,13 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("fourtrax", source)
         self.assertIn("recon", source)
 
+    def test_hibid_v2_requires_mileage_before_pushing_rows(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertIn("listing.mileage === null", source)
+        self.assertIn("[SKIP-MILES-MISSING]", source)
+
     def test_govdeals_sold_actor_supports_explicit_seo_asset_urls_without_enabling_search(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
         source = source_path.read_text(encoding="utf-8")
