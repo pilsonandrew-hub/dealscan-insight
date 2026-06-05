@@ -119,3 +119,12 @@ def test_run_apify_actor_workflow_supports_bounded_hibid_v2_proof():
     assert '"requested_max_mileage"' in text
     assert '"effective_min_year"' in text
     assert '"effective_max_mileage"' in text
+
+
+def test_run_apify_actor_workflow_supports_bounded_proxibid_source_parity_proof():
+    text = WORKFLOW.read_text()
+
+    assert "PROXIBID_MIN_YEAR" in text
+    assert "PROXIBID_MAX_MILEAGE" in text
+    assert '"minYear": int(os.environ.get("PROXIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4))' in text
+    assert '"maxMileage": int(os.environ.get("PROXIBID_MAX_MILEAGE") or "50000")' in text

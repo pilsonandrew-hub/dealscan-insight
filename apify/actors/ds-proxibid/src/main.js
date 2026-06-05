@@ -21,6 +21,9 @@ import { PlaywrightCrawler } from 'crawlee';
 
 const SOURCE = 'proxibid';
 const BASE = 'https://www.proxibid.com';
+const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_MIN_YEAR = CURRENT_YEAR - 4;
+const DEFAULT_MAX_MILEAGE = 50000;
 const DEFAULT_WEBHOOK_SECRET = 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
 const actorRunId = process.env.APIFY_ACTOR_RUN_ID || process.env.APIFY_RUN_ID || null;
 
@@ -92,10 +95,14 @@ const {
     maxPages = 5,
     minBid = 500,
     maxBid = 50000,
-    minYear = new Date().getFullYear() - 10,
+    minYear = DEFAULT_MIN_YEAR,
+    maxMileage = DEFAULT_MAX_MILEAGE,
     maxDetailPages = 200,
     targetCategories = "",
 } = input;
+
+const EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR);
+const EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE);
 
 const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];
 
@@ -139,15 +146,23 @@ const CATEGORY_URLS = TARGET_CATEGORIES.map(category => {
 
 let totalFound = 0;
 let totalPassed = 0;
+let rowsExcludedAgeMileagePrefilter = 0;
 const seenLotIds = new Set();
 const sampleLocations = [];
 const passingLots = [];
+const prefilterAgeMileageRejectedSamples = [];
 const enrichmentProof = {
     record_type: 'source_quality_proof',
     source_site: SOURCE,
     generated_at: null,
     actor: 'ds-proxibid',
     actor_run_id: actorRunId,
+    found_rows_total: 0,
+    prefilter_passed_rows_total: 0,
+    requested_min_year: Number(minYear) || null,
+    requested_max_mileage: Number(maxMileage) || null,
+    effective_min_year: EFFECTIVE_MIN_YEAR,
+    effective_max_mileage: EFFECTIVE_MAX_MILEAGE,
     detail_pages_attempted: 0,
     detail_pages_fetched: 0,
     detail_pages_failed: 0,
@@ -163,12 +178,14 @@ const enrichmentProof = {
     rows_excluded_missing_required_data: 0,
     rows_excluded_missing_vin: 0,
     rows_excluded_missing_mileage: 0,
+    rows_excluded_age_mileage_prefilter: 0,
     enriched_rows_accepted: 0,
     enriched_rows_rejected: 0,
     rejection_reasons: {},
     accepted_enriched_samples: [],
     rejected_enriched_samples: [],
     excluded_missing_required_samples: [],
+    prefilter_age_mileage_rejected_samples: [],
     input_contract: {
         category_navigation_path: CATEGORY_NAVIGATION_PATH,
         targeted_categories: TARGET_CATEGORIES.map(category => category.label),
@@ -184,6 +201,19 @@ function normalize(text) {
 function recordLocationSample(loc) {
     const n = normalize(loc);
     if (n && !sampleLocations.includes(n) && sampleLocations.length < 8) sampleLocations.push(n);
+}
+
+function recordPrefilterAgeMileageReject(card, reason, year, mileage) {
+    rowsExcludedAgeMileagePrefilter++;
+    if (prefilterAgeMileageRejectedSamples.length >= 5) return;
+    prefilterAgeMileageRejectedSamples.push({
+        title: card.title,
+        state: parseState(card.location),
+        year: year ?? null,
+        mileage: mileage ?? null,
+        reject_reasons: [reason],
+        source_site: SOURCE,
+    });
 }
 
 function parseState(locationText) {
@@ -384,7 +414,14 @@ const crawler = new PlaywrightCrawler({
                 seenLotIds.add(card.lotId);
 
                 if (!make) continue;
-                if (!year || year < minYear) continue;
+                if (!year || year < EFFECTIVE_MIN_YEAR) {
+                    recordPrefilterAgeMileageReject(card, year ? 'age_over_4_years' : 'missing_year', year, mileage);
+                    continue;
+                }
+                if (mileage !== null && mileage !== undefined && mileage > EFFECTIVE_MAX_MILEAGE) {
+                    recordPrefilterAgeMileageReject(card, 'mileage_over_50k', year, mileage);
+                    continue;
+                }
                 if (bid > 0 && (bid < minBid || bid > maxBid)) continue;
                 if (applyBuyerGradeFilters({ title: card.title, mileage }).length > 0) continue;
                 if (!state || !US_STATES.has(state)) continue;
@@ -584,6 +621,8 @@ function proofSample(lot) {
 
 function finalizeEnrichmentProof(lotsToPush) {
     enrichmentProof.generated_at = new Date().toISOString();
+    enrichmentProof.found_rows_total = totalFound;
+    enrichmentProof.prefilter_passed_rows_total = totalPassed;
     const accepted = lotsToPush;
     const acceptedEnriched = accepted.filter(lot => lot.detail_enriched);
     const rejected = passingLots.filter(lot => lot.rejected_after_detail);
@@ -602,6 +641,7 @@ function finalizeEnrichmentProof(lotsToPush) {
     enrichmentProof.rows_excluded_missing_required_data = missingRequired.length;
     enrichmentProof.rows_excluded_missing_vin = missingRequired.filter(lot => !lot.vin).length;
     enrichmentProof.rows_excluded_missing_mileage = missingRequired.filter(lot => !lot.mileage).length;
+    enrichmentProof.rows_excluded_age_mileage_prefilter = rowsExcludedAgeMileagePrefilter;
     enrichmentProof.enriched_rows_accepted = acceptedEnriched.length;
     enrichmentProof.enriched_rows_rejected = rejected.length;
     enrichmentProof.rejection_reasons = {};
@@ -612,6 +652,7 @@ function finalizeEnrichmentProof(lotsToPush) {
     }
     enrichmentProof.accepted_enriched_samples = acceptedEnriched.slice(0, 5).map(proofSample);
     enrichmentProof.rejected_enriched_samples = rejected.slice(0, 5).map(proofSample);
+    enrichmentProof.prefilter_age_mileage_rejected_samples = prefilterAgeMileageRejectedSamples;
     enrichmentProof.excluded_missing_required_samples = missingRequired.slice(0, 5).map(lot => ({
         ...proofSample(lot),
         reject_reasons: [

@@ -155,6 +155,24 @@ def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     assert 'rejected_after_detail' in text
 
 
+def test_proxibid_actor_enforces_dealerscope_age_mileage_source_gate():
+    text = ACTOR.read_text()
+
+    assert 'DEFAULT_MIN_YEAR = CURRENT_YEAR - 4' in text
+    assert 'DEFAULT_MAX_MILEAGE = 50000' in text
+    assert 'EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR)' in text
+    assert 'EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE)' in text
+    assert 'requested_min_year: Number(minYear) || null' in text
+    assert 'requested_max_mileage: Number(maxMileage) || null' in text
+    assert 'effective_min_year: EFFECTIVE_MIN_YEAR' in text
+    assert 'effective_max_mileage: EFFECTIVE_MAX_MILEAGE' in text
+    assert 'rows_excluded_age_mileage_prefilter' in text
+    assert 'prefilter_age_mileage_rejected_samples' in text
+    assert 'year < EFFECTIVE_MIN_YEAR' in text
+    assert 'mileage > EFFECTIVE_MAX_MILEAGE' in text
+    assert 'year < minYear' not in text
+
+
 def test_low_yield_source_truth_is_diagnostic_not_passing():
     text = WORKFLOW.read_text()
     assert 'low_yield_source_truth_detected' in text
