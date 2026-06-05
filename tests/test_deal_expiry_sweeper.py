@@ -1,4 +1,8 @@
 from datetime import datetime, timezone
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 from scripts import deal_expiry_sweeper
 
@@ -105,6 +109,35 @@ class _Client:
 
     def table(self, name):
         return _Query(self, name)
+
+
+def test_sweeper_script_starts_without_pythonpath():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "deal_expiry_sweeper.py"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "PYTHONPATH",
+            "SUPABASE_URL",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "BOT_TOKEN",
+            "CHAT_ID",
+        }
+    }
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "ModuleNotFoundError: No module named 'backend'" not in result.stderr
+    assert "SUPABASE_URL" in result.stderr
 
 
 def test_sweeper_archives_stale_saved_inactive_deals():
