@@ -216,6 +216,18 @@ def _select_available(columns: set[str], desired: list[str], fallback: str) -> s
     return ",".join(selected) if selected else fallback
 
 
+def _delivery_select_for_columns(columns: set[str]) -> tuple[str, str]:
+    order = "created_at" if "created_at" in columns else "updated_at"
+    return (
+        _select_available(
+            columns,
+            ["run_id", "source_site", "source", "channel", "status", "error_message", "created_at", "updated_at"],
+            order,
+        ),
+        order,
+    )
+
+
 def _fetch_optional_delivery_rows(
     base_url: str,
     service_role_key: str,
@@ -229,12 +241,7 @@ def _fetch_optional_delivery_rows(
         return []
     if not columns:
         return []
-    order = "created_at" if "created_at" in columns else "updated_at"
-    select = _select_available(
-        columns,
-        ["run_id", "source_site", "source", "channel", "status", "error_message", "created_at", "updated_at"],
-        order,
-    )
+    select, order = _delivery_select_for_columns(columns)
     try:
         return _fetch_recent_rows(
             base_url,
@@ -244,6 +251,36 @@ def _fetch_optional_delivery_rows(
             order,
             since,
             limit,
+        )
+    except Exception:
+        return []
+
+
+def _fetch_optional_delivery_rows_for_run(
+    base_url: str,
+    service_role_key: str,
+    table: str,
+    run_id: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    try:
+        columns = _available_columns(base_url, service_role_key, table)
+    except Exception:
+        return []
+    if not columns or "run_id" not in columns:
+        return []
+    select, order = _delivery_select_for_columns(columns)
+    try:
+        return _fetch_postgrest_rows(
+            base_url,
+            service_role_key,
+            table,
+            [
+                ("select", select),
+                ("run_id", f"eq.{run_id}"),
+                ("order", f"{order}.asc"),
+                ("limit", str(limit)),
+            ],
         )
     except Exception:
         return []
@@ -298,6 +335,7 @@ def build_source_yield_report(
     webhook_item_count_by_source: Counter[str] = Counter()
     webhook_by_run: dict[str, Counter[str]] = defaultdict(Counter)
     webhook_item_count_by_run: Counter[str] = Counter()
+    processed_positive_run_ids: set[str] = set()
     for row in webhook_rows:
         source = _source_from_row(row, actor_sources=actor_sources)
         run_id = str(row.get("run_id") or "").strip()
@@ -308,9 +346,12 @@ def build_source_yield_report(
         if run_id:
             webhook_by_run[run_id][status] += 1
         if status == "processed":
-            webhook_item_count_by_source[source] += _safe_int(row.get("item_count"))
+            item_count = _safe_int(row.get("item_count"))
+            webhook_item_count_by_source[source] += item_count
             if run_id:
-                webhook_item_count_by_run[run_id] += _safe_int(row.get("item_count"))
+                webhook_item_count_by_run[run_id] += item_count
+                if item_count > 0:
+                    processed_positive_run_ids.add(run_id)
 
     delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
     delivery_order = "created_at"
@@ -339,6 +380,35 @@ def build_source_yield_report(
         if str(row.get("run_id") or "").strip()
         and str(row.get("run_id") or "").strip() not in primary_delivery_run_ids
     ]
+    fallback_seen = {
+        (
+            str(row.get("run_id") or ""),
+            str(row.get("channel") or ""),
+            str(row.get("status") or ""),
+            str(row.get("error_message") or ""),
+            str(row.get("created_at") or row.get("updated_at") or ""),
+        )
+        for row in legacy_delivery_rows
+    }
+    missing_primary_run_ids = sorted(processed_positive_run_ids - primary_delivery_run_ids)
+    for run_id in missing_primary_run_ids:
+        for row in _fetch_optional_delivery_rows_for_run(
+            base_url,
+            service_role_key,
+            "delivery_log",
+            run_id,
+            limit,
+        ):
+            key = (
+                str(row.get("run_id") or ""),
+                str(row.get("channel") or ""),
+                str(row.get("status") or ""),
+                str(row.get("error_message") or ""),
+                str(row.get("created_at") or row.get("updated_at") or ""),
+            )
+            if key not in fallback_seen:
+                fallback_seen.add(key)
+                legacy_delivery_rows.append(row)
     all_delivery_rows = delivery_rows + legacy_delivery_rows
     delivery_by_source: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "channel": Counter(),
