@@ -57,6 +57,13 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _actor_source_by_id(path: Path = DEPLOYMENT_PATH) -> dict[str, str]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -123,6 +130,8 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     if int(summary.get("opportunity_rows") or 0) > 0:
         return "accepted_flow_present"
     if int(summary.get("webhook_processed_rows") or 0) > 0 and int(summary.get("delivery_rows") or 0) == 0:
+        if int(summary.get("webhook_item_count_total") or 0) == 0:
+            return "source_empty_result"
         return "webhook_without_delivery_gap"
 
     status_counts = summary.get("status_counts") or {}
@@ -211,6 +220,7 @@ def build_source_yield_report(
             "status",
             "processing_status",
             "db_save",
+            "item_count",
             "received_at",
             "created_at",
         ],
@@ -227,6 +237,7 @@ def build_source_yield_report(
     )
     run_sources: dict[str, str] = {}
     webhook_by_source: dict[str, Counter[str]] = defaultdict(Counter)
+    webhook_item_count_by_source: Counter[str] = Counter()
     for row in webhook_rows:
         source = _source_from_row(row, actor_sources=actor_sources)
         run_id = str(row.get("run_id") or "").strip()
@@ -234,6 +245,8 @@ def build_source_yield_report(
             run_sources[run_id] = source
         status = str(row.get("status") or row.get("processing_status") or row.get("db_save") or "unknown")[:80]
         webhook_by_source[source][status] += 1
+        if status == "processed":
+            webhook_item_count_by_source[source] += _safe_int(row.get("item_count"))
 
     delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
     delivery_order = "created_at"
@@ -312,6 +325,7 @@ def build_source_yield_report(
             "source": source,
             "webhook_rows": sum(webhook_status_counts.values()),
             "webhook_processed_rows": int(webhook_status_counts.get("processed") or 0),
+            "webhook_item_count_total": int(webhook_item_count_by_source[source]),
             "delivery_rows": sum(delivery_counters["status"].values()),
             "channel_counts": dict(delivery_counters["channel"].most_common(10)),
             "status_counts": dict(delivery_counters["status"].most_common(10)),

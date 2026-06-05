@@ -52,6 +52,7 @@ def test_build_report_marks_webhook_delivery_gap(monkeypatch):
                     "run_id": "run-1",
                     "actor_name": "ds-govdeals",
                     "status": "processed",
+                    "item_count": 2,
                     "received_at": "2026-06-05T04:00:00+00:00",
                 }
             ]
@@ -74,6 +75,39 @@ def test_build_report_marks_webhook_delivery_gap(monkeypatch):
     assert report["overall_verdict"] == "diagnostic_gap"
     assert report["source_summaries"][0]["classification"] == "webhook_without_delivery_gap"
     assert report["source_summaries"][0]["source"] == "govdeals"
+
+
+def test_build_report_separates_zero_item_webhooks_from_delivery_gap(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-empty",
+                    "source": "municibid",
+                    "status": "processed",
+                    "item_count": 0,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return []
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+    )
+
+    assert report["overall_verdict"] == "no_recent_accepted_source_yield"
+    assert report["source_summaries"][0]["classification"] == "source_empty_result"
+    assert report["source_summaries"][0]["webhook_item_count_total"] == 0
 
 
 def test_build_report_groups_delivery_and_opportunity_truth(monkeypatch):
