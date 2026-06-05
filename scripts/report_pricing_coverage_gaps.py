@@ -81,7 +81,6 @@ market_matches as (
     on mp.year = cp.year
     and mp.make = cp.make
     and mp.model = cp.model
-    and coalesce(mp.state, '') = coalesce(cp.state, '')
   group by cp.id
 ),
 dealer_sales_matches as (
@@ -97,7 +96,6 @@ dealer_sales_matches as (
     on ds.year between cp.year - 1 and cp.year + 1
     and lower(trim(ds.make)) = cp.make
     and lower(trim(ds.model)) = cp.model
-    and (cp.state is null or upper(ds.state) = upper(cp.state))
   group by cp.id
 ),
 opportunity_history as (
@@ -200,7 +198,6 @@ def _market_price_matches(row: dict[str, Any], market_rows: list[dict[str, Any]]
             int(market.get("year") or 0) != int(row.get("year") or 0)
             or _norm_text(market.get("make")) != _norm_text(row.get("make"))
             or _norm_text(market.get("model")) != _norm_text(row.get("model"))
-            or (_norm_text(market.get("state")) or None) != (row.get("state") or None)
         ):
             continue
         matches += 1
@@ -226,8 +223,6 @@ def _dealer_sales_matches(row: dict[str, Any], dealer_sales_rows: list[dict[str,
         if not int(row.get("year") or 0) - 1 <= sale_year <= int(row.get("year") or 0) + 1:
             continue
         if _norm_text(sale.get("make")) != row.get("make") or _norm_text(sale.get("model")) != row.get("model"):
-            continue
-        if row.get("state") and _norm_text(sale.get("state")) != row.get("state"):
             continue
         matches += 1
         sale_date = _parse_datetime(sale.get("sale_date"))

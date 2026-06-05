@@ -57,6 +57,46 @@ def test_classify_gap_blocks_when_no_internal_comp_evidence_exists():
     assert report_pricing_coverage_gaps.classify_gap(row) == "blocked_no_internal_comp_evidence"
 
 
+def test_market_and_dealer_sales_matches_allow_runtime_fallback_beyond_exact_state():
+    row = {
+        "year": 2023,
+        "make": "toyota",
+        "model": "camry",
+        "state": "va",
+    }
+    now = report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T07:00:00+00:00")
+
+    market_total, market_usable = report_pricing_coverage_gaps._market_price_matches(
+        row,
+        [
+            {
+                "year": 2023,
+                "make": "toyota",
+                "model": "camry",
+                "state": None,
+                "avg_price": 26000,
+                "low_price": 24000,
+                "high_price": 28000,
+                "sample_size": 3,
+                "expires_at": "2026-06-19T00:00:00+00:00",
+                "source": "external_retail_listing_comp",
+            }
+        ],
+        now,
+    )
+    sales_total, sales_usable = report_pricing_coverage_gaps._dealer_sales_matches(
+        row,
+        [
+            {"year": 2023, "make": "toyota", "model": "camry", "state": "md", "sale_price": 25000, "sale_date": "2026-05-01T00:00:00+00:00"},
+            {"year": 2022, "make": "toyota", "model": "camry", "state": "dc", "sale_price": 24000, "sale_date": "2026-04-01T00:00:00+00:00"},
+        ],
+        now,
+    )
+
+    assert (market_total, market_usable) == (1, 1)
+    assert (sales_total, sales_usable) == (2, 2)
+
+
 def test_format_gap_row_includes_evidence_and_economics():
     row = {
         "year": 2020,
