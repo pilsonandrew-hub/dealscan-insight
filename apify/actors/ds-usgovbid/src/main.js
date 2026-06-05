@@ -22,6 +22,8 @@
  * Note: USGovBid typically lists 1–5 active auctions with 20–200 lots each.
  * Vehicle lots are clearly labeled. Each auction covers a single government
  * agency (county sheriff, state surplus, etc.).
+ *
+ * Deploy marker: rebuild after adding ds-usgovbid to the Apify deploy map.
  */
 
 import { Actor } from 'apify';
