@@ -113,6 +113,18 @@ def test_bidspotter_actor_is_safe_for_supply_reactivation():
     assert 'CURRENT_YEAR - 10' not in text
 
 
+def test_bidspotter_actor_accounts_for_all_prefilter_skips():
+    text = Path('apify/actors/ds-bidspotter/src/main.js').read_text()
+
+    early_non_vehicle_branch = text.split('if (!make && !isVehicleLot(lot.title))', 1)[1].split(
+        'const lotDesc = lot.block ||', 1
+    )[0]
+    assert 'rows_excluded_non_vehicle' in early_non_vehicle_branch
+    assert 'early_non_vehicle_reject' in early_non_vehicle_branch
+    assert 'const accountedRows =' in text
+    assert 'rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - totalPassed - accountedRows)' in text
+
+
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     text = ACTOR.read_text()
     assert '!lot.rejected_after_detail' in text

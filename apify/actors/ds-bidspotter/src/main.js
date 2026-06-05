@@ -451,7 +451,16 @@ for (let i = 0; i < toProcess.length; i++) {
         const { year, make, model, lower } = parseVehicleTitle(lot.title);
 
         // ── Filters ────────────────────────────────────────────────────
-        if (!make && !isVehicleLot(lot.title)) continue;
+        if (!make && !isVehicleLot(lot.title)) {
+            rejectForProof(
+                'rows_excluded_non_vehicle',
+                'non_vehicle_rejected_samples',
+                lot,
+                details,
+                'early_non_vehicle_reject',
+            );
+            continue;
+        }
         // Require at least one strong vehicle signal: recognized make, VIN, or mileage
         const lotDesc = lot.block || '';
         const hasVIN = /\b[A-HJ-NPR-Z0-9]{17}\b/i.test(lotDesc);
@@ -604,6 +613,7 @@ for (let i = 0; i < toProcess.length; i++) {
 console.log(`[BS COMPLETE] Found: ${totalFound} | Passed: ${totalPassed}`);
 
 const env = Actor.getEnv();
+const accountedRows = Object.values(proofCounters).reduce((sum, value) => sum + value, 0);
 const proof = {
     record_type: 'source_quality_proof',
     source: SOURCE,
@@ -617,6 +627,7 @@ const proof = {
     max_catalogues: maxCatalogues,
     min_year: MIN_YEAR,
     max_mileage: MAX_MILEAGE,
+    rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - totalPassed - accountedRows),
     ...proofCounters,
     ...proofSamples,
     scraped_at: new Date().toISOString(),
