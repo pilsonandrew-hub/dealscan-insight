@@ -236,10 +236,7 @@ def run_sweep(
     ])
     active_high_dos_rows = _fetch_rows(
         supabase,
-        (
-            "id,title,condition_grade,condition,raw_data,description,details,"
-            "condition_notes,detail_text,assetLongDesc,damage_type,damage"
-        ),
+        "id,title,condition_grade,raw_data",
         [
             lambda q: q.eq("is_active", True),
             lambda q: q.gte("dos_score", 80),
