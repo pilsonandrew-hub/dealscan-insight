@@ -43,6 +43,10 @@ describe('ds-gsaauctions source contract', () => {
     expect(source).toContain('/\\brear[\\s-]+end[\\s-]+damage\\b/i');
     expect(source).toContain('/\\bside[\\s-]+damage\\b/i');
     expect(source).toContain('/\\bas[\\s-]?is\\b.*\\bno\\s+warrant|\\bno\\s+warrant.*\\bas[\\s-]?is\\b/i');
+    expect(source).toContain('/\\bneeds?\\s+trans(?:mission)?\\b/i');
+    expect(source).toContain('/\\btransmission\\s+(?:fail|issues?|problem|gone|dead|shot)s?\\b/i');
+    expect(source).toContain('/\\bneeds?\\s+engine\\b/i');
+    expect(source).toContain('/\\bengine\\s+(?:knock|miss)\\b/i');
     expect(source).toContain('function hasConditionReject(record)');
     expect(postDetailRejectIndex).toBeGreaterThan(detailIndex);
     expect(postDetailRejectIndex).toBeLessThan(publishIndex);
