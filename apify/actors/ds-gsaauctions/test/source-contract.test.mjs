@@ -65,6 +65,14 @@ describe('ds-gsaauctions source contract', () => {
     expect(source).toContain('utility\\s*bed');
   });
 
+  test('mirrors backend age and mileage gates before publish', () => {
+    expect(source).toContain('minYear = new Date().getFullYear() - 4,');
+    expect(source).toContain('maxMileage = 50000,');
+    expect(source).toContain('if (record.mileage > maxMileage) {');
+    expect(source).toContain('reason=age_or_mileage_rejected_after_detail');
+    expect(source).toContain('rows_excluded_age_or_mileage');
+  });
+
   test('emits source quality proof for list/detail field visibility', () => {
     expect(source).toContain("record_type: 'source_quality_proof'");
     expect(source).toContain('list_rows_with_vin');
