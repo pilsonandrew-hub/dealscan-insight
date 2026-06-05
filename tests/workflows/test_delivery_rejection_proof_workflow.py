@@ -17,6 +17,7 @@ def test_delivery_rejection_proof_workflow_uses_rest_read_path_only():
     assert "SUPABASE_USE_POOLER:" not in text
     assert "SUPABASE_URL: ${{ secrets.SUPABASE_URL }}" in text
     assert "SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" in text
+    assert "psycopg2-binary==2.9.9" in text
     assert "scripts/report_delivery_rejection_candidates.py" in text
     assert "--via-rest" in text
     assert "--lookback-hours" in text
