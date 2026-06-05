@@ -474,6 +474,110 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         self.assertEqual(summary["runs_with_current_landing_issues"], 0)
         self.assertEqual(summary["runs_with_historical_artifacts"], 1)
 
+    def test_build_reports_reclassifies_mixed_dataset_when_only_pre_ledger_proof_row_is_missing(self):
+        older_started = datetime(2026, 6, 4, 19, 0, tzinfo=timezone.utc)
+        clean_proof_started = datetime(2026, 6, 4, 23, 35, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "old-mixed-run",
+                    "actor_name": "ds-gsaauctions",
+                    "status": "SUCCEEDED",
+                    "item_count": 4,
+                    "source_quality_proof_count": 1,
+                    "started_at": older_started,
+                },
+                {
+                    "run_id": "clean-proof-run",
+                    "actor_name": "ds-proxibid",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "source_quality_proof_count": 1,
+                    "started_at": clean_proof_started,
+                },
+            ],
+            webhook_rows={
+                "old-mixed-run": {"latest_status": "ignored_replay", "webhook_entries": 2, "max_item_count": 4},
+                "clean-proof-run": {"latest_status": "ignored_replay", "webhook_entries": 2, "max_item_count": 1},
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "old-mixed-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"skipped_gate": 2, "skipped_margin": 1},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+                "clean-proof-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"skipped_proof": 1},
+                            "total_rows": 1,
+                            "total_attempts": 1,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertEqual(
+            by_run_id["old-mixed-run"]["issues"],
+            ["superseded_source_quality_proof_pre_ledger"],
+        )
+        self.assertEqual(by_run_id["old-mixed-run"]["issue_scope"], "historical_artifact")
+        summary = reconcile.summarize(reports)
+        self.assertEqual(summary["runs_with_current_landing_issues"], 0)
+        self.assertEqual(summary["runs_with_historical_artifacts"], 1)
+
+    def test_build_reports_does_not_reclassify_post_cutover_missing_proof_rows(self):
+        clean_proof_started = datetime(2026, 6, 4, 23, 35, tzinfo=timezone.utc)
+        later_started = datetime(2026, 6, 4, 23, 45, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "clean-proof-run",
+                    "actor_name": "ds-proxibid",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "source_quality_proof_count": 1,
+                    "started_at": clean_proof_started,
+                },
+                {
+                    "run_id": "later-missing-proof-run",
+                    "actor_name": "ds-gsaauctions",
+                    "status": "SUCCEEDED",
+                    "item_count": 4,
+                    "source_quality_proof_count": 1,
+                    "started_at": later_started,
+                },
+            ],
+            webhook_rows={
+                "clean-proof-run": {"latest_status": "ignored_replay", "webhook_entries": 2, "max_item_count": 1},
+                "later-missing-proof-run": {"latest_status": "ignored_replay", "webhook_entries": 2, "max_item_count": 4},
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "clean-proof-run": {
+                    "channels": {"db_save": {"statuses": {"skipped_proof": 1}, "total_rows": 1, "total_attempts": 1}}
+                },
+                "later-missing-proof-run": {
+                    "channels": {"db_save": {"statuses": {"skipped_gate": 3}, "total_rows": 3, "total_attempts": 3}}
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertIn("partial_db_save_ledger", by_run_id["later-missing-proof-run"]["issues"])
+        self.assertEqual(by_run_id["later-missing-proof-run"]["issue_scope"], "current_landing_issue")
+
     def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
         with patch.object(
             reconcile,

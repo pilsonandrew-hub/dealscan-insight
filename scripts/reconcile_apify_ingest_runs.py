@@ -1097,6 +1097,20 @@ def _has_clean_skipped_proof_ledger(report: dict[str, Any]) -> bool:
     return (_first_int(statuses.get("skipped_proof")) or 0) > 0
 
 
+def _db_save_accounted_rows(report: dict[str, Any]) -> int:
+    delivery = report.get("delivery") or {}
+    db_save = ((delivery.get("channels") or {}).get("db_save") or {})
+    statuses = db_save.get("statuses") or {}
+    accounted_statuses = (
+        DB_SAVE_INSERT_STATUSES
+        | DB_SAVE_CANDIDATE_STATUSES
+        | DB_SAVE_EXISTING_STATUSES
+        | DB_SAVE_SKIPPED_STATUSES
+        | DB_SAVE_FAILURE_STATUSES
+    )
+    return sum(_first_int(statuses.get(status)) or 0 for status in accounted_statuses)
+
+
 def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -> None:
     """Mark old proof-only control runs historical once a later clean proof ledger exists.
 
@@ -1106,6 +1120,7 @@ def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -
     clean skipped_proof ledger row.
     """
     latest_clean_proof_by_actor: dict[str, datetime] = {}
+    first_clean_proof_at: Optional[datetime] = None
     for report in reports:
         if not _is_source_quality_proof_only(report) or not _has_clean_skipped_proof_ledger(report):
             continue
@@ -1116,8 +1131,10 @@ def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -
         prior = latest_clean_proof_by_actor.get(actor_name)
         if prior is None or started_at > prior:
             latest_clean_proof_by_actor[actor_name] = started_at
+        if first_clean_proof_at is None or started_at < first_clean_proof_at:
+            first_clean_proof_at = started_at
 
-    if not latest_clean_proof_by_actor:
+    if not latest_clean_proof_by_actor or first_clean_proof_at is None:
         return
 
     superseded_issues = {
@@ -1125,15 +1142,37 @@ def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -
         "missing_db_save_ledger",
         "no_db_landing",
     }
+    mixed_superseded_issues = {
+        "partial_db_save_ledger",
+        "no_db_landing",
+    }
     for report in reports:
-        if not _is_source_quality_proof_only(report):
+        apify = report.get("apify") or {}
+        item_count = _first_int(apify.get("item_count")) or 0
+        proof_count = _first_int(apify.get("source_quality_proof_count")) or 0
+        if item_count <= 0 or proof_count <= 0:
             continue
         actor_name = str(((report.get("apify") or {}).get("actor_name")) or "")
         latest_clean = latest_clean_proof_by_actor.get(actor_name)
-        if latest_clean is None or _started_at_for_report(report) >= latest_clean:
-            continue
+        started_at = _started_at_for_report(report)
         issue_set = set(report.get("issues") or [])
-        if issue_set and issue_set <= superseded_issues:
+        proof_only_superseded = (
+            proof_count >= item_count
+            and latest_clean is not None
+            and started_at < latest_clean
+            and issue_set
+            and issue_set <= superseded_issues
+        )
+        missing_count = max(0, item_count - _db_save_accounted_rows(report))
+        mixed_pre_cutover_superseded = (
+            proof_count < item_count
+            and started_at < first_clean_proof_at
+            and missing_count > 0
+            and missing_count <= proof_count
+            and issue_set
+            and issue_set <= mixed_superseded_issues
+        )
+        if proof_only_superseded or mixed_pre_cutover_superseded:
             report["issues"] = ["superseded_source_quality_proof_pre_ledger"]
             report["issue_scope"] = "historical_artifact"
             report["likely_cause"] = (
