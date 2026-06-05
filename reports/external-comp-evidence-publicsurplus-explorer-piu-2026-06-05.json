@@ -1,0 +1,43 @@
+{
+  "source_run_id": "publicsurplus-pricing-gap-LFULyVEdTKSWtuebK-explorer-piu-2026-06-05",
+  "source_url": "https://www.carfax.com/Used-2022-Ford-Explorer-Police-Interceptor_x50188",
+  "vehicle": {
+    "year": 2022,
+    "make": "Ford",
+    "model": "Explorer PIU",
+    "state": null
+  },
+  "confidence_notes": "National active retail-listing evidence for 2022 Ford Explorer Police Interceptor Utility because exact-state low-mileage PIU supply is sparse. This covers runtime's broader same-year/make/model fallback; retail listings are not closed-sale outcomes.",
+  "comps": [
+    {
+      "source_url": "https://www.lhmauto.com/used/Ford/2022-Ford-Police-Interceptor-Utility-bb10de67ac184c418849c2b514dbe649.htm",
+      "captured_at": "2026-06-05T06:47:56+00:00",
+      "price": 22750,
+      "mileage": 71721,
+      "vin": "1FM5K8AC3NGB80348",
+      "listing_id": "lhm-draper-sflf260820a",
+      "title": "Used 2022 Ford Police Interceptor Utility Base",
+      "title_history_caveat": "Dealer page lists CARFAX one-owner evidence; no closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2022-Ford-Explorer-Police-Interceptor_x50188",
+      "captured_at": "2026-06-05T06:47:56+00:00",
+      "price": 18750,
+      "mileage": 57292,
+      "vin": "1FM5K8AB7NGA30878",
+      "listing_id": "carfax-2022-explorer-piu-magic-auto-sales-57292",
+      "title": "Used 2022 Ford Explorer Police Interceptor SUV",
+      "title_history_caveat": "CARFAX page reports no accident or damage for this listing."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2022-Ford-Explorer-Police-Interceptor_x50188",
+      "captured_at": "2026-06-05T06:47:56+00:00",
+      "price": 18795,
+      "mileage": 74385,
+      "vin": "1FM5K8AC2NGB46353",
+      "listing_id": "carfax-2022-explorer-piu-chicago-motors-74385",
+      "title": "Used 2022 Ford Explorer Police Interceptor SUV",
+      "title_history_caveat": "CARFAX page reports no accident or damage for this listing."
+    }
+  ]
+}
