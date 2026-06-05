@@ -195,6 +195,7 @@ def _otherwise_alert_eligible_record(**overrides):
         "vin": "1HGCM82633A004352",
         "mileage": 42000,
         "condition_grade": "Good",
+        "raw_data": {"detail_text": "Starts, runs and drives. Minor scratches noted."},
         "retail_comp_count": 3,
         "retail_comp_confidence": 0.82,
     }
@@ -208,6 +209,16 @@ def test_alert_gate_allows_valid_high_confidence_record_with_otherwise_strong_si
     assert gate["eligible"] is True
     assert gate["alert_type"] == "platinum"
     assert gate["blocking_reasons"] == []
+
+
+def test_alert_gate_blocks_good_condition_grade_without_source_condition_evidence():
+    gate = evaluate_alert_gate(
+        _otherwise_alert_eligible_record(raw_data={}),
+        thresholds=AlertThresholds(),
+    )
+
+    assert gate["eligible"] is False
+    assert "condition_evidence_missing" in gate["blocking_reasons"]
 
 
 def test_alert_gate_blocks_missing_confidence_even_with_otherwise_strong_signals():

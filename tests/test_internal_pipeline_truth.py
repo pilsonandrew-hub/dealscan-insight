@@ -121,6 +121,9 @@ class _Supabase:
                     "projected_total_cost": 10000,
                     "max_bid": 12000,
                     "expected_close_bid": 10000,
+                    "raw_data": {
+                        "detail_text": "Starts, runs and drives. Minor scratches noted.",
+                    },
                 },
             ],
             "webhook_log": [{"id": "w1", "processing_status": "processed", "source": "govdeals"}],
@@ -410,6 +413,55 @@ def test_pipeline_truth_reports_condition_storage_gap_samples(monkeypatch):
         "vin_suffix": "324462",
     }
     assert opportunities["active_dos80_condition_storage_gap_samples"][0]["condition_backfill_assessment"]["status"] == "blocked_missing_source_condition_evidence"
+
+
+def test_pipeline_truth_blocks_active_dos80_good_grade_without_source_condition_evidence(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "missing-condition-proof",
+                "is_active": True,
+                "dos_score": 93,
+                "mileage": 12000,
+                "year": 2024,
+                "title": "2024 Toyota Camry",
+                "pricing_maturity": "market_comp",
+                "vin": "4T1C11AK0RU000001",
+                "condition_grade": "Good",
+                "source_site": "publicsurplus",
+                "investment_grade": "Platinum",
+                "roi_per_day": 300,
+                "bid_headroom": 1000,
+                "current_bid_trust_score": 0.9,
+                "mmr_confidence_proxy": 90,
+                "pricing_source": "market_comp",
+                "retail_comp_count": 5,
+                "retail_comp_confidence": 0.9,
+                "projected_total_cost": 10000,
+                "max_bid": 12000,
+                "expected_close_bid": 10000,
+                "raw_data": {
+                    "description": "2024 Toyota Camry",
+                },
+            }
+        ],
+        "webhook_log": [],
+        "alert_log": [],
+        "ingest_delivery_log": [],
+        "market_prices": [],
+        "dealer_sales": [],
+    }))
+
+    result = internal.build_pipeline_truth()
+    opportunities = result["opportunities"]
+    breakdown = opportunities["active_dos80_gate_breakdown"][0]
+
+    assert breakdown["eligible"] is False
+    assert "condition_evidence_missing" in breakdown["blocking_reasons"]
+    assert opportunities["active_dos80_alert_eligible_sample"] == 0
+    assert opportunities["active_dos80_condition_storage_gap_count_sample"] == 1
+    assert opportunities["active_dos80_condition_storage_gap_by_source_sample"] == {"publicsurplus": 1}
+    assert opportunities["active_dos80_condition_storage_gap_samples"][0]["id"] == "missing-condition-proof"
 
 
 def test_pipeline_truth_distinguishes_explicit_condition_damage_from_heuristic(monkeypatch):
