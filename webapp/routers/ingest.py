@@ -1046,6 +1046,7 @@ async def _process_webhook_items(
                 )
                 skipped += 1
                 increment_reason_counter(skip_reasons, "margin_below_floor")
+                margin_reason = _format_margin_below_floor_reason(score_result)
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1053,7 +1054,7 @@ async def _process_webhook_items(
                     opportunity_id=None,
                     channel="db_save",
                     status="skipped_margin",
-                    error_message="margin_below_floor",
+                    error_message=margin_reason,
                     require_durable=True,
                     audit_state=audit_state,
                 )
@@ -3715,6 +3716,27 @@ def _save_to_sonar_listings(vehicle: dict) -> None:
     if supabase_client is None:
         return
     supabase_client.table("sonar_listings").insert(build_sonar_listing_row(vehicle)).execute()
+
+
+def _format_margin_below_floor_reason(score_result: dict) -> str:
+    def _money(value: object) -> str:
+        try:
+            return f"${float(value):.0f}"
+        except (TypeError, ValueError):
+            return "$0"
+
+    tier = str(score_result.get("vehicle_tier") or "rejected")
+    floor = min_margin_for_tier(tier) or 0
+    return (
+        "margin_below_floor"
+        f" | margin={_money(score_result.get('wholesale_margin', 0))}"
+        f" floor={_money(floor)}"
+        f" tier={tier}"
+        f" bid={_money(score_result.get('current_bid', 0))}"
+        f" max_bid={_money(score_result.get('max_bid', 0))}"
+        f" headroom={_money(score_result.get('bid_headroom', 0))}"
+        f" pricing={score_result.get('pricing_maturity') or 'unknown'}"
+    )
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
