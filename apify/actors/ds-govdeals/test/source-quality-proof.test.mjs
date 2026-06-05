@@ -117,6 +117,13 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('missing_mileage: !lot.mileage');
   });
 
+  test('accounts for prefilter-passed rows that are not otherwise explained', () => {
+    expect(source).toContain('rows_excluded_unaccounted_after_prefilter: 0');
+    expect(source).toContain('const accountedRows = (');
+    expect(source).toContain('sourceQualityStats.rows_excluded_unaccounted_after_prefilter = Math.max(0, totalPassed - accountedRows);');
+    expect(source).toContain('rows_excluded_unaccounted_after_prefilter: sourceQualityStats.rows_excluded_unaccounted_after_prefilter');
+  });
+
   test('adds sanitized detail diagnostics to attempted exclusion samples', () => {
     expect(source).toContain('function extractDetailDiagnostics(bodyText, metadata = {})');
     expect(source).toContain('lot.detail_diagnostics = extractDetailDiagnostics(bodyText, {');

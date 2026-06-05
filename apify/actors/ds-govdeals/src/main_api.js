@@ -124,6 +124,7 @@ const sourceQualityStats = {
     rows_excluded_policy_after_detail: 0,
     rows_excluded_after_detail_attempt: 0,
     rows_excluded_without_detail_attempt: 0,
+    rows_excluded_unaccounted_after_prefilter: 0,
     excluded_after_detail_attempt_samples: [],
     excluded_without_detail_attempt_samples: [],
     post_policy_rejected_samples: [],
@@ -663,6 +664,12 @@ function sampleExcludedLots(lots, limit = 10) {
 async function pushSourceQualityProof(log, pushedLots = passingLots) {
     const pushedRowsWithVin = pushedLots.filter(lot => Boolean(lot.vin)).length;
     const pushedRowsWithMileage = pushedLots.filter(lot => Boolean(lot.mileage)).length;
+    const accountedRows = (
+        pushedLots.length
+        + sourceQualityStats.rows_excluded_missing_required_data
+        + sourceQualityStats.rows_excluded_policy_after_detail
+    );
+    sourceQualityStats.rows_excluded_unaccounted_after_prefilter = Math.max(0, totalPassed - accountedRows);
     const proof = {
         record_type: 'source_quality_proof',
         source_site: 'govdeals',
@@ -680,6 +687,7 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_policy_after_detail: sourceQualityStats.rows_excluded_policy_after_detail,
         rows_excluded_after_detail_attempt: sourceQualityStats.rows_excluded_after_detail_attempt,
         rows_excluded_without_detail_attempt: sourceQualityStats.rows_excluded_without_detail_attempt,
+        rows_excluded_unaccounted_after_prefilter: sourceQualityStats.rows_excluded_unaccounted_after_prefilter,
         excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples,
         excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples,
         post_policy_rejected_samples: sourceQualityStats.post_policy_rejected_samples,
