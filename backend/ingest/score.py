@@ -556,15 +556,28 @@ def _has_usable_retail_comp_evidence(count: Optional[int], confidence: Optional[
     return normalized_count >= RETAIL_COMP_MIN_EVIDENCE_COUNT and normalized_confidence >= RETAIL_COMP_MIN_CONFIDENCE
 
 
+def _has_usable_retail_comp_pricing(
+    retail_comp_price_estimate: Optional[float],
+    retail_comp_count: Optional[int],
+    retail_comp_confidence: Optional[float],
+) -> bool:
+    if not _has_usable_retail_comp_evidence(retail_comp_count, retail_comp_confidence):
+        return False
+    retail_value = _coerce_float(retail_comp_price_estimate)
+    return bool(retail_value and retail_value > 0)
+
+
 def _retail_comp_wholesale_estimate(
     retail_comp_price_estimate: Optional[float],
     retail_comp_count: Optional[int],
     retail_comp_confidence: Optional[float],
 ) -> Optional[float]:
-    if not _has_usable_retail_comp_evidence(retail_comp_count, retail_comp_confidence):
-        return None
     retail_value = _coerce_float(retail_comp_price_estimate)
-    if retail_value is None or retail_value <= 0:
+    if not _has_usable_retail_comp_pricing(
+        retail_value,
+        retail_comp_count,
+        retail_comp_confidence,
+    ):
         return None
     # Mirror the existing retail proxy multiplier in reverse so retail comps
     # improve wholesale economics without treating asking price as MMR.
@@ -1050,7 +1063,11 @@ def score_deal(
 
     if manheim_source_status == "live":
         pricing_maturity = "live_market"
-    elif _has_usable_retail_comp_evidence(retail_comp_count, retail_comp_confidence):
+    elif _has_usable_retail_comp_pricing(
+        retail_comp_price_estimate,
+        retail_comp_count,
+        retail_comp_confidence,
+    ):
         pricing_maturity = "market_comp"
     else:
         pricing_maturity = "proxy"
