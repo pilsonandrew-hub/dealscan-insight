@@ -95,6 +95,8 @@ const REJECT_PATTERNS = [
     /\bfor\s+parts\b/i,
     /\bproject\s+(?:car|vehicle|truck)\b/i,
     /\brebuilt\s+title\b/i,
+    /\bas[\s-]?is\b.*\bno\s+warrant/i,
+    /\bno\s+warrant.*\bas[\s-]?is\b/i,
     /\bstructural[\s-]+damage\b/i,
     /\bblown\s+engine\b/i,
     /\bbad\s+engine\b/i,

@@ -32,6 +32,23 @@ describe('AllSurplus detail enrichment source contract', () => {
     expect(requiredGate.indexOf('continue;')).toBeLessThan(source.indexOf('await Actor.pushData(listing)'));
   });
 
+  it('mirrors backend title-brand policy phrases after detail enrichment before publish', () => {
+    const rejectPatterns = source.slice(
+      source.indexOf('const REJECT_PATTERNS = ['),
+      source.indexOf('// Commercial/fleet patterns')
+    );
+    const detailRejectGate = source.slice(
+      source.indexOf("if (REJECT_PATTERNS.some((pattern) => pattern.test(listing.description || listing.title || '')))"),
+      source.indexOf('totalPassed++')
+    );
+
+    expect(rejectPatterns).toMatch(/as\[\\s-\]\?is/);
+    expect(rejectPatterns).toMatch(/no\\s\+warrant/);
+    expect(detailRejectGate).toContain('continue;');
+    expect(source.indexOf("if (REJECT_PATTERNS.some((pattern) => pattern.test(listing.description || listing.title || '')))"))
+      .toBeLessThan(source.indexOf('await Actor.pushData(listing)'));
+  });
+
   it('emits source-quality proof counters and samples', () => {
     expect(source).toContain("record_type: 'source_quality_proof'");
     expect(source).toContain('found_rows_total: totalFound');
