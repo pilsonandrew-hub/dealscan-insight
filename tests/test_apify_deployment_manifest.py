@@ -55,7 +55,7 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
 
     def test_bidspotter_actor_is_enabled_on_github_actions_schedule(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"
-        workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
+        workflow_path = self.repo_root / ".github" / "workflows" / "configure-bidspotter-apify-schedule.yml"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         workflow = workflow_path.read_text(encoding="utf-8")
 
@@ -64,10 +64,11 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["id"], "5Eu3hfCcBBdzp6I1u")
         self.assertEqual(actor["webhookId"], "N699FBbtfzjjhHshJ")
         self.assertEqual(actor["status"], "enabled")
-        self.assertEqual(actor["schedule"], "15 9,21 * * *")
-        self.assertEqual(actor["scheduleStatus"], "github_actions_enabled")
-        self.assertIn("15 9,21 * * *", workflow)
-        self.assertIn("github.event_name == 'schedule' && 'ds-bidspotter' || inputs.actor", workflow)
+        self.assertEqual(actor["schedule"], "45 10,22 * * *")
+        self.assertEqual(actor["scheduleName"], "ds-bidspotter-12hr-apify-native")
+        self.assertEqual(actor["scheduleStatus"], "apify_native_configurator")
+        self.assertIn("ds-bidspotter-12hr-apify-native", workflow)
+        self.assertIn("FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}", workflow)
 
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"

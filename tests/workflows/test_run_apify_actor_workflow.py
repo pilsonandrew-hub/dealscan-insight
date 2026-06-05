@@ -73,12 +73,11 @@ def test_run_apify_actor_workflow_supports_bounded_bidspotter_supply_proof():
     assert '"maxMileage": 50000' in text
 
 
-def test_run_apify_actor_workflow_schedules_bidspotter_with_github_secret():
+def test_run_apify_actor_workflow_keeps_bidspotter_manual_only():
     text = WORKFLOW.read_text()
 
-    assert "schedule:" in text
-    assert "15 9,21 * * *" in text
-    assert "github.event_name == 'schedule' && 'ds-bidspotter' || inputs.actor" in text
+    assert "schedule:" not in text
+    assert "github.event_name == 'schedule'" not in text
     assert "FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}" in text
 
 
