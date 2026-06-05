@@ -126,6 +126,12 @@ def _reason_bucket(value: Any) -> str:
     return text[:80]
 
 
+def _inactive_lifecycle_bucket(row: dict[str, Any]) -> str:
+    step_status = str(row.get("step_status") or "").strip()
+    status = str(row.get("status") or "").strip()
+    return (step_status or status or "inactive_unknown")[:80]
+
+
 def _dominance_threshold(row_count: int, ratio: float) -> int:
     if row_count <= 1:
         return 1
@@ -495,6 +501,8 @@ def build_source_yield_report(
             "is_active",
             "dos_score",
             "score",
+            "step_status",
+            "status",
             "created_at",
         ],
         opportunity_order,
@@ -518,6 +526,8 @@ def build_source_yield_report(
         "active_opportunity_rows": 0,
         "active_dos80_rows": 0,
     })
+    inactive_lifecycle_by_source: dict[str, Counter[str]] = defaultdict(Counter)
+    inactive_lifecycle_by_run: dict[str, Counter[str]] = defaultdict(Counter)
     for row in opportunity_rows:
         source = _source_from_row(row, run_sources=run_sources)
         run_id = str(row.get("source_run_id") or row.get("run_id") or "").strip()
@@ -526,7 +536,8 @@ def build_source_yield_report(
         opportunities_by_source[source]["opportunity_rows"] += 1
         if run_id:
             opportunities_by_run[run_id]["opportunity_rows"] += 1
-        if _parse_bool(row.get("active") if "active" in row else row.get("is_active")):
+        is_active = _parse_bool(row.get("active") if "active" in row else row.get("is_active"))
+        if is_active:
             opportunities_by_source[source]["active_opportunity_rows"] += 1
             if run_id:
                 opportunities_by_run[run_id]["active_opportunity_rows"] += 1
@@ -535,6 +546,10 @@ def build_source_yield_report(
                 opportunities_by_source[source]["active_dos80_rows"] += 1
                 if run_id:
                     opportunities_by_run[run_id]["active_dos80_rows"] += 1
+        else:
+            inactive_lifecycle_by_source[source][_inactive_lifecycle_bucket(row)] += 1
+            if run_id:
+                inactive_lifecycle_by_run[run_id][_inactive_lifecycle_bucket(row)] += 1
 
     sources = sorted(set(webhook_by_source) | set(delivery_by_source) | set(opportunities_by_source))
     summaries: list[dict[str, Any]] = []
@@ -554,6 +569,7 @@ def build_source_yield_report(
             "opportunity_rows": opportunity_counts["opportunity_rows"],
             "active_opportunity_rows": opportunity_counts["active_opportunity_rows"],
             "active_dos80_rows": opportunity_counts["active_dos80_rows"],
+            "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_source[source].most_common(10)),
         }
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
@@ -612,6 +628,7 @@ def build_source_yield_report(
                 "opportunity_rows": opportunity_counts["opportunity_rows"],
                 "active_opportunity_rows": opportunity_counts["active_opportunity_rows"],
                 "active_dos80_rows": opportunity_counts["active_dos80_rows"],
+                "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
             }
             run_summary["classification"] = classify_run_summary(run_summary)
             run_summaries.append(run_summary)
