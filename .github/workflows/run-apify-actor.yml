@@ -1,6 +1,8 @@
 name: Run Apify Actor
 
 on:
+  schedule:
+    - cron: "17 */12 * * *"
   workflow_dispatch:
     inputs:
       actor:
@@ -112,7 +114,7 @@ jobs:
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
-          ACTOR_NAME: ${{ inputs.actor }}
+          ACTOR_NAME: ${{ github.event_name == 'schedule' && 'ds-bidspotter' || inputs.actor }}
           MAX_ITEMS: ${{ inputs.max_items }}
           GOVDEALS_SOLD_MAX_ITEMS: ${{ inputs.govdeals_sold_max_items }}
           GOVDEALS_SOLD_MAX_PAGES: ${{ inputs.govdeals_sold_max_pages }}

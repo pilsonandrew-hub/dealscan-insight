@@ -85,12 +85,11 @@
     },
     "ds-bidspotter": {
       "id": "5Eu3hfCcBBdzp6I1u",
-      "scheduleId": "Vol9X7tsYEHKLSdIK",
       "webhookId": "N699FBbtfzjjhHshJ",
-      "status": "DISABLED",
+      "status": "enabled",
       "schedule": "0 */12 * * *",
-      "notes": "BidSpotter.com \u2014 3-level Playwright crawler (catalogue list \u2192 catalogue \u2192 lot). AWS WAF protected, uses Apify browser fingerprinting. US-only filter applied. Build 1.0.16. Live audit 2026-05-12: schedule Vol9X7tsYEHKLSdIK returns 404 and actor has no latest run; not an active source until schedule is recreated/enabled.",
-      "scheduleStatus": "missing_live"
+      "notes": "BidSpotter.com \u2014 Firecrawl-backed actor for AWS WAF protected pages. US-only filter applied. Cadence runs through GitHub Actions so FIRECRAWL_API_KEY is injected from Actions secrets instead of being stored in an Apify schedule payload.",
+      "scheduleStatus": "github_actions_enabled"
     },
     "ds-hibid": {
       "id": "e8UeyRvQ6QSnX5fhP",
