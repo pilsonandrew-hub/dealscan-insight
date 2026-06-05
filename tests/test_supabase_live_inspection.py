@@ -155,6 +155,16 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
         },
         "alert_log": {"created_at", "status", "delivery_status", "channel"},
         "webhook_log": {"created_at", "received_at", "processing_status"},
+        "ingest_delivery_log": {
+            "source_site",
+            "source",
+            "channel",
+            "status",
+            "error_message",
+            "created_at",
+            "listing_url",
+            "vin",
+        },
         "post_close_outcome_requests": {
             "source_site",
             "outcome_status",
@@ -173,6 +183,31 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
         "opportunities": [],
         "alert_log": [],
         "webhook_log": [],
+        "ingest_delivery_log": [
+            {
+                "source_site": "govdeals",
+                "channel": "db_save",
+                "status": "skipped_gate",
+                "error_message": "age_or_mileage_exceeded",
+                "created_at": "2026-06-03T19:00:01Z",
+                "listing_url": "https://example.com/private-listing",
+                "vin": "1FTFW1E50PFA00000",
+            },
+            {
+                "source_site": "govdeals",
+                "channel": "db_save",
+                "status": "skipped_margin",
+                "error_message": "margin_below_floor",
+                "created_at": "2026-06-03T19:00:02Z",
+            },
+            {
+                "source_site": "publicsurplus",
+                "channel": "db_save",
+                "status": "skipped_margin",
+                "error_message": "margin_below_floor",
+                "created_at": "2026-06-03T19:00:03Z",
+            },
+        ],
         "post_close_outcome_requests": [
             {
                 "source_site": "govdeals",
@@ -216,6 +251,18 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
     report = inspection._safe_truth_audit("https://example.supabase.co", "service-key")
 
     assert report["post_close_outcome_requests"]["sample_count"] == 3
+    assert report["recent_deliveries"]["sample_count"] == 3
+    assert report["recent_deliveries"]["source_counts"] == {"govdeals": 2, "publicsurplus": 1}
+    assert report["recent_deliveries"]["status_counts"] == {"skipped_margin": 2, "skipped_gate": 1}
+    assert report["recent_deliveries"]["source_status_counts"] == [
+        {"source": "govdeals", "status": "skipped_gate", "count": 1},
+        {"source": "govdeals", "status": "skipped_margin", "count": 1},
+        {"source": "publicsurplus", "status": "skipped_margin", "count": 1},
+    ]
+    assert report["recent_deliveries"]["sanitized_error_counts"] == {
+        "margin_below_floor": 2,
+        "age_or_mileage_exceeded": 1,
+    }
     assert report["post_close_outcome_requests"]["source_counts"] == {"govdeals": 2, "publicsurplus": 1}
     assert report["post_close_outcome_requests"]["outcome_status_counts"] == {
         "pending": 2,

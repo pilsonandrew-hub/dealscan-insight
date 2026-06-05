@@ -273,6 +273,42 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _summarize_recent_delivery_truth(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    channel_counts: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    source_status_counts: Counter[tuple[str, str]] = Counter()
+    reason_counts: Counter[str] = Counter()
+    latest_created_at = None
+    for row in rows:
+        source = str(row.get("source_site") or row.get("source") or "unknown")[:80]
+        channel = str(row.get("channel") or "unknown")[:80]
+        status = str(row.get("status") or "unknown")[:80]
+        source_counts[source] += 1
+        channel_counts[channel] += 1
+        status_counts[status] += 1
+        source_status_counts[(source, status)] += 1
+        error = str(row.get("error_message") or "")[:160]
+        if error:
+            reason_counts[error] += 1
+        created_at = row.get("created_at")
+        if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
+            latest_created_at = created_at
+
+    return {
+        "sample_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "channel_counts": dict(channel_counts.most_common(20)),
+        "status_counts": dict(status_counts.most_common(20)),
+        "source_status_counts": [
+            {"source": source, "status": status, "count": count}
+            for (source, status), count in source_status_counts.most_common(30)
+        ],
+        "sanitized_error_counts": dict(reason_counts.most_common(20)),
+        "latest_created_at": latest_created_at,
+    }
+
+
 def _summarize_run_webhook_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     status_counts: Counter[str] = Counter()
     error_counts: Counter[str] = Counter()
@@ -679,6 +715,27 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         key = row.get("status") or row.get("processing_status") or row.get("db_save") or "unknown"
         webhook_status_counts[str(key)[:80]] += 1
 
+    delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
+    delivery_select = ",".join([
+        col for col in [
+            "source_site",
+            "source",
+            "channel",
+            "status",
+            "error_message",
+            "created_at",
+        ]
+        if col in delivery_columns
+    ]) or "created_at"
+    delivery_rows = _recent_rows(
+        base_url,
+        service_key,
+        "ingest_delivery_log",
+        delivery_select,
+        "created_at",
+        200,
+    )
+
     post_close_report: dict[str, Any]
     try:
         post_close_columns = _available_columns(base_url, service_key, "post_close_outcome_requests")
@@ -721,6 +778,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
             "status_counts": dict(webhook_status_counts.most_common(20)),
             "latest_received_at": next((row.get("received_at") for row in webhook_rows if row.get("received_at")), None),
         },
+        "recent_deliveries": _summarize_recent_delivery_truth(delivery_rows),
         "post_close_outcome_requests": post_close_report,
         "truth_boundary": "Samples only sanitized aggregate fields from recent rows. Does not print VINs, titles, URLs, user data, tokens, or raw listing payloads.",
     }
