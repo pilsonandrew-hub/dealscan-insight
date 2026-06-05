@@ -21,11 +21,17 @@ describe('ds-publicsurplus source contract', () => {
   });
 
   test('re-applies mileage cap after detail-page enrichment before publishing', () => {
-    expect(source).toContain('const MAX_ALLOWED_MILEAGE = 100000;');
+    expect(source).toContain('const MAX_ALLOWED_MILEAGE = 50000;');
     expect(detailHandler).toContain('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)');
     expect(detailHandler).toContain('return;');
     expect(detailHandler.indexOf('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)'))
       .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
+  });
+
+  test('mirrors backend max-age gate before publishing standard and Texas rows', () => {
+    expect(source).toContain('const MAX_ALLOWED_AGE_YEARS = 4;');
+    expect(source).toContain('age > MAX_ALLOWED_AGE_YEARS');
+    expect(source.match(/age > MAX_ALLOWED_AGE_YEARS/g)).toHaveLength(2);
   });
 
   test('detail-enriches rows missing condition evidence even when VIN is already present', () => {
