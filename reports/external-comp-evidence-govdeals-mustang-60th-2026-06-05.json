@@ -1,0 +1,40 @@
+{
+  "source_run_id": "manual-2026-06-05-govdeals-mustang-60th",
+  "source_url": "https://github.com/pilsonandrew-hub/dealscan-insight/blob/main/reports/pricing-external-comp-provenance-govdeals-mustang-60th-2026-06-05.md",
+  "confidence_notes": "National active retail-listing evidence for the current GovDeals 2025 Ford Mustang GT Premium 60th Anniversary candidate. Used to cover the current proxy-pricing gap; retail listings are not closed-sale outcomes.",
+  "vehicle": {
+    "year": 2025,
+    "make": "Ford",
+    "model": "Mustang 60th Anniv Editio",
+    "state": "GA"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.kbb.com/cars-for-sale/inventory/759557159?allListingType=all&clickType=listing&endYear=2025&makeCode=FORD&modelCode=MUST&startYear=2025&trimCode=MUST%7CGT+Premium",
+      "captured_at": "2026-06-05T15:05:00Z",
+      "price": 59170,
+      "mileage": 6,
+      "listing_id": "kbb-759557159",
+      "title": "New 2025 Ford Mustang GT Premium w/ 60th Anniversary Package",
+      "title_history_caveat": "Kelley Blue Book active retail listing; title history not independently verified by DealerScope; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.kbb.com/cars-for-sale/inventory/752418561?allListingType=all&clickType=listing&endYear=2025&makeCode=FORD&modelCode=MUST&startYear=2025&trimCode=MUST%7CGT+Premium",
+      "captured_at": "2026-06-05T15:05:00Z",
+      "price": 59000,
+      "mileage": 14,
+      "listing_id": "kbb-752418561",
+      "title": "New 2025 Ford Mustang GT Premium w/ 60th Anniversary Package",
+      "title_history_caveat": "Kelley Blue Book active retail listing; title history not independently verified by DealerScope; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.kbb.com/cars-for-sale/inventory/747797546?allListingType=all&clickType=listing&endYear=2025&makeCode=FORD&modelCode=MUST&startYear=2025&trimCode=MUST%7CGT+Premium",
+      "captured_at": "2026-06-05T15:05:00Z",
+      "price": 58562,
+      "mileage": 207,
+      "listing_id": "kbb-747797546",
+      "title": "New 2025 Ford Mustang GT Premium w/ 60th Anniversary Package",
+      "title_history_caveat": "Kelley Blue Book active retail listing; title history not independently verified by DealerScope; not closed-sale evidence."
+    }
+  ]
+}
