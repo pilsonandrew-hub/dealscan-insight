@@ -125,6 +125,25 @@ const targetStateSet = new Set(targetStates.map(s => String(s).toUpperCase()));
 const seenLotIds = new Set();
 let totalFound = 0;
 let totalPassed = 0;
+const proofCounters = {
+    rows_excluded_search_filter: 0,
+    rows_excluded_non_vehicle: 0,
+    rows_excluded_missing_required_data: 0,
+    rows_excluded_missing_vin: 0,
+    rows_excluded_missing_mileage: 0,
+    rows_excluded_age_mileage_prefilter: 0,
+    rows_excluded_policy_prefilter: 0,
+    rows_excluded_rust_state: 0,
+    rows_excluded_bid_range: 0,
+    rows_excluded_zero_pricing_signal: 0,
+};
+const proofSamples = {
+    missing_required_data: [],
+    missing_mileage: [],
+    age_mileage_prefilter: [],
+    policy_prefilter: [],
+    zero_pricing: [],
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -214,25 +233,44 @@ function buildLotUrl(lotId, siteSubdomain) {
     return `${BASE_URL}/lot/${lotId}/`;
 }
 
+function addProofSample(bucket, listing, reason) {
+    const samples = proofSamples[bucket];
+    if (!samples || samples.length >= 5) return;
+    samples.push({
+        title: String(listing.title || '').slice(0, 120),
+        year: listing.year ?? null,
+        mileage: listing.mileage ?? null,
+        state: listing.state || null,
+        bid: listing.current_bid ?? null,
+        listing_url: listing.listing_url || null,
+        reason,
+    });
+}
+
 function passesFilters(listing, log) {
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(String(listing.title || '').toLowerCase()))) {
         log.debug(`[SKIP] Condition reject: ${listing.title || 'unknown title'}`);
+        proofCounters.rows_excluded_policy_prefilter++;
+        addProofSample('policy_prefilter', listing, 'condition_reject_pattern');
         return false;
     }
     if (!isVehicle(listing.title)) {
         log.debug(`[SKIP-NON-VEH] ${listing.title?.slice(0, 60)}`);
+        proofCounters.rows_excluded_non_vehicle++;
         return false;
     }
 
     // Currency guard — reject non-USD (Canadian CAD)
     if (listing._currency && listing._currency !== 'USD') {
         log.debug(`[SKIP-CURRENCY] ${listing._currency}: ${listing.title?.slice(0, 50)}`);
+        proofCounters.rows_excluded_search_filter++;
         return false;
     }
 
     // Canadian province rejection
     if (isCanadian(listing._rawState)) {
         log.debug(`[SKIP-CA] Province=${listing._rawState}: ${listing.title?.slice(0, 50)}`);
+        proofCounters.rows_excluded_search_filter++;
         return false;
     }
 
@@ -240,6 +278,8 @@ function passesFilters(listing, log) {
     const state = listing.state;
     if (state && !US_STATES.has(state)) {
         log.debug(`[SKIP-STATE] Unknown state ${state}: ${listing.title?.slice(0, 50)}`);
+        proofCounters.rows_excluded_missing_required_data++;
+        addProofSample('missing_required_data', listing, 'unknown_state');
         return false;
     }
 
@@ -248,6 +288,7 @@ function passesFilters(listing, log) {
         const currentYear = new Date().getFullYear();
         if (!(listing.year && listing.year >= currentYear - 2)) {
             log.debug(`[SKIP-RUST] ${state} + year ${listing.year}: ${listing.title?.slice(0, 50)}`);
+            proofCounters.rows_excluded_rust_state++;
             return false;
         }
         log.info(`[BYPASS-RUST] ${state} year=${listing.year} — recent vehicle allowed`);
@@ -256,6 +297,7 @@ function passesFilters(listing, log) {
     // Target state filter
     if (state && targetStateSet.size > 0 && !targetStateSet.has(state)) {
         log.debug(`[SKIP-OOT] State ${state} not in target list`);
+        proofCounters.rows_excluded_search_filter++;
         return false;
     }
 
@@ -263,30 +305,40 @@ function passesFilters(listing, log) {
     const bid = listing.current_bid;
     if (bid === 0) {
         log.debug(`[SKIP-ZERO-BID] Pre-auction item with no pricing: ${listing.title?.slice(0, 60)}`);
+        proofCounters.rows_excluded_zero_pricing_signal++;
+        addProofSample('zero_pricing', listing, 'zero_bid');
         return false;
     }
     if (bid > 0 && bid < minBid) {
         log.debug(`[SKIP-BID-LOW] $${bid}`);
+        proofCounters.rows_excluded_bid_range++;
         return false;
     }
     if (bid > 0 && bid > maxBid) {
         log.debug(`[SKIP-BID-HIGH] $${bid}`);
+        proofCounters.rows_excluded_bid_range++;
         return false;
     }
 
     // Year
     if (!listing.year || listing.year < minYear) {
         log.debug(`[SKIP-YEAR] ${listing.year}`);
+        proofCounters.rows_excluded_age_mileage_prefilter++;
+        addProofSample('age_mileage_prefilter', listing, listing.year ? 'age_over_4_years' : 'missing_year');
         return false;
     }
 
     // Mileage
     if (listing.mileage === null) {
         log.debug(`[SKIP-MILES-MISSING] ${listing.title?.slice(0, 60)}`);
+        proofCounters.rows_excluded_missing_mileage++;
+        addProofSample('missing_mileage', listing, 'missing_mileage');
         return false;
     }
     if (listing.mileage !== null && listing.mileage > maxMileage) {
         log.debug(`[SKIP-MILES] ${listing.mileage}`);
+        proofCounters.rows_excluded_age_mileage_prefilter++;
+        addProofSample('age_mileage_prefilter', listing, 'mileage_over_50k');
         return false;
     }
 
@@ -551,12 +603,28 @@ for (const searchText of searchTerms) {
 
 // ── Webhook notification ──────────────────────────────────────────────────────
 
+const proof = {
+    record_type: 'source_quality_proof',
+    source_site: SOURCE,
+    scraped_at: new Date().toISOString(),
+    found_rows_total: totalFound,
+    prefilter_passed_rows_total: totalPassed,
+    pushed_rows_total: totalPassed,
+    ...proofCounters,
+    missing_required_data_samples: proofSamples.missing_required_data,
+    missing_mileage_samples: proofSamples.missing_mileage,
+    prefilter_age_mileage_rejected_samples: proofSamples.age_mileage_prefilter,
+    prefilter_policy_rejected_samples: proofSamples.policy_prefilter,
+    zero_pricing_rejected_samples: proofSamples.zero_pricing,
+};
+await Actor.pushData(proof);
+
 const effectiveWebhookUrl = webhookUrl
     || process.env.WEBHOOK_URL
     || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
 const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
 
-if (effectiveWebhookUrl && totalPassed > 0) {
+if (effectiveWebhookUrl) {
     try {
         const resp = await fetch(effectiveWebhookUrl, {
             method: 'POST',
@@ -567,7 +635,7 @@ if (effectiveWebhookUrl && totalPassed > 0) {
             body: JSON.stringify({
                 source: SOURCE,
                 actorRunId: process.env.APIFY_ACTOR_RUN_ID ?? 'local',
-                itemCount: totalPassed,
+                itemCount: totalPassed + 1,
                 totalScraped: totalFound,
                 timestamp: new Date().toISOString(),
             }),
