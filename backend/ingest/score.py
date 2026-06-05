@@ -776,7 +776,8 @@ def score_deal(
         retail_comp_count,
         retail_comp_confidence,
     )
-    mmr = manheim_mmr_mid or market_comp_wholesale_estimate or mmr_ca or 0
+    live_manheim_mmr_mid = manheim_mmr_mid if manheim_source_status == "live" else None
+    mmr = live_manheim_mmr_mid or market_comp_wholesale_estimate or mmr_ca or 0
     bid_value = _coerce_float(bid)
     vehicle_tier = determine_vehicle_tier(year, mileage)
 
