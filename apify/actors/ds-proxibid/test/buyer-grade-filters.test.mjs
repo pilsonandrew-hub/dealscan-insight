@@ -60,6 +60,15 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(scraper.parseMileage(text)).toBe(145983);
   });
 
+  test('extracts VIN-adjacent mileage from leading Proxibid meta description', () => {
+    const text = [
+      'VIN 1GKKRPKD9GJ335483, NC TITLE, 145,983 Miles, Runs and drives, 2nd row bucket seats',
+      '2016 GMC Arcadia VIN 5483 Bid now through Proxibid',
+      'Similar Items 2016 FORD Explorer SUV VIN: 1FM5K8ARXGGA78391. Odometer: 89, $650.00 20d 1h Left',
+    ].join(' ');
+    expect(scraper.parseMileage(text)).toBe(145983);
+  });
+
   test('keeps mileage-labeled values without requiring a repeated unit', () => {
     expect(scraper.parseMileage('Item Details VIN 1GKKRPKD9GJ335483 Mileage: 12345 Payment')).toBe(12345);
   });
