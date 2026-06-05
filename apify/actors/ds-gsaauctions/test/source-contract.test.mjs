@@ -34,6 +34,20 @@ describe('ds-gsaauctions source contract', () => {
     expect(rejectMissingMileageIndex).toBeLessThan(publishIndex);
   });
 
+  test('reruns backend policy rejects after detail enrichment before publish', () => {
+    const detailIndex = source.indexOf('await fetchLotPreview(lotId)');
+    const postDetailRejectIndex = source.indexOf('source_policy_rejected_after_detail');
+    const publishIndex = source.indexOf('await Actor.pushData(record);');
+
+    expect(source).toContain('/\\bfront[\\s-]+end[\\s-]+damage\\b/i');
+    expect(source).toContain('/\\brear[\\s-]+end[\\s-]+damage\\b/i');
+    expect(source).toContain('/\\bside[\\s-]+damage\\b/i');
+    expect(source).toContain('/\\bas[\\s-]?is\\b.*\\bno\\s+warrant|\\bno\\s+warrant.*\\bas[\\s-]?is\\b/i');
+    expect(source).toContain('function hasConditionReject(record)');
+    expect(postDetailRejectIndex).toBeGreaterThan(detailIndex);
+    expect(postDetailRejectIndex).toBeLessThan(publishIndex);
+  });
+
   test('emits source quality proof for list/detail field visibility', () => {
     expect(source).toContain("record_type: 'source_quality_proof'");
     expect(source).toContain('list_rows_with_vin');

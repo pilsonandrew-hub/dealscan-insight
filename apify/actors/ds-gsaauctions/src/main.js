@@ -65,6 +65,9 @@ const CONDITION_REJECT_PATTERNS = [
     /\bsalvage\b/i,
     /\bflood\b/i,
     /\bframe[\s-]+damage\b/i,
+    /\bfront[\s-]+end[\s-]+damage\b/i,
+    /\brear[\s-]+end[\s-]+damage\b/i,
+    /\bside[\s-]+damage\b/i,
     /\bcrash(?:ed)?\b/i,
     /\bcollision[\s-]+damage\b/i,
     /\bfire[\s-]+damage\b/i,
@@ -82,6 +85,7 @@ const CONDITION_REJECT_PATTERNS = [
     /\bblown\s+engine\b/i,
     /\bbad\s+engine\b/i,
     /\bno\s+title\b/i,
+    /\bas[\s-]?is\b.*\bno\s+warrant|\bno\s+warrant.*\bas[\s-]?is\b/i,
 ];
 
 function normalizeText(v) {
@@ -150,6 +154,15 @@ function isPassengerVehicle(title, categoryCode) {
     if (!VEHICLE_CATEGORY_CODES.has(String(categoryCode))) return false;
     if (EXCLUDED_PATTERN.test(title)) return false;
     return true;
+}
+
+function hasConditionReject(record) {
+    const text = [
+        record?.title,
+        record?.description,
+        record?.title_status,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 // Fetch one page from the GSA API
@@ -389,6 +402,11 @@ for (let page = startPage; page <= totalPages; page++) {
             record.detail_text_length = parsedDetail.detail_text_length;
         } else {
             record.detail_enriched = false;
+        }
+
+        if (hasConditionReject(record)) {
+            console.log(`[GSA EXCLUDE] reason=source_policy_rejected_after_detail | ${title}`);
+            continue;
         }
 
         if (!record.vin || !record.mileage) {
