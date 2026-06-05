@@ -529,3 +529,70 @@ def test_delivery_log_fallback_queries_candidate_run_ids(monkeypatch):
     assert report["overall_verdict"] == "no_recent_accepted_source_yield"
     assert report["run_summaries"][0]["delivery_rows"] == 1
     assert report["run_summaries"][0]["classification"] == "source_quality_reject_dominant"
+
+
+def test_ingest_delivery_log_queries_candidate_run_ids(monkeypatch):
+    def primary_row():
+        return {
+            "run_id": "run-primary",
+            "source_site": "hibid",
+            "channel": "db_save",
+            "status": "skipped_gate",
+            "error_message": "age_or_mileage_exceeded",
+            "created_at": "2026-06-05T04:01:00+00:00",
+        }
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-primary",
+                        "source": "hibid",
+                        "status": "processed",
+                        "item_count": 182,
+                        "received_at": "2026-06-05T04:00:00+00:00",
+                    }
+                ]
+            if table in {"ingest_delivery_log", "delivery_log"}:
+                return [primary_row()]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-05T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-primary",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 182,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log" and query_dict.get("run_id") == "eq.run-primary":
+            return [primary_row()]
+        if table == "ingest_delivery_log":
+            return []
+        if table == "delivery_log":
+            return []
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+        run_detail_source="hibid",
+    )
+
+    assert report["delivery_log_fallback_rows"] == 0
+    assert report["overall_verdict"] == "no_recent_accepted_source_yield"
+    assert "webhook_without_delivery_gap" not in report.get("run_classification_counts", {})
+    assert report["source_summaries"][0]["delivery_rows"] == 1
+    assert report["run_summaries"][0]["classification"] == "source_quality_reject_dominant"
