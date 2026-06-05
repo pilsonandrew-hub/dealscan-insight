@@ -13,6 +13,10 @@ import urllib.request
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from backend.ingest.alert_gating import (
+    UNKNOWN_OR_WEAK_CONDITION_GRADES,
+    has_source_condition_evidence,
+)
 from supabase import create_client
 
 
@@ -55,6 +59,21 @@ def _dedupe_preserving_order(values: Iterable[str]) -> list[str]:
         seen.add(value)
         deduped.append(value)
     return deduped
+
+
+def _condition_grade_requires_source_evidence(row: dict[str, Any]) -> bool:
+    grade = str(row.get("condition_grade") or row.get("condition") or "").strip().lower()
+    return grade not in UNKNOWN_OR_WEAK_CONDITION_GRADES
+
+
+def _missing_source_condition_evidence_ids(rows: Iterable[dict[str, Any]]) -> list[str]:
+    return _dedupe_preserving_order(
+        str(row["id"])
+        for row in rows
+        if row.get("id")
+        and _condition_grade_requires_source_evidence(row)
+        and not has_source_condition_evidence(row)
+    )
 
 
 def _update_batches(supabase: Any, ids: list[str], payload: dict[str, Any]) -> int:
@@ -130,6 +149,8 @@ def build_message(summary: dict[str, Any]) -> str:
         f"<b>{summary['archived_untrusted_active_high_dos_missing_mileage']}</b>\n"
         "Archived active high-DOS missing-VIN deals: "
         f"<b>{summary['archived_untrusted_active_high_dos_missing_vin']}</b>\n"
+        "Archived active high-DOS missing-condition-evidence deals: "
+        f"<b>{summary['archived_untrusted_active_high_dos_missing_condition_evidence']}</b>\n"
         f"Run time: {summary['run_time']}"
     )
 
@@ -207,6 +228,20 @@ def run_sweep(
             ],
         ),
     ])
+    active_high_dos_rows = _fetch_rows(
+        supabase,
+        (
+            "id,title,condition_grade,condition,raw_data,description,details,"
+            "condition_notes,detail_text,assetLongDesc,damage_type,damage"
+        ),
+        [
+            lambda q: q.eq("is_active", True),
+            lambda q: q.gte("dos_score", 80),
+        ],
+    )
+    active_high_dos_missing_condition_evidence_ids = _missing_source_condition_evidence_ids(
+        active_high_dos_rows
+    )
 
     post_close_request_count = (
         len([
@@ -256,6 +291,19 @@ def run_sweep(
                 "is_active": False,
                 "pipeline_step": "archived",
                 "step_status": "q_no_vin",
+            },
+        ),
+        "archived_untrusted_active_high_dos_missing_condition_evidence": len(
+            active_high_dos_missing_condition_evidence_ids
+        )
+        if dry_run
+        else _update_batches(
+            supabase,
+            active_high_dos_missing_condition_evidence_ids,
+            {
+                "is_active": False,
+                "pipeline_step": "archived",
+                "step_status": "q_no_condition_evidence",
             },
         ),
         "run_time": now.strftime("%Y-%m-%d %H:%M UTC"),
