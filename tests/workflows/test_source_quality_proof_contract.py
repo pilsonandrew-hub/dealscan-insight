@@ -67,6 +67,32 @@ def test_proxibid_actor_emits_non_opportunity_enrichment_proof_record():
     assert 'await Actor.pushData(proof)' in text
 
 
+def test_municibid_actor_emits_zero_output_source_quality_proof():
+    text = Path('apify/actors/ds-municibid/src/main.js').read_text()
+
+    assert "record_type: 'source_quality_proof'" in text
+    assert 'found_rows_total: found' in text
+    assert 'prefilter_passed_rows_total: passed' in text
+    assert 'pushed_rows_total: pushed' in text
+    assert 'rows_excluded_missing_required_data' in text
+    assert 'rows_excluded_age_mileage_prefilter' in text
+    assert 'rows_excluded_policy_prefilter' in text
+    assert 'await Actor.pushData(proof)' in text
+
+
+def test_hibid_v2_actor_emits_zero_output_source_quality_proof():
+    text = Path('apify/actors/ds-hibid-v2/src/main.js').read_text()
+
+    assert "record_type: 'source_quality_proof'" in text
+    assert 'found_rows_total: totalFound' in text
+    assert 'prefilter_passed_rows_total: totalPassed' in text
+    assert 'pushed_rows_total: totalPassed' in text
+    assert 'rows_excluded_missing_required_data' in text
+    assert 'rows_excluded_age_mileage_prefilter' in text
+    assert 'rows_excluded_policy_prefilter' in text
+    assert 'await Actor.pushData(proof)' in text
+
+
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     text = ACTOR.read_text()
     assert '!lot.rejected_after_detail' in text

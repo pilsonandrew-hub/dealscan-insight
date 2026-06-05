@@ -21,6 +21,8 @@ const SOURCE = 'municibid';
 // NOTE: www.municibid.com 301-redirects to municibid.com (no-www).
 // CheerioCrawler must follow the redirect — use non-www base URL.
 const BASE = 'https://municibid.com';
+const MAX_MODEL_AGE_YEARS = 4;
+const MAX_MILEAGE = 50000;
 
 // Passenger vehicle categories only (no buses, motorcycles, heavy trucks)
 const CATEGORY_URLS = [
@@ -74,12 +76,41 @@ const urls = CATEGORY_URLS.map(url =>
 );
 
 let found = 0, passed = 0;
+let pushed = 0;
 const sampleLocations = [];
+const proofCounters = {
+    rows_excluded_missing_required_data: 0,
+    rows_excluded_age_mileage_prefilter: 0,
+    rows_excluded_policy_prefilter: 0,
+    rows_excluded_non_vehicle: 0,
+    rows_excluded_bid_range: 0,
+    rows_excluded_rust_state: 0,
+    rows_excluded_search_filter: 0,
+};
+const proofSamples = {
+    missing_required_data: [],
+    age_mileage_prefilter: [],
+    policy_prefilter: [],
+};
 
 function recordLocationSample(location = '') {
     const normalized = location.trim();
     if (!normalized || sampleLocations.includes(normalized) || sampleLocations.length >= 5) return;
     sampleLocations.push(normalized);
+}
+
+function addProofSample(bucket, item) {
+    const samples = proofSamples[bucket];
+    if (!samples || samples.length >= 5) return;
+    samples.push({
+        title: String(item.title || '').slice(0, 120),
+        year: item.year ?? null,
+        mileage: item.mileage ?? null,
+        state: item.state || null,
+        bid: item.bid ?? null,
+        listing_url: item.listing_url || null,
+        reason: item.reason || null,
+    });
 }
 
 function parseState(location = '') {
@@ -216,24 +247,56 @@ const crawler = new CheerioCrawler({
             ];
 
             // Keyword post-filter: if searchQuery is set, title must contain it
-            if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) return;
+            if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) {
+                proofCounters.rows_excluded_search_filter++;
+                return;
+            }
 
             // Filters
-            if (!year || !make) return;
-            if (conditionRejectPatterns.some((pattern) => pattern.test(lower))) return;
-            if (mileage !== null && mileage > 100000) return;
-            if (!isPassengerVehicle(title)) return;
-            if (bid < minBid || bid > maxBid) return;
+            if (!year || !make) {
+                proofCounters.rows_excluded_missing_required_data++;
+                addProofSample('missing_required_data', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'missing_year_or_make' });
+                return;
+            }
+            if (conditionRejectPatterns.some((pattern) => pattern.test(lower))) {
+                proofCounters.rows_excluded_policy_prefilter++;
+                addProofSample('policy_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'condition_reject_pattern' });
+                return;
+            }
+            if (mileage !== null && mileage > MAX_MILEAGE) {
+                proofCounters.rows_excluded_age_mileage_prefilter++;
+                addProofSample('age_mileage_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'mileage_over_50k' });
+                return;
+            }
+            if (!isPassengerVehicle(title)) {
+                proofCounters.rows_excluded_non_vehicle++;
+                return;
+            }
+            if (bid < minBid || bid > maxBid) {
+                proofCounters.rows_excluded_bid_range++;
+                return;
+            }
             const currentYear = new Date().getFullYear();
             if (state) {
-                if (!US_STATES.has(state)) return;
+                if (!US_STATES.has(state)) {
+                    proofCounters.rows_excluded_missing_required_data++;
+                    addProofSample('missing_required_data', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'unknown_state' });
+                    return;
+                }
                 if (HIGH_RUST.has(state)) {
-                    if (!(year >= currentYear - 2)) return;
+                    if (!(year >= currentYear - 2)) {
+                        proofCounters.rows_excluded_rust_state++;
+                        return;
+                    }
                     console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
                 }
             }
             const age = currentYear - year;
-            if (age > 10 || age < 0) return;
+            if (age > MAX_MODEL_AGE_YEARS || age < 0) {
+                proofCounters.rows_excluded_age_mileage_prefilter++;
+                addProofSample('age_mileage_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: age < 0 ? 'future_model_year' : 'age_over_4_years' });
+                return;
+            }
 
             passed++;
             const model = parseModel(title, make);
@@ -256,6 +319,7 @@ const crawler = new CheerioCrawler({
 
         if (batch.length > 0) {
             await Actor.pushData(batch);
+            pushed += batch.length;
         }
     },
 });
@@ -264,4 +328,18 @@ if (searchQuery) console.log(`[MUNICIBID] Keyword search: "${searchQuery}"`);
 await crawler.run(urls.map(url => ({ url })));
 console.log('[MUNICIBID] Sample locations:', sampleLocations);
 console.log(`[MUNICIBID] Found: ${found} | Passed: ${passed}`);
+const proof = {
+    record_type: 'source_quality_proof',
+    source_site: SOURCE,
+    scraped_at: new Date().toISOString(),
+    found_rows_total: found,
+    prefilter_passed_rows_total: passed,
+    pushed_rows_total: pushed,
+    ...proofCounters,
+    sample_locations: sampleLocations,
+    missing_required_data_samples: proofSamples.missing_required_data,
+    prefilter_age_mileage_rejected_samples: proofSamples.age_mileage_prefilter,
+    prefilter_policy_rejected_samples: proofSamples.policy_prefilter,
+};
+await Actor.pushData(proof);
 await Actor.exit();
