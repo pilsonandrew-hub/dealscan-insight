@@ -59,6 +59,15 @@ def test_run_apify_actor_workflow_supports_all_enabled_source_proofs():
         assert actor_id in text
 
 
+def test_run_apify_actor_workflow_prints_usgovbid_zero_output_proof_fields():
+    text = WORKFLOW.read_text()
+
+    assert "auctions_discovered" in text
+    assert "bid_urls_resolved" in text
+    assert "rows_excluded_search_filter" in text
+    assert "rows_excluded_non_vehicle" in text
+
+
 def test_run_apify_actor_workflow_supports_bounded_govplanet_proof():
     text = WORKFLOW.read_text()
 
