@@ -221,3 +221,99 @@ def test_build_report_maps_actor_id_to_source_for_delivery_rows(monkeypatch, tmp
 
     assert report["source_summaries"][0]["source"] == "govdeals"
     assert report["source_summaries"][0]["delivery_rows"] == 1
+
+
+def test_build_report_includes_sanitized_run_summaries_for_requested_source(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "webhook_log" and dict(query).get("select") == "*":
+            return [
+                {
+                    "run_id": "run-hibid-1",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 3,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log" and dict(query).get("select") == "*":
+            return [
+                {
+                    "run_id": "run-hibid-1",
+                    "source_site": "hibid",
+                    "status": "skipped_gate",
+                    "error_message": "age_or_mileage_exceeded",
+                    "created_at": "2026-06-05T04:01:00+00:00",
+                }
+            ]
+        if table == "opportunities" and dict(query).get("select") == "*":
+            return [{"created_at": "2026-06-05T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-hibid-1",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 3,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                },
+                {
+                    "run_id": "run-govdeals-1",
+                    "source": "govdeals",
+                    "status": "processed",
+                    "item_count": 7,
+                    "received_at": "2026-06-05T03:00:00+00:00",
+                },
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-hibid-1",
+                    "source_site": "hibid",
+                    "status": "skipped_gate",
+                    "error_message": "age_or_mileage_exceeded",
+                    "created_at": "2026-06-05T04:01:00+00:00",
+                },
+                {
+                    "run_id": "run-govdeals-1",
+                    "source_site": "govdeals",
+                    "status": "skipped_margin",
+                    "error_message": "margin_below_floor: bid=27000",
+                    "created_at": "2026-06-05T03:01:00+00:00",
+                },
+            ]
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+        run_detail_source="hibid",
+    )
+
+    assert report["run_detail_source"] == "hibid"
+    assert report["run_summaries"] == [
+        {
+            "run_id": "run-hibid-1",
+            "source": "hibid",
+            "webhook_rows": 1,
+            "webhook_processed_rows": 1,
+            "webhook_item_count_total": 3,
+            "delivery_rows": 1,
+            "status_counts": {"skipped_gate": 1},
+            "reason_counts": {"age_or_mileage_exceeded": 1},
+            "opportunity_rows": 0,
+            "active_opportunity_rows": 0,
+            "active_dos80_rows": 0,
+            "classification": "source_quality_reject_dominant",
+        }
+    ]
+    run_output = str(report["run_summaries"]).lower()
+    assert "title" not in run_output
+    assert "vin" not in run_output
+    assert "url" not in run_output
