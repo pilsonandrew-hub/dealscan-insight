@@ -49,6 +49,9 @@ describe('ds-gsaauctions source contract', () => {
     expect(source).toContain('/\\bnot\\s+operational\\b/i');
     expect(source).toContain('/\\bneeds?\\s+engine\\b/i');
     expect(source).toContain('/\\bengine\\s+(?:knock|miss)\\b/i');
+    expect(source).toContain('/\\blow\\s+cylinder\\s+compression\\b/i');
+    expect(source).toContain('/\\bcoolant\\s+leaks?\\b/i');
+    expect(source).toContain('/\\brequires?\\s+engine\\s+(?:inspection|repair)\\b/i');
     expect(source).toContain('function hasConditionReject(record)');
     expect(postDetailRejectIndex).toBeGreaterThan(detailIndex);
     expect(postDetailRejectIndex).toBeLessThan(publishIndex);
