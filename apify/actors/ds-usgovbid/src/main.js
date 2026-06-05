@@ -30,6 +30,7 @@ import { PlaywrightCrawler } from 'crawlee';
 const SOURCE = 'usgovbid';
 const WP_EVENTS_API = 'https://www.usgovbid.com/wp-json/tribe/events/v1/events?per_page=50&status=publish';
 const BID_BASE = 'https://bid.auctionlistservices.com';
+const DEFAULT_MAX_YEAR_AGE = 4;
 
 const HIGH_RUST_STATES = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
@@ -88,11 +89,23 @@ const {
     maxLotsPerAuction = 500,
     minBid = 500,
     maxBid = 35000,
+    maxYearAge = DEFAULT_MAX_YEAR_AGE,
     searchQuery = '',
 } = input;
 
+let auctionsDiscovered = 0;
+let bidUrlsResolved = 0;
 let totalFound = 0;
 let totalPassed = 0;
+let rowsExcludedSearchFilter = 0;
+let rowsExcludedNonVehicle = 0;
+let rowsExcludedRustState = 0;
+let rowsExcludedBidRange = 0;
+let rowsExcludedAgeMileagePrefilter = 0;
+const rejectionReasons = {};
+const searchFilterRejectedSamples = [];
+const nonVehicleRejectedSamples = [];
+const ageMileageRejectedSamples = [];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +160,41 @@ function parseDate(v) {
     const parsed = new Date(text);
     if (!isNaN(parsed.getTime())) return parsed.toISOString();
     return null;
+}
+
+function incrementCount(map, key) {
+    map[key] = (map[key] || 0) + 1;
+}
+
+function addSample(samples, sample, limit = 5) {
+    if (samples.length >= limit) return;
+    samples.push(sample);
+}
+
+async function pushSourceQualityProof() {
+    await Actor.pushData({
+        record_type: 'source_quality_proof',
+        source: 'usgovbid',
+        source_site: SOURCE,
+        generated_at: new Date().toISOString(),
+        auctions_discovered: auctionsDiscovered,
+        bid_urls_resolved: bidUrlsResolved,
+        found_rows_total: totalFound,
+        prefilter_passed_rows_total: totalPassed,
+        pushed_rows_total: totalPassed,
+        rows_excluded_search_filter: rowsExcludedSearchFilter,
+        rows_excluded_non_vehicle: rowsExcludedNonVehicle,
+        rows_excluded_rust_state: rowsExcludedRustState,
+        rows_excluded_bid_range: rowsExcludedBidRange,
+        rows_excluded_age_mileage_prefilter: rowsExcludedAgeMileagePrefilter,
+        max_year_age: maxYearAge,
+        min_bid: minBid,
+        max_bid: maxBid,
+        rejection_reasons: rejectionReasons,
+        search_filter_rejected_samples: searchFilterRejectedSamples,
+        non_vehicle_rejected_samples: nonVehicleRejectedSamples,
+        prefilter_age_mileage_rejected_samples: ageMileageRejectedSamples,
+    });
 }
 
 /**
@@ -314,22 +362,54 @@ const crawler = new PlaywrightCrawler({
         for (const lot of allLots) {
             totalFound++;
             const { title, listing_url, current_bid, auction_end_time, photo_url } = lot;
+            const sample = {
+                title,
+                current_bid,
+                state: auctionMeta.state,
+                listing_url,
+            };
 
-            if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) continue;
+            if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) {
+                rowsExcludedSearchFilter++;
+                incrementCount(rejectionReasons, 'search_filter');
+                addSample(searchFilterRejectedSamples, sample);
+                continue;
+            }
 
-            if (!isVehicle(title)) continue;
+            if (!isVehicle(title)) {
+                rowsExcludedNonVehicle++;
+                incrementCount(rejectionReasons, 'non_vehicle_or_condition_reject');
+                addSample(nonVehicleRejectedSamples, sample);
+                continue;
+            }
 
             const state = auctionMeta.state;
             const year = parseYear(title);
             const currentYear = new Date().getFullYear();
             if (state && HIGH_RUST_STATES.has(state)) {
-                if (!(year && year >= currentYear - 2)) continue;
+                if (!(year && year >= currentYear - 2)) {
+                    rowsExcludedRustState++;
+                    incrementCount(rejectionReasons, 'rust_state_reject');
+                    continue;
+                }
                 console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
             }
 
-            if (current_bid > 0 && (current_bid < minBid || current_bid > maxBid)) continue;
+            if (current_bid > 0 && (current_bid < minBid || current_bid > maxBid)) {
+                rowsExcludedBidRange++;
+                incrementCount(rejectionReasons, current_bid < minBid ? 'bid_below_min' : 'bid_above_max');
+                continue;
+            }
 
-            if (!year || (currentYear - year) > 10) continue;
+            if (!year || (currentYear - year) > maxYearAge) {
+                rowsExcludedAgeMileagePrefilter++;
+                incrementCount(rejectionReasons, !year ? 'missing_year' : 'age_over_limit_prefilter');
+                addSample(ageMileageRejectedSamples, {
+                    ...sample,
+                    year,
+                });
+                continue;
+            }
 
             const make = parseMake(title);
             const model = parseModel(title, make);
@@ -366,12 +446,14 @@ const crawler = new PlaywrightCrawler({
 let events = [];
 try {
     events = await fetchUpcomingAuctions(console);
+    auctionsDiscovered = events.length;
 } catch (err) {
     console.error(`Failed to fetch events: ${err.message}`);
 }
 
 if (!events.length) {
     console.warn('[USGOVBID] No upcoming auctions found via Events API');
+    await pushSourceQualityProof();
     await Actor.exit();
 }
 
@@ -393,6 +475,7 @@ for (const auction of events.slice(0, maxAuctions)) {
         url: bidUrl,
         userData: { auctionMeta: auction },
     });
+    bidUrlsResolved++;
 }
 
 // Pre-pass: resolve event pages → ALS bid URL
@@ -413,6 +496,7 @@ if (requests.some(r => r.userData.needsRedirect)) {
             if (bidLink) {
                 auctionMeta.bid_url = bidLink;
                 auctions.push({ url: bidLink, userData: { auctionMeta } });
+                bidUrlsResolved++;
                 log.info(`Found bid URL: ${bidLink}`);
             } else {
                 log.warning(`No bid.auctionlistservices.com link found on ${request.url}`);
@@ -438,6 +522,7 @@ const mainRequests = [
 
 if (!mainRequests.length) {
     console.warn('[USGOVBID] No bid URLs resolved — check event page structure');
+    await pushSourceQualityProof();
     await Actor.exit();
 }
 
@@ -446,4 +531,5 @@ await crawler.run(mainRequests);
 console.log(`[USGOVBID] Scrape complete. Found: ${totalFound} | Passed filters: ${totalPassed}`);
 console.log(`[USGOVBID] Auctions processed: ${mainRequests.length}`);
 
+await pushSourceQualityProof();
 await Actor.exit();
