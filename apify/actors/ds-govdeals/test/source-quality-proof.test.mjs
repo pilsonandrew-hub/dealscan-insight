@@ -53,6 +53,21 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('/\\b(?:jail|prisoner)\\s+(?:van|transport)\\b/i');
   });
 
+  test('rejects backend-policy condition phrases before pushing rows', () => {
+    expect(source).toContain('/\\bas[\\s-]+is\\b/i');
+    expect(source).toContain('/\\bno\\s+warranty\\b/i');
+    expect(source).toContain('/\\brebuilt\\b/i');
+  });
+
+  test('rejects commercial-heavy vehicle families before pushing rows', () => {
+    expect(source).toContain('/\\bsprinter\\b/i');
+    expect(source).toContain('/\\btransit\\b/i');
+    expect(source).toContain('/\\bpeterbilt\\b/i');
+    expect(source).toContain('/\\bfreightliner\\b/i');
+    expect(source).toContain('/\\binternational\\b/i');
+    expect(source).toContain('/\\b(?:box|dump|bucket|utility)\\s+truck\\b/i');
+  });
+
   test('keeps detail-enriched rows missing required data out of pushed opportunities', () => {
     expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
     expect(source).toContain('const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);');
