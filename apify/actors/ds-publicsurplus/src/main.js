@@ -237,8 +237,8 @@ function parseMileage(text = '') {
     return match ? parseInt(match[1], 10) : null;
 }
 
-// Queue of passing standard listings that need VIN detail-page scraping
-const vinQueue = [];
+// Queue of passing standard listings that need VIN or condition detail-page evidence.
+const detailQueue = [];
 let detailPageCount = 0;
 
 /**
@@ -248,6 +248,29 @@ let detailPageCount = 0;
 function extractVinFromText(text) {
     const match = String(text || '').match(VIN_PATTERN);
     return match ? match[1].toUpperCase() : null;
+}
+
+function needsDetailEvidence(vehicle) {
+    const title = normalizeText(vehicle?.title);
+    const description = normalizeText(vehicle?.description);
+    const detailText = normalizeText(vehicle?.detail_text);
+    if (detailText && detailText !== title) return false;
+    return !description || description === title;
+}
+
+function hasConditionReject(vehicle) {
+    const text = [
+        vehicle?.title,
+        vehicle?.description,
+        vehicle?.detail_text,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function extractDetailText(bodyText) {
+    const text = normalizeText(bodyText);
+    if (!text) return '';
+    return text.slice(0, 8000);
 }
 
 async function pushListing(listing, sourceUrl, log) {
@@ -262,7 +285,7 @@ async function pushListing(listing, sourceUrl, log) {
         log.debug(`[SKIP] Missing title on ${sourceUrl}`);
         return false;
     }
-    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(`${title} ${description}`.toLowerCase()))) {
+    if (hasConditionReject({ title, description })) {
         log.debug(`[SKIP] Condition reject: ${title}`);
         return false;
     }
@@ -336,9 +359,10 @@ async function pushListing(listing, sourceUrl, log) {
     totalAfterFilters++;
     log.info(`[PASS] ${vehicle.title} | $${vehicle.current_bid} | ${vehicle.state} | VIN: ${vehicle.vin || 'pending'}`);
 
-    // If no VIN found yet and we have a detail URL, queue for detail page scrape
-    if (!vehicle.vin && listingUrl && detailPageCount < MAX_DETAIL_PAGES) {
-        vinQueue.push(vehicle);
+    // If identity or condition evidence is incomplete, enrich before publishing.
+    if (listingUrl && detailPageCount < MAX_DETAIL_PAGES && (!vehicle.vin || needsDetailEvidence(vehicle))) {
+        detailPageCount++;
+        detailQueue.push(vehicle);
     } else {
         totalPushed++;
         await Actor.pushData(vehicle);
@@ -436,13 +460,17 @@ const crawler = new PlaywrightCrawler({
     minConcurrency: 1,
 
     async requestHandler({ page, request, enqueueLinks, log }) {
-        // ── PublicSurplus detail page — extract VIN ────────────────────────────
+        // ── PublicSurplus detail page — extract VIN and condition evidence ─────
         if (request.label === 'DETAIL_VIN') {
             const vehicle = request.userData.vehicle;
             try {
                 await page.waitForLoadState('domcontentloaded', { timeout: 20000 }).catch(() => {});
                 await page.waitForTimeout(1000);
                 const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+                const detailText = extractDetailText(bodyText);
+                vehicle.detail_text = detailText;
+                if (detailText && needsDetailEvidence(vehicle)) vehicle.description = detailText;
+                vehicle.title_status = parseTitleStatus([vehicle.title, vehicle.description, vehicle.detail_text].filter(Boolean).join(' '));
                 const vin = extractVinFromText(bodyText);
                 if (vin) {
                     vehicle.vin = vin;
@@ -462,8 +490,16 @@ const crawler = new PlaywrightCrawler({
                     log.info(`[MILEAGE DETAIL][SKIP] Too many miles after detail enrichment: ${vehicle.mileage} - ${vehicle.title}`);
                     return;
                 }
+                if (hasConditionReject(vehicle)) {
+                    log.info(`[DETAIL POLICY][SKIP] Condition reject after detail enrichment: ${vehicle.title}`);
+                    return;
+                }
             } catch (err) {
                 log.warning(`[VIN DETAIL] Failed for ${request.url}: ${err.message}`);
+            }
+            if (needsDetailEvidence(vehicle)) {
+                log.info(`[DETAIL EVIDENCE][SKIP] Missing detail evidence after enrichment: ${vehicle.title}`);
+                return;
             }
             totalPushed++;
             await Actor.pushData(vehicle);
@@ -663,17 +699,17 @@ await crawler.run([
     { url: TX_SURPLUS_BASE, label: 'TX_LIST', userData: { pageNum: 1 } },
 ]);
 
-// ── VIN enrichment: visit detail pages for listings without a VIN ──────────
-if (vinQueue.length > 0) {
-    console.log(`[PUBLICSURPLUS] Enriching VINs: ${vinQueue.length} detail pages to visit`);
-    const detailRequests = vinQueue.map((vehicle) => ({
+// ── Detail enrichment: visit pages for missing VIN or condition evidence ───
+if (detailQueue.length > 0) {
+    console.log(`[PUBLICSURPLUS] Enriching detail pages: ${detailQueue.length} lots need VIN or condition evidence`);
+    const detailRequests = detailQueue.map((vehicle) => ({
         url: vehicle.listing_url,
         label: 'DETAIL_VIN',
         userData: { vehicle },
     }));
     await crawler.run(detailRequests);
 } else {
-    console.log('[PUBLICSURPLUS] No VIN detail pages needed (all VINs found inline or no passing lots)');
+    console.log('[PUBLICSURPLUS] No detail pages needed (all passing lots had inline VIN and condition evidence, or no passing lots)');
 }
 
 console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Pushed: ${totalPushed}`);

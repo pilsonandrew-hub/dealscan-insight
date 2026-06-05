@@ -28,6 +28,20 @@ describe('ds-publicsurplus source contract', () => {
       .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
   });
 
+  test('detail-enriches rows missing condition evidence even when VIN is already present', () => {
+    expect(source).toContain('const detailQueue = [];');
+    expect(source).toContain('function needsDetailEvidence(vehicle)');
+    expect(source).toContain('if (listingUrl && detailPageCount < MAX_DETAIL_PAGES && (!vehicle.vin || needsDetailEvidence(vehicle)))');
+  });
+
+  test('persists detail text and reruns source-policy rejects after detail enrichment', () => {
+    expect(detailHandler).toContain('vehicle.detail_text = detailText;');
+    expect(detailHandler).toContain('if (detailText && needsDetailEvidence(vehicle)) vehicle.description = detailText;');
+    expect(detailHandler).toContain('if (hasConditionReject(vehicle))');
+    expect(detailHandler.indexOf('if (hasConditionReject(vehicle))'))
+      .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
+  });
+
   test('uses actual published row count for webhook itemCount', () => {
     expect(source).toContain('let totalPushed = 0;');
     expect(source).toContain('totalPushed++;');
