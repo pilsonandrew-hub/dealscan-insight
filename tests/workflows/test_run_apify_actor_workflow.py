@@ -73,6 +73,17 @@ def test_run_apify_actor_workflow_supports_bounded_bidspotter_supply_proof():
     assert '"maxMileage": 50000' in text
 
 
+def test_run_apify_actor_workflow_supports_bounded_equipmentfacts_supply_proof():
+    text = WORKFLOW.read_text()
+
+    assert "ds-equipmentfacts" in text
+    assert "0XjoegYZVcPldLstl" in text
+    assert "EQUIPMENTFACTS_MAX_PAGES" in text
+    assert '"maxPages": int(os.environ.get("EQUIPMENTFACTS_MAX_PAGES") or "1")' in text
+    assert '"minYear": datetime.now(timezone.utc).year - 4' in text
+    assert '"maxMileage": 50000' in text
+
+
 def test_run_apify_actor_workflow_prints_usgovbid_zero_output_proof_fields():
     text = WORKFLOW.read_text()
 

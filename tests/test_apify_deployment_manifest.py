@@ -39,6 +39,18 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["status"], "enabled")
         self.assertRegex(workflow, r'"ds-usgovbid":\s+"6XO9La81aEmtsCT3g"')
 
+    def test_equipmentfacts_actor_is_manifested_and_deployable_when_reactivated(self):
+        manifest_path = self.repo_root / "apify" / "deployment.json"
+        workflow_path = self.repo_root / ".github" / "workflows" / "apify-deploy.yml"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        actor = payload["actors"].get("ds-equipmentfacts")
+        self.assertIsNotNone(actor)
+        self.assertEqual(actor["id"], "0XjoegYZVcPldLstl")
+        self.assertEqual(actor["status"], "DISABLED")
+        self.assertRegex(workflow, r'"ds-equipmentfacts":\s+"0XjoegYZVcPldLstl"')
+
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
         workflow = workflow_path.read_text(encoding="utf-8")

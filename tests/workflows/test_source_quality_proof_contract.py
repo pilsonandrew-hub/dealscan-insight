@@ -125,6 +125,26 @@ def test_bidspotter_actor_accounts_for_all_prefilter_skips():
     assert 'rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - totalPassed - accountedRows)' in text
 
 
+def test_equipmentfacts_actor_is_safe_for_supply_reactivation():
+    text = Path('apify/actors/ds-equipmentfacts/src/main.js').read_text()
+
+    assert "record_type: 'source_quality_proof'" in text
+    assert 'found_rows_total: totalFound' in text
+    assert 'prefilter_passed_rows_total: totalPassed' in text
+    assert 'pushed_rows_total: totalPassed' in text
+    assert 'rows_excluded_age_mileage_prefilter' in text
+    assert 'rows_excluded_policy_prefilter' in text
+    assert 'rows_excluded_bid_range' in text
+    assert 'rows_excluded_unaccounted_after_prefilter' in text
+    assert 'await Actor.pushData(proof)' in text
+    assert 'itemCount: totalPassed + 1' in text
+    assert 'CURRENT_YEAR - 4' in text
+    assert 'DEFAULT_MAX_MILEAGE = 50000' in text
+    assert 'mileage > MAX_MILEAGE' in text
+    assert 'age > 10' not in text
+    assert 'mileage > 100000' not in text
+
+
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     text = ACTOR.read_text()
     assert '!lot.rejected_after_detail' in text

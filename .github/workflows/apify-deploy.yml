@@ -52,6 +52,7 @@ jobs:
               "ds-jjkane":      "lvb7T6VMFfNUQpqlq",
               "ds-usgovbid":    "6XO9La81aEmtsCT3g",
               "ds-bidspotter":  "5Eu3hfCcBBdzp6I1u",
+              "ds-equipmentfacts": "0XjoegYZVcPldLstl",
           }
 
           ctx = ssl.create_default_context()
