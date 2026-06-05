@@ -8,10 +8,16 @@ from __future__ import annotations
 import datetime as _datetime
 import json
 import os
+from pathlib import Path
 import ssl
+import sys
 import urllib.request
 from collections.abc import Callable, Iterable
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.ingest.alert_gating import (
     UNKNOWN_OR_WEAK_CONDITION_GRADES,
