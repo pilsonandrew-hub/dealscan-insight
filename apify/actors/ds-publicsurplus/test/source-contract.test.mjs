@@ -25,7 +25,7 @@ describe('ds-publicsurplus source contract', () => {
     expect(detailHandler).toContain('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)');
     expect(detailHandler).toContain('return;');
     expect(detailHandler.indexOf('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)'))
-      .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
+      .toBeLessThan(detailHandler.indexOf('await pushVehicle(vehicle);'));
   });
 
   test('mirrors backend max-age gate before publishing standard and Texas rows', () => {
@@ -46,7 +46,7 @@ describe('ds-publicsurplus source contract', () => {
       source.indexOf('const crawler = new PlaywrightCrawler'),
     );
     expect(txHandler).toContain('if (listingUrl && detailPageCount < MAX_DETAIL_PAGES && (!vehicle.vin || needsDetailEvidence(vehicle)))');
-    expect(txHandler.indexOf('detailQueue.push(vehicle);')).toBeLessThan(txHandler.indexOf('await Actor.pushData(vehicle);'));
+    expect(txHandler.indexOf('detailQueue.push(vehicle);')).toBeLessThan(txHandler.indexOf('await pushVehicle(vehicle);'));
   });
 
   test('persists detail text and reruns source-policy rejects after detail enrichment', () => {
@@ -54,7 +54,7 @@ describe('ds-publicsurplus source contract', () => {
     expect(detailHandler).toContain('if (detailText && needsDetailEvidence(vehicle)) vehicle.description = detailText;');
     expect(detailHandler).toContain('if (hasConditionReject(vehicle))');
     expect(detailHandler.indexOf('if (hasConditionReject(vehicle))'))
-      .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
+      .toBeLessThan(detailHandler.indexOf('await pushVehicle(vehicle);'));
   });
 
   test('source policy rejects backend title-brand damage and as-is warranty phrases', () => {
@@ -74,8 +74,20 @@ describe('ds-publicsurplus source contract', () => {
 
   test('uses actual published row count for webhook itemCount', () => {
     expect(source).toContain('let totalPushed = 0;');
-    expect(source).toContain('totalPushed++;');
-    expect(source).toContain('itemCount: totalPushed');
+    expect(source).toContain('const datasetItemCount = totalPushed + 1;');
+    expect(source).toContain('itemCount: datasetItemCount');
     expect(source).not.toContain('itemCount: totalAfterFilters');
+  });
+
+  test('emits a source-quality proof record even when no opportunities are pushed', () => {
+    expect(source).toContain("record_type: 'source_quality_proof'");
+    expect(source).toContain("source: 'publicsurplus'");
+    expect(source).toContain('found_rows_total: totalFound');
+    expect(source).toContain('prefilter_passed_rows_total: totalAfterFilters');
+    expect(source).toContain('pushed_rows_total: totalPushed');
+    expect(source).toContain('pushed_rows_with_description: totalPushedWithDescription');
+    expect(source).toContain('pushed_rows_with_detail_text: totalPushedWithDetailText');
+    expect(source.indexOf("record_type: 'source_quality_proof'"))
+      .toBeLessThan(source.indexOf('if (webhookUrl && datasetItemCount > 0)'));
   });
 });

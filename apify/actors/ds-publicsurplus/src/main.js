@@ -96,6 +96,15 @@ const seenListings = new Set();
 let totalFound = 0;
 let totalAfterFilters = 0;
 let totalPushed = 0;
+let totalPushedWithDescription = 0;
+let totalPushedWithDetailText = 0;
+
+async function pushVehicle(vehicle) {
+    totalPushed++;
+    if (vehicle.description) totalPushedWithDescription++;
+    if (vehicle.detail_text) totalPushedWithDetailText++;
+    await Actor.pushData(vehicle);
+}
 
 function normalizeText(value) {
     return String(value ?? '')
@@ -374,8 +383,7 @@ async function pushListing(listing, sourceUrl, log) {
         detailPageCount++;
         detailQueue.push(vehicle);
     } else {
-        totalPushed++;
-        await Actor.pushData(vehicle);
+        await pushVehicle(vehicle);
     }
     return true;
 }
@@ -456,8 +464,7 @@ async function pushTXListing(listing, sourceUrl, log) {
         detailPageCount++;
         detailQueue.push(vehicle);
     } else {
-        totalPushed++;
-        await Actor.pushData(vehicle);
+        await pushVehicle(vehicle);
     }
     return true;
 }
@@ -516,8 +523,7 @@ const crawler = new PlaywrightCrawler({
                 log.info(`[DETAIL EVIDENCE][SKIP] Missing detail evidence after enrichment: ${vehicle.title}`);
                 return;
             }
-            totalPushed++;
-            await Actor.pushData(vehicle);
+            await pushVehicle(vehicle);
             return;
         }
         // ── Texas State Surplus (mobile site) ──────────────────────────────────
@@ -728,10 +734,25 @@ if (detailQueue.length > 0) {
 }
 
 console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Pushed: ${totalPushed}`);
+
+await Actor.pushData({
+    record_type: 'source_quality_proof',
+    source: 'publicsurplus',
+    found_rows_total: totalFound,
+    prefilter_passed_rows_total: totalAfterFilters,
+    pushed_rows_total: totalPushed,
+    pushed_rows_with_description: totalPushedWithDescription,
+    pushed_rows_with_detail_text: totalPushedWithDetailText,
+    detail_pages_attempted: detailPageCount,
+    max_pages_total: effectiveMaxPages + maxTXPages,
+    scraped_at: new Date().toISOString(),
+});
+
 // ── Webhook notification ──────────────────────────────────────────────────────
 const webhookUrl = process.env.WEBHOOK_URL || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
 const webhookSecret = process.env.WEBHOOK_SECRET || 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
-if (webhookUrl && totalPushed > 0) {
+const datasetItemCount = totalPushed + 1;
+if (webhookUrl && datasetItemCount > 0) {
     try {
         const env = Actor.getEnv();
         const dataset = await Actor.openDataset();
@@ -747,7 +768,7 @@ if (webhookUrl && totalPushed > 0) {
                 runId: env.actorRunId || 'local',
                 actorId: env.actorId || '',
                 datasetId: datasetInfo?.id || '',
-                itemCount: totalPushed,
+                itemCount: datasetItemCount,
             }),
         });
         console.log(`[WEBHOOK] Notified ingest: HTTP ${resp.status}`);
