@@ -122,6 +122,15 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("payload.categoryIds = categoryScope", source)
         self.assertNotIn("payload.categoryIds = payload.categoryIds || '4100'", source)
 
+    def test_hibid_v2_defaults_match_dealerscope_age_mileage_gate(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertIn("minYear = new Date().getFullYear() - 4", source)
+        self.assertIn("maxMileage = 50000", source)
+        self.assertNotIn("minYear = new Date().getFullYear() - 10", source)
+        self.assertNotIn("maxMileage = 100000", source)
+
     def test_govdeals_sold_actor_supports_explicit_seo_asset_urls_without_enabling_search(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
         source = source_path.read_text(encoding="utf-8")

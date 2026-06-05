@@ -37,3 +37,16 @@ def test_run_apify_actor_workflow_supports_bounded_govplanet_proof():
     assert "GOVPLANET_MAX_DETAIL_PAGES" in text
     assert '"maxItemsPerCategory": int(os.environ.get("GOVPLANET_MAX_ITEMS_PER_CATEGORY") or "1")' in text
     assert '"maxDetailPages": int(os.environ.get("GOVPLANET_MAX_DETAIL_PAGES") or "1")' in text
+
+
+def test_run_apify_actor_workflow_supports_bounded_hibid_v2_proof():
+    text = WORKFLOW.read_text()
+
+    assert "ds-hibid-v2" in text
+    assert "7s9e0eATTt1kuGGfE" in text
+    assert "HIBID_MAX_PAGES" in text
+    assert "HIBID_MAX_MILEAGE" in text
+    assert "HIBID_MIN_YEAR" in text
+    assert '"maxPages": int(os.environ.get("HIBID_MAX_PAGES") or "1")' in text
+    assert '"maxMileage": int(os.environ.get("HIBID_MAX_MILEAGE") or "50000")' in text
+    assert '"minYear": int(os.environ.get("HIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4))' in text
