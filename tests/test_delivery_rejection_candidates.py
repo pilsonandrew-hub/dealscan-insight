@@ -111,3 +111,29 @@ def test_fetch_rows_via_rest_joins_delivery_rows_to_listing_facts(monkeypatch):
     assert rows[0]["source_site"] == "govdeals"
     assert rows[0]["classification"] == "clean_margin_rejection"
 
+
+def test_fetch_rows_via_rest_uses_month_scale_listing_join_window(monkeypatch):
+    sonar_created_at_filters = []
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "ingest_delivery_log":
+            return []
+        if table == "sonar_listings":
+            sonar_created_at_filters.extend(value for key, value in query if key == "created_at")
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_delivery_rejection_candidates, "_fetch_postgrest_rows", fake_fetch)
+
+    report_delivery_rejection_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_hours=4,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+    )
+
+    assert sonar_created_at_filters == ["gte.2026-05-01T01:30:00+00:00"]
