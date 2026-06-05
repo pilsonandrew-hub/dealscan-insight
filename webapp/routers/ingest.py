@@ -784,6 +784,70 @@ async def _process_webhook_items(
             dataset_item_count,
         )
 
+        def _mirror_vehicle_to_sonar(vehicle: dict, saved_opportunity_id: Optional[str] = None) -> bool:
+            nonlocal sonar_write_fail_count
+
+            vehicle["_sonar_mirror_attempted"] = True
+            _sonar_listing_id = vehicle.get("listing_id") or _compute_listing_id(
+                vehicle.get("source_site") or "",
+                vehicle.get("listing_url") or "",
+            )
+            if supabase_client is None:
+                sonar_write_fail_count += 1
+                logger.warning(
+                    "[SONAR_WRITE_FAIL] run_id=%s listing_id=%s title=%s reason=%s",
+                    apify_run_id,
+                    vehicle.get("listing_id"),
+                    (vehicle.get("title") or "?")[:50],
+                    "supabase_client_none",
+                )
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=_sonar_listing_id,
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=saved_opportunity_id,
+                    channel="sonar_mirror",
+                    status="sonar_client_unavailable",
+                    error_message="supabase_client_none",
+                    audit_state=audit_state,
+                )
+                return False
+
+            try:
+                _save_to_sonar_listings(vehicle)
+                vehicle["_sonar_mirrored"] = True
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=_sonar_listing_id,
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=saved_opportunity_id,
+                    channel="sonar_mirror",
+                    status="saved_sonar",
+                    error_message=None,
+                    audit_state=audit_state,
+                )
+                return True
+            except Exception as sl_exc:
+                sonar_write_fail_count += 1
+                logger.warning(
+                    "[SONAR_WRITE_FAIL] run_id=%s listing_id=%s title=%s reason=%s",
+                    apify_run_id,
+                    vehicle.get("listing_id"),
+                    (vehicle.get("title") or "?")[:50],
+                    f"insert_error: {sl_exc}",
+                )
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=_sonar_listing_id,
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=saved_opportunity_id,
+                    channel="sonar_mirror",
+                    status="sonar_error",
+                    error_message=f"insert_error: {sl_exc}",
+                    audit_state=audit_state,
+                )
+                return False
+
         for item_index, item in enumerate(items):
             if isinstance(item, dict) and item.get("record_type") == "source_quality_proof":
                 logger.info("[INGEST] Skipping source quality proof record from sold-comp staging")
@@ -916,8 +980,12 @@ async def _process_webhook_items(
                         error_message=str(exc),
                         require_durable=True,
                         audit_state=audit_state,
-                    )
+                )
                 continue
+
+            # sonar_listings is the audit mirror for every normalized current listing.
+            # It must land before gate/margin/ceiling exits so rejected rows remain inspectable.
+            _mirror_vehicle_to_sonar(vehicle)
 
             gate_result = passes_basic_gates(vehicle)
             if not gate_result["pass"]:
@@ -1060,59 +1128,8 @@ async def _process_webhook_items(
                     audit_state=audit_state,
                 )
                 continue
-            # Write to sonar_listings (unfiltered — every vehicle regardless of DOS/state/mileage)
-            _sonar_listing_id = vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or "")
-            if supabase_client is None:
-                sonar_write_fail_count += 1
-                logger.warning(
-                    "[SONAR_WRITE_FAIL] run_id=%s listing_id=%s title=%s reason=%s",
-                    apify_run_id,
-                    vehicle.get("listing_id"),
-                    (vehicle.get("title") or "?")[:50],
-                    "supabase_client_none",
-                )
-                _record_delivery_log(
-                    run_id=vehicle.get("run_id") or apify_run_id,
-                    listing_id=_sonar_listing_id,
-                    listing_url=vehicle.get("listing_url"),
-                    opportunity_id=saved_opportunity_id,
-                    channel="sonar_mirror",
-                    status="sonar_client_unavailable",
-                    error_message="supabase_client_none",
-                    audit_state=audit_state,
-                )
-            else:
-                try:
-                    _save_to_sonar_listings(vehicle)
-                    _record_delivery_log(
-                        run_id=vehicle.get("run_id") or apify_run_id,
-                        listing_id=_sonar_listing_id,
-                        listing_url=vehicle.get("listing_url"),
-                        opportunity_id=saved_opportunity_id,
-                        channel="sonar_mirror",
-                        status="saved_sonar",
-                        error_message=None,
-                        audit_state=audit_state,
-                    )
-                except Exception as sl_exc:
-                    sonar_write_fail_count += 1
-                    logger.warning(
-                        "[SONAR_WRITE_FAIL] run_id=%s listing_id=%s title=%s reason=%s",
-                        apify_run_id,
-                        vehicle.get("listing_id"),
-                        (vehicle.get("title") or "?")[:50],
-                        f"insert_error: {sl_exc}",
-                    )
-                    _record_delivery_log(
-                        run_id=vehicle.get("run_id") or apify_run_id,
-                        listing_id=_sonar_listing_id,
-                        listing_url=vehicle.get("listing_url"),
-                        opportunity_id=saved_opportunity_id,
-                        channel="sonar_mirror",
-                        status="sonar_error",
-                        error_message=f"insert_error: {sl_exc}",
-                        audit_state=audit_state,
-                    )
+            if not vehicle.get("_sonar_mirror_attempted"):
+                _mirror_vehicle_to_sonar(vehicle, saved_opportunity_id=saved_opportunity_id)
             save_status = vehicle.get("_save_status", "unknown")
             increment_reason_counter(save_outcomes, save_status)
             if saved_opportunity_id:

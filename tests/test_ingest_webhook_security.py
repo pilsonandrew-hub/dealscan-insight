@@ -841,6 +841,8 @@ class WebhookSecurityTests(unittest.TestCase):
         ), patch.object(
             ingest, "save_opportunity_to_supabase", _raise_save_exception
         ), patch.object(
+            ingest, "_save_to_sonar_listings", lambda _vehicle: None
+        ), patch.object(
             ingest,
             "_record_delivery_log",
             lambda **kwargs: delivery_calls.append(kwargs),
@@ -850,17 +852,140 @@ class WebhookSecurityTests(unittest.TestCase):
             )
 
         self.assertEqual(response["status"], "ok")
-        self.assertEqual(len(delivery_calls), 1, "expected save-exception db_save ledger row")
-        self.assertEqual(delivery_calls[0]["run_id"], "run-save-fail")
-        self.assertEqual(delivery_calls[0]["listing_id"], "listing-save-fail")
-        self.assertEqual(delivery_calls[0]["channel"], "db_save")
-        self.assertEqual(delivery_calls[0]["status"], "save_exception")
-        self.assertIn("database write exploded", delivery_calls[0]["error_message"])
+        self.assertEqual(
+            [call["channel"] for call in delivery_calls],
+            ["sonar_mirror", "db_save"],
+        )
+        self.assertEqual(
+            [call["status"] for call in delivery_calls],
+            ["saved_sonar", "save_exception"],
+        )
+        self.assertEqual(delivery_calls[1]["run_id"], "run-save-fail")
+        self.assertEqual(delivery_calls[1]["listing_id"], "listing-save-fail")
+        self.assertIn("database write exploded", delivery_calls[1]["error_message"])
         self.assertTrue(len(webhook_updates) > 0, "expected webhook_log update")
         self.assertEqual(webhook_updates[-1][0][1], "error")
         self.assertIn("failed:1", webhook_updates[-1][1]["error_message"])
         self.assertIn("save_outcomes={'save_exception': 1}", webhook_updates[-1][1]["error_message"])
         self.assertIn("skip_reasons={'save_exception': 1}", webhook_updates[-1][1]["error_message"])
+
+    def test_apify_webhook_mirrors_gate_rejected_rows_to_sonar_before_skip(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-gate-sonar", "defaultDatasetId": "dataset-gate-sonar"},
+        }
+        vehicle = {
+            "run_id": "run-gate-sonar",
+            "listing_id": "listing-gate-sonar",
+            "listing_url": "https://example.com/vehicle/gate-sonar",
+            "title": "2012 Toyota Camry",
+            "year": 2012,
+            "make": "Toyota",
+            "model": "Camry",
+            "current_bid": 7000,
+            "state": "CA",
+            "mileage": 155000,
+            "source_site": "govdeals",
+        }
+        delivery_calls = []
+        sonar_rows = []
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", object()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-gate-sonar"
+        ), patch.object(
+            ingest, "update_webhook_log", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: dict(vehicle)
+        ), patch.object(
+            ingest, "passes_basic_gates", lambda *_args, **_kwargs: {"pass": False, "reason": "age_or_mileage_exceeded"}
+        ), patch.object(
+            ingest, "_save_to_sonar_listings", lambda row: sonar_rows.append(dict(row))
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual([row["listing_id"] for row in sonar_rows], ["listing-gate-sonar"])
+        self.assertEqual([call["channel"] for call in delivery_calls], ["sonar_mirror", "db_save"])
+        self.assertEqual([call["status"] for call in delivery_calls], ["saved_sonar", "skipped_gate"])
+        self.assertEqual(delivery_calls[0]["listing_id"], "listing-gate-sonar")
+        self.assertEqual(delivery_calls[1]["error_message"], "age_or_mileage_exceeded")
+
+    def test_apify_webhook_mirrors_margin_rejected_rows_to_sonar_before_skip(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-margin-sonar", "defaultDatasetId": "dataset-margin-sonar"},
+        }
+        vehicle = {
+            "run_id": "run-margin-sonar",
+            "listing_id": "listing-margin-sonar",
+            "listing_url": "https://example.com/vehicle/margin-sonar",
+            "title": "2020 Ford F-150",
+            "year": 2020,
+            "make": "Ford",
+            "model": "F-150",
+            "current_bid": 19000,
+            "state": "TX",
+            "mileage": 42000,
+            "source_site": "publicsurplus",
+        }
+        delivery_calls = []
+        sonar_rows = []
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", object()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-margin-sonar"
+        ), patch.object(
+            ingest, "update_webhook_log", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: dict(vehicle)
+        ), patch.object(
+            ingest, "passes_basic_gates", lambda *_args, **_kwargs: {"pass": True, "reason": "ok"}
+        ), patch.object(
+            ingest,
+            "score_vehicle",
+            lambda _vehicle: {
+                "dos_score": 55,
+                "vehicle_tier": "standard",
+                "wholesale_margin": 100,
+                "ceiling_pass": True,
+                "current_bid": 19000,
+                "gross_margin": 100,
+                "bid_headroom": 100,
+            },
+        ), patch.object(
+            ingest, "passes_ingest_margin_floor", lambda *_args, **_kwargs: False
+        ), patch.object(
+            ingest, "_save_to_sonar_listings", lambda row: sonar_rows.append(dict(row))
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual([row["listing_id"] for row in sonar_rows], ["listing-margin-sonar"])
+        self.assertEqual([call["channel"] for call in delivery_calls], ["sonar_mirror", "db_save"])
+        self.assertEqual([call["status"] for call in delivery_calls], ["saved_sonar", "skipped_margin"])
+        self.assertEqual(delivery_calls[0]["listing_id"], "listing-margin-sonar")
+        self.assertEqual(delivery_calls[1]["error_message"], "margin_below_floor")
 
     def test_govdeals_sold_webhook_stages_candidate_instead_of_dealer_sales(self):
         payload = {
