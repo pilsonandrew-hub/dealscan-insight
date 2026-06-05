@@ -258,8 +258,9 @@ const input = await Actor.getInput() ?? {};
 const {
     minBid = 100,
     maxBid = 75000,
-    minYear = new Date().getFullYear() - 10,
+    minYear = new Date().getFullYear() - 4,
     maxYear = new Date().getFullYear() + 1,
+    maxMileage = 50000,
     pageSize = 50,
     // Number of pages from the END to scan (active items are at the end)
     pagesToScan = 20,
@@ -284,7 +285,9 @@ let detailMileagesFound = 0;
 let rowsExcludedMissingRequiredData = 0;
 let rowsExcludedMissingVin = 0;
 let rowsExcludedMissingMileage = 0;
+let rowsExcludedAgeOrMileage = 0;
 const excludedMissingRequiredSamples = [];
+const excludedAgeOrMileageSamples = [];
 
 console.log('[GSA] Fetching total page count...');
 
@@ -455,6 +458,26 @@ for (let page = startPage; page <= totalPages; page++) {
             continue;
         }
 
+        if (record.mileage > maxMileage) {
+            rowsExcludedAgeOrMileage++;
+            if (excludedAgeOrMileageSamples.length < 10) {
+                excludedAgeOrMileageSamples.push({
+                    title,
+                    listing_url: listingUrl,
+                    lot_id: lotId,
+                    current_bid: effectiveBid,
+                    year,
+                    make,
+                    model,
+                    mileage: record.mileage,
+                    max_mileage: maxMileage,
+                    rejection_reasons: ['age_or_mileage_rejected_after_detail'],
+                });
+            }
+            console.log(`[GSA EXCLUDE] reason=age_or_mileage_rejected_after_detail | ${title} | mileage=${record.mileage}`);
+            continue;
+        }
+
         await Actor.pushData(record);
         totalPassed++;
         console.log(`[PASS] ${title} | bid=$${effectiveBid} | ${stateCode} | vin=${record.vin} mileage=${record.mileage} | end=${item.endDate}`);
@@ -481,7 +504,9 @@ await Actor.pushData({
     rows_excluded_missing_required_data: rowsExcludedMissingRequiredData,
     rows_excluded_missing_vin: rowsExcludedMissingVin,
     rows_excluded_missing_mileage: rowsExcludedMissingMileage,
+    rows_excluded_age_or_mileage: rowsExcludedAgeOrMileage,
     excluded_missing_required_samples: excludedMissingRequiredSamples,
+    excluded_age_or_mileage_samples: excludedAgeOrMileageSamples,
     scraped_at: new Date().toISOString(),
 });
 
