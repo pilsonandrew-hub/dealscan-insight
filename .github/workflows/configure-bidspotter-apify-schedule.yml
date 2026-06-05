@@ -95,7 +95,17 @@ jobs:
           versions = paged_items(f"/actors/{ACTOR_ID}/versions?limit=100")
           if not versions:
               raise SystemExit(f"No versions found for actor {ACTOR_ID}")
-          active_version = next((version for version in versions if version.get("buildTag") == "latest"), versions[-1])
+
+          def version_sort_key(version_number):
+              parts = []
+              for part in str(version_number).split("."):
+                  try:
+                      parts.append(int(part))
+                  except ValueError:
+                      parts.append(-1)
+              return tuple(parts)
+
+          active_version = max(versions, key=lambda version: version_sort_key(version["versionNumber"]))
           ACTIVE_VERSION = active_version["versionNumber"]
 
           configured_versions = []

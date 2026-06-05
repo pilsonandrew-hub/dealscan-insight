@@ -22,6 +22,8 @@ def test_configure_bidspotter_apify_schedule_uses_github_secrets_for_apify_env()
 def test_configure_bidspotter_apify_schedule_rebuilds_after_secret_env_write():
     text = WORKFLOW.read_text()
 
+    assert "def version_sort_key(version_number):" in text
+    assert 'active_version = max(versions, key=lambda version: version_sort_key(version["versionNumber"]))' in text
     assert 'build = request("POST", f"/actors/{ACTOR_ID}/builds?version={ACTIVE_VERSION}&tag=latest&useCache=false&betaPackages=false")' in text
     assert 'wait_for_terminal_build(build["id"])' in text
     assert '"configured_build_id": build.get("id")' in text
