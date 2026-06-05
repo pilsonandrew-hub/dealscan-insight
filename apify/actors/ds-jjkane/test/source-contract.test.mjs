@@ -26,4 +26,19 @@ describe('ds-jjkane source contract', () => {
     expect(source).toContain('extractVin(conditionText)');
     expect(source).toContain('vin: vin || null');
   });
+
+  test('emits source-quality proof before webhook even when no vehicles are pushed', () => {
+    expect(source).toContain("record_type: 'source_quality_proof'");
+    expect(source).toContain("source: 'jjkane'");
+    expect(source).toContain('found_rows_total: totalFound');
+    expect(source).toContain('prefilter_passed_rows_total: totalPassed');
+    expect(source).toContain('pushed_rows_total: totalPushed');
+    expect(source).toContain('rows_excluded_missing_required_data');
+    expect(source).toContain('rows_excluded_age_mileage_prefilter');
+    expect(source).toContain('rows_excluded_policy_prefilter');
+    expect(source).toContain('rows_excluded_bid_range');
+    expect(source).toContain('rows_excluded_zero_pricing_signal');
+    expect(source.indexOf("record_type: 'source_quality_proof'"))
+      .toBeLessThan(source.indexOf('if (effectiveWebhookUrl && datasetItemCount > 0)'));
+  });
 });
