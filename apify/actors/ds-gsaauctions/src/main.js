@@ -60,7 +60,8 @@ const MAKES = [
     'mitsubishi', 'volvo', 'tesla', 'mini', 'saturn', 'scion', 'international', 'sterling',
 ];
 
-const EXCLUDED_PATTERN = /\b(forklift|tractor|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv|utv|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed|box\s*truck|step\s+van|cutaway|chassis\s+cab|stake\s*bed|forklift|pallet|raft|printer|computer|furniture|desk|chair|cabinet|aircraft|plane|helicopter)\b/i;
+const EXCLUDED_PATTERN = /\b(forklift|tractor|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv|utv|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed|box\s*truck|bucket\s*truck|step\s+van|cutaway|chassis\s+cab|stake\s*bed|utility\s*bed|forklift|pallet|raft|printer|computer|furniture|desk|chair|cabinet|aircraft|plane|helicopter)\b/i;
+const COMMERCIAL_DUTY_PATTERN = /\b(?:4500|5500)\b/i;
 const CONDITION_REJECT_PATTERNS = [
     /\bsalvage\b/i,
     /\bflood\b/i,
@@ -169,6 +170,7 @@ function isPassengerVehicle(title, categoryCode) {
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (!VEHICLE_CATEGORY_CODES.has(String(categoryCode))) return false;
     if (EXCLUDED_PATTERN.test(title)) return false;
+    if (COMMERCIAL_DUTY_PATTERN.test(title)) return false;
     return true;
 }
 

@@ -57,6 +57,14 @@ describe('ds-gsaauctions source contract', () => {
     expect(postDetailRejectIndex).toBeLessThan(publishIndex);
   });
 
+  test('blocks backend commercial-duty tonnage before publish', () => {
+    expect(source).toContain('const COMMERCIAL_DUTY_PATTERN = /\\b(?:4500|5500)\\b/i;');
+    expect(source).toContain('if (COMMERCIAL_DUTY_PATTERN.test(title)) return false;');
+    expect(source).toContain('box\\s*truck');
+    expect(source).toContain('bucket\\s*truck');
+    expect(source).toContain('utility\\s*bed');
+  });
+
   test('emits source quality proof for list/detail field visibility', () => {
     expect(source).toContain("record_type: 'source_quality_proof'");
     expect(source).toContain('list_rows_with_vin');
