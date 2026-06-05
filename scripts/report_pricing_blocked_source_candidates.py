@@ -447,6 +447,27 @@ def fetch_rows_via_rest(
     listing_since = (current_time - timedelta(days=lookback_days + 30)).isoformat()
     sales_since = (current_time - timedelta(days=365)).isoformat()
 
+    proxy_skip_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "ingest_delivery_log",
+        [
+            ("select", "run_id,listing_id,listing_url,status,error_message,created_at"),
+            ("created_at", f"gte.{since}"),
+            ("status", "in.(skipped_ceiling,skipped_margin)"),
+            ("order", "created_at.desc"),
+            ("limit", str(max(limit * 5, 100))),
+        ],
+    )
+    proxy_skip_rows = [row for row in proxy_skip_rows if _is_pricing_blocked_skip(row)]
+    latest_skips: dict[str, dict[str, Any]] = {}
+    for skip in proxy_skip_rows:
+        key = _row_key(skip)
+        if key and key not in latest_skips:
+            latest_skips[key] = skip
+    if not latest_skips:
+        return []
+
     delivery_rows = _fetch_postgrest_rows(
         base_url,
         service_role_key,
@@ -456,22 +477,14 @@ def fetch_rows_via_rest(
             ("created_at", f"gte.{since}"),
             ("status", "in.(skipped_ceiling,skipped_margin,saved_sonar)"),
             ("order", "created_at.desc"),
-            ("limit", str(max(limit * 5, 100))),
+            ("limit", str(max(limit * 20, 1000))),
         ],
     )
-    proxy_skip_rows = [row for row in delivery_rows if _is_pricing_blocked_skip(row)]
-    latest_skips: dict[str, dict[str, Any]] = {}
     latest_deliveries: dict[str, dict[str, Any]] = {}
     for delivery in delivery_rows:
         key = _row_key(delivery)
-        if key and key not in latest_deliveries:
+        if key and key in latest_skips and key not in latest_deliveries:
             latest_deliveries[key] = delivery
-    for skip in proxy_skip_rows:
-        key = _row_key(skip)
-        if key and key not in latest_skips:
-            latest_skips[key] = skip
-    if not latest_skips:
-        return []
 
     sonar_rows = _fetch_postgrest_rows(
         base_url,
