@@ -51,6 +51,32 @@ describe('ds-proxibid buyer-grade filter source contract', () => {
     expect(scraper.parseMileage('2017 FORD FUSION 4 DOOR CAR, S/N 3FA6P0HD0HR334611, 4CYL, AUTO, OD READS 135620 MILES')).toBe(135620);
   });
 
+  test('prefers primary item-detail miles over unrelated Proxibid page chrome', () => {
+    const text = [
+      'Similar Items 2016 FORD Explorer SUV VIN: 1FM5K8ARXGGA78391. Odometer: 89, $650.00 20d 1h Left',
+      'Overview of 2016 GMC Arcadia VIN 5483 Item Details VIN 1GKKRPKD9GJ335483, NC TITLE, 145,983 Miles, Runs and drives',
+      'Payment PAYMENT INSTRUCTIONS',
+    ].join(' ');
+    expect(scraper.parseMileage(text)).toBe(145983);
+  });
+
+  test('keeps mileage-labeled values without requiring a repeated unit', () => {
+    expect(scraper.parseMileage('Item Details VIN 1GKKRPKD9GJ335483 Mileage: 12345 Payment')).toBe(12345);
+  });
+
+  test('does not let primary-section distance text beat VIN-adjacent mileage', () => {
+    const text = [
+      'Item Details pickup location is approximately 12 miles from the airport.',
+      'VIN 1GKKRPKD9GJ335483, NC TITLE, 145,983 Miles, Runs and drives',
+      'Payment PAYMENT INSTRUCTIONS',
+    ].join(' ');
+    expect(scraper.parseMileage(text)).toBe(145983);
+  });
+
+  test('does not treat unlabeled price-adjacent Proxibid odometer chrome as mileage', () => {
+    expect(scraper.parseMileage('Similar Items 2016 FORD Explorer SUV VIN: 1FM5K8ARXGGA78391. Odometer: 89, $650.00 20d 1h Left')).toBeNull();
+  });
+
   test('targets the Cars menu selections directly before VIN/odometer detail extraction', () => {
     const navigationIndex = source.indexOf("const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];");
     const selectableIndex = source.indexOf('function selectedTargetCategories(rawTargetCategories)');
