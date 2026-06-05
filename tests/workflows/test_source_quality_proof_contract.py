@@ -93,6 +93,15 @@ def test_hibid_v2_actor_emits_zero_output_source_quality_proof():
     assert 'await Actor.pushData(proof)' in text
 
 
+def test_hibid_v2_actor_does_not_embed_webhook_secret():
+    text = Path('apify/actors/ds-hibid-v2/src/main.js').read_text()
+
+    assert "webhookSecret || process.env.WEBHOOK_SECRET" in text
+    assert "WEBHOOK_SECRET is required" in text
+    assert "webhookSecret = '" not in text
+    assert "rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA" not in text
+
+
 def test_bidspotter_actor_is_safe_for_supply_reactivation():
     text = Path('apify/actors/ds-bidspotter/src/main.js').read_text()
 
