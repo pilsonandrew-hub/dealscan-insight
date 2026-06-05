@@ -111,6 +111,29 @@ def test_classify_source_candidate_marks_brightdrop_as_source_policy_reject():
     )
 
 
+def test_classify_source_candidate_marks_newer_non_proxy_delivery_as_superseded():
+    row = {
+        "year": 2025,
+        "make": "Ford",
+        "model": "Explorer",
+        "state": "NJ",
+        "mileage": 1435,
+        "vin": "1FMUK8DH5SGA77978",
+        "auction_active": True,
+        "has_market_price": False,
+        "has_usable_dealer_sales": False,
+        "error_message": "margin_below_floor | margin=$-13300 floor=$1500 tier=premium bid=$31000 mmr=$22000 cost=$35300 max_bid=$17600 headroom=$-13400 pricing=proxy",
+        "skip_created_at": "2026-06-05T12:05:52.18536+00:00",
+        "latest_delivery_created_at": "2026-06-05T15:26:12.090049+00:00",
+        "latest_delivery_error_message": "margin_below_floor | margin=$-4795 floor=$1500 tier=premium bid=$31000 mmr=$30505 cost=$35300 max_bid=$25095 headroom=$-5905 pricing=market_comp comp_price=$41182 comp_count=3 comp_conf=0.73",
+    }
+
+    assert (
+        report_pricing_blocked_source_candidates.classify_source_candidate(row)
+        == "superseded_after_skip"
+    )
+
+
 def test_classify_source_candidate_separates_expired_and_dirty_rows():
     expired = {
         "year": 2023,

@@ -59,6 +59,9 @@ joined as (
          ps.created_at as skip_created_at,
          sl.title,
          sl.listing_url,
+         latest_delivery.status as latest_delivery_status,
+         latest_delivery.error_message as latest_delivery_error_message,
+         latest_delivery.created_at as latest_delivery_created_at,
          exists (
            select 1
            from public.market_prices mp
@@ -87,6 +90,13 @@ joined as (
   from proxy_skips ps
   join public.sonar_listings sl
     on (sl.listing_id = ps.listing_id or sl.listing_url = ps.listing_url)
+  left join lateral (
+    select idl.status, idl.error_message, idl.created_at
+    from public.ingest_delivery_log idl
+    where (idl.listing_id = ps.listing_id or idl.listing_url = ps.listing_url)
+    order by idl.created_at desc
+    limit 1
+  ) latest_delivery on true
   order by coalesce(nullif(sl.listing_id,''), nullif(sl.listing_url,'')), sl.created_at desc
 )
 select
@@ -155,11 +165,22 @@ def _matches_source_policy_reject(row: dict[str, Any]) -> bool:
     return any(pattern.search(text) for pattern in SOURCE_POLICY_REJECT_PATTERNS)
 
 
+def _is_superseded_proxy_skip(row: dict[str, Any]) -> bool:
+    skip_created_at = _parse_datetime(row.get("skip_created_at"))
+    latest_created_at = _parse_datetime(row.get("latest_delivery_created_at"))
+    if not skip_created_at or not latest_created_at or latest_created_at <= skip_created_at:
+        return False
+    latest_message = str(row.get("latest_delivery_error_message") or "")
+    return "pricing=proxy" not in latest_message
+
+
 def classify_source_candidate(row: dict[str, Any]) -> str:
     if _matches_source_policy_reject(row):
         return "source_policy_reject"
     if not row.get("vin") or not row.get("mileage"):
         return "dirty_source_row"
+    if _is_superseded_proxy_skip(row):
+        return "superseded_after_skip"
     if row.get("has_market_price") or row.get("has_usable_dealer_sales"):
         return "covered_after_skip"
     parsed = parse_proxy_skip_reason(row.get("error_message"))
@@ -188,6 +209,8 @@ def format_candidate(row: dict[str, Any]) -> str:
         f"proxy_tier={parsed.get('tier')} proxy_pricing={parsed.get('pricing')} auction_active={row.get('auction_active')} "
         f"market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
         f"skip_at={row.get('skip_created_at')} title={row.get('title')} url={row.get('listing_url')}"
+        f" latest_delivery_status={row.get('latest_delivery_status')}"
+        f" latest_delivery_at={row.get('latest_delivery_created_at')}"
     )
 
 
@@ -424,20 +447,25 @@ def fetch_rows_via_rest(
     listing_since = (current_time - timedelta(days=lookback_days + 30)).isoformat()
     sales_since = (current_time - timedelta(days=365)).isoformat()
 
-    proxy_skip_rows = _fetch_postgrest_rows(
+    delivery_rows = _fetch_postgrest_rows(
         base_url,
         service_role_key,
         "ingest_delivery_log",
         [
             ("select", "run_id,listing_id,listing_url,status,error_message,created_at"),
             ("created_at", f"gte.{since}"),
-            ("status", "in.(skipped_ceiling,skipped_margin)"),
+            ("status", "in.(skipped_ceiling,skipped_margin,saved_sonar)"),
             ("order", "created_at.desc"),
             ("limit", str(max(limit * 5, 100))),
         ],
     )
-    proxy_skip_rows = [row for row in proxy_skip_rows if _is_pricing_blocked_skip(row)]
+    proxy_skip_rows = [row for row in delivery_rows if _is_pricing_blocked_skip(row)]
     latest_skips: dict[str, dict[str, Any]] = {}
+    latest_deliveries: dict[str, dict[str, Any]] = {}
+    for delivery in delivery_rows:
+        key = _row_key(delivery)
+        if key and key not in latest_deliveries:
+            latest_deliveries[key] = delivery
     for skip in proxy_skip_rows:
         key = _row_key(skip)
         if key and key not in latest_skips:
@@ -498,6 +526,9 @@ def fetch_rows_via_rest(
             "error_message": skip.get("error_message"),
             "skip_created_at": skip.get("created_at"),
             "sonar_created_at": listing.get("created_at"),
+            "latest_delivery_status": (latest_deliveries.get(key) or {}).get("status"),
+            "latest_delivery_error_message": (latest_deliveries.get(key) or {}).get("error_message"),
+            "latest_delivery_created_at": (latest_deliveries.get(key) or {}).get("created_at"),
             "has_market_price": _has_market_price(listing, market_rows, current_time),
             "has_usable_dealer_sales": _has_usable_dealer_sales(listing, dealer_sales_rows),
             "auction_active": None if auction_end is None else auction_end >= current_time,
