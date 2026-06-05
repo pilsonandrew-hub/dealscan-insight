@@ -17,6 +17,7 @@ def test_run_apify_actor_workflow_supports_bounded_govdeals_proof():
     assert "pushed_rows_with_detail_text" in text
     assert "description_samples" in text
     assert "source_quality_proof" in text
+    assert "rows_excluded_unaccounted_after_prefilter" in text
 
 
 def test_run_apify_actor_workflow_supports_manual_jjkane_proof():
