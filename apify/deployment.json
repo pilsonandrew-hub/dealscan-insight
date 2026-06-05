@@ -87,7 +87,7 @@
       "id": "5Eu3hfCcBBdzp6I1u",
       "webhookId": "N699FBbtfzjjhHshJ",
       "status": "enabled",
-      "schedule": "0 */12 * * *",
+      "schedule": "45 8,20 * * *",
       "notes": "BidSpotter.com \u2014 Firecrawl-backed actor for AWS WAF protected pages. US-only filter applied. Cadence runs through GitHub Actions so FIRECRAWL_API_KEY is injected from Actions secrets instead of being stored in an Apify schedule payload.",
       "scheduleStatus": "github_actions_enabled"
     },
