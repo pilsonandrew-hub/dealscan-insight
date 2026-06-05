@@ -60,6 +60,7 @@ describe('AllSurplus detail enrichment source contract', () => {
     );
 
     expect(rejectPatterns).toMatch(/sold\\s\+as\\s\+is/);
+    expect(rejectPatterns).toMatch(/sold\\b\[\\s"'\\u201c\\u201d\]\+as\[\\s"'\\u201c\\u201d\]\+is/);
     expect(rejectPatterns).toMatch(/no\\s\+\(\?:guarantees\?\|warrant\(\?:y\|ies\)\)/);
     expect(detailRejectGate).toContain('continue;');
     expect(source.indexOf("if (REJECT_PATTERNS.some((pattern) => pattern.test(listing.description || listing.title || '')))"))

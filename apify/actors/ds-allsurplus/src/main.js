@@ -99,6 +99,8 @@ const REJECT_PATTERNS = [
     /\bno\s+warrant.*\bas[\s-]?is\b/i,
     /\bsold\s+as\s+is\b.*\bno\s+(?:guarantees?|warrant(?:y|ies))/i,
     /\bno\s+(?:guarantees?|warrant(?:y|ies))\b.*\bsold\s+as\s+is\b/i,
+    /\bsold\b[\s"'\u201c\u201d]+as[\s"'\u201c\u201d]+is\b.*\bno\s+(?:guarantees?|warrant(?:y|ies))/i,
+    /\bno\s+(?:guarantees?|warrant(?:y|ies))\b.*\bsold\b[\s"'\u201c\u201d]+as[\s"'\u201c\u201d]+is\b/i,
     /\bstructural[\s-]+damage\b/i,
     /\bblown\s+engine\b/i,
     /\bbad\s+engine\b/i,
