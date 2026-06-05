@@ -34,6 +34,15 @@ describe('ds-publicsurplus source contract', () => {
     expect(source).toContain('if (listingUrl && detailPageCount < MAX_DETAIL_PAGES && (!vehicle.vin || needsDetailEvidence(vehicle)))');
   });
 
+  test('detail-enriches Texas mobile rows before publishing when condition evidence is missing', () => {
+    const txHandler = source.slice(
+      source.indexOf('async function pushTXListing'),
+      source.indexOf('const crawler = new PlaywrightCrawler'),
+    );
+    expect(txHandler).toContain('if (listingUrl && detailPageCount < MAX_DETAIL_PAGES && (!vehicle.vin || needsDetailEvidence(vehicle)))');
+    expect(txHandler.indexOf('detailQueue.push(vehicle);')).toBeLessThan(txHandler.indexOf('await Actor.pushData(vehicle);'));
+  });
+
   test('persists detail text and reruns source-policy rejects after detail enrichment', () => {
     expect(detailHandler).toContain('vehicle.detail_text = detailText;');
     expect(detailHandler).toContain('if (detailText && needsDetailEvidence(vehicle)) vehicle.description = detailText;');
