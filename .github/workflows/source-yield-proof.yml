@@ -11,6 +11,10 @@ on:
         description: "Maximum recent rows to inspect per table"
         required: true
         default: "500"
+      source:
+        description: "Optional source slug for sanitized run-level summaries"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -26,6 +30,7 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
       LIMIT: ${{ inputs.limit }}
+      SOURCE: ${{ inputs.source }}
     steps:
       - name: Set Git default branch for quiet checkout
         run: git config --global init.defaultBranch main
@@ -40,7 +45,12 @@ jobs:
       - name: Run source yield proof through Supabase REST
         run: |
           set -euo pipefail
-          python3 scripts/report_source_yield_proof.py \
-            --via-rest \
-            --lookback-hours "${LOOKBACK_HOURS}" \
+          args=(
+            --via-rest
+            --lookback-hours "${LOOKBACK_HOURS}"
             --limit "${LIMIT}"
+          )
+          if [ -n "${SOURCE}" ]; then
+            args+=(--source "${SOURCE}")
+          fi
+          python3 scripts/report_source_yield_proof.py "${args[@]}"

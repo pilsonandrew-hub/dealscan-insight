@@ -154,6 +154,29 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     return "mixed_rejection_surface"
 
 
+def classify_run_summary(summary: dict[str, Any]) -> str:
+    if int(summary.get("opportunity_rows") or 0) > 0:
+        return "accepted_flow_present"
+    if int(summary.get("webhook_processed_rows") or 0) > 0 and int(summary.get("delivery_rows") or 0) == 0:
+        if int(summary.get("webhook_item_count_total") or 0) == 0:
+            return "source_empty_result"
+        return "webhook_without_delivery_gap"
+
+    status_counts = summary.get("status_counts") or {}
+    delivery_rows = int(summary.get("delivery_rows") or 0)
+    if delivery_rows == 0:
+        return "no_recent_delivery_rows"
+    if int(status_counts.get("skipped_gate") or 0) == delivery_rows:
+        return "source_quality_reject_dominant"
+    if int(status_counts.get("skipped_margin") or 0) == delivery_rows:
+        return "economic_reject_dominant"
+    if int(status_counts.get("skipped_ceiling") or 0) == delivery_rows:
+        return "pricing_ceiling_reject_dominant"
+    if int(status_counts.get("skipped_proof") or 0) == delivery_rows:
+        return "proof_control_only"
+    return classify_source_summary(summary)
+
+
 def _fetch_recent_rows(
     base_url: str,
     service_role_key: str,
@@ -199,6 +222,7 @@ def build_source_yield_report(
     *,
     lookback_hours: int,
     limit: int,
+    run_detail_source: str | None = None,
     now: datetime | None = None,
     deployment_path: Path = DEPLOYMENT_PATH,
 ) -> dict[str, Any]:
@@ -206,6 +230,7 @@ def build_source_yield_report(
     since = current_time - timedelta(hours=lookback_hours)
     base_url = _normalize_supabase_rest_url(supabase_url)
     actor_sources = _actor_source_by_id(deployment_path)
+    detail_source = _canon_source(run_detail_source) if run_detail_source else None
 
     webhook_columns = _available_columns(base_url, service_role_key, "webhook_log")
     webhook_order = "received_at" if "received_at" in webhook_columns else "created_at"
@@ -238,6 +263,8 @@ def build_source_yield_report(
     run_sources: dict[str, str] = {}
     webhook_by_source: dict[str, Counter[str]] = defaultdict(Counter)
     webhook_item_count_by_source: Counter[str] = Counter()
+    webhook_by_run: dict[str, Counter[str]] = defaultdict(Counter)
+    webhook_item_count_by_run: Counter[str] = Counter()
     for row in webhook_rows:
         source = _source_from_row(row, actor_sources=actor_sources)
         run_id = str(row.get("run_id") or "").strip()
@@ -245,8 +272,12 @@ def build_source_yield_report(
             run_sources[run_id] = source
         status = str(row.get("status") or row.get("processing_status") or row.get("db_save") or "unknown")[:80]
         webhook_by_source[source][status] += 1
+        if run_id:
+            webhook_by_run[run_id][status] += 1
         if status == "processed":
             webhook_item_count_by_source[source] += _safe_int(row.get("item_count"))
+            if run_id:
+                webhook_item_count_by_run[run_id] += _safe_int(row.get("item_count"))
 
     delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
     delivery_order = "created_at"
@@ -269,11 +300,21 @@ def build_source_yield_report(
         "status": Counter(),
         "reason": Counter(),
     })
+    delivery_by_run: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
+        "status": Counter(),
+        "reason": Counter(),
+    })
     for row in delivery_rows:
         source = _source_from_row(row, run_sources=run_sources)
+        run_id = str(row.get("run_id") or "").strip()
+        if run_id and source != "unknown":
+            run_sources[run_id] = source
         delivery_by_source[source]["channel"][str(row.get("channel") or "unknown")[:80]] += 1
         delivery_by_source[source]["status"][str(row.get("status") or "unknown")[:80]] += 1
         delivery_by_source[source]["reason"][_reason_bucket(row.get("error_message"))] += 1
+        if run_id:
+            delivery_by_run[run_id]["status"][str(row.get("status") or "unknown")[:80]] += 1
+            delivery_by_run[run_id]["reason"][_reason_bucket(row.get("error_message"))] += 1
 
     opportunity_columns = _available_columns(base_url, service_role_key, "opportunities")
     opportunity_order = "created_at"
@@ -283,6 +324,7 @@ def build_source_yield_report(
             "source_site",
             "source",
             "source_name",
+            "run_id",
             "source_run_id",
             "active",
             "is_active",
@@ -306,14 +348,28 @@ def build_source_yield_report(
         "active_opportunity_rows": 0,
         "active_dos80_rows": 0,
     })
+    opportunities_by_run: dict[str, dict[str, int]] = defaultdict(lambda: {
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "active_dos80_rows": 0,
+    })
     for row in opportunity_rows:
         source = _source_from_row(row, run_sources=run_sources)
+        run_id = str(row.get("source_run_id") or row.get("run_id") or "").strip()
+        if run_id and source != "unknown":
+            run_sources[run_id] = source
         opportunities_by_source[source]["opportunity_rows"] += 1
+        if run_id:
+            opportunities_by_run[run_id]["opportunity_rows"] += 1
         if _parse_bool(row.get("active") if "active" in row else row.get("is_active")):
             opportunities_by_source[source]["active_opportunity_rows"] += 1
+            if run_id:
+                opportunities_by_run[run_id]["active_opportunity_rows"] += 1
             score = _safe_float(row.get("dos_score") if row.get("dos_score") is not None else row.get("score"))
             if score is not None and score >= 80:
                 opportunities_by_source[source]["active_dos80_rows"] += 1
+                if run_id:
+                    opportunities_by_run[run_id]["active_dos80_rows"] += 1
 
     sources = sorted(set(webhook_by_source) | set(delivery_by_source) | set(opportunities_by_source))
     summaries: list[dict[str, Any]] = []
@@ -349,7 +405,7 @@ def build_source_yield_report(
     else:
         overall = "no_recent_source_activity"
 
-    return {
+    report = {
         "generated_at": current_time.isoformat(),
         "lookback_hours": lookback_hours,
         "db_path": "rest:env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY",
@@ -365,6 +421,41 @@ def build_source_yield_report(
         ),
         "truth_boundary": "Read-only sanitized source-yield aggregate. It does not print titles, VINs, URLs, row payloads, tokens, or user data.",
     }
+    if detail_source:
+        run_ids = sorted(set(webhook_by_run) | set(delivery_by_run) | set(opportunities_by_run))
+        run_summaries: list[dict[str, Any]] = []
+        for run_id in run_ids:
+            source = run_sources.get(run_id, "unknown")
+            if source != detail_source:
+                continue
+            webhook_status_counts = webhook_by_run[run_id]
+            delivery_counters = delivery_by_run[run_id]
+            opportunity_counts = opportunities_by_run[run_id]
+            run_summary = {
+                "run_id": run_id[:120],
+                "source": source,
+                "webhook_rows": sum(webhook_status_counts.values()),
+                "webhook_processed_rows": int(webhook_status_counts.get("processed") or 0),
+                "webhook_item_count_total": int(webhook_item_count_by_run[run_id]),
+                "delivery_rows": sum(delivery_counters["status"].values()),
+                "status_counts": dict(delivery_counters["status"].most_common(10)),
+                "reason_counts": dict(delivery_counters["reason"].most_common(10)),
+                "opportunity_rows": opportunity_counts["opportunity_rows"],
+                "active_opportunity_rows": opportunity_counts["active_opportunity_rows"],
+                "active_dos80_rows": opportunity_counts["active_dos80_rows"],
+            }
+            run_summary["classification"] = classify_run_summary(run_summary)
+            run_summaries.append(run_summary)
+        report["run_detail_source"] = detail_source
+        report["run_summaries"] = sorted(
+            run_summaries,
+            key=lambda item: (
+                -int(item["webhook_item_count_total"]),
+                -int(item["delivery_rows"]),
+                item["run_id"],
+            ),
+        )[:25]
+    return report
 
 
 def main() -> int:
@@ -373,6 +464,7 @@ def main() -> int:
     parser.add_argument("--env-file", help="Optional env file to resolve Supabase REST settings.")
     parser.add_argument("--lookback-hours", type=int, default=24)
     parser.add_argument("--limit", type=int, default=500)
+    parser.add_argument("--source", help="Optional source slug for sanitized run-level summaries.")
     parser.add_argument("--json", action="store_true", help="Print compact JSON only.")
     args = parser.parse_args()
 
@@ -389,6 +481,7 @@ def main() -> int:
         service_key,
         lookback_hours=args.lookback_hours,
         limit=args.limit,
+        run_detail_source=args.source,
     )
     if args.json:
         print(json.dumps(report, sort_keys=True))

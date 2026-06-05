@@ -21,4 +21,6 @@ def test_source_yield_proof_workflow_uses_read_only_rest_path():
     assert "scripts/report_source_yield_proof.py" in text
     assert "--via-rest" in text
     assert "--lookback-hours" in text
+    assert "source:" in text
+    assert "--source" in text
     assert "set -x" not in lower
