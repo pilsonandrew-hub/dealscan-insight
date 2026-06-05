@@ -33,6 +33,9 @@ const CONDITION_REJECT_PATTERNS = [
     /\bsalvage\b/i,
     /\bflood\b/i,
     /\bframe[\s-]+damage\b/i,
+    /\bfront[\s-]+end[\s-]+damage\b/i,
+    /\brear[\s-]+end[\s-]+damage\b/i,
+    /\bside[\s-]+damage\b/i,
     /\bcrash(?:ed)?\b/i,
     /\bcollision[\s-]+damage\b/i,
     /\bfire[\s-]+damage\b/i,
@@ -50,6 +53,7 @@ const CONDITION_REJECT_PATTERNS = [
     /\bblown\s+engine\b/i,
     /\bbad\s+engine\b/i,
     /\bno\s+title\b/i,
+    /\bas[\s-]?is\b.*\bno\s+warrant|\bno\s+warrant.*\bas[\s-]?is\b/i,
 ];
 
 const BASE_URL = 'https://www.publicsurplus.com';
