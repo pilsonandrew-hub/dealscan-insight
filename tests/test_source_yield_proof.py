@@ -24,6 +24,19 @@ def test_classify_source_marks_accepted_flow_present():
     assert report_source_yield_proof.classify_source_summary(summary) == "accepted_flow_present"
 
 
+def test_classify_source_marks_inactive_accepted_flow_separately():
+    summary = {
+        "source": "publicsurplus",
+        "delivery_rows": 205,
+        "opportunity_rows": 2,
+        "active_opportunity_rows": 0,
+        "active_dos80_rows": 0,
+        "status_counts": {"saved_supabase": 2, "skipped_margin": 67},
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "inactive_accepted_flow_only"
+
+
 def test_classify_source_separates_gate_and_margin_dominance():
     gate_summary = {
         "source": "hibid",
@@ -172,6 +185,56 @@ def test_build_report_groups_delivery_and_opportunity_truth(monkeypatch):
     assert by_source["govdeals"]["classification"] == "accepted_flow_present"
     assert by_source["govdeals"]["active_opportunity_rows"] == 1
     assert by_source["hibid"]["classification"] == "source_quality_reject_dominant"
+
+
+def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-old-accepted",
+                    "source": "publicsurplus",
+                    "status": "processed",
+                    "item_count": 2,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-old-accepted",
+                    "source_site": "publicsurplus",
+                    "channel": "db_save",
+                    "status": "saved_supabase",
+                    "created_at": "2026-06-05T04:01:00+00:00",
+                }
+            ]
+        if table == "opportunities":
+            return [
+                {
+                    "source_site": "publicsurplus",
+                    "source_run_id": "run-old-accepted",
+                    "active": False,
+                    "dos_score": 92.0,
+                    "created_at": "2026-06-05T04:02:00+00:00",
+                }
+            ]
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+    )
+
+    assert report["overall_verdict"] == "inactive_accepted_flow_only"
+    assert report["source_summaries"][0]["classification"] == "inactive_accepted_flow_only"
+    assert report["source_summaries"][0]["opportunity_rows"] == 1
+    assert report["source_summaries"][0]["active_opportunity_rows"] == 0
 
 
 def test_build_report_selects_only_available_live_columns(monkeypatch):
