@@ -44,6 +44,32 @@ def test_classify_source_separates_gate_and_margin_dominance():
     assert report_source_yield_proof.classify_source_summary(margin_summary) == "economic_reject_dominant"
 
 
+def test_classify_source_ignores_proof_and_sonar_rows_for_business_outcome():
+    summary = {
+        "source": "govdeals",
+        "delivery_rows": 4,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "channel_counts": {"db_save": 3, "sonar_mirror": 1},
+        "status_counts": {"skipped_proof": 2, "skipped_margin": 1, "saved_sonar": 1},
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "economic_reject_dominant"
+
+
+def test_classify_source_keeps_small_split_business_outcome_mixed():
+    summary = {
+        "source": "govdeals",
+        "delivery_rows": 4,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "channel_counts": {"db_save": 3, "sonar_mirror": 1},
+        "status_counts": {"skipped_proof": 1, "skipped_margin": 1, "skipped_gate": 1, "saved_sonar": 1},
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+
+
 def test_build_report_marks_webhook_delivery_gap(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "webhook_log":

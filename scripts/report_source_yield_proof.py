@@ -126,6 +126,12 @@ def _reason_bucket(value: Any) -> str:
     return text[:80]
 
 
+def _dominance_threshold(row_count: int, ratio: float) -> int:
+    if row_count <= 1:
+        return 1
+    return max(2, int(row_count * ratio))
+
+
 def classify_source_summary(summary: dict[str, Any]) -> str:
     if int(summary.get("opportunity_rows") or 0) > 0:
         return "accepted_flow_present"
@@ -140,17 +146,21 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     margin_rows = int(status_counts.get("skipped_margin") or 0)
     ceiling_rows = int(status_counts.get("skipped_ceiling") or 0)
     proof_rows = int(status_counts.get("skipped_proof") or 0)
+    sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
+    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows)
 
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
-    if gate_rows >= max(2, int(delivery_rows * 0.5)):
-        return "source_quality_reject_dominant"
-    if margin_rows >= max(2, int(delivery_rows * 0.35)):
-        return "economic_reject_dominant"
-    if ceiling_rows >= max(2, int(delivery_rows * 0.35)):
-        return "pricing_ceiling_reject_dominant"
     if proof_rows == delivery_rows:
         return "proof_control_only"
+    if business_delivery_rows == 0:
+        return "mixed_rejection_surface"
+    if gate_rows >= _dominance_threshold(business_delivery_rows, 0.5):
+        return "source_quality_reject_dominant"
+    if margin_rows >= _dominance_threshold(business_delivery_rows, 0.35):
+        return "economic_reject_dominant"
+    if ceiling_rows >= _dominance_threshold(business_delivery_rows, 0.35):
+        return "pricing_ceiling_reject_dominant"
     return "mixed_rejection_surface"
 
 
@@ -164,16 +174,21 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
 
     status_counts = summary.get("status_counts") or {}
     delivery_rows = int(summary.get("delivery_rows") or 0)
+    proof_rows = int(status_counts.get("skipped_proof") or 0)
+    sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
+    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows)
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
-    if int(status_counts.get("skipped_gate") or 0) == delivery_rows:
-        return "source_quality_reject_dominant"
-    if int(status_counts.get("skipped_margin") or 0) == delivery_rows:
-        return "economic_reject_dominant"
-    if int(status_counts.get("skipped_ceiling") or 0) == delivery_rows:
-        return "pricing_ceiling_reject_dominant"
-    if int(status_counts.get("skipped_proof") or 0) == delivery_rows:
+    if proof_rows == delivery_rows:
         return "proof_control_only"
+    if business_delivery_rows == 0:
+        return "mixed_rejection_surface"
+    if int(status_counts.get("skipped_gate") or 0) == business_delivery_rows:
+        return "source_quality_reject_dominant"
+    if int(status_counts.get("skipped_margin") or 0) == business_delivery_rows:
+        return "economic_reject_dominant"
+    if int(status_counts.get("skipped_ceiling") or 0) == business_delivery_rows:
+        return "pricing_ceiling_reject_dominant"
     return classify_source_summary(summary)
 
 
