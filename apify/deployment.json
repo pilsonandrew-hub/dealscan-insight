@@ -4,7 +4,10 @@
       "id": "CuKaIAcWyFS0EPrAz",
       "scheduleId": "qjgekMFdXQDRrULto",
       "webhookId": "ZtD68eBxLI416ql80",
-      "status": "enabled"
+      "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-govdeals-12hr",
+      "scheduleStatus": "enabled_live"
     },
     "ds-govdeals-sold": {
       "id": "Ui7FeFY4mIVPnU1fH",
@@ -16,31 +19,46 @@
       "id": "9xxQLlRsROnSgA42i",
       "scheduleId": "IZsc1DPIraSBlT4eu",
       "webhookId": "8yqQfG35cyEAjQ0z1",
-      "status": "enabled"
+      "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-publicsurplus-12hr",
+      "scheduleStatus": "enabled_live"
     },
     "ds-municibid": {
       "id": "svmsItf3CRBZuIntp",
       "scheduleId": "YRrPwLatWXzJnOzeS",
       "webhookId": "QYOKGB6ejtlcfSaXm",
-      "status": "enabled"
+      "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-municibid-12hr",
+      "scheduleStatus": "enabled_live"
     },
     "ds-gsaauctions": {
       "id": "fvDnYmGuFBCrwpEi9",
       "scheduleId": "rJ2FyiGHrxIOOHhor",
       "webhookId": "QgKHl5U66MXMpoBHs",
-      "status": "enabled"
+      "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-gsaauctions-12hr",
+      "scheduleStatus": "enabled_live"
     },
     "ds-allsurplus": {
       "id": "gYGIfHeYeN3EzmLnB",
       "scheduleId": "MBuO3CqsBprCha5fH",
       "webhookId": "fjxMgUc6GH6rJRISU",
-      "status": "enabled"
+      "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-allsurplus-12hr",
+      "scheduleStatus": "enabled_live"
     },
     "ds-govplanet": {
       "id": "pO2t5UDoSVmO1gvKJ",
       "scheduleId": "jijJOYPk449GYMD6b",
       "webhookId": "SINNRTPxfC8F5szXq",
       "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-govplanet-12hr",
+      "scheduleStatus": "enabled_live",
       "build": "1.0.8",
       "itemsPerRun": 306,
       "notes": "FIXED 2026-03-21: CheerioCrawler (was PlaywrightCrawler), 6 category URLs with l2=USA, quickviews.push() extraction. Was 7 items/run, now 306. Webhook 200 confirmed. 7k+ item auth-gated endpoint is Mission 4 scope."
@@ -49,7 +67,10 @@
       "id": "bxhncvtHEP712WX2e",
       "scheduleId": "KZkaBQXUaQS56kkPW",
       "webhookId": "OB4e8BQJFnySBse5M",
-      "status": "enabled"
+      "status": "enabled",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-proxibid-12h",
+      "scheduleStatus": "enabled_live"
     },
     "ds-equipmentfacts": {
       "id": "0XjoegYZVcPldLstl",
@@ -57,6 +78,8 @@
       "webhookId": "lcQSaKEq2yb3EfoZb",
       "status": "enabled",
       "notes": "Sandhills Cloud platform \u2014 ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Live proof-clean actor re-enabled on schedule uJyfnyv7p5UmTzPmn after 2026-06-05 source-quality proof and production schedule audit.",
+      "schedule": "0 */6 * * *",
+      "scheduleName": "legacy-disabled-ds-equipmentfacts-6hr",
       "scheduleStatus": "enabled_live"
     },
     "ds-usgovbid": {
@@ -64,7 +87,9 @@
       "scheduleId": "PZRUZq76opvUAxTzV",
       "webhookId": "QhPfZWcztslsbKDlm",
       "status": "enabled",
-      "schedule": "45 8,20 * * *",
+      "schedule": "0 */12 * * *",
+      "scheduleName": "ds-usgovbid-12hr",
+      "scheduleStatus": "enabled_live",
       "notes": "USGovBid (usgovbid.com) impound/surplus vehicle auctions. WordPress Events Calendar REST API + Maxanet platform (bid.usgovbid.com). Playwright required for AJAX lot loading."
     },
     "ds-jjkane": {
@@ -73,6 +98,8 @@
       "webhookId": "vZW5IhQw7uTpXeFG2",
       "status": "enabled",
       "schedule": "0 */12 * * *",
+      "scheduleName": "ds-jjkane-12hr",
+      "scheduleStatus": "enabled_live",
       "notes": "JJ Kane Government Surplus (jjkane.com) \u2014 Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
     },
     "ds-hibid-v2": {
