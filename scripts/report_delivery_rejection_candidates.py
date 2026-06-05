@@ -104,7 +104,7 @@ def fetch_rows_via_rest(
     current_time = now or datetime.now(timezone.utc)
     base_url = _normalize_supabase_rest_url(supabase_url)
     since = (current_time - timedelta(hours=lookback_hours)).isoformat()
-    listing_since = (current_time - timedelta(hours=lookback_hours + 24)).isoformat()
+    listing_since = (current_time - timedelta(days=35)).isoformat()
 
     delivery_rows = _fetch_postgrest_rows(
         base_url,
