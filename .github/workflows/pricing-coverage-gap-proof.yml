@@ -1,0 +1,52 @@
+name: Pricing Coverage Gap Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Opportunity lookback window in days"
+        required: true
+        default: "14"
+      max_mileage:
+        description: "Maximum mileage for clean proxy opportunity reporting"
+        required: true
+        default: "50000"
+      limit:
+        description: "Maximum candidates to print"
+        required: true
+        default: "100"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOOKBACK_DAYS: ${{ inputs.lookback_days }}
+      MAX_MILEAGE: ${{ inputs.max_mileage }}
+      LIMIT: ${{ inputs.limit }}
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
+      - name: Run pricing coverage gap proof through Supabase REST
+        run: |
+          set -euo pipefail
+          python3 scripts/report_pricing_coverage_gaps.py \
+            --via-rest \
+            --lookback-days "${LOOKBACK_DAYS}" \
+            --max-mileage "${MAX_MILEAGE}" \
+            --limit "${LIMIT}"
