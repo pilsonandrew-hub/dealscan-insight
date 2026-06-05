@@ -1,0 +1,43 @@
+{
+  "source_run_id": "govdeals-pricing-gap-bGi42l0UTI6JOu32S-explorer-active-2026-06-05",
+  "source_url": "https://github.com/pilsonandrew-hub/dealscan-insight/blob/main/reports/pricing-external-comp-provenance-govdeals-explorer-active-2026-06-05.md",
+  "vehicle": {
+    "year": 2025,
+    "make": "Ford",
+    "model": "Explorer",
+    "state": null
+  },
+  "confidence_notes": "National active retail-listing evidence for 2025 Ford Explorer Active. Used to cover current GovDeals proxy-pricing gap; retail listings are not closed-sale outcomes.",
+  "comps": [
+    {
+      "source_url": "https://jackschmittford.com/inventory/Used-2025-Ford-Explorer-Active-1FMUK8DH2SGD07301",
+      "captured_at": "2026-06-05T12:30:00+00:00",
+      "price": 42689,
+      "mileage": 2774,
+      "vin": "1FMUK8DH2SGD07301",
+      "listing_id": "jack-schmitt-ford-sp2800",
+      "title": "Used 2025 Ford Explorer Active",
+      "title_history_caveat": "Dealer listing active retail asking price; title history not independently verified by DealerScope."
+    },
+    {
+      "source_url": "https://cooperautogroup.com/inventory/Used-2025-Ford-Explorer-Active-1FMUK8DH6SGB57130-231",
+      "captured_at": "2026-06-05T12:30:00+00:00",
+      "price": 40898,
+      "mileage": 2730,
+      "vin": "1FMUK8DH6SGB57130",
+      "listing_id": "cooper-auto-mms57130",
+      "title": "Used 2025 Ford Explorer Active",
+      "title_history_caveat": "Dealer listing active retail asking price; title history not independently verified by DealerScope."
+    },
+    {
+      "source_url": "https://www.powerofbowser.com/inventory/Used-2025-Ford-Explorer-Active-1FMUK8DH3SGB29043",
+      "captured_at": "2026-06-05T12:30:00+00:00",
+      "price": 39960,
+      "mileage": 3894,
+      "vin": "1FMUK8DH3SGB29043",
+      "listing_id": "power-of-bowser-n26234a",
+      "title": "Used 2025 Ford Explorer Active",
+      "title_history_caveat": "Dealer listing active retail asking price; title history not independently verified by DealerScope."
+    }
+  ]
+}
