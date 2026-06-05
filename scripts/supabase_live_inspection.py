@@ -12,6 +12,7 @@ import os
 import sys
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -45,6 +46,8 @@ HIGH_RUST_STATES = {
     "ND", "SD", "NE", "KS", "WV", "ME", "NH", "VT", "MA", "RI",
     "CT", "NJ", "MD", "DE",
 }
+
+DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
 
 
 def _require_env(name: str) -> str:
@@ -273,15 +276,73 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _summarize_recent_delivery_truth(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _canonical_delivery_source(value: Any) -> str | None:
+    if value is None:
+        return None
+    source = str(value).strip().lower()
+    if not source:
+        return None
+    if source.startswith("ds-"):
+        source = source[3:]
+    if source.endswith("-v2"):
+        source = source[:-3]
+    return source[:80]
+
+
+def _actor_source_by_id(path: Path = DEPLOYMENT_PATH) -> dict[str, str]:
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    actors = payload.get("actors") if isinstance(payload, dict) else {}
+    if not isinstance(actors, dict):
+        return {}
+    source_by_id: dict[str, str] = {}
+    for actor_name, details in actors.items():
+        if not isinstance(details, dict):
+            continue
+        actor_id = str(details.get("id") or "").strip()
+        source = _canonical_delivery_source(actor_name)
+        if actor_id and source:
+            source_by_id[actor_id] = source
+    return source_by_id
+
+
+def _source_by_run_from_webhooks(rows: list[dict[str, Any]]) -> dict[str, str]:
+    source_by_run: dict[str, str] = {}
+    source_by_actor_id = _actor_source_by_id()
+    for row in rows:
+        run_id = str(row.get("run_id") or "").strip()
+        if not run_id or run_id in source_by_run:
+            continue
+        actor_id = str(row.get("actor_id") or "").strip()
+        source = (
+            _canonical_delivery_source(row.get("source") or row.get("source_site") or row.get("actor_name"))
+            or source_by_actor_id.get(actor_id)
+        )
+        if source:
+            source_by_run[run_id] = source
+    return source_by_run
+
+
+def _summarize_recent_delivery_truth(
+    rows: list[dict[str, Any]],
+    source_by_run: dict[str, str] | None = None,
+) -> dict[str, Any]:
     source_counts: Counter[str] = Counter()
     channel_counts: Counter[str] = Counter()
     status_counts: Counter[str] = Counter()
     source_status_counts: Counter[tuple[str, str]] = Counter()
     reason_counts: Counter[str] = Counter()
     latest_created_at = None
+    source_by_run = source_by_run or {}
     for row in rows:
-        source = str(row.get("source_site") or row.get("source") or "unknown")[:80]
+        run_id = str(row.get("run_id") or "").strip()
+        source = (
+            _canonical_delivery_source(row.get("source_site") or row.get("source"))
+            or source_by_run.get(run_id)
+            or "unknown"
+        )[:80]
         channel = str(row.get("channel") or "unknown")[:80]
         status = str(row.get("status") or "unknown")[:80]
         source_counts[source] += 1
@@ -701,7 +762,21 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
 
     webhook_columns = _available_columns(base_url, service_key, "webhook_log")
     webhook_order = "received_at" if "received_at" in webhook_columns else "created_at"
-    webhook_select = ",".join([col for col in ["received_at", "created_at", "status", "processing_status", "db_save"] if col in webhook_columns]) or webhook_order
+    webhook_select = ",".join([
+        col for col in [
+            "run_id",
+            "source",
+            "source_site",
+            "actor_name",
+            "actor_id",
+            "received_at",
+            "created_at",
+            "status",
+            "processing_status",
+            "db_save",
+        ]
+        if col in webhook_columns
+    ]) or webhook_order
     webhook_rows = _recent_rows(
         base_url,
         service_key,
@@ -718,6 +793,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
     delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
     delivery_select = ",".join([
         col for col in [
+            "run_id",
             "source_site",
             "source",
             "channel",
@@ -778,7 +854,10 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
             "status_counts": dict(webhook_status_counts.most_common(20)),
             "latest_received_at": next((row.get("received_at") for row in webhook_rows if row.get("received_at")), None),
         },
-        "recent_deliveries": _summarize_recent_delivery_truth(delivery_rows),
+        "recent_deliveries": _summarize_recent_delivery_truth(
+            delivery_rows,
+            _source_by_run_from_webhooks(webhook_rows),
+        ),
         "post_close_outcome_requests": post_close_report,
         "truth_boundary": "Samples only sanitized aggregate fields from recent rows. Does not print VINs, titles, URLs, user data, tokens, or raw listing payloads.",
     }
