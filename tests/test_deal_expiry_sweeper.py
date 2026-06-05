@@ -195,6 +195,57 @@ def test_sweeper_archives_active_high_dos_rows_with_missing_vin():
     } in client.updates
 
 
+def test_sweeper_archives_active_high_dos_rows_missing_source_condition_evidence():
+    now = datetime(2026, 6, 5, 9, 5, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", 80),
+            ): [
+                {
+                    "id": "missing-condition-evidence-1",
+                    "title": "2023 Toyota Camry",
+                    "condition_grade": "Good",
+                    "raw_data": {},
+                },
+                {
+                    "id": "missing-condition-evidence-2",
+                    "title": "2022 Ford Explorer",
+                    "condition_grade": "Fair",
+                    "raw_data": {"detail_text": "2022 Ford Explorer"},
+                },
+                {
+                    "id": "condition-evidence-present",
+                    "title": "2023 Toyota Camry",
+                    "condition_grade": "Good",
+                    "raw_data": {"detail_text": "Starts and runs, normal wear reported."},
+                },
+                {
+                    "id": "weak-condition-grade",
+                    "title": "2021 Chevrolet Malibu",
+                    "condition_grade": "Unknown",
+                    "raw_data": {},
+                },
+            ],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["archived_untrusted_active_high_dos_missing_condition_evidence"] == 2
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_no_condition_evidence",
+        },
+        "ids": ["missing-condition-evidence-1", "missing-condition-evidence-2"],
+        "filters": [("in", "id", ("missing-condition-evidence-1", "missing-condition-evidence-2"))],
+    } in client.updates
+
+
 def test_sweeper_refers_expired_deals_for_post_close_outcome_check_without_creating_comp_candidates():
     now = datetime(2026, 6, 2, 8, 18, tzinfo=timezone.utc)
     expired_cutoff = "2026-06-01T08:18:00+00:00"
@@ -373,6 +424,7 @@ def test_sweeper_message_reports_post_close_outcome_referrals():
             "archived_stale_saved_inactive": 0,
             "archived_untrusted_active_high_dos_missing_mileage": 0,
             "archived_untrusted_active_high_dos_missing_vin": 0,
+            "archived_untrusted_active_high_dos_missing_condition_evidence": 0,
             "run_time": "2026-06-02 08:18 UTC",
         }
     )
@@ -390,6 +442,7 @@ def test_sweeper_message_labels_dry_run():
             "archived_stale_saved_inactive": 0,
             "archived_untrusted_active_high_dos_missing_mileage": 0,
             "archived_untrusted_active_high_dos_missing_vin": 0,
+            "archived_untrusted_active_high_dos_missing_condition_evidence": 0,
             "run_time": "2026-06-02 08:18 UTC",
         }
     )
