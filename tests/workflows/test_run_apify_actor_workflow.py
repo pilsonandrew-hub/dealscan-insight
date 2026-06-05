@@ -77,7 +77,7 @@ def test_run_apify_actor_workflow_schedules_bidspotter_with_github_secret():
     text = WORKFLOW.read_text()
 
     assert "schedule:" in text
-    assert "45 8,20 * * *" in text
+    assert "15 9,21 * * *" in text
     assert "github.event_name == 'schedule' && 'ds-bidspotter' || inputs.actor" in text
     assert "FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}" in text
 

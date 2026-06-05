@@ -64,9 +64,9 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["id"], "5Eu3hfCcBBdzp6I1u")
         self.assertEqual(actor["webhookId"], "N699FBbtfzjjhHshJ")
         self.assertEqual(actor["status"], "enabled")
-        self.assertEqual(actor["schedule"], "45 8,20 * * *")
+        self.assertEqual(actor["schedule"], "15 9,21 * * *")
         self.assertEqual(actor["scheduleStatus"], "github_actions_enabled")
-        self.assertIn("45 8,20 * * *", workflow)
+        self.assertIn("15 9,21 * * *", workflow)
         self.assertIn("github.event_name == 'schedule' && 'ds-bidspotter' || inputs.actor", workflow)
 
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
