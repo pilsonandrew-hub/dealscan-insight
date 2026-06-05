@@ -1,0 +1,37 @@
+{
+  "source_run_id": "publicsurplus-pricing-gap-LFULyVEdTKSWtuebK-camry-2026-06-05",
+  "source_url": "https://www.autotrader.com/cars-for-sale/2023/toyota/camry/fairfax-va",
+  "vehicle": {
+    "year": 2023,
+    "make": "Toyota",
+    "model": "Camry",
+    "state": "VA"
+  },
+  "confidence_notes": "Virginia active retail-listing evidence for 2023 Toyota Camry. Used to cover a PublicSurplus active pricing gap only; retail listings are not closed-sale outcomes.",
+  "comps": [
+    {
+      "source_url": "https://www.autotrader.com/cars-for-sale/2023/toyota/camry/fairfax-va",
+      "captured_at": "2026-06-05T06:47:56+00:00",
+      "price": 25000,
+      "mileage": 31000,
+      "listing_id": "autotrader-fairfax-va-2023-camry-se-koons-kia-woodbridge-31k",
+      "title": "Used 2023 Toyota Camry SE"
+    },
+    {
+      "source_url": "https://www.autotrader.com/cars-for-sale/2023/toyota/camry/fairfax-va",
+      "captured_at": "2026-06-05T06:47:56+00:00",
+      "price": 24290,
+      "mileage": 34000,
+      "listing_id": "autotrader-fairfax-va-2023-camry-le-easterns-woodbridge-34k",
+      "title": "Used 2023 Toyota Camry LE"
+    },
+    {
+      "source_url": "https://www.autotrader.com/cars-for-sale/2023/toyota/camry/fairfax-va",
+      "captured_at": "2026-06-05T06:47:56+00:00",
+      "price": 26250,
+      "mileage": 11000,
+      "listing_id": "autotrader-fairfax-va-2023-camry-se-koons-ford-woodbridge-11k",
+      "title": "Used 2023 Toyota Camry SE"
+    }
+  ]
+}
