@@ -24,6 +24,11 @@ from live_verification_support import DEFAULT_ENV_FILES, get_database_url
 POSTGREST_PAGE_SIZE = 1000
 SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
+SOURCE_POLICY_REJECT_PATTERNS = (
+    re.compile(r"\bBrightDrop\b", re.IGNORECASE),
+    re.compile(r"\bZevo\b", re.IGNORECASE),
+    re.compile(r"\bCargo\s+Delivery\s+Van\b", re.IGNORECASE),
+)
 
 
 PROXY_SKIP_SQL = """
@@ -142,16 +147,26 @@ def parse_proxy_skip_reason(reason: str | None) -> dict[str, Any]:
     }
 
 
+def _matches_source_policy_reject(row: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(row.get(field) or "")
+        for field in ("title", "make", "model")
+    )
+    return any(pattern.search(text) for pattern in SOURCE_POLICY_REJECT_PATTERNS)
+
+
 def classify_source_candidate(row: dict[str, Any]) -> str:
+    if _matches_source_policy_reject(row):
+        return "source_policy_reject"
     if not row.get("vin") or not row.get("mileage"):
         return "dirty_source_row"
+    if row.get("has_market_price") or row.get("has_usable_dealer_sales"):
+        return "covered_after_skip"
     parsed = parse_proxy_skip_reason(row.get("error_message"))
     margin = parsed.get("margin")
     floor = parsed.get("floor")
     if margin is not None and floor is not None and margin < floor:
         return "below_margin_floor"
-    if row.get("has_market_price") or row.get("has_usable_dealer_sales"):
-        return "covered_after_skip"
     if row.get("auction_active") is False:
         return "expired_pricing_gap"
     if row.get("auction_active") is None:
