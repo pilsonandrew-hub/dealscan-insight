@@ -59,6 +59,13 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('/\\brebuilt\\b/i');
   });
 
+  test('reruns source-policy rejects after detail enrichment before pushing rows', () => {
+    expect(source).toContain('item.detail_text');
+    expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && passes(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && !passes(lot));');
+    expect(source).toContain('rows_excluded_policy_after_detail');
+  });
+
   test('rejects commercial-heavy vehicle families before pushing rows', () => {
     expect(source).toContain('/\\bsprinter\\b/i');
     expect(source).toContain('/\\btransit\\b/i');
@@ -69,7 +76,7 @@ describe('ds-govdeals source quality proof contract', () => {
   });
 
   test('keeps detail-enriched rows missing required data out of pushed opportunities', () => {
-    expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
+    expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && passes(lot));');
     expect(source).toContain('const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);');
     expect(source).toContain('rows_excluded_missing_required_data');
     expect(source).toContain('rows_excluded_missing_vin');
