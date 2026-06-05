@@ -239,14 +239,18 @@ function parseMileage(text) {
         /\b(?:odometer(?:\s+shows)?|odometer\s+reading|odom(?:eter)?\s+reads?|od\s+reads?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)/i,
         /\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\s+on\s+(?:meter|odometer)\b/i,
     ];
+    const vinAdjacentMileagePattern = /\b(?:VIN|V\.I\.N\.?)[:\s#\-.]*[A-HJ-NPR-Z0-9]{17}[\s,;.-]+(?:[A-Z0-9\s,;./()-]*?\b)?(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\b/i;
     const primaryText = primaryItemDetailText(text);
     if (primaryText) {
         const primaryMileage = matchMileage(primaryText, [
             ...labeledPatterns,
-            /\b(?:VIN|V\.I\.N\.?)[:\s#\-.]*[A-HJ-NPR-Z0-9]{17}[\s,;.-]+(?:[A-Z0-9\s,;./()-]*?\b)?(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\b/i,
+            vinAdjacentMileagePattern,
         ]);
         if (primaryMileage) return primaryMileage;
     }
+    const leadingDetailText = normalize(text).slice(0, 500);
+    const leadingMileage = matchMileage(leadingDetailText, [vinAdjacentMileagePattern]);
+    if (leadingMileage) return leadingMileage;
     return matchMileage(text, labeledPatterns);
 }
 
