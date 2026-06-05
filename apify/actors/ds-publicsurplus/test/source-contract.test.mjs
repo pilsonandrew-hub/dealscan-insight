@@ -64,6 +64,14 @@ describe('ds-publicsurplus source contract', () => {
     expect(source).toContain('/\\bas[\\s-]?is\\b.*\\bno\\s+warrant|\\bno\\s+warrant.*\\bas[\\s-]?is\\b/i');
   });
 
+  test('source policy rejects backend condition-trust phrases from detail text', () => {
+    expect(source).toContain('/\\bsold\\s+as\\s+is\\b.*\\bno\\s+(?:guarantees?|warrant(?:y|ies))/i');
+    expect(source).toContain('/\\bno\\s+(?:guarantees?|warrant(?:y|ies))\\b.*\\bsold\\s+as\\s+is\\b/i');
+    expect(source).toContain('/\\bneeds?\\s+jump\\s+(?:box|start)\\b/i');
+    expect(source).toContain('/\\bwarning\\s+lights?\\s+on\\s+(?:the\\s+)?dash\\b/i');
+    expect(source).toContain('/\\binvolved\\s+in\\s+(?:a\\s+)?motor\\s+vehicle\\s+accident\\b/i');
+  });
+
   test('uses actual published row count for webhook itemCount', () => {
     expect(source).toContain('let totalPushed = 0;');
     expect(source).toContain('totalPushed++;');
