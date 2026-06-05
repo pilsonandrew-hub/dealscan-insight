@@ -99,6 +99,9 @@ def _send_eligible_deal(**overrides):
         "current_bid": 10000,
         "max_bid": 15000,
         "projected_total_cost": 11000,
+        "raw_data": {
+            "detail_text": "Starts, runs and drives. Minor scratches noted.",
+        },
         "score_breakdown": {
             "dos_score": 95,
             "investment_grade": "Platinum",

@@ -26,6 +26,15 @@ VIN_PLACEHOLDER_VALUES = frozenset({
     "UNKNOWNUNKNOWNUNK",
 })
 VIN_FORBIDDEN_CHARACTERS = frozenset({"I", "O", "Q"})
+SOURCE_CONDITION_EVIDENCE_FIELDS = (
+    "description",
+    "details",
+    "condition_notes",
+    "detail_text",
+    "assetLongDesc",
+    "damage_type",
+    "damage",
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +121,32 @@ def _score_breakdown(record: Mapping[str, Any]) -> Mapping[str, Any]:
     return {}
 
 
+def _raw_data(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = record.get("raw_data")
+    return raw if isinstance(raw, Mapping) else {}
+
+
+def _pick_record_or_raw_text(record: Mapping[str, Any], key: str) -> str:
+    raw = _raw_data(record)
+    for source in (record, raw):
+        value = source.get(key)
+        if value in (None, ""):
+            continue
+        text = " ".join(str(value).split()).strip()
+        if text:
+            return text
+    return ""
+
+
+def has_source_condition_evidence(record: Mapping[str, Any]) -> bool:
+    title_text = _pick_record_or_raw_text(record, "title").lower()
+    for key in SOURCE_CONDITION_EVIDENCE_FIELDS:
+        text = _pick_record_or_raw_text(record, key)
+        if text and text.lower() != title_text:
+            return True
+    return False
+
+
 def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
     breakdown = _score_breakdown(record)
     pricing_maturity = _pick_text(record.get("pricing_maturity"), breakdown.get("pricing_maturity")) or "unknown"
@@ -177,6 +212,7 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
             record.get("condition"),
             breakdown.get("condition"),
         ),
+        "source_condition_evidence_present": has_source_condition_evidence(record),
     }
 
 
@@ -202,6 +238,8 @@ def evaluate_alert_gate(
     condition_grade = str(signals["condition_grade"] or "").strip().lower()
     if condition_grade in UNKNOWN_OR_WEAK_CONDITION_GRADES:
         reasons.append("condition_unverified")
+    elif not signals.get("source_condition_evidence_present"):
+        reasons.append("condition_evidence_missing")
 
     confidence = signals["confidence"]
     if signals.get("confidence_invalid"):

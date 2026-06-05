@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, Header, HTTPException, Path
 
 from backend.business_rules.constants import ALERTS_ENABLED_PRODUCTION_DEFAULT
-from backend.ingest.alert_gating import evaluate_alert_gate
+from backend.ingest.alert_gating import evaluate_alert_gate, has_source_condition_evidence
 from backend.ingest.condition import score_condition
 from webapp.database import supabase_client
 
@@ -444,8 +444,6 @@ def _condition_blocker_basis_samples(rows: list[dict[str, Any]], *, limit: int =
 def _condition_storage_gap_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     gap_rows: list[dict[str, Any]] = []
     for row in rows:
-        if not _condition_blocker_basis(row):
-            continue
         if _stored_source_condition_evidence(row):
             continue
         gap_rows.append(row)
@@ -530,10 +528,7 @@ def _source_identity(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stored_source_condition_evidence(row: dict[str, Any]) -> bool:
-    for evidence in _condition_evidence_fields(row).values():
-        if evidence.get("present") and not evidence.get("matches_title"):
-            return True
-    return False
+    return has_source_condition_evidence(row)
 
 
 def _condition_backfill_assessment(row: dict[str, Any]) -> dict[str, Any]:

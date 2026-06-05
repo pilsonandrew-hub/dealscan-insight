@@ -67,6 +67,9 @@ class TelegramAlertFormatTests(unittest.TestCase):
             "vin": "1HGCM82633A004352",
             "mileage": 42000,
             "condition_grade": "Good",
+            "raw_data": {
+                "detail_text": "Starts, runs and drives. Minor scratches noted.",
+            },
             "score_breakdown": {
                 "dos_score": 91,
                 "investment_grade": "Gold",
