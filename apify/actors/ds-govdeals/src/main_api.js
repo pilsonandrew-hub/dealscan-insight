@@ -118,10 +118,12 @@ const sourceQualityStats = {
     rows_excluded_missing_required_data: 0,
     rows_excluded_missing_vin: 0,
     rows_excluded_missing_mileage: 0,
+    rows_excluded_policy_after_detail: 0,
     rows_excluded_after_detail_attempt: 0,
     rows_excluded_without_detail_attempt: 0,
     excluded_after_detail_attempt_samples: [],
     excluded_without_detail_attempt_samples: [],
+    post_policy_rejected_samples: [],
 };
 const capturedApi = {
     apiKey: null,
@@ -158,6 +160,7 @@ function passes(item) {
         item.longDescription,
         item.itemDescription,
         item.description,
+        item.detail_text,
         item.notes,
         item.assetLongDescription,
         item.itemNotes,
@@ -372,17 +375,20 @@ const crawler = new PlaywrightCrawler({
             // Step 3: Detail enrichment for VIN/mileage before pushing lots.
             await enrichFromDetailPages(page, passingLots, log, runtimeBudget);
 
-            const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));
+            const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && passes(lot));
             const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);
+            const postPolicyRejectedLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && !passes(lot));
             const excludedAfterDetailAttempt = incompleteLots.filter(lot => sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             const excludedWithoutDetailAttempt = incompleteLots.filter(lot => !sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             sourceQualityStats.rows_excluded_missing_required_data = incompleteLots.length;
             sourceQualityStats.rows_excluded_missing_vin = incompleteLots.filter(lot => !lot.vin).length;
             sourceQualityStats.rows_excluded_missing_mileage = incompleteLots.filter(lot => !lot.mileage).length;
+            sourceQualityStats.rows_excluded_policy_after_detail = postPolicyRejectedLots.length;
             sourceQualityStats.rows_excluded_after_detail_attempt = excludedAfterDetailAttempt.length;
             sourceQualityStats.rows_excluded_without_detail_attempt = excludedWithoutDetailAttempt.length;
             sourceQualityStats.excluded_after_detail_attempt_samples = sampleExcludedLots(excludedAfterDetailAttempt);
             sourceQualityStats.excluded_without_detail_attempt_samples = sampleExcludedLots(excludedWithoutDetailAttempt);
+            sourceQualityStats.post_policy_rejected_samples = sampleExcludedLots(postPolicyRejectedLots);
             for (const lot of incompleteLots) {
                 const reasons = [
                     !lot.vin ? 'missing_vin' : null,
@@ -668,10 +674,12 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_missing_required_data: sourceQualityStats.rows_excluded_missing_required_data,
         rows_excluded_missing_vin: sourceQualityStats.rows_excluded_missing_vin,
         rows_excluded_missing_mileage: sourceQualityStats.rows_excluded_missing_mileage,
+        rows_excluded_policy_after_detail: sourceQualityStats.rows_excluded_policy_after_detail,
         rows_excluded_after_detail_attempt: sourceQualityStats.rows_excluded_after_detail_attempt,
         rows_excluded_without_detail_attempt: sourceQualityStats.rows_excluded_without_detail_attempt,
         excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples,
         excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples,
+        post_policy_rejected_samples: sourceQualityStats.post_policy_rejected_samples,
         detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
         detail_pages_fetched: sourceQualityStats.detail_pages_fetched,
         detail_pages_failed: sourceQualityStats.detail_pages_failed,
