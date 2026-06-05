@@ -374,6 +374,37 @@ def build_source_yield_report(
         for row in delivery_rows
         if str(row.get("run_id") or "").strip()
     }
+    primary_seen = {
+        (
+            str(row.get("run_id") or ""),
+            str(row.get("channel") or ""),
+            str(row.get("status") or ""),
+            str(row.get("error_message") or ""),
+            str(row.get("created_at") or row.get("updated_at") or ""),
+        )
+        for row in delivery_rows
+    }
+    for run_id in sorted(processed_positive_run_ids - primary_delivery_run_ids):
+        for row in _fetch_optional_delivery_rows_for_run(
+            base_url,
+            service_role_key,
+            "ingest_delivery_log",
+            run_id,
+            limit,
+        ):
+            key = (
+                str(row.get("run_id") or ""),
+                str(row.get("channel") or ""),
+                str(row.get("status") or ""),
+                str(row.get("error_message") or ""),
+                str(row.get("created_at") or row.get("updated_at") or ""),
+            )
+            if key not in primary_seen:
+                primary_seen.add(key)
+                delivery_rows.append(row)
+                row_run_id = str(row.get("run_id") or "").strip()
+                if row_run_id:
+                    primary_delivery_run_ids.add(row_run_id)
     legacy_delivery_rows = [
         row
         for row in _fetch_optional_delivery_rows(base_url, service_role_key, "delivery_log", since, limit)
