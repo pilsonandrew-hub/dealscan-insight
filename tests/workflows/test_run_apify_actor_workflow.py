@@ -59,6 +59,20 @@ def test_run_apify_actor_workflow_supports_all_enabled_source_proofs():
         assert actor_id in text
 
 
+def test_run_apify_actor_workflow_supports_bounded_bidspotter_supply_proof():
+    text = WORKFLOW.read_text()
+
+    assert "ds-bidspotter" in text
+    assert "5Eu3hfCcBBdzp6I1u" in text
+    assert "FIRECRAWL_API_KEY" in text
+    assert "BIDSPOTTER_MAX_CATALOGUES" in text
+    assert "BIDSPOTTER_MAX_PAGES" in text
+    assert '"maxCatalogues": int(os.environ.get("BIDSPOTTER_MAX_CATALOGUES") or "2")' in text
+    assert '"maxPages": int(os.environ.get("BIDSPOTTER_MAX_PAGES") or "1")' in text
+    assert '"minYear": datetime.now(timezone.utc).year - 4' in text
+    assert '"maxMileage": 50000' in text
+
+
 def test_run_apify_actor_workflow_prints_usgovbid_zero_output_proof_fields():
     text = WORKFLOW.read_text()
 

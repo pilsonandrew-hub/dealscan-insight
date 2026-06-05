@@ -30,6 +30,15 @@
       "title": "Minimum Year",
       "type": "integer",
       "description": "Minimum vehicle model year",
+      "default": 2022,
+      "editor": "number"
+    },
+    "maxMileage": {
+      "title": "Maximum Mileage",
+      "type": "integer",
+      "description": "Maximum accepted mileage",
+      "default": 50000,
+      "minimum": 0,
       "editor": "number"
     },
     "targetStates": {

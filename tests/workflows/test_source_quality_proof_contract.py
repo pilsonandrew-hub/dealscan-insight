@@ -93,6 +93,26 @@ def test_hibid_v2_actor_emits_zero_output_source_quality_proof():
     assert 'await Actor.pushData(proof)' in text
 
 
+def test_bidspotter_actor_is_safe_for_supply_reactivation():
+    text = Path('apify/actors/ds-bidspotter/src/main.js').read_text()
+
+    assert "record_type: 'source_quality_proof'" in text
+    assert 'found_rows_total: totalFound' in text
+    assert 'prefilter_passed_rows_total: totalPassed' in text
+    assert 'pushed_rows_total: totalPassed' in text
+    assert 'rows_excluded_age_mileage_prefilter' in text
+    assert 'rows_excluded_policy_prefilter' in text
+    assert 'rows_excluded_bid_range' in text
+    assert 'await Actor.pushData(proof)' in text
+    assert 'itemCount: totalPassed + 1' in text
+    assert 'CURRENT_YEAR - 4' in text
+    assert 'DEFAULT_MAX_MILEAGE = 50000' in text
+    assert 'MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE' in text
+    assert "webhookSecret = process.env.WEBHOOK_SECRET" in text
+    assert "webhookSecret = '" not in text
+    assert 'CURRENT_YEAR - 10' not in text
+
+
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     text = ACTOR.read_text()
     assert '!lot.rejected_after_detail' in text

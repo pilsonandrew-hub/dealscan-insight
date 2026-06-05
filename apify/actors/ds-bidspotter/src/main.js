@@ -16,6 +16,7 @@ import { Actor } from 'apify';
 
 const SOURCE = 'bidspotter';
 const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_MAX_MILEAGE = 50000;
 
 // ── State sets ──────────────────────────────────────────────────────────────
 
@@ -316,10 +317,13 @@ const input = await Actor.getInput() ?? {};
 const {
     firecrawlApiKey = process.env.FIRECRAWL_API_KEY,
     webhookUrl = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify',
-    webhookSecret = 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA',
     maxCatalogues = 30,
+    maxMileage = DEFAULT_MAX_MILEAGE,
+    minYear = CURRENT_YEAR - 4,
+    targetStates = [...TARGET_STATES],
     categoryCode = 'Automobiles',
 } = input;
+const webhookSecret = process.env.WEBHOOK_SECRET || input.webhookSecret || '';
 
 if (!firecrawlApiKey) {
     console.error('[BS] FIRECRAWL_API_KEY is required (via input or env)');
@@ -328,9 +332,54 @@ if (!firecrawlApiKey) {
 
 const MIN_BID = 500;
 const MAX_BID = 75000;
-const MIN_YEAR = CURRENT_YEAR - 10;
+const MIN_YEAR = Number(minYear) || CURRENT_YEAR - 4;
+const MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE;
+const targetStateSet = new Set(Array.isArray(targetStates) && targetStates.length ? targetStates : [...TARGET_STATES]);
 
 let totalFound = 0, totalPassed = 0;
+const proofCounters = {
+    rows_excluded_search_filter: 0,
+    rows_excluded_non_vehicle: 0,
+    rows_excluded_missing_required_data: 0,
+    rows_excluded_age_mileage_prefilter: 0,
+    rows_excluded_policy_prefilter: 0,
+    rows_excluded_rust_state: 0,
+    rows_excluded_bid_range: 0,
+    rows_excluded_zero_pricing_signal: 0,
+};
+const proofSamples = {
+    search_filter_rejected_samples: [],
+    non_vehicle_rejected_samples: [],
+    missing_required_data_rejected_samples: [],
+    prefilter_age_mileage_rejected_samples: [],
+    prefilter_policy_rejected_samples: [],
+    rust_state_rejected_samples: [],
+    bid_range_rejected_samples: [],
+    zero_pricing_rejected_samples: [],
+};
+
+function sampleForProof(lot, details, extra = {}) {
+    const { year, make, model } = parseVehicleTitle(lot.title);
+    return {
+        title: String(lot.title || '').slice(0, 120),
+        year,
+        make,
+        model,
+        state: details?.state || null,
+        mileage: details?.mileage ?? null,
+        current_bid: details?.currentBid ?? null,
+        listing_url: lot.url || null,
+        ...extra,
+    };
+}
+
+function rejectForProof(counterKey, sampleKey, lot, details, reason, extra = {}) {
+    proofCounters[counterKey] += 1;
+    const samples = proofSamples[sampleKey];
+    if (samples && samples.length < 5) {
+        samples.push(sampleForProof(lot, details, { reason, ...extra }));
+    }
+}
 
 // ── STEP 1: Find vehicle catalogues from Automobiles category page ──────────
 // Fetch the category page once, parse catalogue links WITH titles, keep only
@@ -410,31 +459,116 @@ for (let i = 0; i < toProcess.length; i++) {
         const hasMake = Boolean(make);
         if (!hasMake && !hasVIN && !hasMileage) {
             console.log(`[SKIP] No make/VIN/mileage: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_missing_required_data',
+                'missing_required_data_rejected_samples',
+                lot,
+                details,
+                'missing_make_vin_or_mileage_signal',
+            );
             continue;
         }
         if (CONDITION_REJECT_PATTERNS.some(p => p.test(lower))) {
             console.log(`[SKIP] Condition: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_policy_prefilter',
+                'prefilter_policy_rejected_samples',
+                lot,
+                details,
+                'condition_reject',
+            );
             continue;
         }
-        if (EXCLUDED_PATTERN.test(lower)) continue;
-        if (details.state && CANADIAN_PROVINCES.has(details.state)) continue;
-        if (details.state && !TARGET_STATES.has(details.state)) {
+        if (EXCLUDED_PATTERN.test(lower)) {
+            rejectForProof(
+                'rows_excluded_non_vehicle',
+                'non_vehicle_rejected_samples',
+                lot,
+                details,
+                'non_passenger_vehicle',
+            );
+            continue;
+        }
+        if (details.state && CANADIAN_PROVINCES.has(details.state)) {
+            rejectForProof(
+                'rows_excluded_search_filter',
+                'search_filter_rejected_samples',
+                lot,
+                details,
+                'non_us_inventory',
+            );
+            continue;
+        }
+        if (details.state && !targetStateSet.has(details.state)) {
             console.log(`[SKIP] State ${details.state}: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_search_filter',
+                'search_filter_rejected_samples',
+                lot,
+                details,
+                'target_state_reject',
+            );
             continue;
         }
         if (details.state && HIGH_RUST_STATES.has(details.state)) {
             if (!year || (CURRENT_YEAR - year) > 3) {
                 console.log(`[SKIP] Rust ${details.state}: ${lot.title.slice(0, 60)}`);
+                rejectForProof(
+                    'rows_excluded_rust_state',
+                    'rust_state_rejected_samples',
+                    lot,
+                    details,
+                    'rust_state_age_reject',
+                );
                 continue;
             }
             console.log(`[BYPASS] Rust ${details.state} allowed — ${year}`);
         }
         if (!year || year < MIN_YEAR) {
             console.log(`[SKIP] Year ${year}: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_age_mileage_prefilter',
+                'prefilter_age_mileage_rejected_samples',
+                lot,
+                details,
+                'model_year_reject',
+                { min_year: MIN_YEAR },
+            );
             continue;
         }
-        if (details.currentBid != null && (details.currentBid < MIN_BID || details.currentBid > MAX_BID)) {
+        if (details.mileage != null && Number(details.mileage) > MAX_MILEAGE) {
+            console.log(`[SKIP] Mileage ${details.mileage}: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_age_mileage_prefilter',
+                'prefilter_age_mileage_rejected_samples',
+                lot,
+                details,
+                'mileage_reject',
+                { max_mileage: MAX_MILEAGE },
+            );
+            continue;
+        }
+        if (details.currentBid == null) {
+            console.log(`[SKIP] No bid signal: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_zero_pricing_signal',
+                'zero_pricing_rejected_samples',
+                lot,
+                details,
+                'missing_current_bid',
+            );
+            continue;
+        }
+        if (details.currentBid < MIN_BID || details.currentBid > MAX_BID) {
             console.log(`[SKIP] Bid $${details.currentBid}: ${lot.title.slice(0, 60)}`);
+            rejectForProof(
+                'rows_excluded_bid_range',
+                'bid_range_rejected_samples',
+                lot,
+                details,
+                'bid_out_of_range',
+                { min_bid: MIN_BID, max_bid: MAX_BID },
+            );
             continue;
         }
 
@@ -469,9 +603,28 @@ for (let i = 0; i < toProcess.length; i++) {
 
 console.log(`[BS COMPLETE] Found: ${totalFound} | Passed: ${totalPassed}`);
 
-if (totalPassed > 0) {
+const env = Actor.getEnv();
+const proof = {
+    record_type: 'source_quality_proof',
+    source: SOURCE,
+    source_site: SOURCE,
+    actor_run_id: env.actorRunId || null,
+    run_id: env.actorRunId || null,
+    actor_id: env.actorId || null,
+    found_rows_total: totalFound,
+    prefilter_passed_rows_total: totalPassed,
+    pushed_rows_total: totalPassed,
+    max_catalogues: maxCatalogues,
+    min_year: MIN_YEAR,
+    max_mileage: MAX_MILEAGE,
+    ...proofCounters,
+    ...proofSamples,
+    scraped_at: new Date().toISOString(),
+};
+await Actor.pushData(proof);
+
+if (webhookSecret) {
     try {
-        const env = Actor.getEnv();
         const res = await fetch(webhookUrl, {
             method: 'POST',
             headers: {
@@ -483,13 +636,15 @@ if (totalPassed > 0) {
                 runId: env.actorRunId,
                 actorId: env.actorId,
                 datasetId: env.defaultDatasetId,
-                itemCount: totalPassed,
+                itemCount: totalPassed + 1,
             }),
         });
         console.log(`[BS] Webhook → ${res.status}`);
     } catch (err) {
         console.warn(`[BS] Webhook failed: ${err.message}`);
     }
+} else {
+    console.warn('[BS] WEBHOOK_SECRET missing; proof row was pushed to dataset but not delivered to webhook');
 }
 
 await Actor.exit();
