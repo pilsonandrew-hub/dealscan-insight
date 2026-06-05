@@ -133,8 +133,10 @@ def _dominance_threshold(row_count: int, ratio: float) -> int:
 
 
 def classify_source_summary(summary: dict[str, Any]) -> str:
-    if int(summary.get("opportunity_rows") or 0) > 0:
+    if int(summary.get("active_opportunity_rows") or 0) > 0:
         return "accepted_flow_present"
+    if int(summary.get("opportunity_rows") or 0) > 0:
+        return "inactive_accepted_flow_only"
     if int(summary.get("webhook_processed_rows") or 0) > 0 and int(summary.get("delivery_rows") or 0) == 0:
         if int(summary.get("webhook_item_count_total") or 0) == 0:
             return "source_empty_result"
@@ -165,8 +167,10 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
 
 
 def classify_run_summary(summary: dict[str, Any]) -> str:
-    if int(summary.get("opportunity_rows") or 0) > 0:
+    if int(summary.get("active_opportunity_rows") or 0) > 0:
         return "accepted_flow_present"
+    if int(summary.get("opportunity_rows") or 0) > 0:
+        return "inactive_accepted_flow_only"
     if int(summary.get("webhook_processed_rows") or 0) > 0 and int(summary.get("delivery_rows") or 0) == 0:
         if int(summary.get("webhook_item_count_total") or 0) == 0:
             return "source_empty_result"
@@ -556,11 +560,14 @@ def build_source_yield_report(
 
     classification_counts = Counter(str(item["classification"]) for item in summaries)
     total_recent_opportunities = sum(int(item["opportunity_rows"]) for item in summaries)
+    total_active_opportunities = sum(int(item["active_opportunity_rows"]) for item in summaries)
     diagnostic_gap = any(item["classification"] == "webhook_without_delivery_gap" for item in summaries)
     if diagnostic_gap:
         overall = "diagnostic_gap"
-    elif total_recent_opportunities > 0:
+    elif total_active_opportunities > 0:
         overall = "accepted_flow_present"
+    elif total_recent_opportunities > 0:
+        overall = "inactive_accepted_flow_only"
     elif summaries:
         overall = "no_recent_accepted_source_yield"
     else:
