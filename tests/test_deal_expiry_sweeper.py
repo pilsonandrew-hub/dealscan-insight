@@ -24,6 +24,7 @@ class _Query:
 
     def select(self, *_args, **_kwargs):
         self.mode = "select"
+        self.client.selects.append({"table": self.table_name, "select": _args[0] if _args else ""})
         return self
 
     def order(self, *_args, **_kwargs):
@@ -103,6 +104,7 @@ class _Query:
 class _Client:
     def __init__(self, select_rows):
         self.select_rows = select_rows
+        self.selects = []
         self.updates = []
         self.upserts = []
         self.operations = []
@@ -277,6 +279,30 @@ def test_sweeper_archives_active_high_dos_rows_missing_source_condition_evidence
         "ids": ["missing-condition-evidence-1", "missing-condition-evidence-2"],
         "filters": [("in", "id", ("missing-condition-evidence-1", "missing-condition-evidence-2"))],
     } in client.updates
+
+
+def test_sweeper_condition_evidence_query_uses_live_opportunity_columns_only():
+    now = datetime(2026, 6, 5, 10, 15, tzinfo=timezone.utc)
+    client = _Client({})
+
+    deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True, dry_run=True)
+
+    condition_selects = [
+        item["select"]
+        for item in client.selects
+        if "condition_grade" in item["select"] and "raw_data" in item["select"]
+    ]
+    assert condition_selects
+    for select in condition_selects:
+        columns = {column.strip() for column in select.split(",")}
+        assert "condition" not in columns
+        assert "description" not in columns
+        assert "details" not in columns
+        assert "condition_notes" not in columns
+        assert "detail_text" not in columns
+        assert "assetLongDesc" not in columns
+        assert "damage_type" not in columns
+        assert "damage" not in columns
 
 
 def test_sweeper_refers_expired_deals_for_post_close_outcome_check_without_creating_comp_candidates():
