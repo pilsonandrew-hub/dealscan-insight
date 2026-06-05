@@ -49,6 +49,8 @@ const NAVIGATION_BUDGET_REQUIRED_MS = 90000;
 const PAGINATION_PAGE_REQUIRED_MS = 12000;
 const DETAIL_PAGE_REQUIRED_MS = 12000;
 const DETAIL_PAGE_TIMEOUT_MS = 12000;
+const MAX_MODEL_AGE_YEARS = 4;
+const MAX_MILEAGE = 50000;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -121,12 +123,14 @@ const sourceQualityStats = {
     rows_excluded_missing_required_data: 0,
     rows_excluded_missing_vin: 0,
     rows_excluded_missing_mileage: 0,
+    rows_excluded_age_mileage_after_detail: 0,
     rows_excluded_policy_after_detail: 0,
     rows_excluded_after_detail_attempt: 0,
     rows_excluded_without_detail_attempt: 0,
     rows_excluded_unaccounted_after_prefilter: 0,
     excluded_after_detail_attempt_samples: [],
     excluded_without_detail_attempt_samples: [],
+    post_age_mileage_rejected_samples: [],
     post_policy_rejected_samples: [],
 };
 const capturedApi = {
@@ -175,16 +179,28 @@ function passes(item) {
     const state = (item.locationState || item.state || '').toUpperCase();
     const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;
+    if (failsAgeMileageCeiling(item)) return false;
     const year = parseInt(item.modelYear || item.year || 0);
     const currentYear = new Date().getFullYear();
-    if (year && (currentYear - year) > 10) return false;
-    const mileage = parseInt(item.meterCount || item.meter_count || 0);
-    if (mileage > 0 && mileage > 100000) return false;
     if (HIGH_RUST_STATES.has(state)) {
         if (!(year && year >= currentYear - 2)) return false;
         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
     }
     return true;
+}
+
+function parseMileageValue(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    const mileage = parseInt(String(value).replace(/,/g, ''), 10);
+    return Number.isNaN(mileage) ? 0 : mileage;
+}
+
+function failsAgeMileageCeiling(item) {
+    const year = parseInt(item.modelYear || item.year || 0, 10);
+    const currentYear = new Date().getFullYear();
+    if (year && (currentYear - year) > MAX_MODEL_AGE_YEARS) return true;
+    const mileage = parseMileageValue(item.meterCount ?? item.meter_count ?? item.mileage ?? 0);
+    return mileage > 0 && mileage > MAX_MILEAGE;
 }
 
 /**
@@ -379,19 +395,23 @@ const crawler = new PlaywrightCrawler({
             // Step 3: Detail enrichment for VIN/mileage before pushing lots.
             await enrichFromDetailPages(page, passingLots, log, runtimeBudget);
 
-            const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && passes(lot));
+            const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));
+            const pushableLots = completeLots.filter(lot => passes(lot));
             const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);
-            const postPolicyRejectedLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && !passes(lot));
+            const postAgeMileageRejectedLots = completeLots.filter(lot => failsAgeMileageCeiling(lot));
+            const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !passes(lot));
             const excludedAfterDetailAttempt = incompleteLots.filter(lot => sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             const excludedWithoutDetailAttempt = incompleteLots.filter(lot => !sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             sourceQualityStats.rows_excluded_missing_required_data = incompleteLots.length;
             sourceQualityStats.rows_excluded_missing_vin = incompleteLots.filter(lot => !lot.vin).length;
             sourceQualityStats.rows_excluded_missing_mileage = incompleteLots.filter(lot => !lot.mileage).length;
+            sourceQualityStats.rows_excluded_age_mileage_after_detail = postAgeMileageRejectedLots.length;
             sourceQualityStats.rows_excluded_policy_after_detail = postPolicyRejectedLots.length;
             sourceQualityStats.rows_excluded_after_detail_attempt = excludedAfterDetailAttempt.length;
             sourceQualityStats.rows_excluded_without_detail_attempt = excludedWithoutDetailAttempt.length;
             sourceQualityStats.excluded_after_detail_attempt_samples = sampleExcludedLots(excludedAfterDetailAttempt);
             sourceQualityStats.excluded_without_detail_attempt_samples = sampleExcludedLots(excludedWithoutDetailAttempt);
+            sourceQualityStats.post_age_mileage_rejected_samples = sampleExcludedLots(postAgeMileageRejectedLots);
             sourceQualityStats.post_policy_rejected_samples = sampleExcludedLots(postPolicyRejectedLots);
             for (const lot of incompleteLots) {
                 const reasons = [
@@ -667,6 +687,7 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
     const accountedRows = (
         pushedLots.length
         + sourceQualityStats.rows_excluded_missing_required_data
+        + sourceQualityStats.rows_excluded_age_mileage_after_detail
         + sourceQualityStats.rows_excluded_policy_after_detail
     );
     sourceQualityStats.rows_excluded_unaccounted_after_prefilter = Math.max(0, totalPassed - accountedRows);
@@ -684,12 +705,14 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_missing_required_data: sourceQualityStats.rows_excluded_missing_required_data,
         rows_excluded_missing_vin: sourceQualityStats.rows_excluded_missing_vin,
         rows_excluded_missing_mileage: sourceQualityStats.rows_excluded_missing_mileage,
+        rows_excluded_age_mileage_after_detail: sourceQualityStats.rows_excluded_age_mileage_after_detail,
         rows_excluded_policy_after_detail: sourceQualityStats.rows_excluded_policy_after_detail,
         rows_excluded_after_detail_attempt: sourceQualityStats.rows_excluded_after_detail_attempt,
         rows_excluded_without_detail_attempt: sourceQualityStats.rows_excluded_without_detail_attempt,
         rows_excluded_unaccounted_after_prefilter: sourceQualityStats.rows_excluded_unaccounted_after_prefilter,
         excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples,
         excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples,
+        post_age_mileage_rejected_samples: sourceQualityStats.post_age_mileage_rejected_samples,
         post_policy_rejected_samples: sourceQualityStats.post_policy_rejected_samples,
         detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
         detail_pages_fetched: sourceQualityStats.detail_pages_fetched,

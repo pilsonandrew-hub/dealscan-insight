@@ -61,9 +61,27 @@ describe('ds-govdeals source quality proof contract', () => {
 
   test('reruns source-policy rejects after detail enrichment before pushing rows', () => {
     expect(source).toContain('item.detail_text');
-    expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && passes(lot));');
-    expect(source).toContain('const postPolicyRejectedLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && !passes(lot));');
+    expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
+    expect(source).toContain('const pushableLots = completeLots.filter(lot => passes(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !passes(lot));');
     expect(source).toContain('rows_excluded_policy_after_detail');
+  });
+
+  test('enforces governed backend age and mileage ceilings before pushing rows', () => {
+    expect(source).toContain('const MAX_MODEL_AGE_YEARS = 4;');
+    expect(source).toContain('const MAX_MILEAGE = 50000;');
+    expect(source).toContain('function failsAgeMileageCeiling(item)');
+    expect(source).toContain('if (failsAgeMileageCeiling(item)) return false;');
+    expect(source).not.toContain('(currentYear - year) > 10');
+    expect(source).not.toContain('mileage > 100000');
+  });
+
+  test('separates detail-enriched age/mileage rejects from generic policy rejects', () => {
+    expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
+    expect(source).toContain('const postAgeMileageRejectedLots = completeLots.filter(lot => failsAgeMileageCeiling(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !passes(lot));');
+    expect(source).toContain('rows_excluded_age_mileage_after_detail');
+    expect(source).toContain('post_age_mileage_rejected_samples');
   });
 
   test('rejects commercial-heavy vehicle families before pushing rows', () => {
@@ -79,7 +97,8 @@ describe('ds-govdeals source quality proof contract', () => {
   });
 
   test('keeps detail-enriched rows missing required data out of pushed opportunities', () => {
-    expect(source).toContain('const pushableLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage) && passes(lot));');
+    expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
+    expect(source).toContain('const pushableLots = completeLots.filter(lot => passes(lot));');
     expect(source).toContain('const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);');
     expect(source).toContain('rows_excluded_missing_required_data');
     expect(source).toContain('rows_excluded_missing_vin');
