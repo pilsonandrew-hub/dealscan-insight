@@ -170,3 +170,17 @@ def test_send_telegram_alert_records_delivery_skip_when_telegram_config_missing(
             "error_message": "missing_telegram_chat_id",
         }
     ]
+
+
+def test_duplicate_existing_opportunity_re_enters_alert_pipeline_when_no_alert_delivery(monkeypatch):
+    ingest = _ingest_module(monkeypatch)
+    monkeypatch.setattr(ingest, "_alert_delivery_exists_for_opportunity", lambda opportunity_id: False)
+
+    assert ingest._should_evaluate_alert_delivery("duplicate_existing", True, "opp-issue-5") is True
+
+
+def test_duplicate_existing_opportunity_does_not_realert_when_delivery_exists(monkeypatch):
+    ingest = _ingest_module(monkeypatch)
+    monkeypatch.setattr(ingest, "_alert_delivery_exists_for_opportunity", lambda opportunity_id: True)
+
+    assert ingest._should_evaluate_alert_delivery("duplicate_existing", True, "opp-issue-5") is False

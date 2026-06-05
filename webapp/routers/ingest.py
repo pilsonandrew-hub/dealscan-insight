@@ -164,6 +164,57 @@ alerts_this_run_ts: dict[str, float] = {}
 def _alert_thresholds():
     return build_alert_thresholds(os.environ, log=logger)
 
+
+def _alert_delivery_exists_for_opportunity(opportunity_id: Optional[str]) -> bool:
+    """Return True when a prior sent alert receipt exists for an opportunity."""
+    if not opportunity_id or supabase_client is None:
+        return False
+    try:
+        alert_log_result = (
+            supabase_client.table("alert_log")
+            .select("id")
+            .eq("opportunity_id", opportunity_id)
+            .limit(1)
+            .execute()
+        )
+        if alert_log_result.data:
+            return True
+    except Exception as exc:
+        logger.warning("[ALERT_RECOVERY] alert_log lookup failed for opportunity_id=%s: %s", opportunity_id, exc)
+    try:
+        delivery_result = (
+            supabase_client.table("ingest_delivery_log")
+            .select("id,status")
+            .eq("opportunity_id", opportunity_id)
+            .eq("channel", "telegram_alert")
+            .limit(10)
+            .execute()
+        )
+        return any((row.get("status") == "sent") for row in (delivery_result.data or []))
+    except Exception as exc:
+        logger.warning("[ALERT_RECOVERY] delivery lookup failed for opportunity_id=%s: %s", opportunity_id, exc)
+    return False
+
+
+def _should_evaluate_alert_delivery(
+    save_status: str,
+    is_existing_listing: bool,
+    opportunity_id: Optional[str],
+) -> bool:
+    inserted_statuses = {"saved_supabase", "saved_direct_pg"}
+    existing_statuses = {
+        "duplicate_existing",
+        "duplicate_pricing_refreshed",
+        "vin_dedup_skipped",
+        "vin_dedup_updated",
+        "vin_dedup_pricing_refreshed",
+    }
+    if save_status in inserted_statuses and not is_existing_listing:
+        return True
+    if save_status in existing_statuses and is_existing_listing and opportunity_id:
+        return not _alert_delivery_exists_for_opportunity(opportunity_id)
+    return False
+
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
 WEBHOOK_SECRET_PREVIOUS = os.getenv("APIFY_WEBHOOK_SECRET_PREVIOUS", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -1204,7 +1255,7 @@ async def _process_webhook_items(
                 + f" | save={save_status}"
             )
 
-            if not is_existing_listing and save_status in {"saved_supabase", "saved_direct_pg"}:
+            if _should_evaluate_alert_delivery(save_status, is_existing_listing, saved_opportunity_id):
                 alert_gate = _alert_gate_for_vehicle(vehicle)
                 if alert_gate.get("eligible"):
                     logger.info(
