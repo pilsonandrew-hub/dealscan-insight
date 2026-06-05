@@ -65,7 +65,7 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["webhookId"], "N699FBbtfzjjhHshJ")
         self.assertEqual(actor["status"], "enabled")
         self.assertEqual(actor["scheduleId"], "JFLFznTEe1kLYXM34")
-        self.assertEqual(actor["schedule"], "45 10,22 * * *")
+        self.assertEqual(actor["schedule"], "5 11,23 * * *")
         self.assertEqual(actor["scheduleName"], "ds-bidspotter-12hr-apify-native")
         self.assertEqual(actor["scheduleStatus"], "enabled_live")
         self.assertIn("ds-bidspotter-12hr-apify-native", workflow)
