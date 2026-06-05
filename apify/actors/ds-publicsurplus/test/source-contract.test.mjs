@@ -51,6 +51,13 @@ describe('ds-publicsurplus source contract', () => {
       .toBeLessThan(detailHandler.indexOf('await Actor.pushData(vehicle);'));
   });
 
+  test('source policy rejects backend title-brand damage and as-is warranty phrases', () => {
+    expect(source).toContain('/\\bfront[\\s-]+end[\\s-]+damage\\b/i');
+    expect(source).toContain('/\\brear[\\s-]+end[\\s-]+damage\\b/i');
+    expect(source).toContain('/\\bside[\\s-]+damage\\b/i');
+    expect(source).toContain('/\\bas[\\s-]?is\\b.*\\bno\\s+warrant|\\bno\\s+warrant.*\\bas[\\s-]?is\\b/i');
+  });
+
   test('uses actual published row count for webhook itemCount', () => {
     expect(source).toContain('let totalPushed = 0;');
     expect(source).toContain('totalPushed++;');
