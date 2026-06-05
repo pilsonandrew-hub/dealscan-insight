@@ -53,6 +53,21 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["scheduleStatus"], "enabled_live")
         self.assertRegex(workflow, r'"ds-equipmentfacts":\s+"0XjoegYZVcPldLstl"')
 
+    def test_bidspotter_actor_is_enabled_on_github_actions_schedule(self):
+        manifest_path = self.repo_root / "apify" / "deployment.json"
+        workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        actor = payload["actors"].get("ds-bidspotter")
+        self.assertIsNotNone(actor)
+        self.assertEqual(actor["id"], "5Eu3hfCcBBdzp6I1u")
+        self.assertEqual(actor["webhookId"], "N699FBbtfzjjhHshJ")
+        self.assertEqual(actor["status"], "enabled")
+        self.assertEqual(actor["scheduleStatus"], "github_actions_enabled")
+        self.assertIn("17 */12 * * *", workflow)
+        self.assertIn("github.event_name == 'schedule' && 'ds-bidspotter' || inputs.actor", workflow)
+
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
         workflow = workflow_path.read_text(encoding="utf-8")
