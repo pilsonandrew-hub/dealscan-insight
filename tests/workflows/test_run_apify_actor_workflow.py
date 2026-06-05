@@ -33,6 +33,11 @@ def test_run_apify_actor_workflow_supports_manual_jjkane_proof():
     assert "lvb7T6VMFfNUQpqlq" in text
     assert "JJ_KANE_MAX_ITEMS" in text
     assert '"maxItems": int(os.environ.get("JJ_KANE_MAX_ITEMS") or "75")' in text
+    assert "rows_excluded_policy_prefilter" in text
+    assert "rows_excluded_bid_range" in text
+    assert "rows_excluded_zero_pricing_signal" in text
+    assert "prefilter_policy_rejected_samples" in text
+    assert "zero_pricing_rejected_samples" in text
 
 
 def test_run_apify_actor_workflow_supports_all_enabled_source_proofs():

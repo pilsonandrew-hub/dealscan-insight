@@ -41,6 +41,8 @@ if (!MARKETCHECK_KEY) {
 
 // Auction-to-retail discount factor (government surplus clears at 60-75% retail)
 const AUCTION_DISCOUNT = 0.70;
+const DEFAULT_MAX_YEAR_AGE = 4;
+const MAX_ALLOWED_MILEAGE = 50000;
 
 // Vehicle categories we want
 const VEHICLE_CATEGORIES = [
@@ -162,6 +164,15 @@ function median(arr) {
 function hasConditionReject(text) {
     const lower = normalizeText(text).toLowerCase();
     return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower));
+}
+
+function incrementCount(map, key) {
+    map[key] = (map[key] || 0) + 1;
+}
+
+function addSample(samples, sample, limit = 5) {
+    if (samples.length >= limit) return;
+    samples.push(sample);
 }
 
 // ── Marketcheck API ───────────────────────────────────────────────────────────
@@ -311,7 +322,7 @@ const {
     searchQuery = '',
     minBid = 0,
     maxBid = 75000,
-    maxYearAge = 10,
+    maxYearAge = DEFAULT_MAX_YEAR_AGE,
     maxItemsPerState = 500,
     enableMarketcheck = Boolean(MARKETCHECK_KEY),
     webhookUrl = null,
@@ -321,7 +332,18 @@ const {
 const currentYear = new Date().getFullYear();
 let totalFound = 0;
 let totalPassed = 0;
+let totalPushed = 0;
 let totalMarketcheck = 0;
+let rowsExcludedMissingRequiredData = 0;
+let rowsExcludedAgeMileagePrefilter = 0;
+let rowsExcludedPolicyPrefilter = 0;
+let rowsExcludedRustState = 0;
+let rowsExcludedBidRange = 0;
+let rowsExcludedZeroPricingSignal = 0;
+const rejectionReasons = {};
+const prefilterAgeMileageRejectedSamples = [];
+const prefilterPolicyRejectedSamples = [];
+const zeroPricingRejectedSamples = [];
 
 // Build Algolia filter for vehicle categories
 const categoryFilter = `(${VEHICLE_CATEGORIES.map(c => `category:"${c}"`).join(' OR ')})`;
@@ -370,19 +392,51 @@ for (const state of targetStates) {
                     normalizeText(hit.shortDescription || ''),
                 ].filter(Boolean).join(' ');
                 const vin = normalizeText(hit.vin || extractVin(conditionText) || '');
+                const sample = {
+                    title: title || `${year || ''} ${make} ${model}`.trim(),
+                    year,
+                    odometer,
+                    state: state_code,
+                    listing_url: itemId ? buildListingUrl(itemId) : null,
+                };
 
                 // ── Filters ──────────────────────────────────────────────────
-                if (hasConditionReject(conditionText)) continue;
+                if (!itemId || !title || !make || !model || !year) {
+                    rowsExcludedMissingRequiredData++;
+                    incrementCount(rejectionReasons, 'missing_required_data');
+                    continue;
+                }
+
+                if (hasConditionReject(conditionText)) {
+                    rowsExcludedPolicyPrefilter++;
+                    incrementCount(rejectionReasons, 'condition_reject_prefilter');
+                    addSample(prefilterPolicyRejectedSamples, sample);
+                    continue;
+                }
                 // Rust state — bypass for ≤2yr old
                 if (HIGH_RUST_STATES.has(state_code)) {
-                    if (!(year && year >= currentYear - 2)) continue;
+                    if (!(year && year >= currentYear - 2)) {
+                        rowsExcludedRustState++;
+                        incrementCount(rejectionReasons, 'rust_state_reject');
+                        continue;
+                    }
                     console.log(`[BYPASS] Rust ${state_code} — year ${year}`);
                 }
 
                 // Year age
-                if (!year || (currentYear - year) > maxYearAge) continue;
+                if ((currentYear - year) > maxYearAge) {
+                    rowsExcludedAgeMileagePrefilter++;
+                    incrementCount(rejectionReasons, 'age_over_limit_prefilter');
+                    addSample(prefilterAgeMileageRejectedSamples, sample);
+                    continue;
+                }
 
-                if (odometer !== null && odometer > 100000) continue;
+                if (odometer !== null && odometer > MAX_ALLOWED_MILEAGE) {
+                    rowsExcludedAgeMileagePrefilter++;
+                    incrementCount(rejectionReasons, 'mileage_over_50k_prefilter');
+                    addSample(prefilterAgeMileageRejectedSamples, sample);
+                    continue;
+                }
 
                 // ── Marketcheck pricing ───────────────────────────────────────
                 let marketcheckMedian = null;
@@ -411,6 +465,9 @@ for (const state of targetStates) {
                 // Skip only when both pricing signals are missing.
                 if (effectiveBid === 0) {
                     console.log(`[SKIP-ZERO-BID] ${title || `${year} ${make} ${model}`} | estimatedAuctionPrice=$${estimatedAuctionPrice} currentBid=$${currentBid}`);
+                    rowsExcludedZeroPricingSignal++;
+                    incrementCount(rejectionReasons, 'zero_pricing_signal');
+                    addSample(zeroPricingRejectedSamples, sample);
                     continue;
                 }
 
@@ -419,8 +476,16 @@ for (const state of targetStates) {
                 }
 
                 // Bid range filter (only applies if we have a real bid or estimate)
-                if (effectiveBid > 0 && effectiveBid > maxBid) continue;
-                if (effectiveBid > 0 && effectiveBid < minBid && currentBid > 0) continue;
+                if (effectiveBid > 0 && effectiveBid > maxBid) {
+                    rowsExcludedBidRange++;
+                    incrementCount(rejectionReasons, 'bid_above_max');
+                    continue;
+                }
+                if (effectiveBid > 0 && effectiveBid < minBid && currentBid > 0) {
+                    rowsExcludedBidRange++;
+                    incrementCount(rejectionReasons, 'bid_below_min');
+                    continue;
+                }
 
                 const record = {
                     listing_id: `jjkane-${itemId}`,
@@ -454,13 +519,14 @@ for (const state of targetStates) {
                     scraped_at: new Date().toISOString(),
                 };
 
-                statePassed++;
-                totalPassed++;
-                if (statePassed > maxItemsPerState) {
+                if (statePassed >= maxItemsPerState) {
                     console.log(`[JJKANE] ${state}: maxItemsPerState (${maxItemsPerState}) reached, stopping`);
                     break;
                 }
                 await Actor.pushData(record);
+                statePassed++;
+                totalPassed++;
+                totalPushed++;
                 console.log(`[PASS] ${title || `${year} ${make} ${model}`} | bid=$${effectiveBid} mmr=$${marketcheckMedian ?? 'N/A'} | ${state_code}`);
             }
         }
@@ -474,14 +540,42 @@ for (const state of targetStates) {
     await new Promise(r => setTimeout(r, 500));
 }
 
+const proofRecord = {
+    record_type: 'source_quality_proof',
+    source: 'jjkane',
+    source_site: SOURCE,
+    generated_at: new Date().toISOString(),
+    found_rows_total: totalFound,
+    prefilter_passed_rows_total: totalPassed,
+    pushed_rows_total: totalPushed,
+    rows_excluded_missing_required_data: rowsExcludedMissingRequiredData,
+    rows_excluded_age_mileage_prefilter: rowsExcludedAgeMileagePrefilter,
+    rows_excluded_policy_prefilter: rowsExcludedPolicyPrefilter,
+    rows_excluded_rust_state: rowsExcludedRustState,
+    rows_excluded_bid_range: rowsExcludedBidRange,
+    rows_excluded_zero_pricing_signal: rowsExcludedZeroPricingSignal,
+    max_year_age: maxYearAge,
+    max_allowed_mileage: MAX_ALLOWED_MILEAGE,
+    target_states: targetStates,
+    search_query: searchQuery,
+    marketcheck_calls: marketcheckCallsThisRun,
+    marketcheck_priced_rows: totalMarketcheck,
+    rejection_reasons: rejectionReasons,
+    prefilter_age_mileage_rejected_samples: prefilterAgeMileageRejectedSamples,
+    prefilter_policy_rejected_samples: prefilterPolicyRejectedSamples,
+    zero_pricing_rejected_samples: zeroPricingRejectedSamples,
+};
+await Actor.pushData(proofRecord);
+
 // ── Webhook notification ──────────────────────────────────────────────────────
 
 const effectiveWebhookUrl = webhookUrl
     || process.env.WEBHOOK_URL
     || 'https://dealscan-insight-production.up.railway.app/api/ingest/apify';
 const effectiveWebhookSecret = webhookSecret || process.env.WEBHOOK_SECRET || '';
+const datasetItemCount = totalPushed + 1;
 
-if (effectiveWebhookUrl && totalPassed > 0) {
+if (effectiveWebhookUrl && datasetItemCount > 0) {
     try {
         const resp = await fetch(effectiveWebhookUrl, {
             method: 'POST',
@@ -494,7 +588,7 @@ if (effectiveWebhookUrl && totalPassed > 0) {
                 actorId: process.env.APIFY_ACT_ID ?? null,
                 actorRunId: process.env.APIFY_ACTOR_RUN_ID ?? 'local',
                 defaultDatasetId: process.env.APIFY_DEFAULT_DATASET_ID ?? null,
-                itemCount: totalPassed,
+                itemCount: datasetItemCount,
                 totalScraped: totalFound,
                 marketcheckPriced: totalMarketcheck,
                 timestamp: new Date().toISOString(),
