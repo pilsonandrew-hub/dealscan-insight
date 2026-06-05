@@ -641,13 +641,13 @@ def test_score_deal_uses_lane_specific_ceiling_and_margin_floor():
 
     assert standard["vehicle_tier"] == "standard"
     assert standard["bid_ceiling_pct"] == 0.8
-    assert standard["max_bid"] == 7450.0
+    assert standard["max_bid"] == 6561.11
     assert standard["min_margin_target"] == 2500.0
     assert standard["ceiling_pass"] is False
 
     assert premium["vehicle_tier"] == "premium"
     assert premium["bid_ceiling_pct"] == 0.88
-    assert premium["max_bid"] == 8250.0
+    assert premium["max_bid"] == 7272.22
     assert premium["min_margin_target"] == 1500.0
     assert premium["ceiling_pass"] is False
 
@@ -1052,6 +1052,32 @@ def test_score_deal_market_comp_pricing_can_remain_capital_ready_when_otherwise_
     assert result["investment_grade"] in {"Platinum", "Gold", "Silver", "Bronze"}
     assert result["investment_grade"] != "Rejected"
     assert result["pricing_trust_blocked"] is False
+
+
+def test_score_deal_uses_conservative_market_comp_wholesale_value_when_proxy_is_low():
+    result = score_deal(
+        bid=31000,
+        mmr_ca=22000,
+        state="NJ",
+        source_site="GovDeals",
+        model="Explorer",
+        make="Ford",
+        year=CURRENT_YEAR - 1,
+        mileage=1435,
+        title_status="clean",
+        description="clean low mileage sport utility vehicle",
+        photos=["https://example.com/photo.jpg"],
+        retail_comp_count=3,
+        retail_comp_price_estimate=41182.33,
+        retail_comp_confidence=0.69,
+        pricing_source="retail_market_cache",
+    )
+
+    assert result["pricing_maturity"] == "market_comp"
+    assert result["mmr_estimated"] == 30505.43
+    assert result["retail_asking_price_estimate"] == 41182.33
+    assert result["ceiling_reason"] == "bid_ceiling_exceeded"
+    assert result["investment_grade"] == "Rejected"
 
 
 def test_score_deal_rejects_explicit_poor_condition_even_with_market_comp_headroom():

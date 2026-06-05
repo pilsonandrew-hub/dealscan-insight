@@ -556,6 +556,21 @@ def _has_usable_retail_comp_evidence(count: Optional[int], confidence: Optional[
     return normalized_count >= RETAIL_COMP_MIN_EVIDENCE_COUNT and normalized_confidence >= RETAIL_COMP_MIN_CONFIDENCE
 
 
+def _retail_comp_wholesale_estimate(
+    retail_comp_price_estimate: Optional[float],
+    retail_comp_count: Optional[int],
+    retail_comp_confidence: Optional[float],
+) -> Optional[float]:
+    if not _has_usable_retail_comp_evidence(retail_comp_count, retail_comp_confidence):
+        return None
+    retail_value = _coerce_float(retail_comp_price_estimate)
+    if retail_value is None or retail_value <= 0:
+        return None
+    # Mirror the existing retail proxy multiplier in reverse so retail comps
+    # improve wholesale economics without treating asking price as MMR.
+    return round(retail_value / 1.35, 2)
+
+
 def _normalized_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
@@ -743,7 +758,12 @@ def score_deal(
     Primary DOS scoring function.
     Returns full scoring dict compatible with save_opportunity_to_supabase.
     """
-    mmr = manheim_mmr_mid or mmr_ca or 0
+    market_comp_wholesale_estimate = _retail_comp_wholesale_estimate(
+        retail_comp_price_estimate,
+        retail_comp_count,
+        retail_comp_confidence,
+    )
+    mmr = manheim_mmr_mid or market_comp_wholesale_estimate or mmr_ca or 0
     bid_value = _coerce_float(bid)
     vehicle_tier = determine_vehicle_tier(year, mileage)
 
