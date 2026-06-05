@@ -15,9 +15,12 @@ import psycopg2.extras
 from live_verification_support import get_database_url
 from report_pricing_blocked_source_candidates import (
     _fetch_postgrest_rows,
+    _is_pricing_blocked_skip,
     _normalize_supabase_rest_url,
     _parse_datetime,
     _positive_number,
+    _row_key,
+    parse_proxy_skip_reason,
     resolve_rest_config,
 )
 
@@ -258,6 +261,113 @@ def _opportunity_history_matches(row: dict[str, Any], history_rows: list[dict[st
     return matches, usable
 
 
+def _is_clean_active_delivery_skip(row: dict[str, Any], *, max_mileage: int, now: datetime) -> bool:
+    if not str(row.get("vin") or "").strip():
+        return False
+    try:
+        mileage = int(row.get("mileage") or 0)
+    except (TypeError, ValueError):
+        return False
+    if mileage <= 0 or mileage > max_mileage:
+        return False
+    auction_end = _parse_datetime(row.get("auction_end_date"))
+    return auction_end is not None and auction_end >= now
+
+
+def _fetch_delivery_pricing_skip_rows(
+    base_url: str,
+    service_role_key: str,
+    *,
+    lookback_days: int,
+    max_mileage: int,
+    limit: int,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    since = (now - timedelta(days=lookback_days)).isoformat()
+    listing_since = (now - timedelta(days=lookback_days + 30)).isoformat()
+
+    skip_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "ingest_delivery_log",
+        [
+            ("select", "run_id,listing_id,listing_url,status,error_message,created_at"),
+            ("created_at", f"gte.{since}"),
+            ("status", "in.(skipped_ceiling,skipped_margin)"),
+            ("order", "created_at.desc"),
+            ("limit", str(max(limit * 5, 100))),
+        ],
+    )
+    latest_skips: dict[str, dict[str, Any]] = {}
+    for skip in skip_rows:
+        if not _is_pricing_blocked_skip(skip):
+            continue
+        key = _row_key(skip)
+        if key and key not in latest_skips:
+            latest_skips[key] = skip
+    if not latest_skips:
+        return []
+
+    sonar_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "sonar_listings",
+        [
+            (
+                "select",
+                "source_site,year,make,model,state,mileage,vin,current_bid,auction_end_date,created_at,title,listing_id,listing_url",
+            ),
+            ("created_at", f"gte.{listing_since}"),
+            ("order", "created_at.desc"),
+            ("limit", str(max(limit * 20, 1000))),
+        ],
+    )
+    latest_listings: dict[str, dict[str, Any]] = {}
+    for listing in sonar_rows:
+        key = _row_key(listing)
+        if key and key in latest_skips and key not in latest_listings:
+            latest_listings[key] = listing
+
+    rows: list[dict[str, Any]] = []
+    for key, skip in latest_skips.items():
+        listing = latest_listings.get(key)
+        if not listing:
+            continue
+        if not _is_clean_active_delivery_skip(listing, max_mileage=max_mileage, now=now):
+            continue
+        parsed_reason = parse_proxy_skip_reason(skip.get("error_message"))
+        rows.append(
+            {
+                "id": f"delivery:{skip.get('run_id') or 'unknown'}:{key}",
+                "candidate_origin": "delivery_pricing_skip",
+                "source": listing.get("source_site"),
+                "source_site": listing.get("source_site"),
+                "title": listing.get("title"),
+                "year": listing.get("year"),
+                "make": _norm_text(listing.get("make")),
+                "model": _norm_text(listing.get("model")),
+                "state": _norm_text(listing.get("state")) or None,
+                "mileage": listing.get("mileage"),
+                "vin": listing.get("vin"),
+                "pricing_maturity": "proxy",
+                "pricing_source": "delivery_skip",
+                "is_active": True,
+                "dos_score": None,
+                "processed_at": skip.get("created_at"),
+                "bid_headroom": None,
+                "investment_grade": None,
+                "current_bid": listing.get("current_bid") or parsed_reason.get("bid"),
+                "expected_close_bid": listing.get("current_bid") or parsed_reason.get("bid"),
+                "acquisition_price_basis": "current_bid",
+                "projected_total_cost": parsed_reason.get("cost"),
+                "max_bid": parsed_reason.get("max_bid"),
+                "retail_asking_price_estimate": parsed_reason.get("mmr"),
+                "listing_url": listing.get("listing_url"),
+            }
+        )
+    return rows[:limit]
+
+
 def fetch_gap_rows_via_rest(
     supabase_url: str,
     service_role_key: str,
@@ -295,6 +405,15 @@ def fetch_gap_rows_via_rest(
         for row in recent_rows
         if (cleaned := _clean_proxy_row(row, max_mileage=max_mileage)) is not None
     ][:limit]
+    delivery_skip_rows = _fetch_delivery_pricing_skip_rows(
+        base_url,
+        service_role_key,
+        lookback_days=lookback_days,
+        max_mileage=max_mileage,
+        limit=limit,
+        now=current_time,
+    )
+    clean_proxy_rows = [*clean_proxy_rows, *delivery_skip_rows][:limit]
     if not clean_proxy_rows:
         return []
 

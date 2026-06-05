@@ -203,6 +203,8 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
             ]
         if table == "dealer_sales":
             return []
+        if table == "ingest_delivery_log":
+            return []
         raise AssertionError(table)
 
     monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
@@ -219,3 +221,63 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
     by_id = {row["id"]: row for row in rows}
     assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-covered-market"]) == "covered_by_market_prices"
     assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-seedable-history"]) == "seedable_from_internal_history"
+
+
+def test_fetch_gap_rows_via_rest_includes_active_delivery_pricing_skips(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        assert base_url == "https://example.supabase.co/rest/v1"
+        assert service_role_key == "service-key"
+        if table == "opportunities":
+            return []
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "source-run-1",
+                    "listing_id": "publicsurplus:auction-1",
+                    "listing_url": "https://example.test/auction-1",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy | bid=$8,300 mmr=$22,000 tier=premium",
+                    "created_at": "2026-06-05T06:25:44+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "source_site": "publicsurplus",
+                    "year": 2023,
+                    "make": "Toyota",
+                    "model": "Camry",
+                    "state": "VA",
+                    "mileage": 7812,
+                    "vin": "4T1C31AK9PU056835",
+                    "current_bid": 8300,
+                    "auction_end_date": "2026-06-05T12:00:00+00:00",
+                    "created_at": "2026-06-05T06:25:44+00:00",
+                    "title": "2023 Toyota Camry",
+                    "listing_id": "publicsurplus:auction-1",
+                    "listing_url": "https://example.test/auction-1",
+                }
+            ]
+        if table == "market_prices":
+            return []
+        if table == "dealer_sales":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        limit=20,
+        now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T07:00:00+00:00"),
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["candidate_origin"] == "delivery_pricing_skip"
+    assert row["source_site"] == "publicsurplus"
+    assert row["is_active"] is True
+    assert report_pricing_coverage_gaps.classify_gap(row) == "blocked_no_internal_comp_evidence"
