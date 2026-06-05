@@ -32,6 +32,8 @@ import { Actor } from 'apify';
 const SOURCE = 'hibid';
 const BASE_URL = 'https://hibid.com';
 const GRAPHQL_URL = `${BASE_URL}/graphql`;
+const DEFAULT_MIN_YEAR = new Date().getFullYear() - 4;
+const DEFAULT_MAX_MILEAGE = 50000;
 
 // --- Canadian province codes to reject ---
 const CANADIAN_PROVINCES = new Set([
@@ -105,8 +107,8 @@ const {
     pageLength = 50,        // lots per GraphQL page
     minBid = 500,
     maxBid = 75000,
-    minYear = new Date().getFullYear() - 4,
-    maxMileage = 50000,
+    minYear = DEFAULT_MIN_YEAR,
+    maxMileage = DEFAULT_MAX_MILEAGE,
     targetStates = [...TARGET_STATES],
     searchQuery = "",
     searchTerms = searchQuery
@@ -121,6 +123,8 @@ const {
     webhookSecret = null,
 } = input;
 
+const EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR);
+const EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE);
 const targetStateSet = new Set(targetStates.map(s => String(s).toUpperCase()));
 const seenLotIds = new Set();
 let totalFound = 0;
@@ -321,7 +325,7 @@ function passesFilters(listing, log) {
     }
 
     // Year
-    if (!listing.year || listing.year < minYear) {
+    if (!listing.year || listing.year < EFFECTIVE_MIN_YEAR) {
         log.debug(`[SKIP-YEAR] ${listing.year}`);
         proofCounters.rows_excluded_age_mileage_prefilter++;
         addProofSample('age_mileage_prefilter', listing, listing.year ? 'age_over_4_years' : 'missing_year');
@@ -335,7 +339,7 @@ function passesFilters(listing, log) {
         addProofSample('missing_mileage', listing, 'missing_mileage');
         return false;
     }
-    if (listing.mileage !== null && listing.mileage > maxMileage) {
+    if (listing.mileage !== null && listing.mileage > EFFECTIVE_MAX_MILEAGE) {
         log.debug(`[SKIP-MILES] ${listing.mileage}`);
         proofCounters.rows_excluded_age_mileage_prefilter++;
         addProofSample('age_mileage_prefilter', listing, 'mileage_over_50k');
@@ -610,6 +614,10 @@ const proof = {
     found_rows_total: totalFound,
     prefilter_passed_rows_total: totalPassed,
     pushed_rows_total: totalPassed,
+    requested_min_year: minYear,
+    requested_max_mileage: maxMileage,
+    effective_min_year: EFFECTIVE_MIN_YEAR,
+    effective_max_mileage: EFFECTIVE_MAX_MILEAGE,
     ...proofCounters,
     missing_required_data_samples: proofSamples.missing_required_data,
     missing_mileage_samples: proofSamples.missing_mileage,
