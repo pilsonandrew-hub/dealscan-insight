@@ -306,7 +306,7 @@ def run_sweep(
             {
                 "is_active": False,
                 "pipeline_step": "archived",
-                "step_status": "q_no_condition_evidence",
+                "step_status": "q_no_cond_ev",
             },
         ),
         "run_time": now.strftime("%Y-%m-%d %H:%M UTC"),

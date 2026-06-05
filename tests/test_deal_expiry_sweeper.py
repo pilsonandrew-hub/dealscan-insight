@@ -274,7 +274,7 @@ def test_sweeper_archives_active_high_dos_rows_missing_source_condition_evidence
         "payload": {
             "is_active": False,
             "pipeline_step": "archived",
-            "step_status": "q_no_condition_evidence",
+            "step_status": "q_no_cond_ev",
         },
         "ids": ["missing-condition-evidence-1", "missing-condition-evidence-2"],
         "filters": [("in", "id", ("missing-condition-evidence-1", "missing-condition-evidence-2"))],
@@ -303,6 +303,35 @@ def test_sweeper_condition_evidence_query_uses_live_opportunity_columns_only():
         assert "assetLongDesc" not in columns
         assert "damage_type" not in columns
         assert "damage" not in columns
+
+
+def test_sweeper_archive_step_status_values_fit_live_schema_limit():
+    now = datetime(2026, 6, 5, 10, 25, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", 80),
+            ): [
+                {
+                    "id": "missing-condition-evidence",
+                    "title": "2023 Toyota Camry",
+                    "condition_grade": "Good",
+                    "raw_data": {},
+                },
+            ],
+        }
+    )
+
+    deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    step_statuses = [
+        update["payload"].get("step_status")
+        for update in client.updates
+        if update["payload"].get("step_status")
+    ]
+    assert step_statuses
+    assert all(len(step_status) <= 16 for step_status in step_statuses)
 
 
 def test_sweeper_refers_expired_deals_for_post_close_outcome_check_without_creating_comp_candidates():
