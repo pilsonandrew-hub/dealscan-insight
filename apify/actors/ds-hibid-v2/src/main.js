@@ -65,7 +65,7 @@ const VEHICLE_KEYWORDS = [
     'minivan','passenger van','4x4','awd','fwd','rwd',
 ];
 
-const EXCLUDED_PATTERNS = /\b(forklift|tractor(?!\s+trailer)|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv(?!\s*vehicle)|utv|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed\s+truck|box\s*truck|cargo\s+van|step\s+van|cutaway|chassis\s+cab|stake\s*bed|lug\s*nut|auto\s*part|spare\s*tire|wheel\s+cover|tonneau|bed\s+cover|floor\s+mat|car\s+seat|child\s+seat|car\s+cover)\b/i;
+const EXCLUDED_PATTERNS = /\b(forklift|tractor(?!\s+trailer)|loader|backhoe|excavator|grader|dozer|bulldozer|skid\s*steer|trencher|mower|generator|compressor|sprayer|sweeper|boat|marine|trailer|camper|rv|motorhome|jet\s*ski|snowmobile|motorcycle|atv(?!\s*vehicle)|utv|quad|four\s*trax|fourtrax|rancher|foreman|recon|golf\s*cart|bus|ambulance|fire\s*truck|dump\s*truck|flatbed\s+truck|box\s*truck|cargo\s+van|step\s+van|cutaway|chassis\s+cab|stake\s*bed|lug\s*nut|auto\s*part|spare\s*tire|wheel\s+cover|tonneau|bed\s+cover|floor\s+mat|car\s+seat|child\s+seat|car\s+cover)\b/i;
 const CONDITION_REJECT_PATTERNS = [
     /\bsalvage\b/i,
     /\bflood\b/i,
