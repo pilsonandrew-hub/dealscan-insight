@@ -90,4 +90,18 @@ describe('ds-publicsurplus source contract', () => {
     expect(source.indexOf("record_type: 'source_quality_proof'"))
       .toBeLessThan(source.indexOf('if (webhookUrl && datasetItemCount > 0)'));
   });
+
+  test('source-quality proof explains post-detail rejection outcomes', () => {
+    expect(source).toContain('const rejectionReasons = {};');
+    expect(source).toContain("incrementRejectionReason('mileage_over_50k')");
+    expect(source).toContain("incrementRejectionReason('condition_reject_after_detail')");
+    expect(source).toContain("incrementRejectionReason('missing_detail_evidence_after_enrichment')");
+    expect(source).toContain('enriched_rows_accepted: enrichedRowsAccepted');
+    expect(source).toContain('enriched_rows_rejected: enrichedRowsRejected');
+    expect(source).toContain('detail_pages_fetched: detailPagesFetched');
+    expect(source).toContain('detail_pages_failed: detailPagesFailed');
+    expect(source).toContain('detail_vins_found: detailVinsFound');
+    expect(source).toContain('detail_mileages_found: detailMileagesFound');
+    expect(source).toContain('rejection_reasons: rejectionReasons');
+  });
 });

@@ -98,6 +98,18 @@ let totalAfterFilters = 0;
 let totalPushed = 0;
 let totalPushedWithDescription = 0;
 let totalPushedWithDetailText = 0;
+let detailPagesFetched = 0;
+let detailPagesFailed = 0;
+let detailVinsFound = 0;
+let detailMileagesFound = 0;
+let enrichedRowsAccepted = 0;
+let enrichedRowsRejected = 0;
+const rejectionReasons = {};
+
+function incrementRejectionReason(reason) {
+    rejectionReasons[reason] = (rejectionReasons[reason] || 0) + 1;
+    enrichedRowsRejected++;
+}
 
 async function pushVehicle(vehicle) {
     totalPushed++;
@@ -489,6 +501,7 @@ const crawler = new PlaywrightCrawler({
                 await page.waitForLoadState('domcontentloaded', { timeout: 20000 }).catch(() => {});
                 await page.waitForTimeout(1000);
                 const bodyText = await page.evaluate(() => document.body.innerText || document.body.textContent || '');
+                detailPagesFetched++;
                 const detailText = extractDetailText(bodyText);
                 vehicle.detail_text = detailText;
                 if (detailText && needsDetailEvidence(vehicle)) vehicle.description = detailText;
@@ -496,6 +509,7 @@ const crawler = new PlaywrightCrawler({
                 const vin = extractVinFromText(bodyText);
                 if (vin) {
                     vehicle.vin = vin;
+                    detailVinsFound++;
                     log.info(`[VIN DETAIL] Found VIN ${vin} for: ${vehicle.title}`);
                 }
                 const mileageMatch = bodyText.match(/\bMileage[:\s#\-]*([\d,]+)/i)
@@ -505,24 +519,30 @@ const crawler = new PlaywrightCrawler({
                     const mileage = parseInt(mileageMatch[1].replace(/,/g, ''), 10);
                     if (!Number.isNaN(mileage) && mileage > 0) {
                         vehicle.mileage = mileage;
+                        detailMileagesFound++;
                         log.info(`[MILEAGE DETAIL] Found mileage ${mileage} for: ${vehicle.title}`);
                     }
                 }
                 if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE) {
+                    incrementRejectionReason('mileage_over_50k');
                     log.info(`[MILEAGE DETAIL][SKIP] Too many miles after detail enrichment: ${vehicle.mileage} - ${vehicle.title}`);
                     return;
                 }
                 if (hasConditionReject(vehicle)) {
+                    incrementRejectionReason('condition_reject_after_detail');
                     log.info(`[DETAIL POLICY][SKIP] Condition reject after detail enrichment: ${vehicle.title}`);
                     return;
                 }
             } catch (err) {
+                detailPagesFailed++;
                 log.warning(`[VIN DETAIL] Failed for ${request.url}: ${err.message}`);
             }
             if (needsDetailEvidence(vehicle)) {
+                incrementRejectionReason('missing_detail_evidence_after_enrichment');
                 log.info(`[DETAIL EVIDENCE][SKIP] Missing detail evidence after enrichment: ${vehicle.title}`);
                 return;
             }
+            enrichedRowsAccepted++;
             await pushVehicle(vehicle);
             return;
         }
@@ -744,6 +764,13 @@ await Actor.pushData({
     pushed_rows_with_description: totalPushedWithDescription,
     pushed_rows_with_detail_text: totalPushedWithDetailText,
     detail_pages_attempted: detailPageCount,
+    detail_pages_fetched: detailPagesFetched,
+    detail_pages_failed: detailPagesFailed,
+    detail_vins_found: detailVinsFound,
+    detail_mileages_found: detailMileagesFound,
+    enriched_rows_accepted: enrichedRowsAccepted,
+    enriched_rows_rejected: enrichedRowsRejected,
+    rejection_reasons: rejectionReasons,
     max_pages_total: effectiveMaxPages + maxTXPages,
     scraped_at: new Date().toISOString(),
 });
