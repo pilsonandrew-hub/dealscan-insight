@@ -421,6 +421,59 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         self.assertEqual(summary["runs_with_historical_artifacts"], 1)
         self.assertEqual(summary["runs_with_current_landing_issues"], 1)
 
+    def test_build_reports_reclassifies_superseded_source_quality_proof_landing_gap(self):
+        older_started = datetime(2026, 6, 4, 19, 0, tzinfo=timezone.utc)
+        newer_started = datetime(2026, 6, 4, 23, 44, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "old-proof-run",
+                    "actor_name": "ds-govplanet",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "source_quality_proof_count": 1,
+                    "started_at": older_started,
+                },
+                {
+                    "run_id": "new-proof-run",
+                    "actor_name": "ds-govplanet",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "source_quality_proof_count": 1,
+                    "started_at": newer_started,
+                },
+            ],
+            webhook_rows={
+                "old-proof-run": {"latest_status": "ignored_replay", "webhook_entries": 2, "max_item_count": 1},
+                "new-proof-run": {"latest_status": "ignored_replay", "webhook_entries": 2, "max_item_count": 1},
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "new-proof-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"skipped_proof": 1},
+                            "total_rows": 1,
+                            "total_attempts": 1,
+                        }
+                    }
+                }
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertEqual(
+            by_run_id["old-proof-run"]["issues"],
+            ["superseded_source_quality_proof_pre_ledger"],
+        )
+        self.assertEqual(by_run_id["old-proof-run"]["issue_scope"], "historical_artifact")
+        self.assertEqual(by_run_id["new-proof-run"]["issues"], [])
+        summary = reconcile.summarize(reports)
+        self.assertEqual(summary["runs_with_current_landing_issues"], 0)
+        self.assertEqual(summary["runs_with_historical_artifacts"], 1)
+
     def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
         with patch.object(
             reconcile,
