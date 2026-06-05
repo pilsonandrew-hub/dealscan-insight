@@ -29,6 +29,7 @@ TARGET_STATES = {
 }
 
 COMMERCIAL_PATTERNS = [
+    r"\bBrightDrop\b", r"\bZevo\b", r"\bCargo\s+Delivery\s+Van\b",
     r"\bEconoline\b", r"\bExpress\s*Cargo\b", r"\bProMaster\s*Cargo\b",
     r"\bSprinter\s*Cargo\b", r"\bTransit\s*Cargo\b", r"\bSavana\s*Cargo\b",
     r"\bE-250\b", r"\bE-350\b", r"\b4500\b", r"\b5500\b",

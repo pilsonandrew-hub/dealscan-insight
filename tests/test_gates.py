@@ -61,6 +61,23 @@ def test_commercial_hd_tonnage_allows_pickup_context_but_rejects_unqualified_250
     assert is_commercial_hd_tonnage("2500 Cargo Van") is True
 
 
+def test_passes_basic_gates_rejects_brightdrop_cargo_delivery_vans():
+    assert passes_basic_gates(
+        _vehicle(
+            title="2024 BrightDrop Zevo 400 Base AWD Cargo Delivery Van",
+            make="BrightDrop",
+            model="Zevo 400",
+            state="FL",
+            year=2024,
+            mileage=10,
+        ),
+        determine_vehicle_tier=_tier,
+    ) == {
+        "pass": False,
+        "reason": "commercial_vehicle (2024 BrightDrop Zevo 400 Base AWD Cargo Delivery V)",
+    }
+
+
 def test_passes_basic_gates_preserves_rejection_order_and_reasons():
     assert passes_basic_gates(_vehicle(make="", vin="", title="office chair", current_bid=0), determine_vehicle_tier=_tier) == {
         "pass": False,
