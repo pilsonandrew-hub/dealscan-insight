@@ -391,3 +391,75 @@ def test_run_level_positive_item_gap_controls_overall_verdict(monkeypatch):
     by_run = {item["run_id"]: item for item in report["run_summaries"]}
     assert by_run["run-gap"]["classification"] == "webhook_without_delivery_gap"
     assert by_run["run-rejected"]["classification"] == "source_quality_reject_dominant"
+
+
+def test_delivery_log_fallback_prevents_false_run_gap(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        select = dict(query).get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-legacy",
+                        "source": "hibid",
+                        "status": "processed",
+                        "item_count": 182,
+                        "received_at": "2026-06-05T04:00:00+00:00",
+                    }
+                ]
+            if table in {"ingest_delivery_log", "delivery_log"}:
+                return [
+                    {
+                        "run_id": "run-legacy",
+                        "source_site": "hibid",
+                        "channel": "db_save",
+                        "status": "skipped_gate",
+                        "error_message": "age_or_mileage_exceeded",
+                        "created_at": "2026-06-05T04:01:00+00:00",
+                    }
+                ]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-05T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-legacy",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 182,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return []
+        if table == "delivery_log":
+            return [
+                {
+                    "run_id": "run-legacy",
+                    "source_site": "hibid",
+                    "channel": "db_save",
+                    "status": "skipped_gate",
+                    "error_message": "age_or_mileage_exceeded",
+                    "created_at": "2026-06-05T04:01:00+00:00",
+                }
+            ]
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+        run_detail_source="hibid",
+    )
+
+    assert report["overall_verdict"] == "no_recent_accepted_source_yield"
+    assert "webhook_without_delivery_gap" not in report.get("run_classification_counts", {})
+    assert report["source_summaries"][0]["delivery_rows"] == 1
+    assert report["source_summaries"][0]["channel_counts"] == {"db_save": 1}
+    assert report["run_summaries"][0]["classification"] == "source_quality_reject_dominant"

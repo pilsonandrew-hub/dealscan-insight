@@ -216,6 +216,39 @@ def _select_available(columns: set[str], desired: list[str], fallback: str) -> s
     return ",".join(selected) if selected else fallback
 
 
+def _fetch_optional_delivery_rows(
+    base_url: str,
+    service_role_key: str,
+    table: str,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    try:
+        columns = _available_columns(base_url, service_role_key, table)
+    except Exception:
+        return []
+    if not columns:
+        return []
+    order = "created_at" if "created_at" in columns else "updated_at"
+    select = _select_available(
+        columns,
+        ["run_id", "source_site", "source", "channel", "status", "error_message", "created_at", "updated_at"],
+        order,
+    )
+    try:
+        return _fetch_recent_rows(
+            base_url,
+            service_role_key,
+            table,
+            select,
+            order,
+            since,
+            limit,
+        )
+    except Exception:
+        return []
+
+
 def build_source_yield_report(
     supabase_url: str,
     service_role_key: str,
@@ -295,6 +328,18 @@ def build_source_yield_report(
         since,
         limit,
     )
+    primary_delivery_run_ids = {
+        str(row.get("run_id") or "").strip()
+        for row in delivery_rows
+        if str(row.get("run_id") or "").strip()
+    }
+    legacy_delivery_rows = [
+        row
+        for row in _fetch_optional_delivery_rows(base_url, service_role_key, "delivery_log", since, limit)
+        if str(row.get("run_id") or "").strip()
+        and str(row.get("run_id") or "").strip() not in primary_delivery_run_ids
+    ]
+    all_delivery_rows = delivery_rows + legacy_delivery_rows
     delivery_by_source: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "channel": Counter(),
         "status": Counter(),
@@ -304,7 +349,7 @@ def build_source_yield_report(
         "status": Counter(),
         "reason": Counter(),
     })
-    for row in delivery_rows:
+    for row in all_delivery_rows:
         source = _source_from_row(row, run_sources=run_sources)
         run_id = str(row.get("run_id") or "").strip()
         if run_id and source != "unknown":
@@ -409,6 +454,7 @@ def build_source_yield_report(
         "generated_at": current_time.isoformat(),
         "lookback_hours": lookback_hours,
         "db_path": "rest:env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY",
+        "delivery_log_fallback_rows": len(legacy_delivery_rows),
         "overall_verdict": overall,
         "classification_counts": dict(classification_counts.most_common()),
         "source_summaries": sorted(
