@@ -105,8 +105,8 @@ const {
     pageLength = 50,        // lots per GraphQL page
     minBid = 500,
     maxBid = 75000,
-    minYear = new Date().getFullYear() - 10,
-    maxMileage = 100000,
+    minYear = new Date().getFullYear() - 4,
+    maxMileage = 50000,
     targetStates = [...TARGET_STATES],
     searchQuery = "",
     searchTerms = searchQuery
