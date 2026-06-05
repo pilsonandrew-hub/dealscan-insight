@@ -313,6 +313,7 @@ def test_safe_truth_audit_attributes_recent_deliveries_from_webhook_run_lineage(
             },
             {
                 "run_id": "run-gsa",
+                "source": "apify",
                 "actor_id": "fvDnYmGuFBCrwpEi9",
                 "received_at": "2026-06-03T19:02:00Z",
                 "processing_status": "processed",

@@ -48,6 +48,7 @@ HIGH_RUST_STATES = {
 }
 
 DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
+GENERIC_DELIVERY_SOURCES = {"apify", "webhook", "actor", "unknown"}
 
 
 def _require_env(name: str) -> str:
@@ -316,10 +317,9 @@ def _source_by_run_from_webhooks(rows: list[dict[str, Any]]) -> dict[str, str]:
         if not run_id or run_id in source_by_run:
             continue
         actor_id = str(row.get("actor_id") or "").strip()
-        source = (
-            _canonical_delivery_source(row.get("source") or row.get("source_site") or row.get("actor_name"))
-            or source_by_actor_id.get(actor_id)
-        )
+        explicit_source = _canonical_delivery_source(row.get("source") or row.get("source_site") or row.get("actor_name"))
+        actor_source = source_by_actor_id.get(actor_id)
+        source = actor_source if explicit_source in GENERIC_DELIVERY_SOURCES else (explicit_source or actor_source)
         if source:
             source_by_run[run_id] = source
     return source_by_run
