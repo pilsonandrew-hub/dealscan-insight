@@ -115,3 +115,7 @@ def test_run_apify_actor_workflow_supports_bounded_hibid_v2_proof():
     assert '"maxPages": int(os.environ.get("HIBID_MAX_PAGES") or "1")' in text
     assert '"maxMileage": int(os.environ.get("HIBID_MAX_MILEAGE") or "50000")' in text
     assert '"minYear": int(os.environ.get("HIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4))' in text
+    assert '"requested_min_year"' in text
+    assert '"requested_max_mileage"' in text
+    assert '"effective_min_year"' in text
+    assert '"effective_max_mileage"' in text
