@@ -28,6 +28,25 @@ def test_run_apify_actor_workflow_supports_manual_jjkane_proof():
     assert '"maxItems": int(os.environ.get("JJ_KANE_MAX_ITEMS") or "75")' in text
 
 
+def test_run_apify_actor_workflow_supports_all_enabled_source_proofs():
+    text = WORKFLOW.read_text()
+
+    for actor_name, actor_id in {
+        "ds-govdeals": "CuKaIAcWyFS0EPrAz",
+        "ds-publicsurplus": "9xxQLlRsROnSgA42i",
+        "ds-municibid": "svmsItf3CRBZuIntp",
+        "ds-gsaauctions": "fvDnYmGuFBCrwpEi9",
+        "ds-allsurplus": "gYGIfHeYeN3EzmLnB",
+        "ds-govplanet": "pO2t5UDoSVmO1gvKJ",
+        "ds-proxibid": "bxhncvtHEP712WX2e",
+        "ds-usgovbid": "6XO9La81aEmtsCT3g",
+        "ds-jjkane": "lvb7T6VMFfNUQpqlq",
+        "ds-hibid-v2": "7s9e0eATTt1kuGGfE",
+    }.items():
+        assert actor_name in text
+        assert actor_id in text
+
+
 def test_run_apify_actor_workflow_supports_bounded_govplanet_proof():
     text = WORKFLOW.read_text()
 
