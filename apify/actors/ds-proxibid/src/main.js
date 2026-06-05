@@ -209,21 +209,45 @@ function parseBid(text) {
     return m ? parseFloat(m[1]) : 0;
 }
 
-function parseMileage(text) {
+function primaryItemDetailText(text) {
+    const normalized = normalize(text);
+    const itemDetailsMatch = normalized.match(/\bItem Details\b([\s\S]*?)(?:\bPayment\b|\bAuction Details\b|\bAuction House\b|\bTerms Of Sale\b|$)/i);
+    return itemDetailsMatch ? normalize(itemDetailsMatch[1]) : '';
+}
+
+function normalizeMileageValue(value, kSuffix) {
+    const parsed = parseFloat(value);
+    if (Number.isNaN(parsed) || parsed <= 0) return null;
+    const mileage = kSuffix ? Math.round(parsed * 1000) : Math.round(parsed);
+    return mileage > 0 && mileage <= 1000000 ? mileage : null;
+}
+
+function matchMileage(text, patterns) {
     const normalized = normalize(text).replace(/,/g, '');
-    const patterns = [
-        /\b(?:mileage|odometer(?:\s+shows)?|odometer\s+reading|od\s+reads?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i,
-        /\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\s+on\s+(?:meter|odometer)\b/i,
-    ];
     for (const pattern of patterns) {
         const match = normalized.match(pattern);
         if (!match) continue;
-        const value = parseFloat(match[1]);
-        if (Number.isNaN(value) || value <= 0) continue;
-        const mileage = match[2] ? Math.round(value * 1000) : Math.round(value);
-        if (mileage > 0 && mileage <= 1000000) return mileage;
+        const mileage = normalizeMileageValue(match[1], match[2]);
+        if (mileage) return mileage;
     }
     return null;
+}
+
+function parseMileage(text) {
+    const labeledPatterns = [
+        /\bmileage[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)?/i,
+        /\b(?:odometer(?:\s+shows)?|odometer\s+reading|odom(?:eter)?\s+reads?|od\s+reads?)[:\s#\-]*(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?\b)/i,
+        /\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\s+on\s+(?:meter|odometer)\b/i,
+    ];
+    const primaryText = primaryItemDetailText(text);
+    if (primaryText) {
+        const primaryMileage = matchMileage(primaryText, [
+            ...labeledPatterns,
+            /\b(?:VIN|V\.I\.N\.?)[:\s#\-.]*[A-HJ-NPR-Z0-9]{17}[\s,;.-]+(?:[A-Z0-9\s,;./()-]*?\b)?(\d+(?:\.\d+)?)\s*(k)?\s*(?:miles?|mi\.?)\b/i,
+        ]);
+        if (primaryMileage) return primaryMileage;
+    }
+    return matchMileage(text, labeledPatterns);
 }
 
 function parseVin(text) {
