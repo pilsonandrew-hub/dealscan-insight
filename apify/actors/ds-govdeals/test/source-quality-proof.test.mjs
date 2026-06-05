@@ -84,6 +84,15 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('post_age_mileage_rejected_samples');
   });
 
+  test('reports source age and mileage rejects that happen before detail enrichment', () => {
+    expect(source).toContain('function recordPrefilterExclusion(lot)');
+    expect(source).toContain('sourceQualityStats.rows_excluded_age_mileage_prefilter++;');
+    expect(source).toContain('sourceQualityStats.prefilter_age_mileage_rejected_samples.push(normalizeLot(lot));');
+    expect(source).toContain('recordPrefilterExclusion(lot);');
+    expect(source).toContain('rows_excluded_age_mileage_prefilter');
+    expect(source).toContain('prefilter_age_mileage_rejected_samples');
+  });
+
   test('rejects commercial-heavy vehicle families before pushing rows', () => {
     expect(source).toContain('/\\bsprinter\\b/i');
     expect(source).toContain('/\\btransit\\b/i');

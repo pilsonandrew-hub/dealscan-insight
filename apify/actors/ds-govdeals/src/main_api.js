@@ -123,6 +123,7 @@ const sourceQualityStats = {
     rows_excluded_missing_required_data: 0,
     rows_excluded_missing_vin: 0,
     rows_excluded_missing_mileage: 0,
+    rows_excluded_age_mileage_prefilter: 0,
     rows_excluded_age_mileage_after_detail: 0,
     rows_excluded_policy_after_detail: 0,
     rows_excluded_after_detail_attempt: 0,
@@ -130,6 +131,7 @@ const sourceQualityStats = {
     rows_excluded_unaccounted_after_prefilter: 0,
     excluded_after_detail_attempt_samples: [],
     excluded_without_detail_attempt_samples: [],
+    prefilter_age_mileage_rejected_samples: [],
     post_age_mileage_rejected_samples: [],
     post_policy_rejected_samples: [],
 };
@@ -201,6 +203,14 @@ function failsAgeMileageCeiling(item) {
     if (year && (currentYear - year) > MAX_MODEL_AGE_YEARS) return true;
     const mileage = parseMileageValue(item.meterCount ?? item.meter_count ?? item.mileage ?? 0);
     return mileage > 0 && mileage > MAX_MILEAGE;
+}
+
+function recordPrefilterExclusion(lot) {
+    if (!failsAgeMileageCeiling(lot)) return;
+    sourceQualityStats.rows_excluded_age_mileage_prefilter++;
+    if (sourceQualityStats.prefilter_age_mileage_rejected_samples.length < 10) {
+        sourceQualityStats.prefilter_age_mileage_rejected_samples.push(normalizeLot(lot));
+    }
 }
 
 /**
@@ -333,7 +343,10 @@ const crawler = new PlaywrightCrawler({
                     const lotId = String(lot.assetId ?? lot.id ?? '');
                     if (lotId) seenIds.add(lotId);
                     totalFound++;
-                    if (!passes(lot)) continue;
+                    if (!passes(lot)) {
+                        recordPrefilterExclusion(lot);
+                        continue;
+                    }
                     totalPassed++;
                     passingLots.push(normalizeLot(lot));
                 }
@@ -705,6 +718,7 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_missing_required_data: sourceQualityStats.rows_excluded_missing_required_data,
         rows_excluded_missing_vin: sourceQualityStats.rows_excluded_missing_vin,
         rows_excluded_missing_mileage: sourceQualityStats.rows_excluded_missing_mileage,
+        rows_excluded_age_mileage_prefilter: sourceQualityStats.rows_excluded_age_mileage_prefilter,
         rows_excluded_age_mileage_after_detail: sourceQualityStats.rows_excluded_age_mileage_after_detail,
         rows_excluded_policy_after_detail: sourceQualityStats.rows_excluded_policy_after_detail,
         rows_excluded_after_detail_attempt: sourceQualityStats.rows_excluded_after_detail_attempt,
@@ -712,6 +726,7 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_unaccounted_after_prefilter: sourceQualityStats.rows_excluded_unaccounted_after_prefilter,
         excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples,
         excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples,
+        prefilter_age_mileage_rejected_samples: sourceQualityStats.prefilter_age_mileage_rejected_samples,
         post_age_mileage_rejected_samples: sourceQualityStats.post_age_mileage_rejected_samples,
         post_policy_rejected_samples: sourceQualityStats.post_policy_rejected_samples,
         detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
@@ -818,7 +833,10 @@ async function paginateWithAuth(page, log, seenIds = new Set()) {
                 if (lotId) seenIds.add(lotId);
                 newItemCount++;
                 totalFound++;
-                if (!passes(lot)) continue;
+                if (!passes(lot)) {
+                    recordPrefilterExclusion(lot);
+                    continue;
+                }
                 totalPassed++;
                 passingLots.push(normalizeLot(lot));
             }
