@@ -29,11 +29,13 @@ SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 PROXY_SKIP_SQL = """
 with proxy_skips as (
   select distinct on (coalesce(nullif(listing_id,''), nullif(listing_url,'')))
-         run_id, listing_id, listing_url, error_message, created_at
+         run_id, listing_id, listing_url, status, error_message, created_at
   from public.ingest_delivery_log
   where created_at >= timezone('utc', now()) - (%(lookback_days)s::int * interval '1 day')
-    and status = 'skipped_ceiling'
-    and error_message like 'pricing_maturity_proxy%%'
+    and (
+      (status = 'skipped_ceiling' and error_message like 'pricing_maturity_proxy%%')
+      or (status = 'skipped_margin' and error_message like 'margin_below_floor%%pricing=proxy%%')
+    )
   order by coalesce(nullif(listing_id,''), nullif(listing_url,'')), created_at desc
 ),
 joined as (
@@ -110,26 +112,46 @@ def _money(value: str | None) -> float | None:
     if value is None:
         return None
     try:
-        return float(value.replace("$", "").replace(",", ""))
+        return float(str(value).replace("$", "").replace(",", ""))
     except ValueError:
         return None
+
+
+def _extract_money(label: str, text: str) -> float | None:
+    match = re.search(rf"{re.escape(label)}=([^ ]+)", text)
+    return _money(match.group(1)) if match else None
+
+
+def _extract_text(label: str, text: str) -> str | None:
+    match = re.search(rf"{re.escape(label)}=([A-Za-z_]+)", text)
+    return match.group(1) if match else None
 
 
 def parse_proxy_skip_reason(reason: str | None) -> dict[str, Any]:
     text = reason or ""
     return {
-        "bid": _money((re.search(r"bid=([^ ]+)", text) or [None, None])[1]),
-        "mmr": _money((re.search(r"mmr=([^ ]+)", text) or [None, None])[1]),
-        "headroom": _money((re.search(r"headroom=([^ ]+)", text) or [None, None])[1]),
-        "tier": (re.search(r"tier=([A-Za-z_]+)", text) or [None, None])[1],
+        "bid": _extract_money("bid", text),
+        "cost": _extract_money("cost", text),
+        "floor": _extract_money("floor", text),
+        "headroom": _extract_money("headroom", text),
+        "margin": _extract_money("margin", text),
+        "max_bid": _extract_money("max_bid", text),
+        "mmr": _extract_money("mmr", text),
+        "pricing": _extract_text("pricing", text),
+        "tier": _extract_text("tier", text),
     }
 
 
 def classify_source_candidate(row: dict[str, Any]) -> str:
-    if row.get("has_market_price") or row.get("has_usable_dealer_sales"):
-        return "covered_after_skip"
     if not row.get("vin") or not row.get("mileage"):
         return "dirty_source_row"
+    parsed = parse_proxy_skip_reason(row.get("error_message"))
+    margin = parsed.get("margin")
+    floor = parsed.get("floor")
+    if margin is not None and floor is not None and margin < floor:
+        return "below_margin_floor"
+    if row.get("has_market_price") or row.get("has_usable_dealer_sales"):
+        return "covered_after_skip"
     if row.get("auction_active") is False:
         return "expired_pricing_gap"
     if row.get("auction_active") is None:
@@ -147,7 +169,8 @@ def format_candidate(row: dict[str, Any]) -> str:
         f"{row.get('year')} {row.get('make')} {row.get('model')} "
         f"state={row.get('state') or 'unknown'} mileage={row.get('mileage')} vin={row.get('vin') or 'missing'} "
         f"bid={row.get('current_bid')} proxy_bid={parsed.get('bid')} proxy_mmr={parsed.get('mmr')} "
-        f"proxy_tier={parsed.get('tier')} auction_active={row.get('auction_active')} "
+        f"margin={parsed.get('margin')} floor={parsed.get('floor')} cost={parsed.get('cost')} "
+        f"proxy_tier={parsed.get('tier')} proxy_pricing={parsed.get('pricing')} auction_active={row.get('auction_active')} "
         f"market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
         f"skip_at={row.get('skip_created_at')} title={row.get('title')} url={row.get('listing_url')}"
     )
@@ -301,6 +324,14 @@ def _positive_number(value: Any) -> bool:
         return False
 
 
+def _is_pricing_blocked_skip(row: dict[str, Any]) -> bool:
+    status = row.get("status")
+    message = str(row.get("error_message") or "")
+    if status == "skipped_ceiling" and message.startswith("pricing_maturity_proxy"):
+        return True
+    return status == "skipped_margin" and message.startswith("margin_below_floor") and "pricing=proxy" in message
+
+
 def _valid_market_price(row: dict[str, Any], now: datetime) -> bool:
     expires_at = _parse_datetime(row.get("expires_at"))
     return (
@@ -383,14 +414,14 @@ def fetch_rows_via_rest(
         service_role_key,
         "ingest_delivery_log",
         [
-            ("select", "run_id,listing_id,listing_url,error_message,created_at"),
+            ("select", "run_id,listing_id,listing_url,status,error_message,created_at"),
             ("created_at", f"gte.{since}"),
-            ("status", "eq.skipped_ceiling"),
-            ("error_message", "like.pricing_maturity_proxy*"),
+            ("status", "in.(skipped_ceiling,skipped_margin)"),
             ("order", "created_at.desc"),
             ("limit", str(max(limit * 5, 100))),
         ],
     )
+    proxy_skip_rows = [row for row in proxy_skip_rows if _is_pricing_blocked_skip(row)]
     latest_skips: dict[str, dict[str, Any]] = {}
     for skip in proxy_skip_rows:
         key = _row_key(skip)

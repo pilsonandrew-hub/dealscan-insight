@@ -15,13 +15,18 @@ SPEC.loader.exec_module(report_pricing_blocked_source_candidates)
 
 def test_parse_proxy_skip_reason_extracts_bid_mmr_and_tier():
     parsed = report_pricing_blocked_source_candidates.parse_proxy_skip_reason(
-        "pricing_maturity_proxy | bid=$22,000 max_bid=$0 mmr=$31,000 headroom=$-22,000 tier=premium"
+        "margin_below_floor | margin=$325 floor=$1500 tier=premium bid=$20900 mmr=$26000 cost=$25675 max_bid=$0 headroom=$0 pricing=proxy"
     )
 
     assert parsed == {
-        "bid": 22000.0,
-        "mmr": 31000.0,
-        "headroom": -22000.0,
+        "bid": 20900.0,
+        "cost": 25675.0,
+        "floor": 1500.0,
+        "headroom": 0.0,
+        "margin": 325.0,
+        "max_bid": 0.0,
+        "mmr": 26000.0,
+        "pricing": "proxy",
         "tier": "premium",
     }
 
@@ -42,6 +47,26 @@ def test_classify_source_candidate_marks_active_clean_pricing_gap():
     assert (
         report_pricing_blocked_source_candidates.classify_source_candidate(row)
         == "active_clean_pricing_gap"
+    )
+
+
+def test_classify_source_candidate_marks_margin_floor_reject():
+    row = {
+        "year": 2022,
+        "make": "BMW",
+        "model": "X1",
+        "state": "TN",
+        "mileage": 40718,
+        "vin": "WBXJG9C02N5P20226",
+        "auction_active": True,
+        "has_market_price": False,
+        "has_usable_dealer_sales": False,
+        "error_message": "margin_below_floor | margin=$325 floor=$1500 tier=premium bid=$20900 mmr=$26000 cost=$25675 max_bid=$0 headroom=$0 pricing=proxy",
+    }
+
+    assert (
+        report_pricing_blocked_source_candidates.classify_source_candidate(row)
+        == "below_margin_floor"
     )
 
 
@@ -109,6 +134,7 @@ def test_fetch_rows_via_rest_marks_candidate_covered_after_market_price(monkeypa
                     "run_id": "run-1",
                     "listing_id": "asset-1",
                     "listing_url": "https://example.com/asset-1",
+                    "status": "skipped_ceiling",
                     "error_message": "pricing_maturity_proxy | bid=$22,000 mmr=$31,000 tier=premium",
                     "created_at": "2026-06-02T12:00:00+00:00",
                 }
@@ -175,6 +201,7 @@ def test_fetch_rows_via_rest_filters_dirty_rows_by_default(monkeypatch):
                 {
                     "listing_id": "asset-dirty",
                     "listing_url": "https://example.com/dirty",
+                    "status": "skipped_ceiling",
                     "error_message": "pricing_maturity_proxy | bid=$10,000 mmr=$20,000 tier=standard",
                     "created_at": "2026-06-02T12:00:00+00:00",
                 }
@@ -225,6 +252,55 @@ def test_fetch_rows_via_rest_filters_dirty_rows_by_default(monkeypatch):
     assert clean_only == []
     assert len(dirty_included) == 1
     assert report_pricing_blocked_source_candidates.classify_source_candidate(dirty_included[0]) == "dirty_source_row"
+
+
+def test_fetch_rows_via_rest_includes_proxy_margin_floor_rows(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "listing_id": "asset-margin",
+                    "listing_url": "https://example.com/margin",
+                    "status": "skipped_margin",
+                    "error_message": "margin_below_floor | margin=$325 floor=$1500 tier=premium bid=$20900 mmr=$26000 cost=$25675 max_bid=$0 headroom=$0 pricing=proxy",
+                    "created_at": "2026-06-05T03:41:16+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "source_site": "govdeals",
+                    "year": 2022,
+                    "make": "BMW",
+                    "model": "X1",
+                    "state": "TN",
+                    "mileage": 40718,
+                    "vin": "WBXJG9C02N5P20226",
+                    "current_bid": 20900,
+                    "auction_end_date": "2026-06-10T00:00:00+00:00",
+                    "created_at": "2026-06-05T03:41:15+00:00",
+                    "title": "2022 BMW X1",
+                    "listing_id": "asset-margin",
+                    "listing_url": "https://example.com/margin",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 5, 4, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(rows) == 1
+    assert report_pricing_blocked_source_candidates.classify_source_candidate(rows[0]) == "below_margin_floor"
 
 
 def test_postgrest_416_range_is_treated_as_empty_page(monkeypatch):
