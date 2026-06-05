@@ -64,9 +64,10 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["id"], "5Eu3hfCcBBdzp6I1u")
         self.assertEqual(actor["webhookId"], "N699FBbtfzjjhHshJ")
         self.assertEqual(actor["status"], "enabled")
+        self.assertEqual(actor["scheduleId"], "JFLFznTEe1kLYXM34")
         self.assertEqual(actor["schedule"], "45 10,22 * * *")
         self.assertEqual(actor["scheduleName"], "ds-bidspotter-12hr-apify-native")
-        self.assertEqual(actor["scheduleStatus"], "apify_native_configurator")
+        self.assertEqual(actor["scheduleStatus"], "enabled_live")
         self.assertIn("ds-bidspotter-12hr-apify-native", workflow)
         self.assertIn("FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}", workflow)
 
