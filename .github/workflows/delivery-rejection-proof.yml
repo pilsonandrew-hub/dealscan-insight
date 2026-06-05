@@ -1,0 +1,71 @@
+name: Delivery Rejection Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Recent db_save rejection lookback window in hours"
+        required: true
+        default: "4"
+      max_mileage:
+        description: "Maximum mileage for clean candidate classification"
+        required: true
+        default: "50000"
+      max_age_years:
+        description: "Maximum model age for clean candidate classification"
+        required: true
+        default: "4"
+      limit:
+        description: "Maximum candidates to print"
+        required: true
+        default: "50"
+      include_dirty:
+        description: "Include dirty source rows"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+      MAX_MILEAGE: ${{ inputs.max_mileage }}
+      MAX_AGE_YEARS: ${{ inputs.max_age_years }}
+      LIMIT: ${{ inputs.limit }}
+      INCLUDE_DIRTY: ${{ inputs.include_dirty }}
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run delivery rejection proof through Supabase REST
+        run: |
+          set -euo pipefail
+
+          args=(
+            --via-rest
+            --lookback-hours "${LOOKBACK_HOURS}"
+            --max-mileage "${MAX_MILEAGE}"
+            --max-age-years "${MAX_AGE_YEARS}"
+            --limit "${LIMIT}"
+          )
+
+          if [[ "${INCLUDE_DIRTY}" == "true" ]]; then
+            args+=(--include-dirty)
+          fi
+
+          python3 scripts/report_delivery_rejection_candidates.py "${args[@]}"
