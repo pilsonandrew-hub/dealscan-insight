@@ -258,6 +258,72 @@ def test_fetch_rows_via_rest_marks_candidate_covered_after_market_price(monkeypa
     assert calls[0][0] == "https://example.supabase.co/rest/v1"
 
 
+def test_fetch_rows_via_rest_uses_separate_proxy_and_latest_delivery_queries(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_values = dict(query)
+        if table == "ingest_delivery_log":
+            if query_values.get("status") == "in.(skipped_ceiling,skipped_margin)":
+                return [
+                    {
+                        "run_id": "old-run",
+                        "listing_id": "asset-explorer",
+                        "listing_url": "https://example.com/explorer",
+                        "status": "skipped_margin",
+                        "error_message": "margin_below_floor | margin=$-13300 floor=$1500 tier=premium bid=$31000 mmr=$22000 cost=$35300 max_bid=$17600 headroom=$-13400 pricing=proxy",
+                        "created_at": "2026-06-05T12:05:52+00:00",
+                    }
+                ]
+            if query_values.get("status") == "in.(skipped_ceiling,skipped_margin,saved_sonar)":
+                return [
+                    {
+                        "run_id": "fresh-run",
+                        "listing_id": "asset-explorer",
+                        "listing_url": "https://example.com/explorer",
+                        "status": "skipped_margin",
+                        "error_message": "margin_below_floor | margin=$-4795 floor=$1500 tier=premium bid=$31000 mmr=$30505 cost=$35300 max_bid=$25095 headroom=$-5905 pricing=market_comp",
+                        "created_at": "2026-06-05T15:26:12+00:00",
+                    }
+                ]
+            raise AssertionError(query_values.get("status"))
+        if table == "sonar_listings":
+            return [
+                {
+                    "source_site": "govdeals",
+                    "year": 2025,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "NJ",
+                    "mileage": 1435,
+                    "vin": "1FMUK8DH5SGA77978",
+                    "current_bid": 31000,
+                    "auction_end_date": "2026-06-12T00:00:00+00:00",
+                    "created_at": "2026-06-05T12:05:51+00:00",
+                    "title": "2025 Ford Explorer Active AWD Low Miles!",
+                    "listing_id": "asset-explorer",
+                    "listing_url": "https://example.com/explorer",
+                }
+            ]
+        if table in {"market_prices", "dealer_sales"}:
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates, "_fetch_postgrest_rows", fake_fetch)
+    rows = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 5, 16, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["latest_delivery_created_at"] == "2026-06-05T15:26:12+00:00"
+    assert report_pricing_blocked_source_candidates.classify_source_candidate(rows[0]) == "superseded_after_skip"
+
+
 def test_fetch_rows_via_rest_filters_dirty_rows_by_default(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "ingest_delivery_log":
