@@ -29,6 +29,29 @@ def _install_fake_httpx(message_id=987):
     return client
 
 
+def _install_fake_openrouter_httpx(content="INVALID rejected by model"):
+    fake_httpx = types.ModuleType("httpx")
+    client = AsyncMock()
+    response = MagicMock()
+    response.json.return_value = {"choices": [{"message": {"content": content}}]}
+    response.raise_for_status.return_value = None
+    client.post.return_value = response
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return client
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    fake_httpx.AsyncClient = FakeAsyncClient
+    sys.modules["httpx"] = fake_httpx
+    return client
+
+
 def _ingest_module(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
@@ -168,6 +191,69 @@ def test_send_telegram_alert_records_delivery_skip_when_telegram_config_missing(
             "channel": "telegram_alert",
             "status": "skipped_config",
             "error_message": "missing_telegram_chat_id",
+        }
+    ]
+
+
+def test_send_telegram_alert_records_delivery_skip_when_send_gate_blocks(monkeypatch):
+    client = _install_fake_httpx()
+    ingest = _ingest_module(monkeypatch)
+    recorded = []
+    monkeypatch.setattr(
+        ingest,
+        "_record_delivery_log",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    deal = _send_eligible_deal(
+        mmr_confidence_proxy=None,
+        retail_comp_confidence=None,
+    )
+    deal["score_breakdown"].pop("mmr_confidence_proxy")
+    deal["score_breakdown"].pop("retail_comp_confidence")
+
+    message_id = asyncio.run(ingest.send_telegram_alert(deal))
+
+    assert message_id is None
+    assert client.post.call_count == 0
+    assert recorded == [
+        {
+            "run_id": "issue-5-test-run",
+            "listing_id": "listing-issue-5",
+            "listing_url": "https://example.com/listing/123",
+            "opportunity_id": "opp-issue-5",
+            "channel": "telegram_alert",
+            "status": "skipped_gate",
+            "error_message": "confidence_invalid,market_comp_confidence_missing",
+        }
+    ]
+
+
+def test_ai_validate_hot_deals_treats_invalid_model_as_advisory_and_records_it(monkeypatch):
+    client = _install_fake_openrouter_httpx("INVALID insufficient detail text")
+    ingest = _ingest_module(monkeypatch)
+    monkeypatch.setattr(ingest, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(ingest, "_resolve_openrouter_lane_model", lambda deal, deal_id: ("standard", "test-model"))
+    recorded = []
+    monkeypatch.setattr(
+        ingest,
+        "_record_delivery_log",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    deal = _send_eligible_deal()
+
+    result = asyncio.run(ingest.ai_validate_hot_deals([deal]))
+
+    assert result == [deal]
+    assert client.post.call_count == 1
+    assert recorded == [
+        {
+            "run_id": "issue-5-test-run",
+            "listing_id": "listing-issue-5",
+            "listing_url": "https://example.com/listing/123",
+            "opportunity_id": "opp-issue-5",
+            "channel": "alert_validation",
+            "status": "advisory_invalid",
+            "error_message": "insufficient detail text",
         }
     ]
 

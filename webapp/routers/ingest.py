@@ -2174,6 +2174,15 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             )
             if recent.data:
                 logger.info("[ALERT SUPPRESSED] already alerted within 6hrs")
+                _record_delivery_log(
+                    run_id=run_id,
+                    listing_id=listing_id,
+                    listing_url=listing_url,
+                    opportunity_id=deal.get("opportunity_id"),
+                    channel="telegram_alert",
+                    status="skipped_recent_alert",
+                    error_message="already_alerted_within_6h",
+                )
                 return None
         except Exception as e:
             logger.warning(f"[SUPPRESSION CHECK] failed: {e}")
@@ -2185,6 +2194,15 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         alerts_this_run_ts.pop(run_id, None)
     if alerts_this_run.get(run_id, 0) >= 20:
         logger.info(f"[ALERT CAP] max alerts reached for run {run_id}")
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="skipped_cap",
+            error_message="run_alert_cap_reached",
+        )
         return None
     alerts_this_run[run_id] = alerts_this_run.get(run_id, 0) + 1
     alerts_this_run_ts[run_id] = alerts_this_run_ts.get(run_id) or _time.time()
@@ -2195,11 +2213,21 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         callback_id = opp_id or "unknown"
         alert_gate = _alert_gate_for_vehicle(deal)
         if not alert_gate.get("eligible"):
+            blocking_reasons = alert_gate.get("blocking_reasons") or ["unknown"]
             logger.info(
                 "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
                 alert_gate.get("summary"),
-                ",".join(alert_gate.get("blocking_reasons") or ["unknown"]),
+                ",".join(blocking_reasons),
                 deal.get("title", "?")[:80],
+            )
+            _record_delivery_log(
+                run_id=run_id,
+                listing_id=listing_id,
+                listing_url=listing_url,
+                opportunity_id=deal.get("opportunity_id"),
+                channel="telegram_alert",
+                status="skipped_gate",
+                error_message=",".join(str(reason) for reason in blocking_reasons),
             )
             return None
         score_breakdown = deal.get("score_breakdown", {})
@@ -2450,6 +2478,22 @@ async def send_telegram_alerts(hot_deals: list) -> None:
         await send_telegram_alert(deal)
 
 
+def _record_alert_validation_outcome(deal: dict, *, status: str, error_message: str) -> None:
+    run_id = deal.get("run_id") or "unknown"
+    raw_listing_url = deal.get("listing_url") or ""
+    listing_url = clean_bid_direct_url(raw_listing_url)
+    listing_id = deal.get("listing_id") or _compute_listing_id(deal.get("source_site") or "", listing_url)
+    _record_delivery_log(
+        run_id=run_id,
+        listing_id=listing_id,
+        listing_url=listing_url,
+        opportunity_id=deal.get("opportunity_id"),
+        channel="alert_validation",
+        status=status,
+        error_message=error_message,
+    )
+
+
 def _alert_validation_mmr_estimate(deal: dict) -> Any:
     return alert_validation_mmr_estimate(deal)
 
@@ -2544,12 +2588,18 @@ async def ai_validate_hot_deals(deals: list) -> list:
                     validated_deals.append(deal)
                 elif verdict == "INVALID":
                     logger.warning(
-                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=INVALID reason=%s",
+                        "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=ADVISORY_INVALID reason=%s",
                         deal_id,
                         lane,
                         model,
                         reason or "rejected by model",
                     )
+                    _record_alert_validation_outcome(
+                        deal,
+                        status="advisory_invalid",
+                        error_message=reason or "rejected_by_model",
+                    )
+                    validated_deals.append(deal)
                 else:
                     logger.warning(
                         "[AI_VALIDATE] deal_id=%s lane=%s model=%s result=BYPASS reason=unparseable_response content=%s",
