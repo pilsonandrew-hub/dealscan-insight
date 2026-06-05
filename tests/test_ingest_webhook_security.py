@@ -963,8 +963,9 @@ class WebhookSecurityTests(unittest.TestCase):
                 "vehicle_tier": "standard",
                 "wholesale_margin": 100,
                 "ceiling_pass": True,
-                "current_bid": 19000,
                 "gross_margin": 100,
+                "mmr_estimated": 21500,
+                "total_cost": 21400,
                 "max_bid": 20500,
                 "bid_headroom": 1500,
                 "pricing_maturity": "market_comp",
@@ -989,7 +990,7 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(delivery_calls[0]["listing_id"], "listing-margin-sonar")
         self.assertEqual(
             delivery_calls[1]["error_message"],
-            "margin_below_floor | margin=$100 floor=$2500 tier=standard bid=$19000 max_bid=$20500 headroom=$1500 pricing=market_comp",
+            "margin_below_floor | margin=$100 floor=$2500 tier=standard bid=$19000 mmr=$21500 cost=$21400 max_bid=$20500 headroom=$1500 pricing=market_comp",
         )
 
     def test_govdeals_sold_webhook_stages_candidate_instead_of_dealer_sales(self):
