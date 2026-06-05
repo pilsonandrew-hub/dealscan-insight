@@ -149,3 +149,41 @@ def test_build_report_selects_only_available_live_columns(monkeypatch):
     assert report["overall_verdict"] == "accepted_flow_present"
     assert "actor_name" not in queries_by_table["webhook_log"][1]["select"]
     assert "is_active" in queries_by_table["opportunities"][1]["select"]
+
+
+def test_build_report_maps_actor_id_to_source_for_delivery_rows(monkeypatch, tmp_path):
+    deployment = tmp_path / "deployment.json"
+    deployment.write_text(
+        '{"actors": {"ds-govdeals": {"id": "actor-govdeals"}}}',
+        encoding="utf-8",
+    )
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        select = dict(query).get("select")
+        if table == "webhook_log" and select == "*":
+            return [{"run_id": "run-1", "actor_id": "actor-govdeals", "source": "apify", "status": "processed", "received_at": "2026-06-05T04:00:00+00:00"}]
+        if table == "ingest_delivery_log" and select == "*":
+            return [{"run_id": "run-1", "status": "skipped_margin", "created_at": "2026-06-05T04:01:00+00:00"}]
+        if table == "opportunities" and select == "*":
+            return [{"created_at": "2026-06-05T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [{"run_id": "run-1", "actor_id": "actor-govdeals", "source": "apify", "status": "processed", "received_at": "2026-06-05T04:00:00+00:00"}]
+        if table == "ingest_delivery_log":
+            return [{"run_id": "run-1", "status": "skipped_margin", "created_at": "2026-06-05T04:01:00+00:00"}]
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+        deployment_path=deployment,
+    )
+
+    assert report["source_summaries"][0]["source"] == "govdeals"
+    assert report["source_summaries"][0]["delivery_rows"] == 1
