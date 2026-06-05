@@ -29,7 +29,7 @@ jobs:
 
           # Watchdog Hunter scope: lightweight health/staleness monitoring only.
           # Heavy source discovery stays on the 12hr sweeps.
-          # ds-hibid intentionally disabled, excluded from monitoring.
+          # ds-hibid is retired; ds-hibid-v2 is the active HiBid source.
           ACTORS = {
               "ds-govdeals":       "CuKaIAcWyFS0EPrAz",
               "ds-publicsurplus":  "9xxQLlRsROnSgA42i",
@@ -40,6 +40,7 @@ jobs:
               "ds-proxibid":       "bxhncvtHEP712WX2e",
               "ds-usgovbid":       "6XO9La81aEmtsCT3g",
               "ds-jjkane":         "lvb7T6VMFfNUQpqlq",
+              "ds-hibid-v2":       "7s9e0eATTt1kuGGfE",
           }
 
           ctx = ssl.create_default_context()
