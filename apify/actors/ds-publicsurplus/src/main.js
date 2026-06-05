@@ -55,6 +55,11 @@ const CONDITION_REJECT_PATTERNS = [
     /\bbad\s+engine\b/i,
     /\bno\s+title\b/i,
     /\bas[\s-]?is\b.*\bno\s+warrant|\bno\s+warrant.*\bas[\s-]?is\b/i,
+    /\bsold\s+as\s+is\b.*\bno\s+(?:guarantees?|warrant(?:y|ies))/i,
+    /\bno\s+(?:guarantees?|warrant(?:y|ies))\b.*\bsold\s+as\s+is\b/i,
+    /\bneeds?\s+jump\s+(?:box|start)\b/i,
+    /\bwarning\s+lights?\s+on\s+(?:the\s+)?dash\b/i,
+    /\binvolved\s+in\s+(?:a\s+)?motor\s+vehicle\s+accident\b/i,
 ];
 
 const BASE_URL = 'https://www.publicsurplus.com';
