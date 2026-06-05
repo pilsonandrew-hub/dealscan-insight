@@ -1219,6 +1219,8 @@ def reclassify_superseded_sold_comp_candidate_failures(reports: list[dict[str, A
     superseded_issues = {
         "audit_backfilled",
         "db_save_failures",
+        "missing_db_save_ledger",
+        "missing_delivery_log",
         "no_db_landing",
         "webhook_error",
     }

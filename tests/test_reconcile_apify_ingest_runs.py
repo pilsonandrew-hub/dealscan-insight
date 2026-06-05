@@ -747,6 +747,62 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         self.assertEqual(by_run_id["old-contract-failure-run"]["issue_scope"], "historical_artifact")
         self.assertEqual(by_run_id["clean-candidate-run"]["issues"], [])
 
+    def test_build_reports_reclassifies_superseded_sold_comp_missing_ledger_run(self):
+        missing_started = datetime(2026, 6, 4, 14, 0, tzinfo=timezone.utc)
+        clean_started = datetime(2026, 6, 4, 14, 22, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "old-missing-ledger-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "started_at": missing_started,
+                },
+                {
+                    "run_id": "clean-candidate-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 3,
+                    "started_at": clean_started,
+                },
+            ],
+            webhook_rows={
+                "old-missing-ledger-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 1,
+                    "latest_error": "audit_fallbacks=webhook_log_claim_direct_pg",
+                },
+                "clean-candidate-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 3,
+                },
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "clean-candidate-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"candidate_staged": 3},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertEqual(
+            by_run_id["old-missing-ledger-run"]["issues"],
+            ["superseded_sold_comp_candidate_pre_ledger"],
+        )
+        self.assertEqual(by_run_id["old-missing-ledger-run"]["issue_scope"], "historical_artifact")
+
     def test_build_reports_keeps_post_cutover_sold_comp_candidate_staging_failures_current(self):
         clean_started = datetime(2026, 6, 4, 14, 22, tzinfo=timezone.utc)
         later_failed_started = datetime(2026, 6, 4, 15, 0, tzinfo=timezone.utc)
@@ -808,6 +864,60 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         by_run_id = {report["run_id"]: report for report in reports}
         self.assertIn("webhook_error", by_run_id["later-contract-failure-run"]["issues"])
         self.assertEqual(by_run_id["later-contract-failure-run"]["issue_scope"], "current_landing_issue")
+
+    def test_build_reports_keeps_post_cutover_sold_comp_missing_ledger_current(self):
+        clean_started = datetime(2026, 6, 4, 14, 22, tzinfo=timezone.utc)
+        later_missing_started = datetime(2026, 6, 4, 15, 0, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "clean-candidate-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 3,
+                    "started_at": clean_started,
+                },
+                {
+                    "run_id": "later-missing-ledger-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "started_at": later_missing_started,
+                },
+            ],
+            webhook_rows={
+                "clean-candidate-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 3,
+                },
+                "later-missing-ledger-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 1,
+                    "latest_error": "audit_fallbacks=webhook_log_claim_direct_pg",
+                },
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "clean-candidate-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"candidate_staged": 3},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertIn("missing_delivery_log", by_run_id["later-missing-ledger-run"]["issues"])
+        self.assertIn("missing_db_save_ledger", by_run_id["later-missing-ledger-run"]["issues"])
+        self.assertEqual(by_run_id["later-missing-ledger-run"]["issue_scope"], "current_landing_issue")
 
     def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
         with patch.object(
