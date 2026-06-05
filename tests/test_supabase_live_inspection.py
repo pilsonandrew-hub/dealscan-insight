@@ -156,6 +156,7 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
         "alert_log": {"created_at", "status", "delivery_status", "channel"},
         "webhook_log": {"created_at", "received_at", "processing_status"},
         "ingest_delivery_log": {
+            "run_id",
             "source_site",
             "source",
             "channel",
@@ -282,3 +283,87 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
     assert "private-listing" not in str(report)
     assert "1FTFW1E50PFA00000" not in str(report)
     assert "Sensitive listing title" not in str(report)
+
+
+def test_safe_truth_audit_attributes_recent_deliveries_from_webhook_run_lineage(monkeypatch):
+    columns = {
+        "opportunities": {"created_at"},
+        "alert_log": {"created_at"},
+        "webhook_log": {"run_id", "source", "actor_id", "received_at", "processing_status"},
+        "ingest_delivery_log": {"run_id", "channel", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at"},
+    }
+    rows = {
+        "opportunities": [],
+        "alert_log": [],
+        "webhook_log": [
+            {
+                "run_id": "run-govdeals",
+                "source": "ds-govdeals",
+                "actor_id": "CuKaIAcWyFS0EPrAz",
+                "received_at": "2026-06-03T19:00:00Z",
+                "processing_status": "processed",
+            },
+            {
+                "run_id": "run-proxibid",
+                "source": "ds-proxibid",
+                "actor_id": "bxhncvtHEP712WX2e",
+                "received_at": "2026-06-03T19:01:00Z",
+                "processing_status": "processed",
+            },
+            {
+                "run_id": "run-gsa",
+                "actor_id": "fvDnYmGuFBCrwpEi9",
+                "received_at": "2026-06-03T19:02:00Z",
+                "processing_status": "processed",
+            },
+        ],
+        "ingest_delivery_log": [
+            {
+                "run_id": "run-govdeals",
+                "channel": "db_save",
+                "status": "skipped_gate",
+                "error_message": "age_or_mileage_exceeded",
+                "created_at": "2026-06-03T19:00:01Z",
+            },
+            {
+                "run_id": "run-govdeals",
+                "channel": "db_save",
+                "status": "skipped_margin",
+                "error_message": "margin_below_floor",
+                "created_at": "2026-06-03T19:00:02Z",
+            },
+            {
+                "run_id": "run-proxibid",
+                "channel": "db_save",
+                "status": "skipped_ceiling",
+                "error_message": "pricing_maturity_proxy",
+                "created_at": "2026-06-03T19:00:03Z",
+            },
+            {
+                "run_id": "run-gsa",
+                "channel": "db_save",
+                "status": "skipped_gate",
+                "error_message": "age_or_mileage_exceeded",
+                "created_at": "2026-06-03T19:00:04Z",
+            },
+        ],
+        "post_close_outcome_requests": [],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    report = inspection._safe_truth_audit("https://example.supabase.co", "service-key")
+
+    assert report["recent_deliveries"]["source_counts"] == {"govdeals": 2, "proxibid": 1, "gsaauctions": 1}
+    assert report["recent_deliveries"]["source_status_counts"] == [
+        {"source": "govdeals", "status": "skipped_gate", "count": 1},
+        {"source": "govdeals", "status": "skipped_margin", "count": 1},
+        {"source": "proxibid", "status": "skipped_ceiling", "count": 1},
+        {"source": "gsaauctions", "status": "skipped_gate", "count": 1},
+    ]
