@@ -7,6 +7,7 @@ import argparse
 import json
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from report_pricing_blocked_source_candidates import (
@@ -17,6 +18,7 @@ from report_pricing_blocked_source_candidates import (
 
 
 GENERIC_SOURCES = {"", "unknown", "db_save", "sonar_mirror", "webhook", "apify"}
+DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
 
 
 def _canon_source(value: Any) -> str | None:
@@ -55,17 +57,44 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
-def _source_from_row(row: dict[str, Any], *, run_sources: dict[str, str] | None = None) -> str:
+def _actor_source_by_id(path: Path = DEPLOYMENT_PATH) -> dict[str, str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    actors = payload.get("actors") if isinstance(payload, dict) else {}
+    if not isinstance(actors, dict):
+        return {}
+    source_by_id: dict[str, str] = {}
+    for actor_name, details in actors.items():
+        if not isinstance(details, dict):
+            continue
+        actor_id = str(details.get("id") or "").strip()
+        source = _canon_source(actor_name)
+        if actor_id and source:
+            source_by_id[actor_id] = source
+    return source_by_id
+
+
+def _source_from_row(
+    row: dict[str, Any],
+    *,
+    run_sources: dict[str, str] | None = None,
+    actor_sources: dict[str, str] | None = None,
+) -> str:
     run_id = str(row.get("run_id") or row.get("source_run_id") or "").strip()
     direct = _canon_source(
         row.get("source_site")
         or row.get("source")
         or row.get("source_name")
         or row.get("actor_name")
-        or row.get("actor_id")
     )
-    if direct:
+    actor_id = str(row.get("actor_id") or "").strip()
+    actor_source = (actor_sources or {}).get(actor_id)
+    if direct and direct not in GENERIC_SOURCES:
         return direct
+    if actor_source:
+        return actor_source
     if run_sources and run_id:
         return run_sources.get(run_id, "unknown")
     return "unknown"
@@ -162,10 +191,12 @@ def build_source_yield_report(
     lookback_hours: int,
     limit: int,
     now: datetime | None = None,
+    deployment_path: Path = DEPLOYMENT_PATH,
 ) -> dict[str, Any]:
     current_time = now or datetime.now(timezone.utc)
     since = current_time - timedelta(hours=lookback_hours)
     base_url = _normalize_supabase_rest_url(supabase_url)
+    actor_sources = _actor_source_by_id(deployment_path)
 
     webhook_columns = _available_columns(base_url, service_role_key, "webhook_log")
     webhook_order = "received_at" if "received_at" in webhook_columns else "created_at"
@@ -197,7 +228,7 @@ def build_source_yield_report(
     run_sources: dict[str, str] = {}
     webhook_by_source: dict[str, Counter[str]] = defaultdict(Counter)
     for row in webhook_rows:
-        source = _source_from_row(row)
+        source = _source_from_row(row, actor_sources=actor_sources)
         run_id = str(row.get("run_id") or "").strip()
         if run_id and source != "unknown":
             run_sources[run_id] = source
