@@ -112,3 +112,40 @@ def test_build_report_groups_delivery_and_opportunity_truth(monkeypatch):
     assert by_source["govdeals"]["classification"] == "accepted_flow_present"
     assert by_source["govdeals"]["active_opportunity_rows"] == 1
     assert by_source["hibid"]["classification"] == "source_quality_reject_dominant"
+
+
+def test_build_report_selects_only_available_live_columns(monkeypatch):
+    queries_by_table = {}
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        queries_by_table.setdefault(table, []).append(dict(query))
+        select = dict(query).get("select")
+        if select and "actor_name" in select:
+            raise AssertionError("actor_name should not be selected when live columns do not expose it")
+        if table == "webhook_log" and select == "*":
+            return [{"run_id": "run-1", "source": "govdeals", "status": "processed", "received_at": "2026-06-05T04:00:00+00:00"}]
+        if table == "ingest_delivery_log" and select == "*":
+            return [{"run_id": "run-1", "source_site": "govdeals", "status": "skipped_margin", "created_at": "2026-06-05T04:01:00+00:00"}]
+        if table == "opportunities" and select == "*":
+            return [{"source_site": "govdeals", "is_active": True, "score": 86.0, "created_at": "2026-06-05T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [{"run_id": "run-1", "source": "govdeals", "status": "processed", "received_at": "2026-06-05T04:00:00+00:00"}]
+        if table == "ingest_delivery_log":
+            return [{"run_id": "run-1", "source_site": "govdeals", "status": "skipped_margin", "created_at": "2026-06-05T04:01:00+00:00"}]
+        if table == "opportunities":
+            return [{"source_site": "govdeals", "is_active": True, "score": 86.0, "created_at": "2026-06-05T04:02:00+00:00"}]
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+    )
+
+    assert report["overall_verdict"] == "accepted_flow_present"
+    assert "actor_name" not in queries_by_table["webhook_log"][1]["select"]
+    assert "is_active" in queries_by_table["opportunities"][1]["select"]

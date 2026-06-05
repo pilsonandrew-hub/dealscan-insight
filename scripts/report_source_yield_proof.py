@@ -138,6 +138,23 @@ def _fetch_recent_rows(
     )
 
 
+def _available_columns(base_url: str, service_role_key: str, table: str) -> set[str]:
+    rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        table,
+        [("select", "*"), ("limit", "1")],
+    )
+    if rows and isinstance(rows[0], dict):
+        return set(rows[0].keys())
+    return set()
+
+
+def _select_available(columns: set[str], desired: list[str], fallback: str) -> str:
+    selected = [column for column in desired if column in columns]
+    return ",".join(selected) if selected else fallback
+
+
 def build_source_yield_report(
     supabase_url: str,
     service_role_key: str,
@@ -150,12 +167,30 @@ def build_source_yield_report(
     since = current_time - timedelta(hours=lookback_hours)
     base_url = _normalize_supabase_rest_url(supabase_url)
 
+    webhook_columns = _available_columns(base_url, service_role_key, "webhook_log")
+    webhook_order = "received_at" if "received_at" in webhook_columns else "created_at"
+    webhook_select = _select_available(
+        webhook_columns,
+        [
+            "run_id",
+            "actor_name",
+            "actor_id",
+            "source",
+            "source_site",
+            "status",
+            "processing_status",
+            "db_save",
+            "received_at",
+            "created_at",
+        ],
+        webhook_order,
+    )
     webhook_rows = _fetch_recent_rows(
         base_url,
         service_role_key,
         "webhook_log",
-        "run_id,actor_name,actor_id,source,source_site,status,processing_status,received_at",
-        "received_at",
+        webhook_select,
+        webhook_order,
         since,
         limit,
     )
@@ -166,15 +201,22 @@ def build_source_yield_report(
         run_id = str(row.get("run_id") or "").strip()
         if run_id and source != "unknown":
             run_sources[run_id] = source
-        status = str(row.get("status") or row.get("processing_status") or "unknown")[:80]
+        status = str(row.get("status") or row.get("processing_status") or row.get("db_save") or "unknown")[:80]
         webhook_by_source[source][status] += 1
 
+    delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
+    delivery_order = "created_at"
+    delivery_select = _select_available(
+        delivery_columns,
+        ["run_id", "source_site", "source", "channel", "status", "error_message", "created_at"],
+        delivery_order,
+    )
     delivery_rows = _fetch_recent_rows(
         base_url,
         service_role_key,
         "ingest_delivery_log",
-        "run_id,source_site,source,channel,status,error_message,created_at",
-        "created_at",
+        delivery_select,
+        delivery_order,
         since,
         limit,
     )
@@ -189,12 +231,29 @@ def build_source_yield_report(
         delivery_by_source[source]["status"][str(row.get("status") or "unknown")[:80]] += 1
         delivery_by_source[source]["reason"][_reason_bucket(row.get("error_message"))] += 1
 
+    opportunity_columns = _available_columns(base_url, service_role_key, "opportunities")
+    opportunity_order = "created_at"
+    opportunity_select = _select_available(
+        opportunity_columns,
+        [
+            "source_site",
+            "source",
+            "source_name",
+            "source_run_id",
+            "active",
+            "is_active",
+            "dos_score",
+            "score",
+            "created_at",
+        ],
+        opportunity_order,
+    )
     opportunity_rows = _fetch_recent_rows(
         base_url,
         service_role_key,
         "opportunities",
-        "source_site,source,source_name,source_run_id,active,dos_score,created_at",
-        "created_at",
+        opportunity_select,
+        opportunity_order,
         since,
         limit,
     )
@@ -206,9 +265,9 @@ def build_source_yield_report(
     for row in opportunity_rows:
         source = _source_from_row(row, run_sources=run_sources)
         opportunities_by_source[source]["opportunity_rows"] += 1
-        if _parse_bool(row.get("active")):
+        if _parse_bool(row.get("active") if "active" in row else row.get("is_active")):
             opportunities_by_source[source]["active_opportunity_rows"] += 1
-            score = _safe_float(row.get("dos_score"))
+            score = _safe_float(row.get("dos_score") if row.get("dos_score") is not None else row.get("score"))
             if score is not None and score >= 80:
                 opportunities_by_source[source]["active_dos80_rows"] += 1
 
