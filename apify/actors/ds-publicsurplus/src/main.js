@@ -12,7 +12,8 @@ import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
 const MAX_DETAIL_PAGES = 200;
-const MAX_ALLOWED_MILEAGE = 100000;
+const MAX_ALLOWED_MILEAGE = 50000;
+const MAX_ALLOWED_AGE_YEARS = 4;
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
@@ -318,7 +319,7 @@ async function pushListing(listing, sourceUrl, log) {
     }
     const currentYear = new Date().getFullYear();
     const age = currentYear - year;
-    if (!year || age > 10 || age < 0) {
+    if (!year || age > MAX_ALLOWED_AGE_YEARS || age < 0) {
         log.debug(`[SKIP] Too old or unknown year: ${year} - ${title}`);
         return false;
     }
@@ -410,7 +411,7 @@ async function pushTXListing(listing, sourceUrl, log) {
     const mileage = parseMileage(title);
     const currentYear = new Date().getFullYear();
     const age = currentYear - year;
-    if (!year || age > 10 || age < 0) {
+    if (!year || age > MAX_ALLOWED_AGE_YEARS || age < 0) {
         log.debug(`[TX][SKIP] Too old or unknown year: ${year} - ${title}`);
         return false;
     }
