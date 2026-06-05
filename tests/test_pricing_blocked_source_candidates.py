@@ -70,6 +70,47 @@ def test_classify_source_candidate_marks_margin_floor_reject():
     )
 
 
+def test_classify_source_candidate_marks_proxy_margin_row_covered_after_market_price():
+    row = {
+        "year": 2025,
+        "make": "Ford",
+        "model": "Mustang 60th Anniv Editio",
+        "state": "GA",
+        "mileage": 104,
+        "vin": "1FA6P8CF3S5407587",
+        "auction_active": True,
+        "has_market_price": True,
+        "has_usable_dealer_sales": False,
+        "error_message": "margin_below_floor | margin=$-38795 floor=$1500 tier=premium bid=$59433 mmr=$30000 cost=$66295 max_bid=$21600 headroom=$-37833 pricing=proxy",
+    }
+
+    assert (
+        report_pricing_blocked_source_candidates.classify_source_candidate(row)
+        == "covered_after_skip"
+    )
+
+
+def test_classify_source_candidate_marks_brightdrop_as_source_policy_reject():
+    row = {
+        "year": 2024,
+        "make": "BrightDrop",
+        "model": "Zevo 400 Base AWD Cargo Delivery Van",
+        "state": "FL",
+        "mileage": 10,
+        "vin": "1GCDE0ED5R7001954",
+        "auction_active": True,
+        "has_market_price": False,
+        "has_usable_dealer_sales": False,
+        "error_message": "margin_below_floor | margin=$-30300 floor=$1500 tier=premium bid=$32000 mmr=$15000 cost=$35300 max_bid=$8100 headroom=$-23900 pricing=proxy",
+        "title": "2024 BrightDrop Zevo 400 Base AWD Cargo Delivery Van",
+    }
+
+    assert (
+        report_pricing_blocked_source_candidates.classify_source_candidate(row)
+        == "source_policy_reject"
+    )
+
+
 def test_classify_source_candidate_separates_expired_and_dirty_rows():
     expired = {
         "year": 2023,
