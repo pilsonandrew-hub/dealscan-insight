@@ -18,7 +18,7 @@ def build_sonar_listing_row(vehicle: dict[str, Any]) -> dict[str, Any]:
         "state": vehicle.get("state"),
         "city": vehicle.get("city"),
         "current_bid": float(vehicle.get("current_bid") or 0),
-        "auction_end_date": vehicle.get("auction_end_date"),
+        "auction_end_date": vehicle.get("auction_end_date") or vehicle.get("auction_end_time"),
         "listing_url": vehicle.get("listing_url"),
         "image_url": vehicle.get("image_url") or vehicle.get("photo_url"),
         "photo_url": vehicle.get("photo_url") or vehicle.get("image_url"),

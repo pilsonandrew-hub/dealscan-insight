@@ -35,5 +35,15 @@ def test_build_sonar_listing_row_preserves_no_filter_mapping_and_fallbacks():
     assert row["dos_score"] == 82.5
 
 
+def test_build_sonar_listing_row_uses_normalized_auction_end_time_fallback():
+    row = build_sonar_listing_row({
+        "source_site": "publicsurplus",
+        "listing_url": "https://example.com/lot-2",
+        "auction_end_time": "2026-06-05T12:00:00+00:00",
+    })
+
+    assert row["auction_end_date"] == "2026-06-05T12:00:00+00:00"
+
+
 def test_build_sonar_listing_row_defaults_current_bid_to_zero():
     assert build_sonar_listing_row({"source": "GSA"})["current_bid"] == 0.0
