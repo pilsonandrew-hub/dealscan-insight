@@ -35,7 +35,7 @@ WEBHOOK_SUCCESS_STATUSES = {"processed", "ignored_replay"}
 SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
-DB_SAVE_CANDIDATE_STATUSES = {"candidate_staged"}
+DB_SAVE_CANDIDATE_STATUSES = {"candidate_already_reviewed", "candidate_staged"}
 DB_SAVE_EXISTING_STATUSES = {"duplicate_existing", "vin_dedup_skipped", "vin_dedup_updated"}
 DB_SAVE_SKIPPED_STATUSES = {
     "below_save_threshold",
@@ -64,6 +64,7 @@ HISTORICAL_ARTIFACT_ISSUES = {
     "audit_backfilled",
     "db_only_run",
     "direct_pg_claim_rest_fallback",
+    "superseded_sold_comp_candidate_pre_ledger",
     "superseded_source_quality_proof_pre_ledger",
 }
 CURRENT_LANDING_ISSUES = {
@@ -1061,6 +1062,7 @@ def build_reports(
             }
         )
     reclassify_superseded_source_quality_proofs(reports)
+    reclassify_superseded_sold_comp_candidate_failures(reports)
     reports.sort(
         key=lambda report: (
             (report["apify"] or {}).get("started_at")
@@ -1095,6 +1097,20 @@ def _has_clean_skipped_proof_ledger(report: dict[str, Any]) -> bool:
     db_save = ((delivery.get("channels") or {}).get("db_save") or {})
     statuses = db_save.get("statuses") or {}
     return (_first_int(statuses.get("skipped_proof")) or 0) > 0
+
+
+def _has_clean_sold_comp_candidate_ledger(report: dict[str, Any]) -> bool:
+    if set(report.get("issues") or []) & CURRENT_LANDING_ISSUES:
+        return False
+    apify = report.get("apify") or {}
+    if str(apify.get("actor_name") or "") != "ds-govdeals-sold":
+        return False
+    delivery = report.get("delivery") or {}
+    db_save = ((delivery.get("channels") or {}).get("db_save") or {})
+    statuses = db_save.get("statuses") or {}
+    candidate_rows = sum(_first_int(statuses.get(status)) or 0 for status in DB_SAVE_CANDIDATE_STATUSES)
+    failed_rows = sum(_first_int(statuses.get(status)) or 0 for status in DB_SAVE_FAILURE_STATUSES)
+    return candidate_rows > 0 and failed_rows == 0
 
 
 def _db_save_accounted_rows(report: dict[str, Any]) -> int:
@@ -1138,11 +1154,13 @@ def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -
         return
 
     superseded_issues = {
+        "audit_backfilled",
         "missing_delivery_log",
         "missing_db_save_ledger",
         "no_db_landing",
     }
     mixed_superseded_issues = {
+        "audit_backfilled",
         "partial_db_save_ledger",
         "no_db_landing",
     }
@@ -1180,6 +1198,48 @@ def reclassify_superseded_source_quality_proofs(reports: list[dict[str, Any]]) -
                 "run predated the durable skipped_proof ledger path; a later same-actor "
                 "proof-only run has clean db_save=skipped_proof evidence."
             )
+
+
+def reclassify_superseded_sold_comp_candidate_failures(reports: list[dict[str, Any]]) -> None:
+    latest_clean_candidate_by_actor: dict[str, datetime] = {}
+    for report in reports:
+        if not _has_clean_sold_comp_candidate_ledger(report):
+            continue
+        actor_name = str(((report.get("apify") or {}).get("actor_name")) or "")
+        if not actor_name:
+            continue
+        started_at = _started_at_for_report(report)
+        prior = latest_clean_candidate_by_actor.get(actor_name)
+        if prior is None or started_at > prior:
+            latest_clean_candidate_by_actor[actor_name] = started_at
+
+    if not latest_clean_candidate_by_actor:
+        return
+
+    superseded_issues = {
+        "audit_backfilled",
+        "db_save_failures",
+        "no_db_landing",
+        "webhook_error",
+    }
+    for report in reports:
+        apify = report.get("apify") or {}
+        actor_name = str(apify.get("actor_name") or "")
+        latest_clean = latest_clean_candidate_by_actor.get(actor_name)
+        if actor_name != "ds-govdeals-sold" or latest_clean is None:
+            continue
+        if _started_at_for_report(report) >= latest_clean:
+            continue
+        issue_set = set(report.get("issues") or [])
+        if not issue_set or not issue_set <= superseded_issues:
+            continue
+        report["issues"] = ["superseded_sold_comp_candidate_pre_ledger"]
+        report["issue_scope"] = "historical_artifact"
+        report["likely_cause"] = (
+            "superseded_sold_comp_candidate_pre_ledger: this older GovDeals sold-comp "
+            "candidate-staging failure predated later clean candidate ledger evidence for "
+            "the same actor."
+        )
 
 
 def print_issue_summary(reports: list[dict[str, Any]]) -> None:

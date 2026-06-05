@@ -578,6 +578,237 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         self.assertIn("partial_db_save_ledger", by_run_id["later-missing-proof-run"]["issues"])
         self.assertEqual(by_run_id["later-missing-proof-run"]["issue_scope"], "current_landing_issue")
 
+    def test_build_reports_counts_candidate_already_reviewed_as_landed_comp_candidate(self):
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "reviewed-candidate-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 3,
+                    "started_at": datetime(2026, 6, 4, 15, 20, tzinfo=timezone.utc),
+                },
+            ],
+            webhook_rows={
+                "reviewed-candidate-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 3,
+                }
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "reviewed-candidate-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"candidate_already_reviewed": 3},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        self.assertEqual(reports[0]["issues"], [])
+        self.assertEqual(reports[0]["issue_scope"], "clean")
+
+    def test_build_reports_reclassifies_pre_ledger_reviewed_candidate_with_missing_proof_row(self):
+        older_started = datetime(2026, 6, 4, 15, 20, tzinfo=timezone.utc)
+        clean_proof_started = datetime(2026, 6, 4, 23, 35, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "old-reviewed-candidate-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 4,
+                    "source_quality_proof_count": 1,
+                    "started_at": older_started,
+                },
+                {
+                    "run_id": "clean-proof-run",
+                    "actor_name": "ds-proxibid",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "source_quality_proof_count": 1,
+                    "started_at": clean_proof_started,
+                },
+            ],
+            webhook_rows={
+                "old-reviewed-candidate-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 4,
+                    "latest_error": "audit_fallbacks=webhook_log_claim_direct_pg",
+                },
+                "clean-proof-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 1,
+                },
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "old-reviewed-candidate-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"candidate_already_reviewed": 3},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+                "clean-proof-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"skipped_proof": 1},
+                            "total_rows": 1,
+                            "total_attempts": 1,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertEqual(
+            by_run_id["old-reviewed-candidate-run"]["issues"],
+            ["superseded_source_quality_proof_pre_ledger"],
+        )
+        self.assertEqual(by_run_id["old-reviewed-candidate-run"]["issue_scope"], "historical_artifact")
+
+    def test_build_reports_reclassifies_superseded_sold_comp_candidate_staging_failures(self):
+        failed_started = datetime(2026, 6, 4, 13, 40, tzinfo=timezone.utc)
+        clean_started = datetime(2026, 6, 4, 14, 22, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "old-contract-failure-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 4,
+                    "started_at": failed_started,
+                },
+                {
+                    "run_id": "clean-candidate-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 3,
+                    "started_at": clean_started,
+                },
+            ],
+            webhook_rows={
+                "old-contract-failure-run": {
+                    "latest_status": "error",
+                    "webhook_entries": 1,
+                    "max_item_count": 4,
+                    "latest_error": "candidate_staging_failed chk_sold_comp_price_basis audit_fallbacks=webhook_log_claim_direct_pg",
+                },
+                "clean-candidate-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 3,
+                },
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "old-contract-failure-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"failed": 4},
+                            "total_rows": 4,
+                            "total_attempts": 4,
+                        }
+                    }
+                },
+                "clean-candidate-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"candidate_staged": 3},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertEqual(
+            by_run_id["old-contract-failure-run"]["issues"],
+            ["superseded_sold_comp_candidate_pre_ledger"],
+        )
+        self.assertEqual(by_run_id["old-contract-failure-run"]["issue_scope"], "historical_artifact")
+        self.assertEqual(by_run_id["clean-candidate-run"]["issues"], [])
+
+    def test_build_reports_keeps_post_cutover_sold_comp_candidate_staging_failures_current(self):
+        clean_started = datetime(2026, 6, 4, 14, 22, tzinfo=timezone.utc)
+        later_failed_started = datetime(2026, 6, 4, 15, 0, tzinfo=timezone.utc)
+
+        reports = reconcile.build_reports(
+            apify_runs=[
+                {
+                    "run_id": "clean-candidate-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 3,
+                    "started_at": clean_started,
+                },
+                {
+                    "run_id": "later-contract-failure-run",
+                    "actor_name": "ds-govdeals-sold",
+                    "status": "SUCCEEDED",
+                    "item_count": 1,
+                    "started_at": later_failed_started,
+                },
+            ],
+            webhook_rows={
+                "clean-candidate-run": {
+                    "latest_status": "processed",
+                    "webhook_entries": 1,
+                    "max_item_count": 3,
+                },
+                "later-contract-failure-run": {
+                    "latest_status": "error",
+                    "webhook_entries": 1,
+                    "max_item_count": 1,
+                    "latest_error": "candidate_staging_failed",
+                },
+            },
+            opportunity_rows={},
+            delivery_rows={
+                "clean-candidate-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"candidate_staged": 3},
+                            "total_rows": 3,
+                            "total_attempts": 3,
+                        }
+                    }
+                },
+                "later-contract-failure-run": {
+                    "channels": {
+                        "db_save": {
+                            "statuses": {"failed": 1},
+                            "total_rows": 1,
+                            "total_attempts": 1,
+                        }
+                    }
+                },
+            },
+            pending_grace_minutes=30,
+        )
+
+        by_run_id = {report["run_id"]: report for report in reports}
+        self.assertIn("webhook_error", by_run_id["later-contract-failure-run"]["issues"])
+        self.assertEqual(by_run_id["later-contract-failure-run"]["issue_scope"], "current_landing_issue")
+
     def test_fetch_webhook_rows_via_rest_aggregates_rows(self):
         with patch.object(
             reconcile,
