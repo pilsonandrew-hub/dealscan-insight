@@ -2,7 +2,7 @@ name: Run Apify Actor
 
 on:
   schedule:
-    - cron: "17 */12 * * *"
+    - cron: "45 8,20 * * *"
   workflow_dispatch:
     inputs:
       actor:
