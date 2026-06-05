@@ -447,6 +447,58 @@ def test_score_vehicle_adds_police_fleet_recon_buffer():
     assert result["manheim_source_status"] == "fallback"
 
 
+def test_score_vehicle_preserves_market_comp_wholesale_value(monkeypatch):
+    from backend.ingest import manheim_market, retail_comps
+
+    vehicle = {
+        "title": "2025 Ford Explorer Active AWD Low Miles!",
+        "agency_name": "City Fleet",
+        "vin": "1FMUK8DH5SGA77978",
+        "make": "Ford",
+        "model": "Explorer",
+        "current_bid": 31000,
+        "state": "CA",
+        "year": 2025,
+        "mileage": 1435,
+        "listing_url": "https://www.govdeals.com/asset/123/456",
+        "source_site": "govdeals",
+    }
+
+    monkeypatch.setattr(
+        manheim_market,
+        "get_manheim_market_data",
+        lambda **_kwargs: {
+            "manheim_mmr_mid": None,
+            "manheim_mmr_low": None,
+            "manheim_mmr_high": None,
+            "manheim_range_width_pct": None,
+            "manheim_confidence": 0,
+            "manheim_source_status": "fallback",
+            "manheim_updated_at": None,
+        },
+    )
+    monkeypatch.setattr(
+        retail_comps,
+        "get_retail_comps",
+        lambda **_kwargs: {
+            "retail_comp_price_estimate": 41182.33,
+            "retail_comp_low": 39960.0,
+            "retail_comp_high": 42689.0,
+            "retail_comp_count": 3,
+            "retail_comp_confidence": 0.69,
+            "pricing_source": "external_retail_listing_comp",
+            "pricing_updated_at": "2026-06-05T12:57:00Z",
+        },
+    )
+
+    result = score_vehicle(vehicle)
+
+    assert result["pricing_maturity"] == "market_comp"
+    assert result["mmr_estimated"] == 30505.43
+    assert result["wholesale_margin"] == -3544.57
+    assert vehicle["mmr_estimated"] == 30505.43
+
+
 def test_score_vehicle_fallback_score_marks_hard_fallback_provenance(monkeypatch):
     from webapp.routers import ingest
 

@@ -1865,8 +1865,7 @@ def score_vehicle(vehicle: dict) -> dict:
             damage_type=vehicle.get("damage_type"),
             title=vehicle.get("title"),
         )
-        result["mmr_estimated"] = mmr
-        vehicle["mmr_estimated"] = mmr
+        vehicle["mmr_estimated"] = result.get("mmr_estimated") or mmr
         for key in (
             "designated_lane",
             "dos_premium",
