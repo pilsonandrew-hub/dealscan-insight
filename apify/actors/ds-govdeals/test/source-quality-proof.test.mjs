@@ -69,6 +69,9 @@ describe('ds-govdeals source quality proof contract', () => {
   test('rejects commercial-heavy vehicle families before pushing rows', () => {
     expect(source).toContain('/\\bsprinter\\b/i');
     expect(source).toContain('/\\btransit\\b/i');
+    expect(source).toContain('/\\bbrightdrop\\b/i');
+    expect(source).toContain('/\\bzevo\\b/i');
+    expect(source).toContain('/\\bcargo\\s+delivery\\s+van\\b/i');
     expect(source).toContain('/\\bpeterbilt\\b/i');
     expect(source).toContain('/\\bfreightliner\\b/i');
     expect(source).toContain('/\\binternational\\b/i');
