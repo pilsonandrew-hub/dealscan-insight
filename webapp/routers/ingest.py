@@ -3854,7 +3854,7 @@ def _format_margin_below_floor_reason(score_result: dict, vehicle: Optional[dict
     current_bid = score_result.get("current_bid")
     if current_bid in (None, "") and vehicle:
         current_bid = vehicle.get("current_bid")
-    return (
+    reason = (
         "margin_below_floor"
         f" | margin={_money(score_result.get('wholesale_margin', 0))}"
         f" floor={_money(floor)}"
@@ -3866,6 +3866,13 @@ def _format_margin_below_floor_reason(score_result: dict, vehicle: Optional[dict
         f" headroom={_money(score_result.get('bid_headroom', 0))}"
         f" pricing={score_result.get('pricing_maturity') or 'unknown'}"
     )
+    if score_result.get("retail_comp_count") or score_result.get("retail_comp_confidence"):
+        reason += (
+            f" comp_price={_money(score_result.get('retail_comp_price_estimate', 0))}"
+            f" comp_count={score_result.get('retail_comp_count') or 0}"
+            f" comp_conf={score_result.get('retail_comp_confidence') or 0}"
+        )
+    return reason
 
 
 async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:

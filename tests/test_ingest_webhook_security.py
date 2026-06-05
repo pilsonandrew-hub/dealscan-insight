@@ -969,6 +969,9 @@ class WebhookSecurityTests(unittest.TestCase):
                 "max_bid": 20500,
                 "bid_headroom": 1500,
                 "pricing_maturity": "market_comp",
+                "retail_comp_price_estimate": 41182.33,
+                "retail_comp_count": 3,
+                "retail_comp_confidence": 0.69,
             },
         ), patch.object(
             ingest, "passes_ingest_margin_floor", lambda *_args, **_kwargs: False
@@ -990,7 +993,7 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(delivery_calls[0]["listing_id"], "listing-margin-sonar")
         self.assertEqual(
             delivery_calls[1]["error_message"],
-            "margin_below_floor | margin=$100 floor=$2500 tier=standard bid=$19000 mmr=$21500 cost=$21400 max_bid=$20500 headroom=$1500 pricing=market_comp",
+            "margin_below_floor | margin=$100 floor=$2500 tier=standard bid=$19000 mmr=$21500 cost=$21400 max_bid=$20500 headroom=$1500 pricing=market_comp comp_price=$41182 comp_count=3 comp_conf=0.69",
         )
 
     def test_govdeals_sold_webhook_stages_candidate_instead_of_dealer_sales(self):
