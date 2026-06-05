@@ -55,9 +55,9 @@
       "id": "0XjoegYZVcPldLstl",
       "scheduleId": "uJyfnyv7p5UmTzPmn",
       "webhookId": "lcQSaKEq2yb3EfoZb",
-      "status": "DISABLED",
-      "notes": "Sandhills Cloud platform \u2014 ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Schedule: every 12hr. Live audit 2026-05-12: schedule uJyfnyv7p5UmTzPmn exists but isEnabled=false; no recent actor run.",
-      "scheduleStatus": "disabled_live"
+      "status": "enabled",
+      "notes": "Sandhills Cloud platform \u2014 ADESA Mercer (NJ auto auction) + Indiana Auto Auction + truck auctions. ADESA lots flagged as source_type=equipmentfacts_adesa. Live proof-clean actor re-enabled on schedule uJyfnyv7p5UmTzPmn after 2026-06-05 source-quality proof and production schedule audit.",
+      "scheduleStatus": "enabled_live"
     },
     "ds-usgovbid": {
       "id": "6XO9La81aEmtsCT3g",
