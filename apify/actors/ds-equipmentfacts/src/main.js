@@ -23,6 +23,8 @@ import { PlaywrightCrawler } from 'crawlee';
 const SOURCE = 'equipmentfacts';
 const BASE_URL = 'https://www.equipmentfacts.com';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_MAX_MILEAGE = 50000;
 
 if (!WEBHOOK_SECRET) {
     console.warn('[EQUIPMENTFACTS] WARNING: WEBHOOK_SECRET env var not set');
@@ -201,14 +203,63 @@ const {
     maxPages = 15,
     minBid = 500,
     maxBid = 50000,
+    minYear = CURRENT_YEAR - 4,
+    maxMileage = DEFAULT_MAX_MILEAGE,
+    webhookUrl = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify',
     includeRustStates = false,
     searchQuery = '',
 } = input;
 const searchQueryLower = searchQuery ? searchQuery.toLowerCase() : '';
+const MIN_YEAR = Number(minYear) || CURRENT_YEAR - 4;
+const MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE;
 
 let totalFound = 0;
 let totalPassed = 0;
 let totalFailed = 0;
+const proofCounters = {
+    rows_excluded_search_filter: 0,
+    rows_excluded_non_vehicle: 0,
+    rows_excluded_missing_required_data: 0,
+    rows_excluded_age_mileage_prefilter: 0,
+    rows_excluded_policy_prefilter: 0,
+    rows_excluded_rust_state: 0,
+    rows_excluded_bid_range: 0,
+    rows_excluded_zero_pricing_signal: 0,
+};
+const proofSamples = {
+    search_filter_rejected_samples: [],
+    non_vehicle_rejected_samples: [],
+    missing_required_data_rejected_samples: [],
+    prefilter_age_mileage_rejected_samples: [],
+    prefilter_policy_rejected_samples: [],
+    rust_state_rejected_samples: [],
+    bid_range_rejected_samples: [],
+    zero_pricing_rejected_samples: [],
+};
+
+function sampleForProof(item, reason, extra = {}) {
+    return {
+        title: String(item.title || item.description || item.equipmentDescription || '').slice(0, 120),
+        year: item.year ?? item.modelYear ?? null,
+        make: item.make || item.manufacturer || item.makebrand || null,
+        model: item.model || item.modelName || null,
+        state: normalizeState(item.state || item.locationState || item.stateAbbr || ''),
+        mileage: item.mileage ?? item.miles ?? item.meterCount ?? null,
+        current_bid: item.currentBid ?? item.bidAmount ?? item.currentPrice ?? null,
+        listing_url: item.url || item.listingUrl || item.lotUrl || null,
+        reason,
+        ...extra,
+    };
+}
+
+function rejectForProof(counterKey, sampleKey, item, reason, extra = {}) {
+    totalFailed++;
+    proofCounters[counterKey] += 1;
+    const samples = proofSamples[sampleKey];
+    if (samples && samples.length < 5) {
+        samples.push(sampleForProof(item, reason, extra));
+    }
+}
 
 function passes(item) {
     const conditionText = [
@@ -218,7 +269,12 @@ function passes(item) {
         item.longDescription,
     ].filter(Boolean).join(' ').toLowerCase();
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(conditionText))) {
-        totalFailed++;
+        rejectForProof(
+            'rows_excluded_policy_prefilter',
+            'prefilter_policy_rejected_samples',
+            item,
+            'condition_reject_pattern',
+        );
         return false;
     }
     const state = normalizeState(item.state || item.locationState || '');
@@ -227,28 +283,58 @@ function passes(item) {
     const hasYear = Number.isFinite(year);
     if (!includeRustStates && HIGH_RUST_STATES.has(state) && hasYear) {
         if (year < 2023) {
-            totalFailed++;
+            rejectForProof(
+                'rows_excluded_rust_state',
+                'rust_state_rejected_samples',
+                item,
+                'rust_state_age_reject',
+            );
             return false;
         }
         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
     }
     const bid = parseFloat(item.currentBid || item.bidAmount || item.currentPrice || 0);
-    if (bid > 0 && (bid < minBid || bid > maxBid)) {
-        totalFailed++;
+    if (bid <= 0) {
+        rejectForProof(
+            'rows_excluded_zero_pricing_signal',
+            'zero_pricing_rejected_samples',
+            item,
+            'missing_current_bid',
+        );
+        return false;
+    }
+    if (bid < minBid || bid > maxBid) {
+        rejectForProof(
+            'rows_excluded_bid_range',
+            'bid_range_rejected_samples',
+            item,
+            'bid_out_of_range',
+            { min_bid: minBid, max_bid: maxBid },
+        );
         return false;
     }
     const mileageValue = item.mileage ?? item.miles ?? item.meterCount ?? null;
     const mileage = mileageValue == null || mileageValue === ''
         ? null
         : parseInt(String(mileageValue).replace(/,/g, ''), 10);
-    if (mileage !== null && mileage > 100000) {
-        totalFailed++;
+    if (mileage !== null && mileage > MAX_MILEAGE) {
+        rejectForProof(
+            'rows_excluded_age_mileage_prefilter',
+            'prefilter_age_mileage_rejected_samples',
+            item,
+            'mileage_over_50k',
+            { max_mileage: MAX_MILEAGE },
+        );
         return false;
     }
-    const currentYear = new Date().getFullYear();
-    const age = hasYear ? currentYear - year : null;
-    if (!year || age > 10 || age < 0) {
-        totalFailed++;
+    if (!year || year < MIN_YEAR || year > CURRENT_YEAR + 1) {
+        rejectForProof(
+            'rows_excluded_age_mileage_prefilter',
+            'prefilter_age_mileage_rejected_samples',
+            item,
+            !year ? 'missing_model_year' : year > CURRENT_YEAR + 1 ? 'future_model_year' : 'model_year_reject',
+            { min_year: MIN_YEAR },
+        );
         return false;
     }
     return true;
@@ -516,12 +602,24 @@ const crawler = new PlaywrightCrawler({
             seenIds.add(id);
             totalFound++;
             if (!isVehicleRelevant(lot)) {
-                totalFailed++;
+                rejectForProof(
+                    'rows_excluded_non_vehicle',
+                    'non_vehicle_rejected_samples',
+                    lot,
+                    'non_vehicle_or_policy_title_reject',
+                );
                 continue;
             }
             if (!passes(lot)) continue;
             const normalized = normalizeLot(lot);
             if (searchQueryLower && !normalized.title.toLowerCase().includes(searchQueryLower)) {
+                rejectForProof(
+                    'rows_excluded_search_filter',
+                    'search_filter_rejected_samples',
+                    normalized,
+                    'search_query_reject',
+                    { search_query: searchQuery },
+                );
                 continue;
             }
             totalPassed++;
@@ -592,12 +690,24 @@ async function paginateApi(log, seenIds) {
                 if (id) seenIds.add(id);
                 totalFound++;
                 if (!isVehicleRelevant(lot)) {
-                    totalFailed++;
+                    rejectForProof(
+                        'rows_excluded_non_vehicle',
+                        'non_vehicle_rejected_samples',
+                        lot,
+                        'non_vehicle_or_policy_title_reject',
+                    );
                     continue;
                 }
                 if (!passes(lot)) continue;
                 const normalized = normalizeLot(lot);
                 if (searchQueryLower && !normalized.title.toLowerCase().includes(searchQueryLower)) {
+                    rejectForProof(
+                        'rows_excluded_search_filter',
+                        'search_filter_rejected_samples',
+                        normalized,
+                        'search_query_reject',
+                        { search_query: searchQuery },
+                    );
                     continue;
                 }
                 totalPassed++;
@@ -619,6 +729,54 @@ console.log(`[EQUIPMENTFACTS] Auth initialized`);
 console.log(`[EQUIPMENTFACTS] Detected API URLs:`);
 for (const u of [...new Set(capturedApi.detectedUrls)].slice(0, 20)) {
     console.log(`  ${u}`);
+}
+
+const env = Actor.getEnv();
+const accountedRows = Object.values(proofCounters).reduce((sum, value) => sum + value, 0);
+const proof = {
+    record_type: 'source_quality_proof',
+    source: SOURCE,
+    source_site: SOURCE,
+    actor_run_id: env.actorRunId || null,
+    run_id: env.actorRunId || null,
+    actor_id: env.actorId || null,
+    found_rows_total: totalFound,
+    prefilter_passed_rows_total: totalPassed,
+    pushed_rows_total: totalPassed,
+    failed_rows_total: totalFailed,
+    max_pages: maxPages,
+    min_year: MIN_YEAR,
+    max_mileage: MAX_MILEAGE,
+    rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - totalPassed - accountedRows),
+    ...proofCounters,
+    ...proofSamples,
+    detected_api_urls: [...new Set(capturedApi.detectedUrls)].slice(0, 20),
+    scraped_at: new Date().toISOString(),
+};
+await Actor.pushData(proof);
+
+if (WEBHOOK_SECRET) {
+    try {
+        const res = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-apify-webhook-secret': WEBHOOK_SECRET,
+            },
+            body: JSON.stringify({
+                source: SOURCE,
+                runId: env.actorRunId,
+                actorId: env.actorId,
+                datasetId: env.defaultDatasetId,
+                itemCount: totalPassed + 1,
+            }),
+        });
+        console.log(`[EQUIPMENTFACTS] Webhook → ${res.status}`);
+    } catch (err) {
+        console.warn(`[EQUIPMENTFACTS] Webhook failed: ${err.message}`);
+    }
+} else {
+    console.warn('[EQUIPMENTFACTS] WEBHOOK_SECRET missing; proof row was pushed to dataset but not delivered to webhook');
 }
 
 await Actor.exit();
