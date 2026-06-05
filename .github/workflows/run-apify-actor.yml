@@ -262,6 +262,7 @@ jobs:
                           "rows_excluded_missing_mileage",
                           "rows_excluded_after_detail_attempt",
                           "rows_excluded_without_detail_attempt",
+                          "rows_excluded_unaccounted_after_prefilter",
                           "rows_excluded_out_of_scope",
                           "rows_excluded_not_completed_sale",
                           "completed_sale_rejection_reasons",
