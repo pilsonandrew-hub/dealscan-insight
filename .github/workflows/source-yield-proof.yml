@@ -1,0 +1,46 @@
+name: Source Yield Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Source yield lookback window in hours"
+        required: true
+        default: "24"
+      limit:
+        description: "Maximum recent rows to inspect per table"
+        required: true
+        default: "500"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+      LIMIT: ${{ inputs.limit }}
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
+      - name: Run source yield proof through Supabase REST
+        run: |
+          set -euo pipefail
+          python3 scripts/report_source_yield_proof.py \
+            --via-rest \
+            --lookback-hours "${LOOKBACK_HOURS}" \
+            --limit "${LIMIT}"
