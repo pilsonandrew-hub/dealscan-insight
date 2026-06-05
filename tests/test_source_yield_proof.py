@@ -237,6 +237,69 @@ def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeyp
     assert report["source_summaries"][0]["active_opportunity_rows"] == 0
 
 
+def test_build_report_explains_inactive_accepted_lifecycle_reason(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-quarantined",
+                    "source": "publicsurplus",
+                    "status": "processed",
+                    "item_count": 2,
+                    "received_at": "2026-06-05T04:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-quarantined",
+                    "source_site": "publicsurplus",
+                    "channel": "db_save",
+                    "status": "saved_supabase",
+                    "created_at": "2026-06-05T04:01:00+00:00",
+                }
+            ]
+        if table == "opportunities":
+            return [
+                {
+                    "source_site": "publicsurplus",
+                    "source_run_id": "run-quarantined",
+                    "active": False,
+                    "step_status": "q_no_cond_ev",
+                    "dos_score": 92.0,
+                    "created_at": "2026-06-05T04:02:00+00:00",
+                },
+                {
+                    "source_site": "publicsurplus",
+                    "source_run_id": "run-quarantined",
+                    "active": False,
+                    "step_status": "q_no_cond_ev",
+                    "dos_score": 88.0,
+                    "created_at": "2026-06-05T04:03:00+00:00",
+                },
+            ]
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 4, 30, tzinfo=timezone.utc),
+        run_detail_source="publicsurplus",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert source_summary["classification"] == "inactive_accepted_flow_only"
+    assert source_summary["inactive_opportunity_lifecycle_counts"] == {"q_no_cond_ev": 2}
+    assert run_summary["classification"] == "inactive_accepted_flow_only"
+    assert run_summary["inactive_opportunity_lifecycle_counts"] == {"q_no_cond_ev": 2}
+
+
 def test_build_report_selects_only_available_live_columns(monkeypatch):
     queries_by_table = {}
 
@@ -399,6 +462,7 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
             "opportunity_rows": 0,
             "active_opportunity_rows": 0,
             "active_dos80_rows": 0,
+            "inactive_opportunity_lifecycle_counts": {},
             "classification": "source_quality_reject_dominant",
         }
     ]
