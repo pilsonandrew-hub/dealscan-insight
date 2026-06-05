@@ -442,8 +442,13 @@ async function pushTXListing(listing, sourceUrl, log) {
 
     totalAfterFilters++;
     log.info(`[TX][PASS] ${vehicle.title} | $${vehicle.current_bid} | VIN: ${vehicle.vin}`);
-    totalPushed++;
-    await Actor.pushData(vehicle);
+    if (listingUrl && detailPageCount < MAX_DETAIL_PAGES && (!vehicle.vin || needsDetailEvidence(vehicle))) {
+        detailPageCount++;
+        detailQueue.push(vehicle);
+    } else {
+        totalPushed++;
+        await Actor.pushData(vehicle);
+    }
     return true;
 }
 
