@@ -88,9 +88,9 @@
       "webhookId": "N699FBbtfzjjhHshJ",
       "status": "enabled",
       "scheduleId": "JFLFznTEe1kLYXM34",
-      "schedule": "45 10,22 * * *",
+      "schedule": "5 11,23 * * *",
       "scheduleName": "ds-bidspotter-12hr-apify-native",
-      "notes": "BidSpotter.com \u2014 Firecrawl-backed actor for AWS WAF protected pages. US-only filter applied. Cadence is configured as an Apify-native schedule by GitHub Actions so FIRECRAWL_API_KEY is stored as a secret actor env var, not in repo or schedule input.",
+      "notes": "BidSpotter.com \u2014 Firecrawl-backed actor for AWS WAF protected pages. US-only filter applied. Cadence is configured as an Apify-native schedule by GitHub Actions so FIRECRAWL_API_KEY and WEBHOOK_SECRET are stored as secret actor env vars, not in repo or schedule input.",
       "scheduleStatus": "enabled_live"
     },
     "ds-hibid": {
