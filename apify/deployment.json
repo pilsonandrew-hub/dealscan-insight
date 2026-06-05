@@ -64,7 +64,7 @@
       "scheduleId": "PZRUZq76opvUAxTzV",
       "webhookId": "QhPfZWcztslsbKDlm",
       "status": "enabled",
-      "schedule": "0 */12 * * *",
+      "schedule": "45 8,20 * * *",
       "notes": "USGovBid (usgovbid.com) impound/surplus vehicle auctions. WordPress Events Calendar REST API + Maxanet platform (bid.usgovbid.com). Playwright required for AJAX lot loading."
     },
     "ds-jjkane": {
