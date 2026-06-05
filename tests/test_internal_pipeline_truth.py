@@ -767,6 +767,8 @@ def test_pipeline_truth_reports_alerts_runtime_status(monkeypatch):
     from webapp.routers import internal
 
     monkeypatch.setenv("ALERTS_ENABLED", "false")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     status = internal._alerts_runtime_status()
 
     assert status == {
@@ -774,10 +776,17 @@ def test_pipeline_truth_reports_alerts_runtime_status(monkeypatch):
         "source": "env",
         "raw_value": "false",
         "production_default": "true",
+        "telegram_bot_configured": True,
+        "telegram_chat_configured": False,
+        "telegram_ready": False,
     }
 
     monkeypatch.delenv("ALERTS_ENABLED", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "-100123")
     status = internal._alerts_runtime_status()
 
     assert status["enabled"] is True
     assert status["source"] == "production_default"
+    assert status["telegram_bot_configured"] is True
+    assert status["telegram_chat_configured"] is True
+    assert status["telegram_ready"] is True

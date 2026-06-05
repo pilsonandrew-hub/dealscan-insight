@@ -44,11 +44,16 @@ def _now_iso() -> str:
 def _alerts_runtime_status() -> dict[str, Any]:
     raw = os.getenv("ALERTS_ENABLED")
     effective = (raw if raw is not None else ALERTS_ENABLED_PRODUCTION_DEFAULT).strip().lower()
+    telegram_bot_configured = bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip())
+    telegram_chat_configured = bool((os.getenv("TELEGRAM_CHAT_ID") or "").strip())
     return {
         "enabled": effective == "true",
         "source": "env" if raw is not None else "production_default",
         "raw_value": raw if raw in {"true", "false"} else ("set_non_boolean" if raw is not None else None),
         "production_default": ALERTS_ENABLED_PRODUCTION_DEFAULT,
+        "telegram_bot_configured": telegram_bot_configured,
+        "telegram_chat_configured": telegram_chat_configured,
+        "telegram_ready": effective == "true" and telegram_bot_configured and telegram_chat_configured,
     }
 
 

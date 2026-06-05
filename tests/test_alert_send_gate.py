@@ -141,3 +141,32 @@ def test_send_telegram_alert_sends_when_recomputed_confidence_gate_passes(monkey
     assert client.post.call_count == 1
     assert deal["alert_gate"]["eligible"] is True
     assert deal["alert_gate"]["blocking_reasons"] == []
+
+
+def test_send_telegram_alert_records_delivery_skip_when_telegram_config_missing(monkeypatch):
+    client = _install_fake_httpx()
+    ingest = _ingest_module(monkeypatch)
+    monkeypatch.setattr(ingest, "TELEGRAM_CHAT_ID", "")
+    recorded = []
+    monkeypatch.setattr(
+        ingest,
+        "_record_delivery_log",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    deal = _send_eligible_deal()
+
+    message_id = asyncio.run(ingest.send_telegram_alert(deal))
+
+    assert message_id is None
+    assert client.post.call_count == 0
+    assert recorded == [
+        {
+            "run_id": "issue-5-test-run",
+            "listing_id": "listing-issue-5",
+            "listing_url": "https://example.com/listing/123",
+            "opportunity_id": "opp-issue-5",
+            "channel": "telegram_alert",
+            "status": "skipped_config",
+            "error_message": "missing_telegram_chat_id",
+        }
+    ]

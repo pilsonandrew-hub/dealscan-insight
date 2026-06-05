@@ -2078,10 +2078,34 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
     # Kill switch
     if os.getenv("ALERTS_ENABLED", ALERTS_ENABLED_PRODUCTION_DEFAULT).lower() != "true":
         logger.info("[ALERTS DISABLED] skipping alert")
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="skipped_disabled",
+            error_message="alerts_disabled",
+        )
         return None
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        missing = []
+        if not TELEGRAM_BOT_TOKEN:
+            missing.append("telegram_bot_token")
+        if not TELEGRAM_CHAT_ID:
+            missing.append("telegram_chat_id")
+        reason = "missing_" + "_and_".join(missing)
         logger.warning("[TELEGRAM] Missing bot token or chat ID; skipping alert")
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="skipped_config",
+            error_message=reason,
+        )
         return None
 
     opp_id = deal.get("opportunity_id")
