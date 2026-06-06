@@ -1036,6 +1036,87 @@ def test_normalize_apify_vehicle_preserves_detail_condition_fields_for_scoring()
     assert normalized["damage_type"] == "none"
 
 
+def test_normalize_apify_vehicle_preserves_jjkane_marketcheck_pricing_evidence():
+    item = {
+        "title": "2022 Ford F150 4x4 Police Responder",
+        "year": 2022,
+        "make": "Ford",
+        "model": "F150",
+        "state": "FL",
+        "current_bid": 29851,
+        "actual_current_bid": 0,
+        "estimated_auction_price": 29851,
+        "mileage": 39294,
+        "vin": "1FTFW1P86NKD26312",
+        "listing_url": "https://www.jjkane.com/items/1612463",
+        "source_site": "jjkane",
+        "pricing_source": "marketcheck_jjkane_estimated_20samples",
+        "mmr": 42644,
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="jjkane-marketcheck-run")
+
+    assert normalized is not None
+    assert normalized["pricing_source"] == "marketcheck_jjkane_estimated_20samples"
+    assert normalized["marketcheck_retail_price"] == 42644
+    assert normalized["marketcheck_sample_count"] == 20
+
+
+def test_score_vehicle_uses_jjkane_marketcheck_evidence_as_market_comp(monkeypatch):
+    import backend.ingest.manheim_market as manheim_market
+    import backend.ingest.retail_comps as retail_comps
+
+    monkeypatch.setattr(
+        manheim_market,
+        "get_manheim_market_data",
+        lambda **kwargs: {
+            "manheim_mmr_mid": None,
+            "manheim_source_status": "fallback",
+        },
+    )
+    monkeypatch.setattr(
+        retail_comps,
+        "get_retail_comps",
+        lambda **kwargs: {
+            "retail_comp_price_estimate": None,
+            "retail_comp_count": 0,
+            "retail_comp_confidence": None,
+            "pricing_source": None,
+        },
+    )
+    vehicle = normalize_apify_vehicle(
+        {
+            "title": "2022 Ford F150 4x4 Police Responder",
+            "year": 2022,
+            "make": "Ford",
+            "model": "F150",
+            "state": "FL",
+            "current_bid": 29851,
+            "actual_current_bid": 0,
+            "estimated_auction_price": 29851,
+            "mileage": 39294,
+            "vin": "1FTFW1P86NKD26312",
+            "listing_url": "https://www.jjkane.com/items/1612463",
+            "source_site": "jjkane",
+            "pricing_source": "marketcheck_jjkane_estimated_20samples",
+            "mmr": 42644,
+            "description": "Clean fleet vehicle.",
+            "photos": ["https://example.com/photo.jpg"],
+        },
+        run_id="jjkane-marketcheck-run",
+    )
+
+    assert vehicle is not None
+    result = score_vehicle(vehicle)
+
+    assert result["pricing_maturity"] == "market_comp"
+    assert result["pricing_source"] == "marketcheck_jjkane"
+    assert result["retail_comp_price_estimate"] == 42644
+    assert result["retail_comp_count"] == 20
+    assert result["pricing_trust_blocked"] is False
+    assert result["ceiling_reason"] != "pricing_maturity_proxy"
+
+
 def test_normalize_apify_vehicle_uses_detail_text_description_alias():
     item = {
         "title": "2024 Toyota Tacoma",
