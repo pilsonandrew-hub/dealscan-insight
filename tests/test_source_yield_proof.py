@@ -110,6 +110,56 @@ def test_classify_source_separates_pricing_proxy_from_bid_ceiling_dominance():
     assert report_source_yield_proof.classify_run_summary(ceiling_summary) == "pricing_ceiling_reject_dominant"
 
 
+def test_classify_source_does_not_let_dirty_proxy_rows_override_clean_bid_ceiling():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 4,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 2,
+            "skipped_gate": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 1,
+            "pricing_maturity_proxy": 1,
+            "age_or_mileage_exceeded": 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_ceiling():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 12,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 10,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 5,
+            "pricing_maturity_proxy": 5,
+            "source_quality_proof_record": 1,
+        },
+        "listing_metadata_gap_rows": 5,
+        "listing_metadata_gap_status_counts": {"skipped_ceiling": 5},
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
 def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
     dirty_only = {
         "source": "hibid",

@@ -271,9 +271,16 @@ def _dirty_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str
     return min(gate_rows, dirty_reason_rows)
 
 
-def _pricing_proxy_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str, Any]) -> int:
-    ceiling_rows = int(status_counts.get("skipped_ceiling") or 0)
+def _pricing_proxy_rejection_rows(
+    status_counts: dict[str, Any],
+    reason_counts: dict[str, Any],
+    *,
+    dirty_rows: int = 0,
+    listing_gap_ceiling_rows: int = 0,
+) -> int:
+    ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - listing_gap_ceiling_rows)
     proxy_rows = int(reason_counts.get("pricing_maturity_proxy") or 0)
+    proxy_rows = max(0, proxy_rows - dirty_rows - listing_gap_ceiling_rows)
     return min(ceiling_rows, proxy_rows)
 
 
@@ -438,9 +445,15 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     clean_gate_rows = max(0, gate_rows - dirty_rows)
     clean_margin_rows = max(0, margin_rows - int(listing_gap_status_counts.get("skipped_margin") or 0))
     clean_ceiling_rows = max(0, ceiling_rows - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
+    listing_gap_ceiling_rows = int(listing_gap_status_counts.get("skipped_ceiling") or 0)
     clean_proxy_pricing_rows = min(
         clean_ceiling_rows,
-        _pricing_proxy_rejection_rows(status_counts, reason_counts),
+        _pricing_proxy_rejection_rows(
+            status_counts,
+            reason_counts,
+            dirty_rows=dirty_rows,
+            listing_gap_ceiling_rows=listing_gap_ceiling_rows,
+        ),
     )
     clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
 
@@ -492,9 +505,15 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     clean_gate_rows = max(0, int(status_counts.get("skipped_gate") or 0) - dirty_rows)
     clean_margin_rows = max(0, int(status_counts.get("skipped_margin") or 0) - int(listing_gap_status_counts.get("skipped_margin") or 0))
     clean_ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
+    listing_gap_ceiling_rows = int(listing_gap_status_counts.get("skipped_ceiling") or 0)
     clean_proxy_pricing_rows = min(
         clean_ceiling_rows,
-        _pricing_proxy_rejection_rows(status_counts, reason_counts),
+        _pricing_proxy_rejection_rows(
+            status_counts,
+            reason_counts,
+            dirty_rows=dirty_rows,
+            listing_gap_ceiling_rows=listing_gap_ceiling_rows,
+        ),
     )
     clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
     if delivery_rows == 0:
