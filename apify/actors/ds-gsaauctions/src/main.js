@@ -286,6 +286,10 @@ let rowsExcludedMissingRequiredData = 0;
 let rowsExcludedMissingVin = 0;
 let rowsExcludedMissingMileage = 0;
 let rowsExcludedAgeOrMileage = 0;
+let rowsExcludedNonVehicle = 0;
+let rowsExcludedSearchFilter = 0;
+let rowsExcludedNonUsState = 0;
+let rowsExcludedBidRange = 0;
 const excludedMissingRequiredSamples = [];
 const excludedAgeOrMileageSamples = [];
 
@@ -342,14 +346,21 @@ for (let page = startPage; page <= totalPages; page++) {
         totalFound++;
 
         // Vehicle check
-        if (!isPassengerVehicle(title, categoryCode)) continue;
+        if (!isPassengerVehicle(title, categoryCode)) {
+            rowsExcludedNonVehicle++;
+            continue;
+        }
 
         // Keyword search filter
-        if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) continue;
+        if (searchQuery && !title.toLowerCase().includes(searchQuery.toLowerCase())) {
+            rowsExcludedSearchFilter++;
+            continue;
+        }
 
         // State filter: only reject non-US states — let ingest pipeline apply rust/target-state logic
         if (stateCode && !US_STATES.has(stateCode)) {
             console.log(`[GSA] Skipping non-US state ${stateCode}: ${title}`);
+            rowsExcludedNonUsState++;
             continue;
         }
 
@@ -357,12 +368,34 @@ for (let page = startPage; page <= totalPages; page++) {
         const minBidAmount = parseBid(item.minBid);
         const effectiveBid = currentBid || minBidAmount;
 
-        if (effectiveBid > 0 && effectiveBid > maxBid) continue;
-        if (currentBid > 0 && currentBid < minBid) continue;
+        if (effectiveBid > 0 && effectiveBid > maxBid) {
+            rowsExcludedBidRange++;
+            continue;
+        }
+        if (currentBid > 0 && currentBid < minBid) {
+            rowsExcludedBidRange++;
+            continue;
+        }
 
         const { year, make, model } = parseVehicleTitle(title);
 
-        if (!year || year < minYear || year > maxYear) continue;
+        if (!year || year < minYear || year > maxYear) {
+            rowsExcludedAgeOrMileage++;
+            if (excludedAgeOrMileageSamples.length < 10) {
+                excludedAgeOrMileageSamples.push({
+                    title,
+                    lot_id: lotId,
+                    current_bid: effectiveBid,
+                    year,
+                    make,
+                    model,
+                    min_year: minYear,
+                    max_year: maxYear,
+                    rejection_reasons: [!year ? 'missing_year_prefilter' : 'age_rejected_prefilter'],
+                });
+            }
+            continue;
+        }
 
         const listingId = String(lotId);
         const listingUrl = `${BASE_UI_URL}/auctions/preview/${listingId}`;
@@ -505,6 +538,10 @@ await Actor.pushData({
     rows_excluded_missing_vin: rowsExcludedMissingVin,
     rows_excluded_missing_mileage: rowsExcludedMissingMileage,
     rows_excluded_age_or_mileage: rowsExcludedAgeOrMileage,
+    rows_excluded_non_vehicle: rowsExcludedNonVehicle,
+    rows_excluded_search_filter: rowsExcludedSearchFilter,
+    rows_excluded_non_us_state: rowsExcludedNonUsState,
+    rows_excluded_bid_range: rowsExcludedBidRange,
     excluded_missing_required_samples: excludedMissingRequiredSamples,
     excluded_age_or_mileage_samples: excludedAgeOrMileageSamples,
     scraped_at: new Date().toISOString(),
