@@ -15,6 +15,22 @@ function loadHelperExports() {
   return vm.runInNewContext(helperSource, {});
 }
 
+function loadMarketcheckExports(fetchImpl) {
+  const marketcheckStart = source.indexOf('const marketcheckCache = new Map();');
+  const marketcheckEnd = source.indexOf('// ── Algolia Query');
+  const marketcheckSource = `
+const MARKETCHECK_KEY = 'test-marketcheck-key';
+const MARKETCHECK_URL = 'https://marketcheck.example.test/search';
+${source.slice(marketcheckStart, marketcheckEnd)}
+({ getMarketcheckPrice })`;
+  return vm.runInNewContext(marketcheckSource, {
+    AbortSignal,
+    URLSearchParams,
+    console: { warn() {} },
+    fetch: fetchImpl,
+  });
+}
+
 describe('ds-jjkane source contract', () => {
   test('extracts VINs from JJ Kane serial-number source text before publish', () => {
     const helpers = loadHelperExports();
@@ -57,7 +73,22 @@ describe('ds-jjkane source contract', () => {
     expect(source).toContain('rows_excluded_policy_prefilter');
     expect(source).toContain('rows_excluded_bid_range');
     expect(source).toContain('rows_excluded_zero_pricing_signal');
+    expect(source).toContain('rows_excluded_pricing_unavailable');
     expect(source.indexOf("record_type: 'source_quality_proof'"))
       .toBeLessThan(source.indexOf('if (effectiveWebhookUrl && datasetItemCount > 0)'));
+  });
+
+  test('classifies Marketcheck rate limits as pricing unavailable, not zero pricing', async () => {
+    const helpers = loadMarketcheckExports(async () => ({
+      ok: false,
+      status: 429,
+    }));
+
+    await expect(
+      helpers.getMarketcheckPrice(2022, 'Ford', 'F150 4x4 Police Responder', 39294)
+    ).resolves.toEqual({
+      pricing_unavailable: true,
+      pricing_source: 'marketcheck_http_429',
+    });
   });
 });

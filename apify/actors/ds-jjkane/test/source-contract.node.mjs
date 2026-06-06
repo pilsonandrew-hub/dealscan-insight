@@ -16,6 +16,22 @@ function loadHelperExports() {
   return vm.runInNewContext(helperSource, {});
 }
 
+function loadMarketcheckExports(fetchImpl) {
+  const marketcheckStart = source.indexOf('const marketcheckCache = new Map();');
+  const marketcheckEnd = source.indexOf('// ── Algolia Query');
+  const marketcheckSource = `
+const MARKETCHECK_KEY = 'test-marketcheck-key';
+const MARKETCHECK_URL = 'https://marketcheck.example.test/search';
+${source.slice(marketcheckStart, marketcheckEnd)}
+({ getMarketcheckPrice })`;
+  return vm.runInNewContext(marketcheckSource, {
+    AbortSignal,
+    URLSearchParams,
+    console: { warn() {} },
+    fetch: fetchImpl,
+  });
+}
+
 test('JJKane rejects defect and unknown-condition phrases before pricing', () => {
   const helpers = loadHelperExports();
   const blockedTexts = [
@@ -34,4 +50,16 @@ test('JJKane rejects defect and unknown-condition phrases before pricing', () =>
     false,
     'JJ Kane boilerplate AS IS/WHERE IS is not sufficient source-policy evidence by itself',
   );
+});
+
+test('JJKane classifies Marketcheck rate limits as pricing unavailable, not zero pricing', async () => {
+  const helpers = loadMarketcheckExports(async () => ({
+    ok: false,
+    status: 429,
+  }));
+
+  const result = await helpers.getMarketcheckPrice(2022, 'Ford', 'F150 4x4 Police Responder', 39294);
+
+  assert.equal(result.pricing_unavailable, true);
+  assert.equal(result.pricing_source, 'marketcheck_http_429');
 });
