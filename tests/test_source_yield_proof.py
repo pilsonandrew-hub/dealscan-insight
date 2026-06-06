@@ -131,6 +131,8 @@ def test_classify_source_does_not_let_dirty_proxy_rows_override_clean_bid_ceilin
         "dirty_rejection_reason_counts": {"pricing_maturity_proxy": 1},
     }
 
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
     assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
 
@@ -157,6 +159,8 @@ def test_classify_source_keeps_clean_proxy_rows_when_dirty_rows_are_unrelated():
         "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
     }
 
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
     assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
 
@@ -183,6 +187,8 @@ def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_
         "listing_metadata_gap_reason_counts": {"pricing_maturity_proxy": 5},
     }
 
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
     assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
 
