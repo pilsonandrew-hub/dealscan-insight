@@ -44,7 +44,7 @@ with proxy_skips as (
   order by coalesce(nullif(listing_id,''), nullif(listing_url,'')), created_at desc
 ),
 joined as (
-  select distinct on (coalesce(nullif(sl.listing_id,''), nullif(sl.listing_url,'')))
+  select distinct on (coalesce(nullif(sl.listing_id,''), nullif(ps.listing_id,''), nullif(sl.listing_url,''), nullif(ps.listing_url,'')))
          sl.source_site,
          sl.year,
          sl.make,
@@ -58,7 +58,9 @@ joined as (
          ps.error_message,
          ps.created_at as skip_created_at,
          sl.title,
-         sl.listing_url,
+         coalesce(sl.listing_id, ps.listing_id) as listing_id,
+         coalesce(sl.listing_url, ps.listing_url) as listing_url,
+         (sl.source_site is not null) as listing_found,
          latest_delivery.status as latest_delivery_status,
          latest_delivery.error_message as latest_delivery_error_message,
          latest_delivery.created_at as latest_delivery_created_at,
@@ -88,7 +90,7 @@ joined as (
            having count(*) >= 2
          ) as has_usable_dealer_sales
   from proxy_skips ps
-  join public.sonar_listings sl
+  left join public.sonar_listings sl
     on (sl.listing_id = ps.listing_id or sl.listing_url = ps.listing_url)
   left join lateral (
     select idl.status, idl.error_message, idl.created_at
@@ -97,7 +99,7 @@ joined as (
     order by idl.created_at desc
     limit 1
   ) latest_delivery on true
-  order by coalesce(nullif(sl.listing_id,''), nullif(sl.listing_url,'')), sl.created_at desc
+  order by coalesce(nullif(sl.listing_id,''), nullif(ps.listing_id,''), nullif(sl.listing_url,''), nullif(ps.listing_url,'')), sl.created_at desc
 )
 select
   *,
@@ -107,10 +109,13 @@ select
   end as auction_active
 from joined
 where (%(include_dirty)s or (
-    year >= extract(year from now())::int - %(max_age_years)s
-    and coalesce(mileage, 999999999) > 0
-    and coalesce(mileage, 999999999) <= %(max_mileage)s
-    and coalesce(vin,'') <> ''
+    listing_found = false
+    or (
+      year >= extract(year from now())::int - %(max_age_years)s
+      and coalesce(mileage, 999999999) > 0
+      and coalesce(mileage, 999999999) <= %(max_mileage)s
+      and coalesce(vin,'') <> ''
+    )
   ))
 order by
   case
@@ -175,6 +180,8 @@ def _is_superseded_proxy_skip(row: dict[str, Any]) -> bool:
 
 
 def classify_source_candidate(row: dict[str, Any]) -> str:
+    if row.get("listing_found") is False:
+        return "listing_evidence_missing"
     if _matches_source_policy_reject(row):
         return "source_policy_reject"
     if not row.get("vin") or not row.get("mileage"):
@@ -207,7 +214,7 @@ def format_candidate(row: dict[str, Any]) -> str:
         f"bid={row.get('current_bid')} proxy_bid={parsed.get('bid')} proxy_mmr={parsed.get('mmr')} "
         f"margin={parsed.get('margin')} floor={parsed.get('floor')} cost={parsed.get('cost')} "
         f"proxy_tier={parsed.get('tier')} proxy_pricing={parsed.get('pricing')} auction_active={row.get('auction_active')} "
-        f"market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
+        f"listing_found={row.get('listing_found')} market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
         f"skip_at={row.get('skip_created_at')} title={row.get('title')} url={row.get('listing_url')}"
         f" latest_delivery_status={row.get('latest_delivery_status')}"
         f" latest_delivery_at={row.get('latest_delivery_created_at')}"
@@ -530,23 +537,28 @@ def fetch_rows_via_rest(
     joined: list[dict[str, Any]] = []
     for key, skip in latest_skips.items():
         listing = latest_listings.get(key)
-        if not listing:
-            continue
-        auction_end = _parse_datetime(listing.get("auction_end_date"))
+        auction_end = _parse_datetime((listing or {}).get("auction_end_date"))
         row = {
-            **listing,
+            **(listing or {}),
+            "listing_found": bool(listing),
+            "listing_id": (listing or {}).get("listing_id") or skip.get("listing_id"),
+            "listing_url": (listing or {}).get("listing_url") or skip.get("listing_url"),
             "run_id": skip.get("run_id"),
             "error_message": skip.get("error_message"),
             "skip_created_at": skip.get("created_at"),
-            "sonar_created_at": listing.get("created_at"),
+            "sonar_created_at": (listing or {}).get("created_at"),
             "latest_delivery_status": (latest_deliveries.get(key) or {}).get("status"),
             "latest_delivery_error_message": (latest_deliveries.get(key) or {}).get("error_message"),
             "latest_delivery_created_at": (latest_deliveries.get(key) or {}).get("created_at"),
-            "has_market_price": _has_market_price(listing, market_rows, current_time),
-            "has_usable_dealer_sales": _has_usable_dealer_sales(listing, dealer_sales_rows),
+            "has_market_price": bool(listing) and _has_market_price(listing, market_rows, current_time),
+            "has_usable_dealer_sales": bool(listing) and _has_usable_dealer_sales(listing, dealer_sales_rows),
             "auction_active": None if auction_end is None else auction_end >= current_time,
         }
-        if include_dirty or _is_clean_candidate(row, max_mileage=max_mileage, max_age_years=max_age_years, now=current_time):
+        if (
+            row["listing_found"] is False
+            or include_dirty
+            or _is_clean_candidate(row, max_mileage=max_mileage, max_age_years=max_age_years, now=current_time)
+        ):
             joined.append(row)
 
     joined.sort(
