@@ -289,6 +289,32 @@ def test_classify_source_non_bid_ceiling_reasons_do_not_suppress_proxy_dominance
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
 
 
+def test_classify_source_counts_detailed_bid_ceiling_reason_bucket():
+    detailed_bid_reason = report_source_yield_proof._reason_bucket(
+        "bid_ceiling_exceeded | bid=$9,000 max_bid=$0 mmr=$17,000"
+    )
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            detailed_bid_reason: 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert detailed_bid_reason == "bid_ceiling_exceeded"
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
 def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
     dirty_only = {
         "source": "hibid",

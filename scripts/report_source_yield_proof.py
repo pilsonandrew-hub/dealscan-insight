@@ -240,6 +240,8 @@ def _reason_bucket(value: Any) -> str:
         return "none"
     if text.startswith("margin_below_floor"):
         return "margin_below_floor"
+    if text.startswith("bid_ceiling_exceeded"):
+        return "bid_ceiling_exceeded"
     if text.startswith("pricing_maturity_proxy"):
         return "pricing_maturity_proxy"
     if text.startswith("source_quality_proof_record"):
