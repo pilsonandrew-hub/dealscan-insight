@@ -425,6 +425,45 @@ def test_fetch_rows_via_rest_reports_proxy_skip_without_listing_evidence(monkeyp
     )
 
 
+def test_fetch_rows_via_rest_reports_proxy_skip_without_listing_key(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "proxibid-run",
+                    "listing_id": "",
+                    "listing_url": "",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy | bid=$18,000 mmr=$22,000 tier=premium",
+                    "created_at": "2026-06-05T23:00:00+00:00",
+                }
+            ]
+        if table in {"sonar_listings", "market_prices", "dealer_sales"}:
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 6, 1, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["listing_key_present"] is False
+    assert rows[0]["listing_found"] is False
+    assert (
+        report_pricing_blocked_source_candidates.classify_source_candidate(rows[0])
+        == "listing_key_missing"
+    )
+
+
 def test_fetch_rows_via_rest_includes_proxy_margin_floor_rows(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "ingest_delivery_log":

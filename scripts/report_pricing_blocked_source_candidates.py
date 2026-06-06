@@ -33,7 +33,7 @@ SOURCE_POLICY_REJECT_PATTERNS = (
 
 PROXY_SKIP_SQL = """
 with proxy_skips as (
-  select distinct on (coalesce(nullif(listing_id,''), nullif(listing_url,'')))
+  select distinct on (coalesce(nullif(listing_id,''), nullif(listing_url,''), run_id || ':' || created_at::text))
          run_id, listing_id, listing_url, status, error_message, created_at
   from public.ingest_delivery_log
   where created_at >= timezone('utc', now()) - (%(lookback_days)s::int * interval '1 day')
@@ -41,10 +41,10 @@ with proxy_skips as (
       (status = 'skipped_ceiling' and error_message like 'pricing_maturity_proxy%%')
       or (status = 'skipped_margin' and error_message like 'margin_below_floor%%pricing=proxy%%')
     )
-  order by coalesce(nullif(listing_id,''), nullif(listing_url,'')), created_at desc
+  order by coalesce(nullif(listing_id,''), nullif(listing_url,''), run_id || ':' || created_at::text), created_at desc
 ),
 joined as (
-  select distinct on (coalesce(nullif(sl.listing_id,''), nullif(ps.listing_id,''), nullif(sl.listing_url,''), nullif(ps.listing_url,'')))
+  select distinct on (coalesce(nullif(sl.listing_id,''), nullif(ps.listing_id,''), nullif(sl.listing_url,''), nullif(ps.listing_url,''), ps.run_id || ':' || ps.created_at::text))
          sl.source_site,
          sl.year,
          sl.make,
@@ -60,6 +60,7 @@ joined as (
          sl.title,
          coalesce(sl.listing_id, ps.listing_id) as listing_id,
          coalesce(sl.listing_url, ps.listing_url) as listing_url,
+         (coalesce(nullif(ps.listing_id,''), nullif(ps.listing_url,'')) is not null) as listing_key_present,
          (sl.source_site is not null) as listing_found,
          latest_delivery.status as latest_delivery_status,
          latest_delivery.error_message as latest_delivery_error_message,
@@ -99,7 +100,7 @@ joined as (
     order by idl.created_at desc
     limit 1
   ) latest_delivery on true
-  order by coalesce(nullif(sl.listing_id,''), nullif(ps.listing_id,''), nullif(sl.listing_url,''), nullif(ps.listing_url,'')), sl.created_at desc
+  order by coalesce(nullif(sl.listing_id,''), nullif(ps.listing_id,''), nullif(sl.listing_url,''), nullif(ps.listing_url,''), ps.run_id || ':' || ps.created_at::text), sl.created_at desc
 )
 select
   *,
@@ -180,6 +181,8 @@ def _is_superseded_proxy_skip(row: dict[str, Any]) -> bool:
 
 
 def classify_source_candidate(row: dict[str, Any]) -> str:
+    if row.get("listing_key_present") is False:
+        return "listing_key_missing"
     if row.get("listing_found") is False:
         return "listing_evidence_missing"
     if _matches_source_policy_reject(row):
@@ -214,7 +217,8 @@ def format_candidate(row: dict[str, Any]) -> str:
         f"bid={row.get('current_bid')} proxy_bid={parsed.get('bid')} proxy_mmr={parsed.get('mmr')} "
         f"margin={parsed.get('margin')} floor={parsed.get('floor')} cost={parsed.get('cost')} "
         f"proxy_tier={parsed.get('tier')} proxy_pricing={parsed.get('pricing')} auction_active={row.get('auction_active')} "
-        f"listing_found={row.get('listing_found')} market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
+        f"listing_key_present={row.get('listing_key_present')} listing_found={row.get('listing_found')} "
+        f"market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
         f"skip_at={row.get('skip_created_at')} title={row.get('title')} url={row.get('listing_url')}"
         f" latest_delivery_status={row.get('latest_delivery_status')}"
         f" latest_delivery_at={row.get('latest_delivery_created_at')}"
@@ -468,11 +472,14 @@ def fetch_rows_via_rest(
     )
     proxy_skip_rows = [row for row in proxy_skip_rows if _is_pricing_blocked_skip(row)]
     latest_skips: dict[str, dict[str, Any]] = {}
+    keyless_skips: list[dict[str, Any]] = []
     for skip in proxy_skip_rows:
         key = _row_key(skip)
         if key and key not in latest_skips:
             latest_skips[key] = skip
-    if not latest_skips:
+        elif not key:
+            keyless_skips.append(skip)
+    if not latest_skips and not keyless_skips:
         return []
 
     delivery_rows = _fetch_postgrest_rows(
@@ -535,11 +542,15 @@ def fetch_rows_via_rest(
     )
 
     joined: list[dict[str, Any]] = []
-    for key, skip in latest_skips.items():
+    keyed_skips = list(latest_skips.items())
+    keyed_skips.extend((f"__missing_key__:{index}", skip) for index, skip in enumerate(keyless_skips))
+    for key, skip in keyed_skips:
         listing = latest_listings.get(key)
+        listing_key_present = bool(_row_key(skip))
         auction_end = _parse_datetime((listing or {}).get("auction_end_date"))
         row = {
             **(listing or {}),
+            "listing_key_present": listing_key_present,
             "listing_found": bool(listing),
             "listing_id": (listing or {}).get("listing_id") or skip.get("listing_id"),
             "listing_url": (listing or {}).get("listing_url") or skip.get("listing_url"),
@@ -555,7 +566,8 @@ def fetch_rows_via_rest(
             "auction_active": None if auction_end is None else auction_end >= current_time,
         }
         if (
-            row["listing_found"] is False
+            row["listing_key_present"] is False
+            or row["listing_found"] is False
             or include_dirty
             or _is_clean_candidate(row, max_mileage=max_mileage, max_age_years=max_age_years, now=current_time)
         ):
