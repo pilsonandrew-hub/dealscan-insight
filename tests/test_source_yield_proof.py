@@ -832,6 +832,70 @@ def test_build_report_fetches_primary_delivery_listing_keys(monkeypatch):
     assert report["run_summaries"][0]["classification"] == "economic_reject_dominant"
 
 
+def test_build_report_reuses_delivery_dirty_gap_classification(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-proxy",
+                    "source": "proxibid",
+                    "status": "processed",
+                    "item_count": 1,
+                    "received_at": "2026-06-05T19:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-proxy",
+                    "source_site": "proxibid",
+                    "channel": "db_save",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy",
+                    "listing_id": "proxy-listing",
+                    "listing_url": "https://proxibid.example/lot/1",
+                    "created_at": "2026-06-05T19:01:00+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return []
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    call_counts = {"dirty": 0, "gap": 0}
+
+    def fake_dirty(row, listing_by_key, now_year):
+        call_counts["dirty"] += 1
+        return False
+
+    def fake_gap(row, listing_by_key):
+        call_counts["gap"] += 1
+        return True
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+    monkeypatch.setattr(report_source_yield_proof, "_delivery_row_is_dirty_for_clean_yield", fake_dirty)
+    monkeypatch.setattr(report_source_yield_proof, "_delivery_row_has_listing_metadata_gap", fake_gap)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+        run_detail_source="proxibid",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert call_counts == {"dirty": 1, "gap": 1}
+    assert source_summary["listing_metadata_gap_rows"] == 1
+    assert source_summary["listing_metadata_gap_reason_counts"] == {"pricing_maturity_proxy": 1}
+    assert run_summary["listing_metadata_gap_rows"] == 1
+    assert run_summary["listing_metadata_gap_reason_counts"] == {"pricing_maturity_proxy": 1}
+
+
 def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "webhook_log":

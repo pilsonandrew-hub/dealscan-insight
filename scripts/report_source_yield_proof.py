@@ -1011,22 +1011,30 @@ def build_source_yield_report(
         if run_id and source != "unknown":
             run_sources[run_id] = source
         _remember_run_seen_at(run_seen_at, run_id, row.get("created_at"), row.get("updated_at"))
+        is_dirty_for_clean_yield = _delivery_row_is_dirty_for_clean_yield(
+            row,
+            listing_by_key,
+            now_year=current_time.year,
+        )
+        has_listing_metadata_gap = (
+            False if is_dirty_for_clean_yield else _delivery_row_has_listing_metadata_gap(row, listing_by_key)
+        )
         delivery_by_source[source]["channel"][str(row.get("channel") or "unknown")[:80]] += 1
         delivery_by_source[source]["status"][status_bucket] += 1
         delivery_by_source[source]["reason"][reason_bucket] += 1
-        if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
+        if is_dirty_for_clean_yield:
             delivery_by_source[source]["dirty"]["dirty_source_row"] += 1
             delivery_by_source[source]["dirty_reason"][reason_bucket] += 1
-        elif _delivery_row_has_listing_metadata_gap(row, listing_by_key):
+        elif has_listing_metadata_gap:
             delivery_by_source[source]["listing_gap"][status_bucket] += 1
             delivery_by_source[source]["listing_gap_reason"][reason_bucket] += 1
         if run_id:
             delivery_by_run[run_id]["status"][status_bucket] += 1
             delivery_by_run[run_id]["reason"][reason_bucket] += 1
-            if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
+            if is_dirty_for_clean_yield:
                 delivery_by_run[run_id]["dirty"]["dirty_source_row"] += 1
                 delivery_by_run[run_id]["dirty_reason"][reason_bucket] += 1
-            elif _delivery_row_has_listing_metadata_gap(row, listing_by_key):
+            elif has_listing_metadata_gap:
                 delivery_by_run[run_id]["listing_gap"][status_bucket] += 1
                 delivery_by_run[run_id]["listing_gap_reason"][reason_bucket] += 1
 
