@@ -125,6 +125,32 @@ class _Supabase:
                         "detail_text": "Starts, runs and drives. Minor scratches noted.",
                     },
                 },
+                {
+                    "id": "3",
+                    "is_active": True,
+                    "dos_score": 62,
+                    "mileage": 41000,
+                    "year": 2023,
+                    "title": "2023 Ford Explorer",
+                    "pricing_maturity": "market_comp",
+                    "vin": "1FM5K8GC1PGA12345",
+                    "condition_grade": "Good",
+                    "source_site": "govdeals",
+                    "investment_grade": "Bronze",
+                    "roi_per_day": 20,
+                    "bid_headroom": 500,
+                    "current_bid_trust_score": 0.9,
+                    "mmr_confidence_proxy": 90,
+                    "pricing_source": "market_comp",
+                    "retail_comp_count": 3,
+                    "retail_comp_confidence": 0.81,
+                    "projected_total_cost": 20000,
+                    "max_bid": 20500,
+                    "expected_close_bid": 20000,
+                    "raw_data": {
+                        "detail_text": "Starts, runs and drives. Normal wear.",
+                    },
+                },
             ],
             "webhook_log": [{"id": "w1", "processing_status": "processed", "source": "govdeals"}],
             "alert_log": [{"id": "a1", "sent_at": "2026-05-20T02:11:32Z", "delivery_state": "sent"}],
@@ -144,6 +170,20 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase())
     result = internal.build_pipeline_truth()
     assert result["status"] == "ok"
+    assert result["opportunities"]["active_sample"] == 3
+    assert result["opportunities"]["active_dos_score_buckets_sample"] == {
+        "80_plus": 2,
+        "50_to_64": 1,
+    }
+    assert result["opportunities"]["active_dos_score_min_sample"] == 62.0
+    assert result["opportunities"]["active_dos_score_max_sample"] == 91.0
+    assert result["opportunities"]["active_dos_score_avg_sample"] == 81.0
+    assert result["opportunities"]["active_pricing_maturity_counts_sample"] == {
+        "market_comp": 2,
+        "proxy": 1,
+    }
+    assert result["opportunities"]["active_source_counts_sample"] == {"govdeals": 3}
+    assert len(result["opportunities"]["active_gate_breakdown_sample"]) == 3
     assert result["opportunities"]["active_dos80_sample"] == 2
     assert result["opportunities"]["active_dos80_missing_mileage_sample"] == 1
     breakdown = result["opportunities"]["active_dos80_gate_breakdown"]
