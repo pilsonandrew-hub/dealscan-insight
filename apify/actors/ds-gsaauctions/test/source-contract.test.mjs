@@ -82,4 +82,24 @@ describe('ds-gsaauctions source contract', () => {
     expect(source).toContain('detail_mileages_found');
     expect(source).toContain('rows_excluded_missing_required_data');
   });
+
+  test('accounts for every pre-detail discard after found row counting', () => {
+    expect(source).toContain('rows_excluded_non_vehicle');
+    expect(source).toContain('rows_excluded_search_filter');
+    expect(source).toContain('rows_excluded_non_us_state');
+    expect(source).toContain('rows_excluded_bid_range');
+
+    const foundIndex = source.indexOf('totalFound++;');
+    const nonVehicleIndex = source.indexOf('rowsExcludedNonVehicle++;');
+    const searchIndex = source.indexOf('rowsExcludedSearchFilter++;');
+    const stateIndex = source.indexOf('rowsExcludedNonUsState++;');
+    const bidIndex = source.indexOf('rowsExcludedBidRange++;');
+    const yearIndex = source.indexOf('rowsExcludedAgeOrMileage++;');
+    const detailIndex = source.indexOf('await fetchLotPreview(lotId)');
+
+    for (const index of [nonVehicleIndex, searchIndex, stateIndex, bidIndex, yearIndex]) {
+      expect(index).toBeGreaterThan(foundIndex);
+      expect(index).toBeLessThan(detailIndex);
+    }
+  });
 });
