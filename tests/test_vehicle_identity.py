@@ -6,6 +6,7 @@ from backend.ingest.vehicle_identity import (
     extract_make,
     extract_model,
     extract_year,
+    refine_price_sensitive_model,
 )
 
 
@@ -25,6 +26,28 @@ def test_extract_make_and_model_use_known_patterns_before_fallback():
 
 def test_extract_model_falls_back_to_words_after_year_and_make():
     assert extract_model("2022 Lucid Air Grand Touring", "Lucid") == "Air Grand"
+
+
+def test_refine_price_sensitive_model_preserves_mustang_ecoboost_premium_trim():
+    assert (
+        refine_price_sensitive_model(
+            "New (Surplus Inventory) 2025 Ford Mustang EcoBoost Premium Coupe",
+            "Ford",
+            "Mustang",
+        )
+        == "Mustang EcoBoost Premium"
+    )
+
+
+def test_refine_price_sensitive_model_does_not_overwrite_specific_mustang_model():
+    assert (
+        refine_price_sensitive_model(
+            "New 2025 Ford Mustang GT Premium 60th Anniversary Edition",
+            "Ford",
+            "Mustang 60th Anniv Editio",
+        )
+        == "Mustang 60th Anniv Editio"
+    )
 
 
 def test_estimate_mmr_details_prefers_model_then_make_then_segment_fallbacks():
