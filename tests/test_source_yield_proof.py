@@ -190,6 +190,38 @@ def test_classify_source_respects_explicit_zero_dirty_rows():
     assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
 
 
+def test_classify_source_does_not_compute_dirty_fallback_when_zero_is_explicit(monkeypatch):
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "skipped_gate": 1,
+            "skipped_ceiling": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "age_or_mileage_exceeded": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 0,
+    }
+    calls = 0
+
+    def fail_if_called(status_counts, reason_counts):
+        nonlocal calls
+        calls += 1
+        return 1
+
+    monkeypatch.setattr(report_source_yield_proof, "_dirty_rejection_rows", fail_if_called)
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+    assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
+    assert calls == 0
+
+
 def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_ceiling():
     summary = {
         "source": "proxibid",

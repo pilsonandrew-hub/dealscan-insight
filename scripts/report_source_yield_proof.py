@@ -10,7 +10,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib import error as urlerror
 from urllib import parse, request
 
@@ -273,10 +273,10 @@ def _dirty_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str
     return min(gate_rows, dirty_reason_rows)
 
 
-def _summary_int_or(summary: dict[str, Any], key: str, fallback: int) -> int:
+def _summary_int_or(summary: dict[str, Any], key: str, fallback: Callable[[], int]) -> int:
     if key in summary:
         return int(summary.get(key) or 0)
-    return int(fallback)
+    return int(fallback())
 
 
 def _pricing_proxy_rejection_rows(
@@ -500,7 +500,11 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     proof_rows = int(status_counts.get("skipped_proof") or 0)
     sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
     reason_counts = summary.get("reason_counts") or {}
-    dirty_rows = _summary_int_or(summary, "dirty_rejection_rows", _dirty_rejection_rows(status_counts, reason_counts))
+    dirty_rows = _summary_int_or(
+        summary,
+        "dirty_rejection_rows",
+        lambda: _dirty_rejection_rows(status_counts, reason_counts),
+    )
     listing_gap_rows = int(summary.get("listing_metadata_gap_rows") or 0)
     listing_gap_status_counts = summary.get("listing_metadata_gap_status_counts") or {}
     business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows - listing_gap_rows)
@@ -579,7 +583,11 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     proof_rows = int(status_counts.get("skipped_proof") or 0)
     sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
     reason_counts = summary.get("reason_counts") or {}
-    dirty_rows = _summary_int_or(summary, "dirty_rejection_rows", _dirty_rejection_rows(status_counts, reason_counts))
+    dirty_rows = _summary_int_or(
+        summary,
+        "dirty_rejection_rows",
+        lambda: _dirty_rejection_rows(status_counts, reason_counts),
+    )
     listing_gap_rows = int(summary.get("listing_metadata_gap_rows") or 0)
     listing_gap_status_counts = summary.get("listing_metadata_gap_status_counts") or {}
     business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows - listing_gap_rows)
