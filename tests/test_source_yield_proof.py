@@ -24,6 +24,12 @@ def test_classify_source_marks_accepted_flow_present():
     assert report_source_yield_proof.classify_source_summary(summary) == "accepted_flow_present"
 
 
+def test_parse_timestamp_normalizes_naive_values_to_utc():
+    parsed = report_source_yield_proof._parse_timestamp("2026-06-06T12:34:56")
+
+    assert parsed == datetime(2026, 6, 6, 12, 34, 56, tzinfo=timezone.utc)
+
+
 def test_classify_source_marks_inactive_accepted_flow_separately():
     summary = {
         "source": "publicsurplus",

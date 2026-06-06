@@ -19,6 +19,7 @@ from report_pricing_blocked_source_candidates import (
     _row_key,
     resolve_rest_config,
 )
+from backend.business_rules import DOS_SAVE_THRESHOLD, HOT_DEAL_ALERT_THRESHOLD
 
 
 GENERIC_SOURCES = {"", "unknown", "db_save", "sonar_mirror", "webhook", "apify"}
@@ -27,6 +28,7 @@ DIRTY_REJECTION_REASON_BUCKETS = {"age_or_mileage_exceeded"}
 BUSINESS_REJECTION_STATUSES = {"skipped_margin", "skipped_ceiling"}
 MAX_CLEAN_AGE_YEARS = 4
 MAX_CLEAN_MILEAGE = 50_000
+MID_DEAL_SCORE_THRESHOLD = 65.0
 SOURCE_QUALITY_TOTAL_FIELDS = (
     "found_rows_total",
     "prefilter_passed_rows_total",
@@ -80,11 +82,11 @@ def _safe_int(value: Any) -> int:
 def _dos_score_bucket(score: float | None) -> str:
     if score is None:
         return "missing"
-    if score >= 80:
+    if score >= HOT_DEAL_ALERT_THRESHOLD:
         return "80_plus"
-    if score >= 65:
+    if score >= MID_DEAL_SCORE_THRESHOLD:
         return "65_to_79"
-    if score >= 50:
+    if score >= DOS_SAVE_THRESHOLD:
         return "50_to_64"
     return "under_50"
 
@@ -123,9 +125,12 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _remember_run_seen_at(
@@ -970,7 +975,7 @@ def build_source_yield_report(
             if run_id:
                 active_score_buckets_by_run[run_id][_dos_score_bucket(score)] += 1
                 _remember_score(active_score_stats_by_run[run_id], score)
-            if score is not None and score >= 80:
+            if score is not None and score >= HOT_DEAL_ALERT_THRESHOLD:
                 opportunities_by_source[source]["active_dos80_rows"] += 1
                 if run_id:
                     opportunities_by_run[run_id]["active_dos80_rows"] += 1
