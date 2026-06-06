@@ -271,6 +271,23 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("listing.mileage === null", source)
         self.assertIn("[SKIP-MILES-MISSING]", source)
 
+    def test_hibid_v2_classifies_age_and_mileage_before_zero_pricing(self):
+        source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
+        source = source_path.read_text(encoding="utf-8")
+
+        self.assertLess(
+            source.index("if (!listing.year || listing.year < EFFECTIVE_MIN_YEAR)"),
+            source.index("if (bid === 0)"),
+        )
+        self.assertLess(
+            source.index("if (listing.mileage === null)"),
+            source.index("if (bid === 0)"),
+        )
+        self.assertLess(
+            source.index("if (listing.mileage !== null && listing.mileage > EFFECTIVE_MAX_MILEAGE)"),
+            source.index("if (bid === 0)"),
+        )
+
     def test_govdeals_sold_actor_supports_explicit_seo_asset_urls_without_enabling_search(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-govdeals-sold" / "src" / "main_api.js"
         source = source_path.read_text(encoding="utf-8")
