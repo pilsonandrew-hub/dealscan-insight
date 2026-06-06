@@ -102,7 +102,6 @@ const CONDITION_REJECT_PATTERNS = [
     /\bcheck\s+engine\s+light\s+on\b/i,
     /\babs\s+light\s+on\b/i,
     /\btraction\s+control\s+light\s+on\b/i,
-    /\bas\s+is\s*\/\s*where\s+is\b/i,
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

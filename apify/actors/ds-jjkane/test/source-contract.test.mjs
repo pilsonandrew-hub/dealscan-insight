@@ -35,12 +35,15 @@ describe('ds-jjkane source contract', () => {
       'Wrecked, Airbags Deployed, Jump To Start, Does Not Move - Broken Axle, Dash Warning Indicators On',
       'Does Not Move, Condition Unknown, Check Engine Light On, ABS Light On, Traction Control Light On',
       'Branded Title - Police Vehicle',
-      'sold AS IS/WHERE IS via Timed Auction',
     ];
 
     for (const text of blockedTexts) {
       expect(helpers.hasConditionReject(text)).toBe(true);
     }
+
+    expect(
+      helpers.hasConditionReject('This unit is being sold AS IS/WHERE IS via Timed Auction and is located in FL.')
+    ).toBe(false);
   });
 
   test('emits source-quality proof before webhook even when no vehicles are pushed', () => {
