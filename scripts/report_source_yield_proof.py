@@ -189,10 +189,24 @@ def _delivery_row_is_dirty_for_clean_yield(
         return False
     if reason in DIRTY_REJECTION_REASON_BUCKETS:
         return True
-    key = _row_key(row)
-    if not key:
-        return False
-    return _listing_is_dirty_for_clean_yield(listing_by_key.get(key), now_year=now_year)
+    for key in _row_keys(row):
+        if _listing_is_dirty_for_clean_yield(listing_by_key.get(key), now_year=now_year):
+            return True
+    return False
+
+
+def _row_keys(row: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for field in ("listing_id", "listing_url"):
+        key = str(row.get(field) or "").strip()
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def _index_listing_by_keys(listing_by_key: dict[str, dict[str, Any]], listing: dict[str, Any]) -> None:
+    for key in _row_keys(listing):
+        listing_by_key.setdefault(key, listing)
 
 
 def classify_source_summary(summary: dict[str, Any]) -> str:
@@ -420,6 +434,60 @@ def _fetch_optional_listing_rows(
         return []
 
 
+def _fetch_optional_listing_rows_for_delivery_keys(
+    base_url: str,
+    service_role_key: str,
+    delivery_rows: list[dict[str, Any]],
+    known_listing_by_key: dict[str, dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    try:
+        columns = _available_columns(base_url, service_role_key, "sonar_listings")
+    except Exception:
+        return []
+    if not columns:
+        return []
+    select = _select_available(
+        columns,
+        ["listing_id", "listing_url", "year", "mileage", "vin", "created_at"],
+        "created_at",
+    )
+    rows: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    remaining_budget = max(0, min(limit, 1_000))
+    for delivery_row in delivery_rows:
+        if remaining_budget <= 0:
+            break
+        if any(key in known_listing_by_key for key in _row_keys(delivery_row)):
+            continue
+        for column in ("listing_id", "listing_url"):
+            if column not in columns:
+                continue
+            key = str(delivery_row.get(column) or "").strip()
+            if not key or f"{column}:{key}" in seen_keys:
+                continue
+            seen_keys.add(f"{column}:{key}")
+            try:
+                matches = _fetch_postgrest_rows(
+                    base_url,
+                    service_role_key,
+                    "sonar_listings",
+                    [
+                        ("select", select),
+                        (column, f"eq.{key}"),
+                        ("order", "created_at.desc"),
+                        ("limit", "1"),
+                    ],
+                )
+            except Exception:
+                matches = []
+            if matches:
+                rows.extend(matches)
+                remaining_budget -= 1
+                break
+    return rows
+
+
 def build_source_yield_report(
     supabase_url: str,
     service_role_key: str,
@@ -583,9 +651,15 @@ def build_source_yield_report(
         listing_since,
         max(limit * 50, 5_000),
     ):
-        key = _row_key(listing)
-        if key and key not in listing_by_key:
-            listing_by_key[key] = listing
+        _index_listing_by_keys(listing_by_key, listing)
+    for listing in _fetch_optional_listing_rows_for_delivery_keys(
+        base_url,
+        service_role_key,
+        all_delivery_rows,
+        listing_by_key,
+        limit,
+    ):
+        _index_listing_by_keys(listing_by_key, listing)
 
     delivery_by_source: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "channel": Counter(),

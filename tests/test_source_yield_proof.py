@@ -355,6 +355,107 @@ def test_build_report_excludes_dirty_margin_and_ceiling_rows_from_business_domin
     assert run_summary["classification"] == "dirty_source_reject_only"
 
 
+def test_build_report_uses_listing_url_match_when_delivery_and_sonar_ids_differ(monkeypatch):
+    listing_url = "https://hibid.com/lot/production-dirty-row/"
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-hibid-url-match",
+                        "source": "hibid",
+                        "status": "processed",
+                        "item_count": 1,
+                        "received_at": "2026-06-05T19:00:00+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-hibid-url-match",
+                        "source_site": "hibid",
+                        "status": "skipped_margin",
+                        "error_message": "margin_below_floor",
+                        "listing_id": "delivery-key",
+                        "listing_url": listing_url,
+                        "created_at": "2026-06-05T19:01:00+00:00",
+                    }
+                ]
+            if table == "sonar_listings":
+                return [
+                    {
+                        "listing_id": "some-other-current-row",
+                        "listing_url": "https://hibid.com/lot/other/",
+                        "year": 2025,
+                        "mileage": 1000,
+                        "vin": "1HGCM82633A004352",
+                        "created_at": "2026-06-05T19:30:00+00:00",
+                    }
+                ]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-05T19:04:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-hibid-url-match",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 1,
+                    "received_at": "2026-06-05T19:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-hibid-url-match",
+                    "source_site": "hibid",
+                    "status": "skipped_margin",
+                    "error_message": "margin_below_floor",
+                    "listing_id": "delivery-key",
+                    "listing_url": listing_url,
+                    "created_at": "2026-06-05T19:01:00+00:00",
+                }
+            ]
+        if table == "sonar_listings" and query_dict.get("listing_url") == f"eq.{listing_url}":
+            return [
+                {
+                    "listing_id": "sonar-key",
+                    "listing_url": listing_url,
+                    "year": 2016,
+                    "mileage": 36492,
+                    "vin": "1FM5K7D80GGA00000",
+                    "created_at": "2026-06-05T18:59:30+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return []
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+        run_detail_source="hibid",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert source_summary["dirty_rejection_rows"] == 1
+    assert source_summary["classification"] == "dirty_source_reject_only"
+    assert run_summary["dirty_rejection_rows"] == 1
+    assert run_summary["classification"] == "dirty_source_reject_only"
+
+
 def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "webhook_log":
