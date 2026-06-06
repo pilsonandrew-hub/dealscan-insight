@@ -91,6 +91,34 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertNotIn('"webhookSecret"', workflow)
         self.assertNotIn("rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA", workflow)
 
+    def test_enabled_scheduled_actors_record_live_schedule_truth(self):
+        manifest_path = self.repo_root / "apify" / "deployment.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        expected = {
+            "ds-govdeals": ("ds-govdeals-12hr", "0 */12 * * *"),
+            "ds-publicsurplus": ("ds-publicsurplus-12hr", "0 */12 * * *"),
+            "ds-municibid": ("ds-municibid-12hr", "0 */12 * * *"),
+            "ds-gsaauctions": ("ds-gsaauctions-12hr", "0 */12 * * *"),
+            "ds-allsurplus": ("ds-allsurplus-12hr", "0 */12 * * *"),
+            "ds-govplanet": ("ds-govplanet-12hr", "0 */12 * * *"),
+            "ds-proxibid": ("ds-proxibid-12h", "0 */12 * * *"),
+            "ds-equipmentfacts": ("legacy-disabled-ds-equipmentfacts-6hr", "0 */6 * * *"),
+            "ds-usgovbid": ("ds-usgovbid-12hr", "0 */12 * * *"),
+            "ds-jjkane": ("ds-jjkane-12hr", "0 */12 * * *"),
+            "ds-hibid-v2": ("ds-hibid-v2-every-12h", "0 */12 * * *"),
+            "ds-bidspotter": ("ds-bidspotter-12hr-apify-native", "5 11,23 * * *"),
+        }
+
+        for actor_name, (schedule_name, schedule) in expected.items():
+            with self.subTest(actor=actor_name):
+                actor = payload["actors"][actor_name]
+                self.assertEqual(actor["status"], "enabled")
+                self.assertTrue(actor["scheduleId"])
+                self.assertEqual(actor["scheduleName"], schedule_name)
+                self.assertEqual(actor["schedule"], schedule)
+                self.assertEqual(actor["scheduleStatus"], "enabled_live")
+
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
         workflow = workflow_path.read_text(encoding="utf-8")
