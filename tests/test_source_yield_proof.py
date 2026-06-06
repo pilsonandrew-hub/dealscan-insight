@@ -57,6 +57,28 @@ def test_classify_source_separates_gate_and_margin_dominance():
     assert report_source_yield_proof.classify_source_summary(margin_summary) == "economic_reject_dominant"
 
 
+def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
+    dirty_only = {
+        "source": "hibid",
+        "delivery_rows": 20,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {"skipped_gate": 20},
+        "reason_counts": {"age_or_mileage_exceeded": 20},
+    }
+    mixed_clean = {
+        "source": "hibid",
+        "delivery_rows": 24,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {"skipped_gate": 21, "skipped_margin": 2, "skipped_ceiling": 1},
+        "reason_counts": {"age_or_mileage_exceeded": 20, "title_brand_rejected": 1, "margin_below_floor": 2, "pricing_maturity_proxy": 1},
+    }
+
+    assert report_source_yield_proof.classify_source_summary(dirty_only) == "dirty_source_reject_only"
+    assert report_source_yield_proof.classify_source_summary(mixed_clean) == "economic_reject_dominant"
+
+
 def test_classify_source_ignores_proof_and_sonar_rows_for_business_outcome():
     summary = {
         "source": "govdeals",
@@ -184,7 +206,8 @@ def test_build_report_groups_delivery_and_opportunity_truth(monkeypatch):
     assert report["overall_verdict"] == "accepted_flow_present"
     assert by_source["govdeals"]["classification"] == "accepted_flow_present"
     assert by_source["govdeals"]["active_opportunity_rows"] == 1
-    assert by_source["hibid"]["classification"] == "source_quality_reject_dominant"
+    assert by_source["hibid"]["classification"] == "dirty_source_reject_only"
+    assert by_source["hibid"]["dirty_rejection_rows"] == 2
 
 
 def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
@@ -463,7 +486,8 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
             "active_opportunity_rows": 0,
             "active_dos80_rows": 0,
             "inactive_opportunity_lifecycle_counts": {},
-            "classification": "source_quality_reject_dominant",
+            "dirty_rejection_rows": 1,
+            "classification": "dirty_source_reject_only",
         }
     ]
     run_output = str(report["run_summaries"]).lower()
@@ -543,7 +567,7 @@ def test_run_level_positive_item_gap_controls_overall_verdict(monkeypatch):
     assert report["run_classification_counts"]["webhook_without_delivery_gap"] == 1
     by_run = {item["run_id"]: item for item in report["run_summaries"]}
     assert by_run["run-gap"]["classification"] == "webhook_without_delivery_gap"
-    assert by_run["run-rejected"]["classification"] == "source_quality_reject_dominant"
+    assert by_run["run-rejected"]["classification"] == "dirty_source_reject_only"
 
 
 def test_delivery_log_fallback_prevents_false_run_gap(monkeypatch):
@@ -615,7 +639,7 @@ def test_delivery_log_fallback_prevents_false_run_gap(monkeypatch):
     assert "webhook_without_delivery_gap" not in report.get("run_classification_counts", {})
     assert report["source_summaries"][0]["delivery_rows"] == 1
     assert report["source_summaries"][0]["channel_counts"] == {"db_save": 1}
-    assert report["run_summaries"][0]["classification"] == "source_quality_reject_dominant"
+    assert report["run_summaries"][0]["classification"] == "dirty_source_reject_only"
 
 
 def test_delivery_log_fallback_queries_candidate_run_ids(monkeypatch):
@@ -681,7 +705,7 @@ def test_delivery_log_fallback_queries_candidate_run_ids(monkeypatch):
     assert report["delivery_log_fallback_rows"] == 1
     assert report["overall_verdict"] == "no_recent_accepted_source_yield"
     assert report["run_summaries"][0]["delivery_rows"] == 1
-    assert report["run_summaries"][0]["classification"] == "source_quality_reject_dominant"
+    assert report["run_summaries"][0]["classification"] == "dirty_source_reject_only"
 
 
 def test_ingest_delivery_log_queries_candidate_run_ids(monkeypatch):
@@ -748,4 +772,4 @@ def test_ingest_delivery_log_queries_candidate_run_ids(monkeypatch):
     assert report["overall_verdict"] == "no_recent_accepted_source_yield"
     assert "webhook_without_delivery_gap" not in report.get("run_classification_counts", {})
     assert report["source_summaries"][0]["delivery_rows"] == 1
-    assert report["run_summaries"][0]["classification"] == "source_quality_reject_dominant"
+    assert report["run_summaries"][0]["classification"] == "dirty_source_reject_only"
