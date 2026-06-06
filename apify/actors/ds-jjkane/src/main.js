@@ -224,9 +224,9 @@ async function getMarketcheckPrice(year, make, model, odometer) {
     const milesKey = odometer ? Math.round(odometer / 5000) * 5000 : 0;
     const cacheKey = `${year}|${makeLower}|${modelNormalized}|${milesKey}`;
     if (marketcheckCallsThisRun >= MAX_MARKETCHECK_CALLS_PER_RUN) {
-            return { estimated_auction_price: 0, pricing_source: 'quota_exceeded' };
-        }
-        if (marketcheckCache.has(cacheKey)) {
+        return { pricing_unavailable: true, pricing_source: 'marketcheck_quota_exceeded' };
+    }
+    if (marketcheckCache.has(cacheKey)) {
         return marketcheckCache.get(cacheKey);
     }
 
@@ -253,8 +253,12 @@ async function getMarketcheckPrice(year, make, model, odometer) {
 
         if (!resp.ok) {
             console.warn(`[MC] HTTP ${resp.status} for ${year} ${make} ${model}`);
-            marketcheckCache.set(cacheKey, null);
-            return null;
+            const result = {
+                pricing_unavailable: true,
+                pricing_source: `marketcheck_http_${resp.status}`,
+            };
+            marketcheckCache.set(cacheKey, result);
+            return result;
         }
 
         const data = await resp.json();
@@ -287,8 +291,12 @@ async function getMarketcheckPrice(year, make, model, odometer) {
 
     } catch (err) {
         console.warn(`[MC] Error for ${year} ${make} ${model}: ${err.message}`);
-        marketcheckCache.set(cacheKey, null);
-        return null;
+        const result = {
+            pricing_unavailable: true,
+            pricing_source: 'marketcheck_request_error',
+        };
+        marketcheckCache.set(cacheKey, result);
+        return result;
     }
 }
 
@@ -354,10 +362,12 @@ let rowsExcludedPolicyPrefilter = 0;
 let rowsExcludedRustState = 0;
 let rowsExcludedBidRange = 0;
 let rowsExcludedZeroPricingSignal = 0;
+let rowsExcludedPricingUnavailable = 0;
 const rejectionReasons = {};
 const prefilterAgeMileageRejectedSamples = [];
 const prefilterPolicyRejectedSamples = [];
 const zeroPricingRejectedSamples = [];
+const pricingUnavailableSamples = [];
 
 // Build Algolia filter for vehicle categories
 const categoryFilter = `(${VEHICLE_CATEGORIES.map(c => `category:"${c}"`).join(' OR ')})`;
@@ -456,10 +466,13 @@ for (const state of targetStates) {
                 let marketcheckMedian = null;
                 let estimatedAuctionPrice = 0;
                 let pricingSource = 'jjkane_no_bid';
+                let pricingUnavailableReason = null;
 
                 if (enableMarketcheck && make && model && year) {
                     const mcResult = await getMarketcheckPrice(year, make, model, odometer);
-                    if (mcResult) {
+                    if (mcResult?.pricing_unavailable) {
+                        pricingUnavailableReason = mcResult.pricing_source || 'marketcheck_unavailable';
+                    } else if (mcResult) {
                         marketcheckMedian = mcResult.retail_median;
                         estimatedAuctionPrice = mcResult.estimated_auction_price;
                         pricingSource = `marketcheck_jjkane_estimated_${mcResult.sample_count}samples`;
@@ -478,6 +491,13 @@ for (const state of targetStates) {
 
                 // Skip only when both pricing signals are missing.
                 if (effectiveBid === 0) {
+                    if (pricingUnavailableReason) {
+                        console.log(`[SKIP-PRICING-UNAVAILABLE] ${title || `${year} ${make} ${model}`} | reason=${pricingUnavailableReason} currentBid=$${currentBid}`);
+                        rowsExcludedPricingUnavailable++;
+                        incrementCount(rejectionReasons, pricingUnavailableReason);
+                        addSample(pricingUnavailableSamples, sample);
+                        continue;
+                    }
                     console.log(`[SKIP-ZERO-BID] ${title || `${year} ${make} ${model}`} | estimatedAuctionPrice=$${estimatedAuctionPrice} currentBid=$${currentBid}`);
                     rowsExcludedZeroPricingSignal++;
                     incrementCount(rejectionReasons, 'zero_pricing_signal');
@@ -568,6 +588,7 @@ const proofRecord = {
     rows_excluded_rust_state: rowsExcludedRustState,
     rows_excluded_bid_range: rowsExcludedBidRange,
     rows_excluded_zero_pricing_signal: rowsExcludedZeroPricingSignal,
+    rows_excluded_pricing_unavailable: rowsExcludedPricingUnavailable,
     max_year_age: maxYearAge,
     max_allowed_mileage: MAX_ALLOWED_MILEAGE,
     target_states: targetStates,
@@ -578,6 +599,7 @@ const proofRecord = {
     prefilter_age_mileage_rejected_samples: prefilterAgeMileageRejectedSamples,
     prefilter_policy_rejected_samples: prefilterPolicyRejectedSamples,
     zero_pricing_rejected_samples: zeroPricingRejectedSamples,
+    pricing_unavailable_samples: pricingUnavailableSamples,
 };
 await Actor.pushData(proofRecord);
 
