@@ -77,6 +77,47 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _dos_score_bucket(score: float | None) -> str:
+    if score is None:
+        return "missing"
+    if score >= 80:
+        return "80_plus"
+    if score >= 65:
+        return "65_to_79"
+    if score >= 50:
+        return "50_to_64"
+    return "under_50"
+
+
+def _new_score_stats() -> dict[str, float | int | None]:
+    return {"count": 0, "sum": 0.0, "min": None, "max": None}
+
+
+def _remember_score(stats: dict[str, float | int | None], score: float | None) -> None:
+    if score is None:
+        return
+    count = int(stats["count"] or 0)
+    stats["count"] = count + 1
+    stats["sum"] = float(stats["sum"] or 0.0) + score
+    stats["min"] = score if stats["min"] is None else min(float(stats["min"]), score)
+    stats["max"] = score if stats["max"] is None else max(float(stats["max"]), score)
+
+
+def _score_stats_summary(stats: dict[str, float | int | None]) -> dict[str, float | None]:
+    count = int(stats.get("count") or 0)
+    if count <= 0:
+        return {
+            "active_dos_score_min": None,
+            "active_dos_score_max": None,
+            "active_dos_score_avg": None,
+        }
+    return {
+        "active_dos_score_min": round(float(stats["min"]), 2) if stats.get("min") is not None else None,
+        "active_dos_score_max": round(float(stats["max"]), 2) if stats.get("max") is not None else None,
+        "active_dos_score_avg": round(float(stats["sum"] or 0.0) / count, 2),
+    }
+
+
 def _parse_timestamp(value: Any) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -903,6 +944,10 @@ def build_source_yield_report(
         "active_opportunity_rows": 0,
         "active_dos80_rows": 0,
     })
+    active_score_buckets_by_source: dict[str, Counter[str]] = defaultdict(Counter)
+    active_score_buckets_by_run: dict[str, Counter[str]] = defaultdict(Counter)
+    active_score_stats_by_source: dict[str, dict[str, float | int | None]] = defaultdict(_new_score_stats)
+    active_score_stats_by_run: dict[str, dict[str, float | int | None]] = defaultdict(_new_score_stats)
     inactive_lifecycle_by_source: dict[str, Counter[str]] = defaultdict(Counter)
     inactive_lifecycle_by_run: dict[str, Counter[str]] = defaultdict(Counter)
     for row in opportunity_rows:
@@ -920,6 +965,11 @@ def build_source_yield_report(
             if run_id:
                 opportunities_by_run[run_id]["active_opportunity_rows"] += 1
             score = _safe_float(row.get("dos_score") if row.get("dos_score") is not None else row.get("score"))
+            active_score_buckets_by_source[source][_dos_score_bucket(score)] += 1
+            _remember_score(active_score_stats_by_source[source], score)
+            if run_id:
+                active_score_buckets_by_run[run_id][_dos_score_bucket(score)] += 1
+                _remember_score(active_score_stats_by_run[run_id], score)
             if score is not None and score >= 80:
                 opportunities_by_source[source]["active_dos80_rows"] += 1
                 if run_id:
@@ -951,6 +1001,9 @@ def build_source_yield_report(
             "active_dos80_rows": opportunity_counts["active_dos80_rows"],
             "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
         }
+        if opportunity_counts["active_opportunity_rows"] > 0:
+            run_summary["active_dos_score_buckets"] = dict(active_score_buckets_by_run[run_id].most_common())
+            run_summary.update(_score_stats_summary(active_score_stats_by_run[run_id]))
         run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
         run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
@@ -999,6 +1052,9 @@ def build_source_yield_report(
             "active_dos80_rows": opportunity_counts["active_dos80_rows"],
             "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_source[source].most_common(10)),
         }
+        if opportunity_counts["active_opportunity_rows"] > 0:
+            summary["active_dos_score_buckets"] = dict(active_score_buckets_by_source[source].most_common())
+            summary.update(_score_stats_summary(active_score_stats_by_source[source]))
         summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
         summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))

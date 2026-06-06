@@ -206,6 +206,10 @@ def test_build_report_groups_delivery_and_opportunity_truth(monkeypatch):
     assert report["overall_verdict"] == "accepted_flow_present"
     assert by_source["govdeals"]["classification"] == "accepted_flow_present"
     assert by_source["govdeals"]["active_opportunity_rows"] == 1
+    assert by_source["govdeals"]["active_dos_score_buckets"] == {"80_plus": 1}
+    assert by_source["govdeals"]["active_dos_score_min"] == 88.0
+    assert by_source["govdeals"]["active_dos_score_max"] == 88.0
+    assert by_source["govdeals"]["active_dos_score_avg"] == 88.0
     assert by_source["hibid"]["classification"] == "dirty_source_reject_only"
     assert by_source["hibid"]["dirty_rejection_rows"] == 2
 
