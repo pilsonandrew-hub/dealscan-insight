@@ -345,6 +345,16 @@ let detailPagesFetched = 0;
 let detailPagesFailed = 0;
 let detailVinsFound = 0;
 let detailMileagesFound = 0;
+let rowsExcludedDuplicate = 0;
+let rowsExcludedNonVehicle = 0;
+let rowsExcludedNonUsState = 0;
+let rowsExcludedNonUsdCurrency = 0;
+let rowsExcludedRustState = 0;
+let rowsExcludedNonTargetState = 0;
+let rowsExcludedBidRange = 0;
+let rowsExcludedAgeMileagePrefilter = 0;
+let rowsExcludedAgeMileageAfterDetail = 0;
+let rowsExcludedPolicyAfterDetail = 0;
 let rowsExcludedMissingRequiredData = 0;
 let rowsExcludedMissingVin = 0;
 let rowsExcludedMissingMileage = 0;
@@ -372,7 +382,10 @@ for (const searchText of searchTerms) {
                 totalFound++;
                 
                 const itemId = `${item.accountId}-${item.assetId}`;
-                if (seenIds.has(itemId)) continue;
+                if (seenIds.has(itemId)) {
+                    rowsExcludedDuplicate++;
+                    continue;
+                }
                 seenIds.add(itemId);
                 
                 const title = (item.assetShortDescription || '').trim();
@@ -380,6 +393,7 @@ for (const searchText of searchTerms) {
                 
                 // Vehicle check
                 if (!isVehicle(title, categoryDesc)) {
+                    rowsExcludedNonVehicle++;
                     continue;
                 }
                 
@@ -387,12 +401,14 @@ for (const searchText of searchTerms) {
                 const state = parseState(item.locationState);
                 if (!state) {
                     console.log(`[SKIP] Non-US state: ${item.locationState} — ${title}`);
+                    rowsExcludedNonUsState++;
                     continue;
                 }
                 
                 // Currency check - must be USD
                 if (item.currencyCode && item.currencyCode !== 'USD') {
                     console.log(`[SKIP] Non-USD currency: ${item.currencyCode} — ${title}`);
+                    rowsExcludedNonUsdCurrency++;
                     continue;
                 }
                 
@@ -404,12 +420,14 @@ for (const searchText of searchTerms) {
                         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
                     } else {
                         console.log(`[SKIP] High-rust state: ${state} — ${title}`);
+                        rowsExcludedRustState++;
                         continue;
                     }
                 }
 
                 if (targetStatesOnly && !TARGET_STATES.has(state)) {
                     console.log(`[SKIP] Non-target state: ${state}`);
+                    rowsExcludedNonTargetState++;
                     continue;
                 }
 
@@ -417,15 +435,18 @@ for (const searchText of searchTerms) {
 
                 if (bid > 0 && bid < minBid) {
                     console.log(`[SKIP] Bid too low: $${bid} — ${title}`);
+                    rowsExcludedBidRange++;
                     continue;
                 }
                 if (bid > 0 && bid > maxBid) {
                     console.log(`[SKIP] Bid too high: $${bid} — ${title}`);
+                    rowsExcludedBidRange++;
                     continue;
                 }
 
                 if (!year || year < minYear) {
                     console.log(`[SKIP] Too old: ${year} — ${title}`);
+                    rowsExcludedAgeMileagePrefilter++;
                     continue;
                 }
 
@@ -436,6 +457,7 @@ for (const searchText of searchTerms) {
 
                 if (!isNaN(mileageNum) && mileageNum > 0 && mileageNum > maxMileage) {
                     console.log('[SKIP-MILEAGE]', title, '| mileage:', mileageNum);
+                    rowsExcludedAgeMileagePrefilter++;
                     continue;
                 }
                 
@@ -507,6 +529,7 @@ for (const searchText of searchTerms) {
 
                 if (listing.mileage && listing.mileage > maxMileage) {
                     console.log(`[SKIP-MILEAGE-DETAIL] ${listing.title} | mileage: ${listing.mileage}`);
+                    rowsExcludedAgeMileageAfterDetail++;
                     continue;
                 }
 
@@ -538,6 +561,7 @@ for (const searchText of searchTerms) {
 
                 if (REJECT_PATTERNS.some((pattern) => pattern.test(listing.description || listing.title || ''))) {
                     console.log(`[SKIP-CONDITION-DETAIL] ${listing.title}`);
+                    rowsExcludedPolicyAfterDetail++;
                     continue;
                 }
 
@@ -565,6 +589,19 @@ for (const searchText of searchTerms) {
 
 console.log(`[ALLSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalPassed} | Unique: ${seenIds.size}`);
 
+const accountedRows = totalPassed
+    + rowsExcludedDuplicate
+    + rowsExcludedNonVehicle
+    + rowsExcludedNonUsState
+    + rowsExcludedNonUsdCurrency
+    + rowsExcludedRustState
+    + rowsExcludedNonTargetState
+    + rowsExcludedBidRange
+    + rowsExcludedAgeMileagePrefilter
+    + rowsExcludedAgeMileageAfterDetail
+    + rowsExcludedMissingRequiredData
+    + rowsExcludedPolicyAfterDetail;
+
 await Actor.pushData({
     record_type: 'source_quality_proof',
     source_site: 'allsurplus',
@@ -580,9 +617,20 @@ await Actor.pushData({
     detail_pages_failed: detailPagesFailed,
     detail_vins_found: detailVinsFound,
     detail_mileages_found: detailMileagesFound,
+    rows_excluded_duplicate: rowsExcludedDuplicate,
+    rows_excluded_non_vehicle: rowsExcludedNonVehicle,
+    rows_excluded_non_us_state: rowsExcludedNonUsState,
+    rows_excluded_non_usd_currency: rowsExcludedNonUsdCurrency,
+    rows_excluded_rust_state: rowsExcludedRustState,
+    rows_excluded_non_target_state: rowsExcludedNonTargetState,
+    rows_excluded_bid_range: rowsExcludedBidRange,
+    rows_excluded_age_mileage_prefilter: rowsExcludedAgeMileagePrefilter,
+    rows_excluded_age_mileage_after_detail: rowsExcludedAgeMileageAfterDetail,
+    rows_excluded_policy_after_detail: rowsExcludedPolicyAfterDetail,
     rows_excluded_missing_required_data: rowsExcludedMissingRequiredData,
     rows_excluded_missing_vin: rowsExcludedMissingVin,
     rows_excluded_missing_mileage: rowsExcludedMissingMileage,
+    rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - accountedRows),
     excluded_missing_required_samples: excludedMissingRequiredSamples,
 });
 

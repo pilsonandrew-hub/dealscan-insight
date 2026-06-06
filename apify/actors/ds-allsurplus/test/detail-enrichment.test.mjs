@@ -78,6 +78,21 @@ describe('AllSurplus detail enrichment source contract', () => {
     expect(source).toContain('excluded_missing_required_samples: excludedMissingRequiredSamples');
   });
 
+  it('accounts for every pre-detail and post-detail discard after found row counting', () => {
+    expect(source).toContain('rowsExcludedDuplicate++');
+    expect(source).toContain('rowsExcludedNonVehicle++');
+    expect(source).toContain('rowsExcludedNonUsState++');
+    expect(source).toContain('rowsExcludedNonUsdCurrency++');
+    expect(source).toContain('rowsExcludedRustState++');
+    expect(source).toContain('rowsExcludedNonTargetState++');
+    expect(source).toContain('rowsExcludedBidRange++');
+    expect(source).toContain('rowsExcludedAgeMileagePrefilter++');
+    expect(source).toContain('rowsExcludedAgeMileageAfterDetail++');
+    expect(source).toContain('rowsExcludedPolicyAfterDetail++');
+    expect(source).toContain('const accountedRows = totalPassed');
+    expect(source).toContain('rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - accountedRows)');
+  });
+
   it('does not send an empty webhook secret when actor env vars are absent', () => {
     expect(source).toContain('DEFAULT_WEBHOOK_SECRET');
     expect(source).toContain('process.env.WEBHOOK_SECRET || DEFAULT_WEBHOOK_SECRET');
