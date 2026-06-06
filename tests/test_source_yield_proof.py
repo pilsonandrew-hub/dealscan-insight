@@ -1299,3 +1299,93 @@ def test_build_report_uses_apify_source_quality_proof_for_proof_only_runs(monkey
     assert source_summary["source_quality_exclusion_counts"]["rows_excluded_zero_pricing_signal"] == 15
     assert run_summary["classification"] == "source_quality_reject_dominant"
     assert run_summary["source_quality_exclusion_counts"]["rows_excluded_age_mileage_prefilter"] == 1269
+
+
+def test_build_report_surfaces_sanitized_source_quality_rejection_reasons(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-proxibid-proof",
+                        "source": "proxibid",
+                        "status": "processed",
+                        "item_count": 1,
+                        "received_at": "2026-06-06T07:12:40+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-proxibid-proof",
+                        "source_site": "proxibid",
+                        "status": "skipped_proof",
+                        "error_message": "source_quality_proof_record",
+                        "created_at": "2026-06-06T07:12:45+00:00",
+                    }
+                ]
+            if table in {"sonar_listings", "opportunities"}:
+                return []
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-proxibid-proof",
+                    "source": "proxibid",
+                    "status": "processed",
+                    "item_count": 1,
+                    "received_at": "2026-06-06T07:12:40+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-proxibid-proof",
+                    "source_site": "proxibid",
+                    "status": "skipped_proof",
+                    "error_message": "source_quality_proof_record",
+                    "created_at": "2026-06-06T07:12:45+00:00",
+                }
+            ]
+        if table in {"delivery_log", "sonar_listings", "opportunities"}:
+            return []
+        raise AssertionError(table)
+
+    def fake_apify_proof(run_id, token):
+        assert run_id == "run-proxibid-proof"
+        assert token == "apify-token"
+        return {
+            "found_rows_total": 1294,
+            "prefilter_passed_rows_total": 24,
+            "pushed_rows_total": 0,
+            "rows_excluded_age_mileage_prefilter": 715,
+            "rejection_reasons": {
+                "condition_reject": 21,
+                "mileage_over_50k": 3,
+            },
+        }
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_apify_source_quality_proof", fake_apify_proof)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=1,
+        limit=100,
+        now=datetime(2026, 6, 6, 7, 15, tzinfo=timezone.utc),
+        run_detail_source="proxibid",
+        apify_token="apify-token",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert source_summary["source_quality_prefilter_passed_rows_total"] == 24
+    assert source_summary["source_quality_pushed_rows_total"] == 0
+    assert source_summary["source_quality_rejection_reason_counts"] == {
+        "condition_reject": 21,
+        "mileage_over_50k": 3,
+    }
+    assert run_summary["source_quality_rejection_reason_counts"]["condition_reject"] == 21
