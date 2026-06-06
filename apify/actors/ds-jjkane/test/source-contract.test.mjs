@@ -8,10 +8,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(__dirname, '../src/main.js'), 'utf8');
 
 function loadHelperExports() {
-  const helperStart = source.indexOf('function normalizeText');
-  const helperEnd = source.indexOf('function parseYear');
+  const helperStart = source.indexOf('const CONDITION_REJECT_PATTERNS');
+  const helperEnd = source.indexOf('// ── Marketcheck API');
   const helperSource = source.slice(helperStart, helperEnd) + `
-({ extractVin })`;
+({ extractVin, hasConditionReject })`;
   return vm.runInNewContext(helperSource, {});
 }
 
@@ -25,6 +25,22 @@ describe('ds-jjkane source contract', () => {
 
     expect(source).toContain('extractVin(conditionText)');
     expect(source).toContain('vin: vin || null');
+  });
+
+  test('rejects JJ Kane defect and unknown-condition phrases before pricing', () => {
+    const helpers = loadHelperExports();
+
+    const blockedTexts = [
+      'True Mileage Unknown State of Florida Unit (Wrecked) (Not Running, Condition Unknown) (Airbags Deployed, No Power)',
+      'Wrecked, Airbags Deployed, Jump To Start, Does Not Move - Broken Axle, Dash Warning Indicators On',
+      'Does Not Move, Condition Unknown, Check Engine Light On, ABS Light On, Traction Control Light On',
+      'Branded Title - Police Vehicle',
+      'sold AS IS/WHERE IS via Timed Auction',
+    ];
+
+    for (const text of blockedTexts) {
+      expect(helpers.hasConditionReject(text)).toBe(true);
+    }
   });
 
   test('emits source-quality proof before webhook even when no vehicles are pushed', () => {
