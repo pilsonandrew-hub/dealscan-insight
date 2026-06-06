@@ -11,7 +11,7 @@ function loadHelperExports() {
   const helperStart = source.indexOf('const CONDITION_REJECT_PATTERNS');
   const helperEnd = source.indexOf('// ── Marketcheck API');
   const helperSource = source.slice(helperStart, helperEnd) + `
-({ extractVin, hasConditionReject })`;
+({ extractVin, hasConditionReject, extractVinFromDetailHtml })`;
   return vm.runInNewContext(helperSource, {});
 }
 
@@ -51,6 +51,24 @@ describe('ds-jjkane source contract', () => {
 
     expect(source).toContain('extractVin(conditionText)');
     expect(source).toContain('vin: vin || null');
+  });
+
+  test('extracts VIN identity from JJ Kane item detail pages before pricing', () => {
+    const helpers = loadHelperExports();
+    const detailHtml = `
+      <table>
+        <tr><th scope="row">Odometer:</th><td>39294</td></tr>
+        <tr><th scope="row">VIN:</th><td>1FTFW1P86NKD26312</td></tr>
+      </table>
+    `;
+
+    expect(helpers.extractVinFromDetailHtml(detailHtml)).toBe('1FTFW1P86NKD26312');
+    expect(helpers.extractVinFromDetailHtml('<table><tr><th>VIN:</th><td></td></tr></table>')).toBeNull();
+
+    expect(source.indexOf('const detailVin =')).toBeGreaterThan(source.indexOf('const vinFromSourceText ='));
+    expect(source.indexOf('const detailVin =')).toBeLessThan(source.indexOf('const mcResult = await getMarketcheckPrice'));
+    expect(source.indexOf("incrementCount(rejectionReasons, 'missing_vin')"))
+      .toBeLessThan(source.indexOf('const mcResult = await getMarketcheckPrice'));
   });
 
   test('rejects JJ Kane defect and unknown-condition phrases before pricing', () => {
