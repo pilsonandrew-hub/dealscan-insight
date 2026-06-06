@@ -305,25 +305,6 @@ function passesFilters(listing, log) {
         return false;
     }
 
-    // Bid range
-    const bid = listing.current_bid;
-    if (bid === 0) {
-        log.debug(`[SKIP-ZERO-BID] Pre-auction item with no pricing: ${listing.title?.slice(0, 60)}`);
-        proofCounters.rows_excluded_zero_pricing_signal++;
-        addProofSample('zero_pricing', listing, 'zero_bid');
-        return false;
-    }
-    if (bid > 0 && bid < minBid) {
-        log.debug(`[SKIP-BID-LOW] $${bid}`);
-        proofCounters.rows_excluded_bid_range++;
-        return false;
-    }
-    if (bid > 0 && bid > maxBid) {
-        log.debug(`[SKIP-BID-HIGH] $${bid}`);
-        proofCounters.rows_excluded_bid_range++;
-        return false;
-    }
-
     // Year
     if (!listing.year || listing.year < EFFECTIVE_MIN_YEAR) {
         log.debug(`[SKIP-YEAR] ${listing.year}`);
@@ -343,6 +324,26 @@ function passesFilters(listing, log) {
         log.debug(`[SKIP-MILES] ${listing.mileage}`);
         proofCounters.rows_excluded_age_mileage_prefilter++;
         addProofSample('age_mileage_prefilter', listing, 'mileage_over_50k');
+        return false;
+    }
+
+    // Bid range. Apply after identity, age, and mileage so source-quality proof
+    // does not hide old or incomplete inventory inside zero-pricing counts.
+    const bid = listing.current_bid;
+    if (bid === 0) {
+        log.debug(`[SKIP-ZERO-BID] Pre-auction item with no pricing: ${listing.title?.slice(0, 60)}`);
+        proofCounters.rows_excluded_zero_pricing_signal++;
+        addProofSample('zero_pricing', listing, 'zero_bid');
+        return false;
+    }
+    if (bid > 0 && bid < minBid) {
+        log.debug(`[SKIP-BID-LOW] $${bid}`);
+        proofCounters.rows_excluded_bid_range++;
+        return false;
+    }
+    if (bid > 0 && bid > maxBid) {
+        log.debug(`[SKIP-BID-HIGH] $${bid}`);
+        proofCounters.rows_excluded_bid_range++;
         return false;
     }
 
