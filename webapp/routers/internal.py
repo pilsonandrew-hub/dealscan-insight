@@ -229,6 +229,52 @@ def _status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(counter.most_common(20))
 
 
+def _numeric_score(row: dict[str, Any]) -> Optional[float]:
+    score = row.get("dos_score") if row.get("dos_score") is not None else row.get("score")
+    try:
+        return float(score)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dos_score_bucket(score: Optional[float]) -> str:
+    if score is None:
+        return "missing"
+    if score >= 80:
+        return "80_plus"
+    if score >= 65:
+        return "65_to_79"
+    if score >= 50:
+        return "50_to_64"
+    return "under_50"
+
+
+def _dos_score_buckets(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for row in rows:
+        counter[_dos_score_bucket(_numeric_score(row))] += 1
+    return dict(counter.most_common())
+
+
+def _dos_score_stats(rows: list[dict[str, Any]]) -> dict[str, Optional[float]]:
+    scores = [
+        score
+        for row in rows
+        if (score := _numeric_score(row)) is not None
+    ]
+    if not scores:
+        return {
+            "active_dos_score_min_sample": None,
+            "active_dos_score_max_sample": None,
+            "active_dos_score_avg_sample": None,
+        }
+    return {
+        "active_dos_score_min_sample": round(min(scores), 2),
+        "active_dos_score_max_sample": round(max(scores), 2),
+        "active_dos_score_avg_sample": round(sum(scores) / len(scores), 2),
+    }
+
+
 def _alert_gate_breakdown(rows: list[dict[str, Any]], *, limit: int = 25) -> list[dict[str, Any]]:
     breakdown: list[dict[str, Any]] = []
     for row in rows[:limit]:
@@ -642,6 +688,13 @@ def build_pipeline_truth() -> dict[str, Any]:
             "total": total_opportunities,
             "active": active_total,
             "sample_size": len(opp_rows),
+            "active_sample": len(active_rows),
+            "active_source_counts_sample": _status_counts(active_rows, "source_site"),
+            "active_pricing_maturity_counts_sample": _status_counts(active_rows, "pricing_maturity"),
+            "active_condition_counts_sample": _status_counts(active_rows, "condition_grade"),
+            "active_dos_score_buckets_sample": _dos_score_buckets(active_rows),
+            **_dos_score_stats(active_rows),
+            "active_gate_breakdown_sample": _alert_gate_breakdown(active_rows),
             "active_dos80_sample": len(active_dos80),
             "active_dos80_missing_mileage_sample": sum(1 for row in active_dos80 if row.get("mileage") in (None, "", 0)),
             "active_dos80_proxy_pricing_sample": sum(1 for row in active_dos80 if row.get("pricing_maturity") == "proxy"),

@@ -9,6 +9,10 @@ def test_internal_pipeline_truth_workflow_prints_gate_aggregates():
 
     assert "workflow_dispatch:" in text
     assert "opportunity_id:" in text
+    assert "active_dos_score_buckets_sample" in text
+    assert "active_gate_breakdown_sample" in text
+    assert "active_pricing_maturity_counts_sample" in text
+    assert "active_source_counts_sample" in text
     assert "active_dos80_gate_blocker_counts_sample" in text
     assert "active_dos80_alert_eligible_sample" in text
     assert "active_dos80_condition_counts_sample" in text
