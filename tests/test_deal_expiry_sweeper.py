@@ -281,6 +281,36 @@ def test_sweeper_archives_active_high_dos_rows_missing_source_condition_evidence
     } in client.updates
 
 
+def test_sweeper_archives_active_rows_below_save_threshold_or_rejected_grade():
+    now = datetime(2026, 6, 6, 5, 12, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("lt", "dos_score", 50),
+            ): [{"id": "dos-zero-row"}, {"id": "dos-49-row"}],
+            (
+                ("eq", "is_active", True),
+                ("eq", "investment_grade", "Rejected"),
+            ): [{"id": "dos-zero-row"}, {"id": "rejected-row"}],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["archived_untrusted_active_rejected_or_low_dos"] == 3
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_rejected",
+        },
+        "ids": ["dos-zero-row", "dos-49-row", "rejected-row"],
+        "filters": [("in", "id", ("dos-zero-row", "dos-49-row", "rejected-row"))],
+    } in client.updates
+
+
 def test_sweeper_condition_evidence_query_uses_live_opportunity_columns_only():
     now = datetime(2026, 6, 5, 10, 15, tzinfo=timezone.utc)
     client = _Client({})
@@ -513,11 +543,13 @@ def test_sweeper_message_reports_post_close_outcome_referrals():
             "archived_untrusted_active_high_dos_missing_mileage": 0,
             "archived_untrusted_active_high_dos_missing_vin": 0,
             "archived_untrusted_active_high_dos_missing_condition_evidence": 0,
+            "archived_untrusted_active_rejected_or_low_dos": 0,
             "run_time": "2026-06-02 08:18 UTC",
         }
     )
 
     assert "Post-close outcome referrals: <b>2</b>" in message
+    assert "Archived active rejected/low-DOS deals: <b>0</b>" in message
 
 
 def test_sweeper_message_labels_dry_run():
@@ -531,6 +563,7 @@ def test_sweeper_message_labels_dry_run():
             "archived_untrusted_active_high_dos_missing_mileage": 0,
             "archived_untrusted_active_high_dos_missing_vin": 0,
             "archived_untrusted_active_high_dos_missing_condition_evidence": 0,
+            "archived_untrusted_active_rejected_or_low_dos": 0,
             "run_time": "2026-06-02 08:18 UTC",
         }
     )

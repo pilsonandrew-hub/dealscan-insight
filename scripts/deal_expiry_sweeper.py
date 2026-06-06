@@ -157,6 +157,8 @@ def build_message(summary: dict[str, Any]) -> str:
         f"<b>{summary['archived_untrusted_active_high_dos_missing_vin']}</b>\n"
         "Archived active high-DOS missing-condition-evidence deals: "
         f"<b>{summary['archived_untrusted_active_high_dos_missing_condition_evidence']}</b>\n"
+        "Archived active rejected/low-DOS deals: "
+        f"<b>{summary['archived_untrusted_active_rejected_or_low_dos']}</b>\n"
         f"Run time: {summary['run_time']}"
     )
 
@@ -245,6 +247,22 @@ def run_sweep(
     active_high_dos_missing_condition_evidence_ids = _missing_source_condition_evidence_ids(
         active_high_dos_rows
     )
+    active_rejected_or_low_dos_ids = _dedupe_preserving_order([
+        *_fetch_ids(
+            supabase,
+            [
+                lambda q: q.eq("is_active", True),
+                lambda q: q.lt("dos_score", 50),
+            ],
+        ),
+        *_fetch_ids(
+            supabase,
+            [
+                lambda q: q.eq("is_active", True),
+                lambda q: q.eq("investment_grade", "Rejected"),
+            ],
+        ),
+    ])
 
     post_close_request_count = (
         len([
@@ -307,6 +325,17 @@ def run_sweep(
                 "is_active": False,
                 "pipeline_step": "archived",
                 "step_status": "q_no_cond_ev",
+            },
+        ),
+        "archived_untrusted_active_rejected_or_low_dos": len(active_rejected_or_low_dos_ids)
+        if dry_run
+        else _update_batches(
+            supabase,
+            active_rejected_or_low_dos_ids,
+            {
+                "is_active": False,
+                "pipeline_step": "archived",
+                "step_status": "q_rejected",
             },
         ),
         "run_time": now.strftime("%Y-%m-%d %H:%M UTC"),
