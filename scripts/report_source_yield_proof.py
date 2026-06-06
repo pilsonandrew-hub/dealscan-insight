@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib import error as urlerror
+from urllib import parse, request
 
 from report_pricing_blocked_source_candidates import (
     _fetch_postgrest_rows,
@@ -24,6 +27,11 @@ DIRTY_REJECTION_REASON_BUCKETS = {"age_or_mileage_exceeded"}
 BUSINESS_REJECTION_STATUSES = {"skipped_margin", "skipped_ceiling"}
 MAX_CLEAN_AGE_YEARS = 4
 MAX_CLEAN_MILEAGE = 50_000
+SOURCE_QUALITY_TOTAL_FIELDS = (
+    "found_rows_total",
+    "prefilter_passed_rows_total",
+    "pushed_rows_total",
+)
 
 
 def _canon_source(value: Any) -> str | None:
@@ -223,6 +231,72 @@ def _index_listing_by_keys(listing_by_key: dict[str, dict[str, Any]], listing: d
         listing_by_key.setdefault(key, listing)
 
 
+def _fetch_apify_json(url: str, token: str) -> Any:
+    req = request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": "DealerScopeSourceYieldProof/1.0",
+        },
+    )
+    with request.urlopen(req, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _fetch_apify_source_quality_proof(run_id: str, token: str) -> dict[str, Any] | None:
+    run_id = str(run_id or "").strip()
+    token = str(token or "").strip()
+    if not run_id or not token:
+        return None
+    try:
+        encoded_run = parse.quote(run_id, safe="")
+        run_payload = _fetch_apify_json(f"https://api.apify.com/v2/actor-runs/{encoded_run}", token)
+        run_data = run_payload.get("data") if isinstance(run_payload, dict) else {}
+        dataset_id = str((run_data or {}).get("defaultDatasetId") or "").strip()
+        if not dataset_id:
+            return None
+        encoded_dataset = parse.quote(dataset_id, safe="")
+        items = _fetch_apify_json(
+            f"https://api.apify.com/v2/datasets/{encoded_dataset}/items?clean=1&limit=10",
+            token,
+        )
+    except (OSError, ValueError, urlerror.URLError, urlerror.HTTPError, json.JSONDecodeError):
+        return None
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("record_type") == "source_quality_proof":
+            return item
+    return None
+
+
+def _source_quality_numeric_summary(proof: dict[str, Any] | None) -> tuple[Counter[str], Counter[str]]:
+    totals: Counter[str] = Counter()
+    exclusions: Counter[str] = Counter()
+    if not isinstance(proof, dict):
+        return totals, exclusions
+    for field in SOURCE_QUALITY_TOTAL_FIELDS:
+        totals[field] = _safe_int(proof.get(field))
+    for key, value in proof.items():
+        if str(key).startswith("rows_excluded_"):
+            exclusions[str(key)[:120]] += _safe_int(value)
+    return totals, exclusions
+
+
+def _attach_source_quality_summary(
+    summary: dict[str, Any],
+    totals: Counter[str],
+    exclusions: Counter[str],
+) -> None:
+    if not totals and not exclusions:
+        return
+    summary["source_quality_found_rows_total"] = int(totals.get("found_rows_total") or 0)
+    summary["source_quality_prefilter_passed_rows_total"] = int(totals.get("prefilter_passed_rows_total") or 0)
+    summary["source_quality_pushed_rows_total"] = int(totals.get("pushed_rows_total") or 0)
+    summary["source_quality_exclusion_counts"] = dict(exclusions.most_common(20))
+
+
 def classify_source_summary(summary: dict[str, Any]) -> str:
     if int(summary.get("active_opportunity_rows") or 0) > 0:
         return "accepted_flow_present"
@@ -251,6 +325,11 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
 
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
+    if (
+        int(summary.get("source_quality_found_rows_total") or 0) > 0
+        and int(summary.get("source_quality_pushed_rows_total") or 0) == 0
+    ):
+        return "source_quality_reject_dominant"
     if proof_rows == delivery_rows:
         return "proof_control_only"
     if business_delivery_rows == 0 and listing_gap_rows > 0:
@@ -292,6 +371,11 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     clean_ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
+    if (
+        int(summary.get("source_quality_found_rows_total") or 0) > 0
+        and int(summary.get("source_quality_pushed_rows_total") or 0) == 0
+    ):
+        return "source_quality_reject_dominant"
     if proof_rows == delivery_rows:
         return "proof_control_only"
     if business_delivery_rows == 0 and listing_gap_rows > 0:
@@ -523,6 +607,7 @@ def build_source_yield_report(
     run_detail_source: str | None = None,
     now: datetime | None = None,
     deployment_path: Path = DEPLOYMENT_PATH,
+    apify_token: str | None = None,
 ) -> dict[str, Any]:
     current_time = now or datetime.now(timezone.utc)
     since = current_time - timedelta(hours=lookback_hours)
@@ -580,6 +665,28 @@ def build_source_yield_report(
                 webhook_item_count_by_run[run_id] += item_count
                 if item_count > 0:
                     processed_positive_run_ids.add(run_id)
+
+    source_quality_by_source: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
+        "totals": Counter(),
+        "exclusions": Counter(),
+    })
+    source_quality_by_run: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
+        "totals": Counter(),
+        "exclusions": Counter(),
+    })
+    if apify_token:
+        for run_id in sorted(processed_positive_run_ids):
+            proof = _fetch_apify_source_quality_proof(run_id, apify_token)
+            totals, exclusions = _source_quality_numeric_summary(proof)
+            if not totals and not exclusions:
+                continue
+            source = _canon_source((proof or {}).get("source_site") or (proof or {}).get("source")) or run_sources.get(run_id, "unknown")
+            if source != "unknown":
+                run_sources[run_id] = source
+            source_quality_by_source[source]["totals"].update(totals)
+            source_quality_by_source[source]["exclusions"].update(exclusions)
+            source_quality_by_run[run_id]["totals"].update(totals)
+            source_quality_by_run[run_id]["exclusions"].update(exclusions)
 
     delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
     delivery_select, delivery_order = _delivery_select_for_columns(delivery_columns)
@@ -779,12 +886,13 @@ def build_source_yield_report(
             if run_id:
                 inactive_lifecycle_by_run[run_id][_inactive_lifecycle_bucket(row)] += 1
 
-    sources = sorted(set(webhook_by_source) | set(delivery_by_source) | set(opportunities_by_source))
+    sources = sorted(set(webhook_by_source) | set(delivery_by_source) | set(opportunities_by_source) | set(source_quality_by_source))
     summaries: list[dict[str, Any]] = []
     for source in sources:
         delivery_counters = delivery_by_source[source]
         opportunity_counts = opportunities_by_source[source]
         webhook_status_counts = webhook_by_source[source]
+        source_quality_counters = source_quality_by_source[source]
         summary = {
             "source": source,
             "webhook_rows": sum(webhook_status_counts.values()),
@@ -802,6 +910,11 @@ def build_source_yield_report(
         summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
         summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
+        _attach_source_quality_summary(
+            summary,
+            source_quality_counters["totals"],
+            source_quality_counters["exclusions"],
+        )
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
 
@@ -838,7 +951,7 @@ def build_source_yield_report(
         "truth_boundary": "Read-only sanitized source-yield aggregate. It does not print titles, VINs, URLs, row payloads, tokens, or user data.",
     }
     if detail_source:
-        run_ids = sorted(set(webhook_by_run) | set(delivery_by_run) | set(opportunities_by_run))
+        run_ids = sorted(set(webhook_by_run) | set(delivery_by_run) | set(opportunities_by_run) | set(source_quality_by_run))
         run_summaries: list[dict[str, Any]] = []
         for run_id in run_ids:
             source = run_sources.get(run_id, "unknown")
@@ -847,6 +960,7 @@ def build_source_yield_report(
             webhook_status_counts = webhook_by_run[run_id]
             delivery_counters = delivery_by_run[run_id]
             opportunity_counts = opportunities_by_run[run_id]
+            source_quality_counters = source_quality_by_run[run_id]
             run_summary = {
                 "run_id": run_id[:120],
                 "source": source,
@@ -864,6 +978,11 @@ def build_source_yield_report(
             run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
             run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
             run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
+            _attach_source_quality_summary(
+                run_summary,
+                source_quality_counters["totals"],
+                source_quality_counters["exclusions"],
+            )
             run_summary["classification"] = classify_run_summary(run_summary)
             run_summaries.append(run_summary)
         report["run_detail_source"] = detail_source
@@ -906,6 +1025,7 @@ def main() -> int:
         lookback_hours=args.lookback_hours,
         limit=args.limit,
         run_detail_source=args.source,
+        apify_token=os.environ.get("APIFY_TOKEN") or None,
     )
     if args.json:
         print(json.dumps(report, sort_keys=True))
