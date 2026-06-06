@@ -165,6 +165,31 @@ def test_classify_source_keeps_clean_proxy_rows_when_dirty_rows_are_unrelated():
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
 
 
+def test_classify_source_respects_explicit_zero_dirty_rows():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "skipped_gate": 1,
+            "skipped_ceiling": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "age_or_mileage_exceeded": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 0,
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+    assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
+
+
 def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_ceiling():
     summary = {
         "source": "proxibid",
