@@ -1550,6 +1550,76 @@ def test_source_summary_separates_aggregate_and_latest_source_quality_proof(monk
     }
 
 
+def test_source_quality_visible_exclusion_total_ignores_diagnostic_subcounters(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-govdeals-proof",
+                        "source": "govdeals",
+                        "status": "processed",
+                        "item_count": 1,
+                        "received_at": "2026-06-06T12:00:00+00:00",
+                    },
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-govdeals-proof",
+                        "source_site": "govdeals",
+                        "status": "skipped_proof",
+                        "error_message": "source_quality_proof_record",
+                        "created_at": "2026-06-06T12:00:10+00:00",
+                    },
+                ]
+            if table in {"sonar_listings", "opportunities"}:
+                return []
+        if table in {"webhook_log", "ingest_delivery_log"}:
+            return fake_fetch(base_url, service_role_key, table, [("select", "*")])
+        if table in {"delivery_log", "sonar_listings", "opportunities"}:
+            return []
+        raise AssertionError(table)
+
+    def fake_apify_proof(run_id, token):
+        assert run_id == "run-govdeals-proof"
+        assert token == "apify-token"
+        return {
+            "source_site": "govdeals",
+            "found_rows_total": 5,
+            "prefilter_passed_rows_total": 5,
+            "pushed_rows_total": 1,
+            "rows_excluded_missing_required_data": 2,
+            "rows_excluded_missing_vin": 2,
+            "rows_excluded_missing_mileage": 1,
+            "rows_excluded_after_detail_attempt": 1,
+            "rows_excluded_without_detail_attempt": 1,
+            "rows_excluded_age_mileage_after_detail": 1,
+            "rows_excluded_policy_after_detail": 1,
+            "rows_excluded_unaccounted_after_prefilter": 0,
+        }
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_apify_source_quality_proof", fake_apify_proof)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=6,
+        limit=100,
+        now=datetime(2026, 6, 6, 12, 30, tzinfo=timezone.utc),
+        apify_token="apify-token",
+    )
+
+    source_summary = report["source_summaries"][0]
+
+    assert source_summary["source_quality_visible_exclusion_rows_total"] == 4
+    assert source_summary["latest_run_source_quality_visible_exclusion_rows_total"] == 4
+    assert source_summary["latest_run_source_quality_exclusion_counts"]["rows_excluded_missing_vin"] == 2
+
+
 def test_build_report_surfaces_sanitized_source_quality_rejection_reasons(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         query_dict = dict(query)
