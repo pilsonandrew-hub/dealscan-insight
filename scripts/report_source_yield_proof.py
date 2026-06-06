@@ -6,12 +6,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib import error as urlerror
 from urllib import parse, request
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from report_pricing_blocked_source_candidates import (
     _fetch_postgrest_rows,
@@ -23,7 +28,7 @@ from backend.business_rules import DOS_SAVE_THRESHOLD, HOT_DEAL_ALERT_THRESHOLD
 
 
 GENERIC_SOURCES = {"", "unknown", "db_save", "sonar_mirror", "webhook", "apify"}
-DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
+DEPLOYMENT_PATH = REPO_ROOT / "apify" / "deployment.json"
 DIRTY_REJECTION_REASON_BUCKETS = {"age_or_mileage_exceeded"}
 BUSINESS_REJECTION_STATUSES = {"skipped_margin", "skipped_ceiling"}
 MAX_CLEAN_AGE_YEARS = 4
