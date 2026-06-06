@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,20 @@ def test_parse_timestamp_normalizes_naive_values_to_utc():
     parsed = report_source_yield_proof._parse_timestamp("2026-06-06T12:34:56")
 
     assert parsed == datetime(2026, 6, 6, 12, 34, 56, tzinfo=timezone.utc)
+
+
+def test_script_entrypoint_imports_when_executed_from_repo_root():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT_PATH), "--help"],
+        cwd=SCRIPT_PATH.parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Report source-by-source live yield" in result.stdout
 
 
 def test_classify_source_marks_inactive_accepted_flow_separately():
