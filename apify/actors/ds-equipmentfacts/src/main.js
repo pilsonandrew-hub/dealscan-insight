@@ -103,6 +103,74 @@ const VEHICLE_KEYWORDS = [
     'ford', 'chevrolet', 'dodge', 'toyota', 'gmc', 'honda', 'nissan', 'jeep',
 ];
 
+const MAKE_NORMALIZATION = new Map([
+    ['CHEVROLET', 'Chevrolet'],
+    ['CHEVY', 'Chevrolet'],
+    ['FORD', 'Ford'],
+    ['GMC', 'GMC'],
+    ['DODGE', 'Dodge'],
+    ['RAM', 'Ram'],
+    ['TOYOTA', 'Toyota'],
+    ['HONDA', 'Honda'],
+    ['NISSAN', 'Nissan'],
+    ['JEEP', 'Jeep'],
+    ['INTERNATIONAL', 'International'],
+]);
+
+const TITLE_MODEL_STOP_WORDS = new Set([
+    'CARGO', 'STRAIGHT', 'BOX', 'TRUCK', 'TRUCKS', 'CUTAWAY', 'CUBE',
+    'PICKUP', 'UTILITY', 'SPORT', 'SUV', 'VAN', 'VANS', 'SEDAN', 'COUPE',
+]);
+
+function normalizeText(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function titleCaseToken(value) {
+    const token = String(value ?? '').trim();
+    if (!token) return '';
+    if (/^\d/.test(token)) return token;
+    return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+}
+
+function parseVehicleIdentityFromTitle(title) {
+    const normalized = normalizeText(title).toUpperCase();
+    const match = normalized.match(/\b((?:19|20)\d{2})\s+([A-Z]+)\s+(.+?)$/);
+    if (!match) return {};
+
+    const year = parseInt(match[1], 10);
+    const make = MAKE_NORMALIZATION.get(match[2]);
+    if (!Number.isFinite(year) || !make) return {};
+
+    const modelTokens = match[3]
+        .replace(/[()/]/g, ' ')
+        .replace(/[-/]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean);
+    const model = [];
+    for (const token of modelTokens) {
+        if (TITLE_MODEL_STOP_WORDS.has(token)) break;
+        model.push(titleCaseToken(token));
+        if (model.length >= 3) break;
+    }
+
+    return {
+        year,
+        make,
+        model: model.join(' ').trim(),
+    };
+}
+
+function withTitleVehicleIdentity(item) {
+    const parsed = parseVehicleIdentityFromTitle(item.title || item.description || item.equipmentDescription || '');
+    return {
+        ...item,
+        year: item.year ?? item.modelYear ?? parsed.year ?? null,
+        make: item.make || item.manufacturer || item.makebrand || parsed.make || '',
+        model: item.model || item.modelName || parsed.model || '',
+    };
+}
+
 function normalizeState(stateRaw) {
     if (!stateRaw) return '';
     const s = stateRaw.trim().toUpperCase();
@@ -121,6 +189,7 @@ function isVehicleRelevant(item) {
 }
 
 function normalizeLot(raw, capturedApiUrl) {
+    raw = withTitleVehicleIdentity(raw);
     const sellerName = raw.sellerName || raw.companyName || raw.auctioneer || raw.seller || '';
 
     const stateRaw = raw.state || raw.locationState || raw.stateAbbr || '';
@@ -238,6 +307,7 @@ const proofSamples = {
 };
 
 function sampleForProof(item, reason, extra = {}) {
+    item = withTitleVehicleIdentity(item);
     return {
         title: String(item.title || item.description || item.equipmentDescription || '').slice(0, 120),
         year: item.year ?? item.modelYear ?? null,
@@ -262,6 +332,7 @@ function rejectForProof(counterKey, sampleKey, item, reason, extra = {}) {
 }
 
 function passes(item) {
+    item = withTitleVehicleIdentity(item);
     const conditionText = [
         item.title,
         item.description,
@@ -293,26 +364,6 @@ function passes(item) {
         }
         console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
     }
-    const bid = parseFloat(item.currentBid || item.bidAmount || item.currentPrice || 0);
-    if (bid <= 0) {
-        rejectForProof(
-            'rows_excluded_zero_pricing_signal',
-            'zero_pricing_rejected_samples',
-            item,
-            'missing_current_bid',
-        );
-        return false;
-    }
-    if (bid < minBid || bid > maxBid) {
-        rejectForProof(
-            'rows_excluded_bid_range',
-            'bid_range_rejected_samples',
-            item,
-            'bid_out_of_range',
-            { min_bid: minBid, max_bid: maxBid },
-        );
-        return false;
-    }
     const mileageValue = item.mileage ?? item.miles ?? item.meterCount ?? null;
     const mileage = mileageValue == null || mileageValue === ''
         ? null
@@ -334,6 +385,26 @@ function passes(item) {
             item,
             !year ? 'missing_model_year' : year > CURRENT_YEAR + 1 ? 'future_model_year' : 'model_year_reject',
             { min_year: MIN_YEAR },
+        );
+        return false;
+    }
+    const bid = parseFloat(item.currentBid || item.bidAmount || item.currentPrice || 0);
+    if (bid <= 0) {
+        rejectForProof(
+            'rows_excluded_zero_pricing_signal',
+            'zero_pricing_rejected_samples',
+            item,
+            'missing_current_bid',
+        );
+        return false;
+    }
+    if (bid < minBid || bid > maxBid) {
+        rejectForProof(
+            'rows_excluded_bid_range',
+            'bid_range_rejected_samples',
+            item,
+            'bid_out_of_range',
+            { min_bid: minBid, max_bid: maxBid },
         );
         return false;
     }
