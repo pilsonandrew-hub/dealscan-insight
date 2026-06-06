@@ -544,6 +544,107 @@ def test_build_report_does_not_treat_unmatched_margin_rows_as_clean_economics(mo
     assert run_summary["classification"] == "listing_metadata_gap"
 
 
+def test_build_report_fetches_primary_delivery_listing_keys(monkeypatch):
+    delivery_selects: list[str] = []
+
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-keyed",
+                        "source": "govdeals",
+                        "status": "processed",
+                        "item_count": 2,
+                        "received_at": "2026-06-05T19:00:00+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-keyed",
+                        "source_site": "govdeals",
+                        "channel": "db_save",
+                        "status": "skipped_margin",
+                        "error_message": "margin_below_floor",
+                        "listing_id": "keyed-listing",
+                        "listing_url": "https://govdeals.example/asset/1",
+                        "created_at": "2026-06-05T19:01:00+00:00",
+                    }
+                ]
+            if table == "sonar_listings":
+                return [
+                    {
+                        "listing_id": "keyed-listing",
+                        "listing_url": "https://govdeals.example/asset/1",
+                        "year": 2025,
+                        "mileage": 38,
+                        "vin": "1HGCM82633A004352",
+                        "created_at": "2026-06-05T19:01:01+00:00",
+                    }
+                ]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-05T19:02:00+00:00"}]
+        if table == "ingest_delivery_log":
+            delivery_selects.append(str(select or ""))
+            return [
+                {
+                    "run_id": "run-keyed",
+                    "source_site": "govdeals",
+                    "channel": "db_save",
+                    "status": "skipped_margin",
+                    "error_message": "margin_below_floor",
+                    "listing_id": "keyed-listing",
+                    "listing_url": "https://govdeals.example/asset/1",
+                    "created_at": "2026-06-05T19:01:00+00:00",
+                }
+            ]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-keyed",
+                    "source": "govdeals",
+                    "status": "processed",
+                    "item_count": 2,
+                    "received_at": "2026-06-05T19:00:00+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "listing_id": "keyed-listing",
+                    "listing_url": "https://govdeals.example/asset/1",
+                    "year": 2025,
+                    "mileage": 38,
+                    "vin": "1HGCM82633A004352",
+                    "created_at": "2026-06-05T19:01:01+00:00",
+                }
+            ]
+        if table == "delivery_log":
+            return []
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+        run_detail_source="govdeals",
+    )
+
+    assert any("listing_id" in select and "listing_url" in select for select in delivery_selects)
+    assert report["source_summaries"][0]["listing_metadata_gap_rows"] == 0
+    assert report["source_summaries"][0]["classification"] == "economic_reject_dominant"
+    assert report["run_summaries"][0]["classification"] == "economic_reject_dominant"
+
+
 def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "webhook_log":

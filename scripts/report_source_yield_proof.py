@@ -582,12 +582,7 @@ def build_source_yield_report(
                     processed_positive_run_ids.add(run_id)
 
     delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
-    delivery_order = "created_at"
-    delivery_select = _select_available(
-        delivery_columns,
-        ["run_id", "source_site", "source", "channel", "status", "error_message", "created_at"],
-        delivery_order,
-    )
+    delivery_select, delivery_order = _delivery_select_for_columns(delivery_columns)
     delivery_rows = _fetch_recent_rows(
         base_url,
         service_role_key,
