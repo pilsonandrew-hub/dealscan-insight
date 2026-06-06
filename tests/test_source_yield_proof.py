@@ -1210,3 +1210,92 @@ def test_ingest_delivery_log_queries_candidate_run_ids(monkeypatch):
     assert "webhook_without_delivery_gap" not in report.get("run_classification_counts", {})
     assert report["source_summaries"][0]["delivery_rows"] == 1
     assert report["run_summaries"][0]["classification"] == "dirty_source_reject_only"
+
+
+def test_build_report_uses_apify_source_quality_proof_for_proof_only_runs(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-jjkane-proof",
+                        "source": "jjkane",
+                        "status": "processed",
+                        "item_count": 1,
+                        "received_at": "2026-06-06T04:01:00+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-jjkane-proof",
+                        "source_site": "jjkane",
+                        "status": "skipped_proof",
+                        "error_message": "source_quality_proof_record",
+                        "created_at": "2026-06-06T04:01:10+00:00",
+                    }
+                ]
+            if table == "sonar_listings":
+                return []
+            if table == "opportunities":
+                return [{"created_at": "2026-06-06T04:02:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-jjkane-proof",
+                    "source": "jjkane",
+                    "status": "processed",
+                    "item_count": 1,
+                    "received_at": "2026-06-06T04:01:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-jjkane-proof",
+                    "source_site": "jjkane",
+                    "status": "skipped_proof",
+                    "error_message": "source_quality_proof_record",
+                    "created_at": "2026-06-06T04:01:10+00:00",
+                }
+            ]
+        if table in {"delivery_log", "sonar_listings", "opportunities"}:
+            return []
+        raise AssertionError(table)
+
+    def fake_apify_proof(run_id, token):
+        assert run_id == "run-jjkane-proof"
+        assert token == "apify-token"
+        return {
+            "found_rows_total": 1365,
+            "prefilter_passed_rows_total": 0,
+            "pushed_rows_total": 0,
+            "rows_excluded_age_mileage_prefilter": 1269,
+            "rows_excluded_policy_prefilter": 79,
+            "rows_excluded_zero_pricing_signal": 15,
+        }
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_apify_source_quality_proof", fake_apify_proof)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=8,
+        limit=100,
+        now=datetime(2026, 6, 6, 4, 5, tzinfo=timezone.utc),
+        run_detail_source="jjkane",
+        apify_token="apify-token",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert source_summary["classification"] == "source_quality_reject_dominant"
+    assert source_summary["source_quality_found_rows_total"] == 1365
+    assert source_summary["source_quality_pushed_rows_total"] == 0
+    assert source_summary["source_quality_exclusion_counts"]["rows_excluded_zero_pricing_signal"] == 15
+    assert run_summary["classification"] == "source_quality_reject_dominant"
+    assert run_summary["source_quality_exclusion_counts"]["rows_excluded_age_mileage_prefilter"] == 1269
