@@ -247,6 +247,43 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     }
 
 
+def test_pipeline_truth_uses_same_score_resolution_for_buckets_and_dos80(monkeypatch):
+    monkeypatch.setattr(
+        internal,
+        "supabase_client",
+        _Supabase(
+            {
+                "opportunities": [
+                    {
+                        "id": "zero-dos-high-score",
+                        "is_active": True,
+                        "dos_score": 0,
+                        "score": 82,
+                        "mileage": 25000,
+                        "year": 2025,
+                        "title": "2025 Ford Explorer",
+                        "pricing_maturity": "market_comp",
+                        "vin": "1FMUK8DH5SGA77978",
+                        "condition_grade": "Good",
+                        "source_site": "govdeals",
+                        "investment_grade": "Silver",
+                    }
+                ],
+                "webhook_log": [],
+                "alert_log": [],
+                "ingest_delivery_log": [],
+                "dealer_sales": [],
+                "market_prices": [],
+            }
+        ),
+    )
+
+    result = internal.build_pipeline_truth()
+
+    assert result["opportunities"]["active_dos_score_buckets_sample"] == {"under_50": 1}
+    assert result["opportunities"]["active_dos80_sample"] == 0
+
+
 def test_opportunity_condition_proof_uses_detail_text_for_exact_row(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "opportunities": [

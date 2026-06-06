@@ -10,7 +10,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, Header, HTTPException, Path
 
-from backend.business_rules.constants import ALERTS_ENABLED_PRODUCTION_DEFAULT
+from backend.business_rules.constants import (
+    ALERTS_ENABLED_PRODUCTION_DEFAULT,
+    DOS_SAVE_THRESHOLD,
+    HOT_DEAL_ALERT_THRESHOLD,
+)
 from backend.ingest.alert_gating import evaluate_alert_gate, has_source_condition_evidence
 from backend.ingest.condition import score_condition
 from webapp.database import supabase_client
@@ -18,6 +22,7 @@ from webapp.database import supabase_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/internal", tags=["internal"])
+MID_DEAL_SCORE_THRESHOLD = 65.0
 
 
 def _internal_secret() -> str:
@@ -240,11 +245,11 @@ def _numeric_score(row: dict[str, Any]) -> Optional[float]:
 def _dos_score_bucket(score: Optional[float]) -> str:
     if score is None:
         return "missing"
-    if score >= 80:
+    if score >= HOT_DEAL_ALERT_THRESHOLD:
         return "80_plus"
-    if score >= 65:
+    if score >= MID_DEAL_SCORE_THRESHOLD:
         return "65_to_79"
-    if score >= 50:
+    if score >= DOS_SAVE_THRESHOLD:
         return "50_to_64"
     return "under_50"
 
@@ -653,7 +658,7 @@ def build_pipeline_truth() -> dict[str, Any]:
     active_rows = [row for row in opp_rows if row.get("is_active") is True]
     active_dos80 = [
         row for row in active_rows
-        if float(row.get("dos_score") or row.get("score") or 0) >= 80
+        if (_numeric_score(row) or 0.0) >= HOT_DEAL_ALERT_THRESHOLD
     ]
     active_dos80_gate_breakdown = _alert_gate_breakdown(active_dos80)
     active_dos80_condition_storage_gap_rows = _condition_storage_gap_rows(active_dos80)
