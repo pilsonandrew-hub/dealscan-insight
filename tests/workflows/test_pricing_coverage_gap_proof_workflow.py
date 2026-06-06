@@ -11,3 +11,6 @@ def test_pricing_coverage_gap_proof_uses_supabase_rest():
     assert "SUPABASE_SERVICE_ROLE_KEY" in text
     assert "scripts/report_pricing_coverage_gaps.py" in text
     assert "--via-rest" in text
+    assert "max_age_years" in text
+    assert "MAX_AGE_YEARS" in text
+    assert "--max-age-years" in text

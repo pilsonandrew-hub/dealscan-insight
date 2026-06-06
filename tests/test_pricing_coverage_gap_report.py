@@ -167,8 +167,8 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
                     "id": "proxy-seedable-history",
                     "source": "govdeals",
                     "source_site": "govdeals",
-                    "title": "2020 Dodge Durango",
-                    "year": 2020,
+                    "title": "2022 Dodge Durango",
+                    "year": 2022,
                     "make": "Dodge",
                     "model": "Durango",
                     "state": "MS",
@@ -198,7 +198,7 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
                         "source": "govdeals",
                         "source_site": "govdeals",
                         "title": "Historical Durango",
-                        "year": 2020,
+                        "year": 2022,
                         "make": "Dodge",
                         "model": "Durango",
                         "state": "MS",
@@ -254,6 +254,7 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
         "service-key",
         lookback_days=14,
         max_mileage=50000,
+        max_age_years=4,
         limit=20,
         now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T04:00:00+00:00"),
     )
@@ -261,6 +262,62 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
     by_id = {row["id"]: row for row in rows}
     assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-covered-market"]) == "covered_by_market_prices"
     assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-seedable-history"]) == "seedable_from_internal_history"
+
+
+def test_fetch_gap_rows_via_rest_excludes_over_age_proxy_opportunities(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "opportunities":
+            return [
+                {
+                    "id": "over-age-proxy",
+                    "source": "proxibid",
+                    "source_site": "proxibid",
+                    "title": "2019 Ford Escape",
+                    "year": 2019,
+                    "make": "Ford",
+                    "model": "Escape",
+                    "state": "AL",
+                    "mileage": 30000,
+                    "vin": "1FMCU9GD0KUA00001",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "processed_at": "2026-06-05T12:00:00+00:00",
+                },
+                {
+                    "id": "governed-age-proxy",
+                    "source": "proxibid",
+                    "source_site": "proxibid",
+                    "title": "2022 Ford Escape",
+                    "year": 2022,
+                    "make": "Ford",
+                    "model": "Escape",
+                    "state": "AL",
+                    "mileage": 30000,
+                    "vin": "1FMCU9GD0NUA00001",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "processed_at": "2026-06-05T12:00:00+00:00",
+                },
+            ]
+        if table in {"market_prices", "dealer_sales", "ingest_delivery_log"}:
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=4,
+        limit=20,
+        now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T12:00:00+00:00"),
+    )
+
+    assert [row["id"] for row in rows] == ["governed-age-proxy"]
 
 
 def test_fetch_gap_rows_via_rest_includes_active_delivery_pricing_skips(monkeypatch):
@@ -311,6 +368,7 @@ def test_fetch_gap_rows_via_rest_includes_active_delivery_pricing_skips(monkeypa
         "service-key",
         lookback_days=1,
         max_mileage=50000,
+        max_age_years=4,
         limit=20,
         now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T07:00:00+00:00"),
     )

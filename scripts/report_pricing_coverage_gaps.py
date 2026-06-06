@@ -58,6 +58,7 @@ with clean_proxy as (
   from public.opportunities
   where processed_at >= timezone('utc', now()) - (%(lookback_days)s::int * interval '1 day')
     and pricing_maturity = 'proxy'
+    and year >= extract(year from now())::int - %(max_age_years)s
     and vin is not null
     and vin <> ''
     and mileage is not null
@@ -172,8 +173,14 @@ def _norm_text(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
-def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int) -> dict[str, Any] | None:
+def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now_year: int) -> dict[str, Any] | None:
     if row.get("pricing_maturity") != "proxy":
+        return None
+    try:
+        year = int(row.get("year") or 0)
+    except (TypeError, ValueError):
+        return None
+    if year < now_year - max_age_years:
         return None
     if not str(row.get("vin") or "").strip():
         return None
@@ -256,7 +263,13 @@ def _opportunity_history_matches(row: dict[str, Any], history_rows: list[dict[st
     return matches, usable
 
 
-def _is_clean_active_delivery_skip(row: dict[str, Any], *, max_mileage: int, now: datetime) -> bool:
+def _is_clean_active_delivery_skip(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now: datetime) -> bool:
+    try:
+        year = int(row.get("year") or 0)
+    except (TypeError, ValueError):
+        return False
+    if year < now.year - max_age_years:
+        return False
     if not str(row.get("vin") or "").strip():
         return False
     try:
@@ -275,6 +288,7 @@ def _fetch_delivery_pricing_skip_rows(
     *,
     lookback_days: int,
     max_mileage: int,
+    max_age_years: int,
     limit: int,
     now: datetime,
 ) -> list[dict[str, Any]]:
@@ -328,7 +342,12 @@ def _fetch_delivery_pricing_skip_rows(
         listing = latest_listings.get(key)
         if not listing:
             continue
-        if not _is_clean_active_delivery_skip(listing, max_mileage=max_mileage, now=now):
+        if not _is_clean_active_delivery_skip(
+            listing,
+            max_mileage=max_mileage,
+            max_age_years=max_age_years,
+            now=now,
+        ):
             continue
         parsed_reason = parse_proxy_skip_reason(skip.get("error_message"))
         rows.append(
@@ -369,6 +388,7 @@ def fetch_gap_rows_via_rest(
     *,
     lookback_days: int,
     max_mileage: int,
+    max_age_years: int,
     limit: int,
     now: Optional[datetime] = None,
 ) -> list[dict[str, Any]]:
@@ -398,13 +418,22 @@ def fetch_gap_rows_via_rest(
     clean_proxy_rows = [
         cleaned
         for row in recent_rows
-        if (cleaned := _clean_proxy_row(row, max_mileage=max_mileage)) is not None
+        if (
+            cleaned := _clean_proxy_row(
+                row,
+                max_mileage=max_mileage,
+                max_age_years=max_age_years,
+                now_year=current_time.year,
+            )
+        )
+        is not None
     ][:limit]
     delivery_skip_rows = _fetch_delivery_pricing_skip_rows(
         base_url,
         service_role_key,
         lookback_days=lookback_days,
         max_mileage=max_mileage,
+        max_age_years=max_age_years,
         limit=limit,
         now=current_time,
     )
@@ -466,6 +495,7 @@ def fetch_gap_rows(
     *,
     lookback_days: int,
     max_mileage: int,
+    max_age_years: int,
     limit: int,
 ) -> list[dict]:
     with psycopg2.connect(dsn) as connection:
@@ -475,6 +505,7 @@ def fetch_gap_rows(
                 {
                     "lookback_days": lookback_days,
                     "max_mileage": max_mileage,
+                    "max_age_years": max_age_years,
                     "limit": limit,
                 },
             )
@@ -487,6 +518,7 @@ def main() -> int:
     parser.add_argument("--env-file", help="Env file to read when DSN is not provided.")
     parser.add_argument("--lookback-days", type=int, default=7)
     parser.add_argument("--max-mileage", type=int, default=50000)
+    parser.add_argument("--max-age-years", type=int, default=4)
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument(
         "--via-rest",
@@ -501,6 +533,9 @@ def main() -> int:
     if args.max_mileage <= 0:
         print("--max-mileage must be positive", file=sys.stderr)
         return 2
+    if args.max_age_years < 0:
+        print("--max-age-years must be non-negative", file=sys.stderr)
+        return 2
     if args.limit <= 0:
         print("--limit must be positive", file=sys.stderr)
         return 2
@@ -512,6 +547,7 @@ def main() -> int:
             dsn,
             lookback_days=args.lookback_days,
             max_mileage=args.max_mileage,
+            max_age_years=args.max_age_years,
             limit=args.limit,
         )
     else:
@@ -531,11 +567,13 @@ def main() -> int:
             service_role_key,
             lookback_days=args.lookback_days,
             max_mileage=args.max_mileage,
+            max_age_years=args.max_age_years,
             limit=args.limit,
         )
     print(
         f"clean_proxy_candidates={len(rows)} "
-        f"lookback_days={args.lookback_days} max_mileage={args.max_mileage}"
+        f"lookback_days={args.lookback_days} "
+        f"max_mileage={args.max_mileage} max_age_years={args.max_age_years}"
     )
     for row in rows:
         print(format_gap_row(row))
