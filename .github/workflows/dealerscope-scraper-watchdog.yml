@@ -31,25 +31,28 @@ jobs:
           # Heavy source discovery stays on the 12hr sweeps.
           # ds-hibid is retired; ds-hibid-v2 is the active HiBid source.
           ACTORS = {
-              "ds-govdeals":       "CuKaIAcWyFS0EPrAz",
-              "ds-publicsurplus":  "9xxQLlRsROnSgA42i",
-              "ds-municibid":      "svmsItf3CRBZuIntp",
-              "ds-gsaauctions":    "fvDnYmGuFBCrwpEi9",
-              "ds-allsurplus":     "gYGIfHeYeN3EzmLnB",
-              "ds-govplanet":      "pO2t5UDoSVmO1gvKJ",
-              "ds-proxibid":       "bxhncvtHEP712WX2e",
-              "ds-usgovbid":       "6XO9La81aEmtsCT3g",
-              "ds-jjkane":         "lvb7T6VMFfNUQpqlq",
-              "ds-hibid-v2":       "7s9e0eATTt1kuGGfE",
+              "ds-govdeals":       {"id": "CuKaIAcWyFS0EPrAz", "max_age_hours": 15},
+              "ds-publicsurplus":  {"id": "9xxQLlRsROnSgA42i", "max_age_hours": 15},
+              "ds-municibid":      {"id": "svmsItf3CRBZuIntp", "max_age_hours": 15},
+              "ds-gsaauctions":    {"id": "fvDnYmGuFBCrwpEi9", "max_age_hours": 15},
+              "ds-allsurplus":     {"id": "gYGIfHeYeN3EzmLnB", "max_age_hours": 15},
+              "ds-govplanet":      {"id": "pO2t5UDoSVmO1gvKJ", "max_age_hours": 15},
+              "ds-proxibid":       {"id": "bxhncvtHEP712WX2e", "max_age_hours": 15},
+              "ds-equipmentfacts":  {"id": "0XjoegYZVcPldLstl", "max_age_hours": 9},
+              "ds-usgovbid":       {"id": "6XO9La81aEmtsCT3g", "max_age_hours": 15},
+              "ds-jjkane":         {"id": "lvb7T6VMFfNUQpqlq", "max_age_hours": 15},
+              "ds-hibid-v2":       {"id": "7s9e0eATTt1kuGGfE", "max_age_hours": 15},
+              "ds-bidspotter":     {"id": "5Eu3hfCcBBdzp6I1u", "max_age_hours": 15},
           }
 
           ctx = ssl.create_default_context()
           now = datetime.datetime.now(datetime.timezone.utc)
-          cutoff = now - datetime.timedelta(hours=15)  # 12hr sweep cadence + 3hr buffer
           running_cutoff = now - datetime.timedelta(hours=3)  # allow legitimate in-flight runs
           stalled = []
 
-          for name, actor_id in ACTORS.items():
+          for name, actor in ACTORS.items():
+              actor_id = actor["id"]
+              cutoff = now - datetime.timedelta(hours=actor["max_age_hours"])
               # Query most recent run (any status), sorted desc by creation time
               url = f"https://api.apify.com/v2/acts/{actor_id}/runs?limit=1&desc=1&token={APIFY_TOKEN}"
               req = urllib.request.Request(url)
