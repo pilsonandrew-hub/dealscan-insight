@@ -379,3 +379,38 @@ def test_fetch_gap_rows_via_rest_includes_active_delivery_pricing_skips(monkeypa
     assert row["source_site"] == "publicsurplus"
     assert row["is_active"] is True
     assert report_pricing_coverage_gaps.classify_gap(row) == "blocked_no_internal_comp_evidence"
+
+
+def test_format_delivery_pricing_skip_does_not_label_it_as_active_opportunity():
+    row = {
+        "candidate_origin": "delivery_pricing_skip",
+        "year": 2023,
+        "make": "toyota",
+        "model": "camry",
+        "state": "va",
+        "source": "publicsurplus",
+        "source_site": "publicsurplus",
+        "is_active": True,
+        "auction_active": True,
+        "opportunity_active": None,
+        "dos_score": None,
+        "investment_grade": None,
+        "bid_headroom": None,
+        "current_bid": 8300,
+        "expected_close_bid": 8300,
+        "retail_asking_price_estimate": 22000,
+        "usable_market_prices_matches": 0,
+        "market_prices_matches": 0,
+        "usable_dealer_sales_matches": 0,
+        "dealer_sales_matches": 0,
+        "usable_opportunity_history": 0,
+        "market_comp_opportunity_history": 0,
+        "title": "2023 Toyota Camry",
+    }
+
+    formatted = report_pricing_coverage_gaps.format_gap_row(row)
+
+    assert "origin=delivery_pricing_skip" in formatted
+    assert "opportunity_active=None" in formatted
+    assert "auction_active=True" in formatted
+    assert " active=True " not in formatted
