@@ -19,6 +19,7 @@ from report_pricing_blocked_source_candidates import (
 
 GENERIC_SOURCES = {"", "unknown", "db_save", "sonar_mirror", "webhook", "apify"}
 DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
+DIRTY_REJECTION_REASON_BUCKETS = {"age_or_mileage_exceeded"}
 
 
 def _canon_source(value: Any) -> str | None:
@@ -138,6 +139,12 @@ def _dominance_threshold(row_count: int, ratio: float) -> int:
     return max(2, int(row_count * ratio))
 
 
+def _dirty_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str, Any]) -> int:
+    dirty_reason_rows = sum(int(reason_counts.get(reason) or 0) for reason in DIRTY_REJECTION_REASON_BUCKETS)
+    gate_rows = int(status_counts.get("skipped_gate") or 0)
+    return min(gate_rows, dirty_reason_rows)
+
+
 def classify_source_summary(summary: dict[str, Any]) -> str:
     if int(summary.get("active_opportunity_rows") or 0) > 0:
         return "accepted_flow_present"
@@ -155,15 +162,20 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     ceiling_rows = int(status_counts.get("skipped_ceiling") or 0)
     proof_rows = int(status_counts.get("skipped_proof") or 0)
     sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
-    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows)
+    reason_counts = summary.get("reason_counts") or {}
+    dirty_rows = int(summary.get("dirty_rejection_rows") or _dirty_rejection_rows(status_counts, reason_counts))
+    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows)
+    clean_gate_rows = max(0, gate_rows - dirty_rows)
 
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
     if proof_rows == delivery_rows:
         return "proof_control_only"
+    if business_delivery_rows == 0 and dirty_rows > 0:
+        return "dirty_source_reject_only"
     if business_delivery_rows == 0:
         return "mixed_rejection_surface"
-    if gate_rows >= _dominance_threshold(business_delivery_rows, 0.5):
+    if clean_gate_rows >= _dominance_threshold(business_delivery_rows, 0.5):
         return "source_quality_reject_dominant"
     if margin_rows >= _dominance_threshold(business_delivery_rows, 0.35):
         return "economic_reject_dominant"
@@ -186,14 +198,19 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     delivery_rows = int(summary.get("delivery_rows") or 0)
     proof_rows = int(status_counts.get("skipped_proof") or 0)
     sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
-    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows)
+    reason_counts = summary.get("reason_counts") or {}
+    dirty_rows = int(summary.get("dirty_rejection_rows") or _dirty_rejection_rows(status_counts, reason_counts))
+    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows)
+    clean_gate_rows = max(0, int(status_counts.get("skipped_gate") or 0) - dirty_rows)
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
     if proof_rows == delivery_rows:
         return "proof_control_only"
+    if business_delivery_rows == 0 and dirty_rows > 0:
+        return "dirty_source_reject_only"
     if business_delivery_rows == 0:
         return "mixed_rejection_surface"
-    if int(status_counts.get("skipped_gate") or 0) == business_delivery_rows:
+    if clean_gate_rows == business_delivery_rows:
         return "source_quality_reject_dominant"
     if int(status_counts.get("skipped_margin") or 0) == business_delivery_rows:
         return "economic_reject_dominant"
@@ -571,6 +588,10 @@ def build_source_yield_report(
             "active_dos80_rows": opportunity_counts["active_dos80_rows"],
             "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_source[source].most_common(10)),
         }
+        summary["dirty_rejection_rows"] = _dirty_rejection_rows(
+            summary["status_counts"],
+            summary["reason_counts"],
+        )
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
 
@@ -630,6 +651,10 @@ def build_source_yield_report(
                 "active_dos80_rows": opportunity_counts["active_dos80_rows"],
                 "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
             }
+            run_summary["dirty_rejection_rows"] = _dirty_rejection_rows(
+                run_summary["status_counts"],
+                run_summary["reason_counts"],
+            )
             run_summary["classification"] = classify_run_summary(run_summary)
             run_summaries.append(run_summary)
         report["run_detail_source"] = detail_source
