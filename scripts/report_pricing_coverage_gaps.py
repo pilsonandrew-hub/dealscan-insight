@@ -43,7 +43,10 @@ with clean_proxy as (
     vin,
     pricing_maturity,
     pricing_source,
+    'opportunity_proxy' as candidate_origin,
     is_active,
+    is_active as opportunity_active,
+    null::boolean as auction_active,
     dos_score,
     processed_at,
     bid_headroom,
@@ -200,6 +203,9 @@ def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int, max_age_years: in
     cleaned["make"] = _norm_text(cleaned.get("make"))
     cleaned["model"] = _norm_text(cleaned.get("model"))
     cleaned["state"] = _norm_text(cleaned.get("state")) or None
+    cleaned["candidate_origin"] = "opportunity_proxy"
+    cleaned["opportunity_active"] = cleaned.get("is_active")
+    cleaned["auction_active"] = None
     return cleaned
 
 
@@ -371,7 +377,6 @@ def _fetch_delivery_pricing_skip_rows(
                 "vin": listing.get("vin"),
                 "pricing_maturity": "proxy",
                 "pricing_source": "delivery_skip",
-                "is_active": True,
                 "opportunity_active": None,
                 "auction_active": True,
                 "dos_score": None,

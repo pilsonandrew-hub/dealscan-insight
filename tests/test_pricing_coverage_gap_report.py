@@ -123,9 +123,18 @@ def test_format_gap_row_includes_evidence_and_economics():
 
     formatted = report_pricing_coverage_gaps.format_gap_row(row)
 
+    assert "origin=opportunity_proxy" in formatted
+    assert "opportunity_active=True" in formatted
+    assert "auction_active=None" in formatted
     assert "evidence=blocked_no_internal_comp_evidence" in formatted
     assert "expected_close=16162.13" in formatted
     assert "retail_proxy=40500" in formatted
+
+
+def test_report_sql_labels_opportunity_proxy_activity_explicitly():
+    assert "'opportunity_proxy' as candidate_origin" in report_pricing_coverage_gaps.REPORT_SQL
+    assert "is_active as opportunity_active" in report_pricing_coverage_gaps.REPORT_SQL
+    assert "null::boolean as auction_active" in report_pricing_coverage_gaps.REPORT_SQL
 
 
 def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
@@ -260,6 +269,9 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
     )
 
     by_id = {row["id"]: row for row in rows}
+    assert by_id["proxy-covered-market"]["candidate_origin"] == "opportunity_proxy"
+    assert by_id["proxy-covered-market"]["opportunity_active"] is True
+    assert by_id["proxy-covered-market"]["auction_active"] is None
     assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-covered-market"]) == "covered_by_market_prices"
     assert report_pricing_coverage_gaps.classify_gap(by_id["proxy-seedable-history"]) == "seedable_from_internal_history"
 
@@ -377,7 +389,9 @@ def test_fetch_gap_rows_via_rest_includes_active_delivery_pricing_skips(monkeypa
     row = rows[0]
     assert row["candidate_origin"] == "delivery_pricing_skip"
     assert row["source_site"] == "publicsurplus"
-    assert row["is_active"] is True
+    assert "is_active" not in row
+    assert row["opportunity_active"] is None
+    assert row["auction_active"] is True
     assert report_pricing_coverage_gaps.classify_gap(row) == "blocked_no_internal_comp_evidence"
 
 
