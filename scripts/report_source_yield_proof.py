@@ -13,6 +13,7 @@ from typing import Any
 from report_pricing_blocked_source_candidates import (
     _fetch_postgrest_rows,
     _normalize_supabase_rest_url,
+    _row_key,
     resolve_rest_config,
 )
 
@@ -20,6 +21,8 @@ from report_pricing_blocked_source_candidates import (
 GENERIC_SOURCES = {"", "unknown", "db_save", "sonar_mirror", "webhook", "apify"}
 DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
 DIRTY_REJECTION_REASON_BUCKETS = {"age_or_mileage_exceeded"}
+MAX_CLEAN_AGE_YEARS = 4
+MAX_CLEAN_MILEAGE = 50_000
 
 
 def _canon_source(value: Any) -> str | None:
@@ -63,6 +66,35 @@ def _safe_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _truthy_vin(value: Any) -> bool:
+    text = str(value or "").strip().upper()
+    return len(text) == 17 and text.isalnum() and not any(ch in text for ch in "IOQ")
+
+
+def _listing_is_dirty_for_clean_yield(
+    listing: dict[str, Any] | None,
+    *,
+    now_year: int,
+    max_age_years: int = MAX_CLEAN_AGE_YEARS,
+    max_mileage: int = MAX_CLEAN_MILEAGE,
+) -> bool:
+    if not listing:
+        return False
+    try:
+        year = int(listing.get("year") or 0)
+    except (TypeError, ValueError):
+        return True
+    if year < now_year - max_age_years:
+        return True
+    try:
+        mileage = int(listing.get("mileage") or 0)
+    except (TypeError, ValueError):
+        return True
+    if mileage <= 0 or mileage > max_mileage:
+        return True
+    return not _truthy_vin(listing.get("vin"))
 
 
 def _actor_source_by_id(path: Path = DEPLOYMENT_PATH) -> dict[str, str]:
@@ -143,6 +175,24 @@ def _dirty_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str
     dirty_reason_rows = sum(int(reason_counts.get(reason) or 0) for reason in DIRTY_REJECTION_REASON_BUCKETS)
     gate_rows = int(status_counts.get("skipped_gate") or 0)
     return min(gate_rows, dirty_reason_rows)
+
+
+def _delivery_row_is_dirty_for_clean_yield(
+    row: dict[str, Any],
+    listing_by_key: dict[str, dict[str, Any]],
+    *,
+    now_year: int,
+) -> bool:
+    status = str(row.get("status") or "").strip()
+    reason = _reason_bucket(row.get("error_message"))
+    if status == "skipped_proof" or reason == "source_quality_proof_record":
+        return False
+    if reason in DIRTY_REJECTION_REASON_BUCKETS:
+        return True
+    key = _row_key(row)
+    if not key:
+        return False
+    return _listing_is_dirty_for_clean_yield(listing_by_key.get(key), now_year=now_year)
 
 
 def classify_source_summary(summary: dict[str, Any]) -> str:
@@ -263,7 +313,18 @@ def _delivery_select_for_columns(columns: set[str]) -> tuple[str, str]:
     return (
         _select_available(
             columns,
-            ["run_id", "source_site", "source", "channel", "status", "error_message", "created_at", "updated_at"],
+            [
+                "run_id",
+                "source_site",
+                "source",
+                "channel",
+                "status",
+                "error_message",
+                "listing_id",
+                "listing_url",
+                "created_at",
+                "updated_at",
+            ],
             order,
         ),
         order,
@@ -323,6 +384,37 @@ def _fetch_optional_delivery_rows_for_run(
                 ("order", f"{order}.asc"),
                 ("limit", str(limit)),
             ],
+        )
+    except Exception:
+        return []
+
+
+def _fetch_optional_listing_rows(
+    base_url: str,
+    service_role_key: str,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    try:
+        columns = _available_columns(base_url, service_role_key, "sonar_listings")
+    except Exception:
+        return []
+    if not columns or not ("listing_id" in columns or "listing_url" in columns):
+        return []
+    select = _select_available(
+        columns,
+        ["listing_id", "listing_url", "year", "mileage", "vin", "created_at"],
+        "created_at",
+    )
+    try:
+        return _fetch_recent_rows(
+            base_url,
+            service_role_key,
+            "sonar_listings",
+            select,
+            "created_at",
+            since,
+            limit,
         )
     except Exception:
         return []
@@ -483,14 +575,28 @@ def build_source_yield_report(
                 fallback_seen.add(key)
                 legacy_delivery_rows.append(row)
     all_delivery_rows = delivery_rows + legacy_delivery_rows
+    listing_since = current_time - timedelta(days=35)
+    listing_by_key: dict[str, dict[str, Any]] = {}
+    for listing in _fetch_optional_listing_rows(
+        base_url,
+        service_role_key,
+        listing_since,
+        max(limit * 50, 5_000),
+    ):
+        key = _row_key(listing)
+        if key and key not in listing_by_key:
+            listing_by_key[key] = listing
+
     delivery_by_source: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "channel": Counter(),
         "status": Counter(),
         "reason": Counter(),
+        "dirty": Counter(),
     })
     delivery_by_run: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "status": Counter(),
         "reason": Counter(),
+        "dirty": Counter(),
     })
     for row in all_delivery_rows:
         source = _source_from_row(row, run_sources=run_sources)
@@ -500,9 +606,13 @@ def build_source_yield_report(
         delivery_by_source[source]["channel"][str(row.get("channel") or "unknown")[:80]] += 1
         delivery_by_source[source]["status"][str(row.get("status") or "unknown")[:80]] += 1
         delivery_by_source[source]["reason"][_reason_bucket(row.get("error_message"))] += 1
+        if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
+            delivery_by_source[source]["dirty"]["dirty_source_row"] += 1
         if run_id:
             delivery_by_run[run_id]["status"][str(row.get("status") or "unknown")[:80]] += 1
             delivery_by_run[run_id]["reason"][_reason_bucket(row.get("error_message"))] += 1
+            if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
+                delivery_by_run[run_id]["dirty"]["dirty_source_row"] += 1
 
     opportunity_columns = _available_columns(base_url, service_role_key, "opportunities")
     opportunity_order = "created_at"
@@ -588,10 +698,7 @@ def build_source_yield_report(
             "active_dos80_rows": opportunity_counts["active_dos80_rows"],
             "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_source[source].most_common(10)),
         }
-        summary["dirty_rejection_rows"] = _dirty_rejection_rows(
-            summary["status_counts"],
-            summary["reason_counts"],
-        )
+        summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
 
@@ -651,10 +758,7 @@ def build_source_yield_report(
                 "active_dos80_rows": opportunity_counts["active_dos80_rows"],
                 "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
             }
-            run_summary["dirty_rejection_rows"] = _dirty_rejection_rows(
-                run_summary["status_counts"],
-                run_summary["reason_counts"],
-            )
+            run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
             run_summary["classification"] = classify_run_summary(run_summary)
             run_summaries.append(run_summary)
         report["run_detail_source"] = detail_source
