@@ -130,6 +130,7 @@ from backend.ingest.vehicle_identity import (
     extract_year,
     estimate_mmr as _estimate_mmr,
     estimate_mmr_details as _estimate_mmr_details,
+    refine_price_sensitive_model,
 )
 from backend.ingest.source_site import (
     SOURCE_SITE_ALIASES as _SOURCE_SITE_ALIASES,
@@ -1596,6 +1597,7 @@ def normalize_apify_vehicle(
         # Make/model/year: parseforge provides these directly
         make = item.get("make") or extract_make(title) or ""
         model = item.get("model") or extract_model(title, make) or ""
+        model = refine_price_sensitive_model(title, make, model)
         year_raw = item.get("modelYear") or item.get("year")
         year = int(year_raw) if year_raw and str(year_raw).isdigit() else extract_year(title)
         from backend.ingest.score import determine_vehicle_tier

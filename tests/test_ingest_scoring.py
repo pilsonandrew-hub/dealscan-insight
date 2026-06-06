@@ -158,6 +158,26 @@ def test_normalize_apify_vehicle_reads_actor_end_date_alias():
     assert normalized["auction_end_time"] == "2026-03-26T18:00:00+00:00"
 
 
+def test_normalize_apify_vehicle_refines_generic_mustang_model_from_title():
+    item = {
+        "title": "New (Surplus Inventory) 2025 Ford Mustang EcoBoost Premium Coupe",
+        "make": "Ford",
+        "model": "Mustang",
+        "year": "2025",
+        "mileage": 38,
+        "current_bid": 37283,
+        "state": "GA",
+        "vin": "1FA6P8TH6S5107894",
+        "listing_url": "https://www.govdeals.com/asset/697/26928",
+        "source_site": "govdeals",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="govdeals-mustang-ecoboost")
+
+    assert normalized is not None
+    assert normalized["model"] == "Mustang EcoBoost Premium"
+
+
 def test_normalize_auction_end_time_handles_actor_iso_and_compact_relative_formats():
     reference = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
 

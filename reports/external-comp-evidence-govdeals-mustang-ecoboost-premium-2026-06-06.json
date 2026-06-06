@@ -1,0 +1,41 @@
+{
+  "source_run_id": "manual-2026-06-06-govdeals-mustang-ecoboost-premium",
+  "source_url": "https://github.com/pilsonandrew-hub/dealscan-insight/blob/main/reports/pricing-external-comp-provenance-govdeals-mustang-ecoboost-premium-2026-06-06.md",
+  "confidence_notes": "Active retail-listing evidence for the current GovDeals 2025 Ford Mustang EcoBoost Premium Coupe pricing gap. Used only after preserving the EcoBoost Premium model identity; retail listings are not closed-sale outcome evidence.",
+  "vehicle": {
+    "year": 2025,
+    "make": "Ford",
+    "model": "Mustang EcoBoost Premium",
+    "state": "GA"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.cargurus.com/Cars/new/nl-New-Ford-Mustang-Milledgeville-d2_L6383",
+      "captured_at": "2026-06-06T00:30:10Z",
+      "price": 41608,
+      "mileage": 60,
+      "listing_id": "cargurus-forsyth-s5128436",
+      "vin": "1FA6P8TH4S5128436",
+      "title": "New 2025 Ford Mustang EcoBoost Premium Fastback RWD",
+      "title_history_caveat": "CarGurus active retail listing; title history not independently verified by DealerScope; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.capitalone.com/cars/new-2025-ford-mustang/ecoboost-premium-in-warner-robins-ga",
+      "captured_at": "2026-06-06T00:30:10Z",
+      "price": 37795,
+      "mileage": 11,
+      "listing_id": "capitalone-brannen-37795",
+      "title": "New 2025 Ford Mustang EcoBoost Premium RWD",
+      "title_history_caveat": "Capital One Auto Navigator active retail listing; title history not independently verified by DealerScope; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.kbb.com/cars-for-sale/inventory/781883995?allListingType=all&clickType=listing&endYear=2025&makeCode=FORD&modelCode=MUST&startYear=2025",
+      "captured_at": "2026-06-06T00:30:10Z",
+      "price": 36919,
+      "mileage": 3033,
+      "listing_id": "kbb-781883995",
+      "title": "Used 2025 Ford Mustang Premium",
+      "title_history_caveat": "Kelley Blue Book active retail listing with EcoBoost-consistent MPG; title history not independently verified by DealerScope; not closed-sale evidence."
+    }
+  ]
+}

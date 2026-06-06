@@ -191,6 +191,22 @@ def extract_model(title: str, make: str) -> str:
     return ""
 
 
+def refine_price_sensitive_model(title: str, make: str, model: str) -> str:
+    """Preserve price-critical trim when an upstream source gives a generic model."""
+
+    current_model = (model or "").strip()
+    if make.lower().strip() != "ford" or current_model.lower() != "mustang":
+        return current_model
+
+    title_text = title or ""
+    if re.search(r"\bEcoBoost\b", title_text, re.IGNORECASE):
+        if re.search(r"\bPremium\b", title_text, re.IGNORECASE):
+            return "Mustang EcoBoost Premium"
+        return "Mustang EcoBoost"
+
+    return current_model
+
+
 def estimate_mmr(make: str, model: str) -> float:
     return estimate_mmr_details(make, model)["mmr"]
 
