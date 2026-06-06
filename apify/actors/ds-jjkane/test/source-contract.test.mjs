@@ -15,12 +15,22 @@ function loadHelperExports() {
   return vm.runInNewContext(helperSource, {});
 }
 
-function loadMarketcheckExports(fetchImpl) {
+function loadMarketcheckExports(fetchImpl, marketcheckKeys = ['test-marketcheck-key']) {
   const marketcheckStart = source.indexOf('const marketcheckCache = new Map();');
   const marketcheckEnd = source.indexOf('// ── Algolia Query');
   const marketcheckSource = `
-const MARKETCHECK_KEY = 'test-marketcheck-key';
+const MARKETCHECK_KEY = ${JSON.stringify(marketcheckKeys[0] || '')};
+const MARKETCHECK_KEYS = ${JSON.stringify(marketcheckKeys)};
 const MARKETCHECK_URL = 'https://marketcheck.example.test/search';
+const AUCTION_DISCOUNT = 0.70;
+function median(arr) {
+  if (!arr || arr.length === 0) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
 ${source.slice(marketcheckStart, marketcheckEnd)}
 ({ getMarketcheckPrice })`;
   return vm.runInNewContext(marketcheckSource, {
@@ -90,5 +100,33 @@ describe('ds-jjkane source contract', () => {
       pricing_unavailable: true,
       pricing_source: 'marketcheck_http_429',
     });
+  });
+
+  test('retries Marketcheck with the next configured key after a rate limit', async () => {
+    const requestedKeys = [];
+    const helpers = loadMarketcheckExports(async (url) => {
+      requestedKeys.push(new URL(url).searchParams.get('api_key'));
+      if (requestedKeys.length === 1) {
+        return { ok: false, status: 429 };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          listings: [
+            { price: 30000, miles: 38000 },
+            { price: 32000, miles: 41000 },
+            { price: 34000, miles: 42000 },
+          ],
+        }),
+      };
+    }, ['rate-limited-key', 'live-key']);
+
+    await expect(
+      helpers.getMarketcheckPrice(2022, 'Ford', 'F150 4x4 Police Responder', 39294)
+    ).resolves.toMatchObject({
+      retail_median: 32000,
+      estimated_auction_price: 22400,
+    });
+    expect(requestedKeys).toEqual(['rate-limited-key', 'live-key']);
   });
 });

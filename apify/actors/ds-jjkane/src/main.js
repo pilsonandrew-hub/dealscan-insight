@@ -35,7 +35,13 @@ const ALGOLIA_SEARCH_KEY = input.algoliaSearchKey || process.env.ALGOLIA_SEARCH_
 const ALGOLIA_URL = `https://${ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/${ALGOLIA_INDEX}/query`;
 
 const MARKETCHECK_KEY = input.marketcheckKey || process.env.MARKETCHECK_KEY;
-if (!MARKETCHECK_KEY) {
+const MARKETCHECK_KEYS = [
+    input.marketcheckKey1 || process.env.MARKETCHECK_KEY_1,
+    input.marketcheckKey2 || process.env.MARKETCHECK_KEY_2,
+    input.marketcheckKey3 || process.env.MARKETCHECK_KEY_3,
+    MARKETCHECK_KEY,
+].filter((key, index, keys) => key && keys.indexOf(key) === index);
+if (MARKETCHECK_KEYS.length === 0) {
     console.warn('[JJKANE] MARKETCHECK_KEY missing — continuing without Marketcheck pricing');
 }
 
@@ -197,7 +203,7 @@ const MAX_MARKETCHECK_CALLS_PER_RUN = 50; // Protect 500/month quota
 let marketcheckCallsThisRun = 0;
 
 async function getMarketcheckPrice(year, make, model, odometer) {
-    if (!MARKETCHECK_KEY || !year || !make || !model) return null;
+    if (MARKETCHECK_KEYS.length === 0 || !year || !make || !model) return null;
 
     const makeLower = make.toLowerCase().trim();
     const modelRaw = model.toLowerCase().trim();
@@ -230,74 +236,86 @@ async function getMarketcheckPrice(year, make, model, odometer) {
         return marketcheckCache.get(cacheKey);
     }
 
-    const params = new URLSearchParams({
-        api_key: MARKETCHECK_KEY,
-        year: String(year),
-        make: makeLower,
-        model: modelNormalized,
-        miles_min: String(milesMin),
-        miles_max: String(milesMax),
-        rows: '20',
-        start: '0',
-        fields: 'price,miles',
-        has_price: 'true',
-        has_miles: 'true',
-    });
+    let lastUnavailable = null;
+    for (const apiKey of MARKETCHECK_KEYS) {
+        if (marketcheckCallsThisRun >= MAX_MARKETCHECK_CALLS_PER_RUN) {
+            lastUnavailable = { pricing_unavailable: true, pricing_source: 'marketcheck_quota_exceeded' };
+            break;
+        }
 
-    try {
-        marketcheckCallsThisRun++; // count every actual API call (success or error)
-        const resp = await fetch(`${MARKETCHECK_URL}?${params}`, {
-            signal: AbortSignal.timeout(10000),
-            headers: { 'Accept': 'application/json', 'x-version': 'v4.6.0' },
+        const params = new URLSearchParams({
+            api_key: apiKey,
+            year: String(year),
+            make: makeLower,
+            model: modelNormalized,
+            miles_min: String(milesMin),
+            miles_max: String(milesMax),
+            rows: '20',
+            start: '0',
+            fields: 'price,miles',
+            has_price: 'true',
+            has_miles: 'true',
         });
 
-        if (!resp.ok) {
-            console.warn(`[MC] HTTP ${resp.status} for ${year} ${make} ${model}`);
+        try {
+            marketcheckCallsThisRun++; // count every actual API call (success or error)
+            const resp = await fetch(`${MARKETCHECK_URL}?${params}`, {
+                signal: AbortSignal.timeout(10000),
+                headers: { 'Accept': 'application/json', 'x-version': 'v4.6.0' },
+            });
+
+            if (!resp.ok) {
+                console.warn(`[MC] HTTP ${resp.status} for ${year} ${make} ${model}`);
+                lastUnavailable = {
+                    pricing_unavailable: true,
+                    pricing_source: `marketcheck_http_${resp.status}`,
+                };
+                continue;
+            }
+
+            const data = await resp.json();
+            const listings = data?.listings ?? [];
+
+            if (listings.length === 0) {
+                marketcheckCache.set(cacheKey, null);
+                return null;
+            }
+
+            // Extract valid prices
+            const prices = listings
+                .map(l => parseFloat(String(l.price ?? '0').replace(/,/g, '')))
+                .filter(p => p > 500 && p < 500000);
+
+            if (prices.length === 0) {
+                marketcheckCache.set(cacheKey, null);
+                return null;
+            }
+
+            const medianPrice = median(prices);
             const result = {
-                pricing_unavailable: true,
-                pricing_source: `marketcheck_http_${resp.status}`,
+                retail_median: Math.round(medianPrice),
+                estimated_auction_price: Math.round(medianPrice * AUCTION_DISCOUNT),
+                sample_count: prices.length,
             };
+
             marketcheckCache.set(cacheKey, result);
             return result;
+
+        } catch (err) {
+            console.warn(`[MC] Error for ${year} ${make} ${model}: ${err.message}`);
+            lastUnavailable = {
+                pricing_unavailable: true,
+                pricing_source: 'marketcheck_request_error',
+            };
         }
-
-        const data = await resp.json();
-        const listings = data?.listings ?? [];
-
-        if (listings.length === 0) {
-            marketcheckCache.set(cacheKey, null);
-            return null;
-        }
-
-        // Extract valid prices
-        const prices = listings
-            .map(l => parseFloat(String(l.price ?? '0').replace(/,/g, '')))
-            .filter(p => p > 500 && p < 500000);
-
-        if (prices.length === 0) {
-            marketcheckCache.set(cacheKey, null);
-            return null;
-        }
-
-        const medianPrice = median(prices);
-        const result = {
-            retail_median: Math.round(medianPrice),
-            estimated_auction_price: Math.round(medianPrice * AUCTION_DISCOUNT),
-            sample_count: prices.length,
-        };
-
-        marketcheckCache.set(cacheKey, result);
-        return result;
-
-    } catch (err) {
-        console.warn(`[MC] Error for ${year} ${make} ${model}: ${err.message}`);
-        const result = {
-            pricing_unavailable: true,
-            pricing_source: 'marketcheck_request_error',
-        };
-        marketcheckCache.set(cacheKey, result);
-        return result;
     }
+
+    const result = lastUnavailable || {
+        pricing_unavailable: true,
+        pricing_source: 'marketcheck_unavailable',
+    };
+    marketcheckCache.set(cacheKey, result);
+    return result;
 }
 
 // ── Algolia Query ─────────────────────────────────────────────────────────────
@@ -346,7 +364,7 @@ const {
     maxBid = 75000,
     maxYearAge = DEFAULT_MAX_YEAR_AGE,
     maxItemsPerState = 500,
-    enableMarketcheck = Boolean(MARKETCHECK_KEY),
+    enableMarketcheck = MARKETCHECK_KEYS.length > 0,
     webhookUrl = null,
     webhookSecret = null,
 } = input;

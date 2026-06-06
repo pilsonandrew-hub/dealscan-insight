@@ -107,6 +107,38 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertNotIn('"webhookSecret"', workflow)
         self.assertNotIn("rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA", workflow)
 
+    def test_jjkane_actor_records_secret_managed_marketcheck_rotation(self):
+        manifest_path = self.repo_root / "apify" / "deployment.json"
+        actor_path = self.repo_root / "apify" / "actors" / "ds-jjkane" / ".actor" / "actor.json"
+        workflow_path = self.repo_root / ".github" / "workflows" / "configure-jjkane-apify-env.yml"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        actor_spec = json.loads(actor_path.read_text(encoding="utf-8"))
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        actor = payload["actors"].get("ds-jjkane")
+        self.assertIsNotNone(actor)
+        self.assertEqual(
+            actor["secretEnv"],
+            ["MARKETCHECK_KEY_1", "MARKETCHECK_KEY_2", "MARKETCHECK_KEY_3", "WEBHOOK_SECRET"],
+        )
+        self.assertEqual(
+            actor_spec["environmentVariables"],
+            {
+                "MARKETCHECK_KEY_1": "@MARKETCHECK_KEY_1",
+                "MARKETCHECK_KEY_2": "@MARKETCHECK_KEY_2",
+                "MARKETCHECK_KEY_3": "@MARKETCHECK_KEY_3",
+                "WEBHOOK_SECRET": "@WEBHOOK_SECRET",
+            },
+        )
+        self.assertNotIn("MARKETCHECK_KEY=", actor_path.read_text(encoding="utf-8"))
+        self.assertIn("MARKETCHECK_KEY_1: ${{ secrets.MARKETCHECK_KEY_1 }}", workflow)
+        self.assertIn("MARKETCHECK_KEY_2: ${{ secrets.MARKETCHECK_KEY_2 }}", workflow)
+        self.assertIn("MARKETCHECK_KEY_3: ${{ secrets.MARKETCHECK_KEY_3 }}", workflow)
+        self.assertIn("At least one MARKETCHECK_KEY_N GitHub secret is required", workflow)
+        self.assertIn('"isSecret": True', workflow)
+        self.assertIn("ds-jjkane-12hr", workflow)
+        self.assertNotIn('"webhookSecret"', workflow)
+
     def test_enabled_scheduled_actors_record_live_schedule_truth(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
