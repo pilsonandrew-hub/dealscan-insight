@@ -271,30 +271,39 @@ def _fetch_apify_source_quality_proof(run_id: str, token: str) -> dict[str, Any]
     return None
 
 
-def _source_quality_numeric_summary(proof: dict[str, Any] | None) -> tuple[Counter[str], Counter[str]]:
+def _source_quality_numeric_summary(proof: dict[str, Any] | None) -> tuple[Counter[str], Counter[str], Counter[str]]:
     totals: Counter[str] = Counter()
     exclusions: Counter[str] = Counter()
+    rejection_reasons: Counter[str] = Counter()
     if not isinstance(proof, dict):
-        return totals, exclusions
+        return totals, exclusions, rejection_reasons
     for field in SOURCE_QUALITY_TOTAL_FIELDS:
         totals[field] = _safe_int(proof.get(field))
     for key, value in proof.items():
         if str(key).startswith("rows_excluded_"):
             exclusions[str(key)[:120]] += _safe_int(value)
-    return totals, exclusions
+    reasons = proof.get("rejection_reasons")
+    if isinstance(reasons, dict):
+        for key, value in reasons.items():
+            reason = str(key or "").strip()[:120]
+            if reason:
+                rejection_reasons[reason] += _safe_int(value)
+    return totals, exclusions, rejection_reasons
 
 
 def _attach_source_quality_summary(
     summary: dict[str, Any],
     totals: Counter[str],
     exclusions: Counter[str],
+    rejection_reasons: Counter[str],
 ) -> None:
-    if not totals and not exclusions:
+    if not totals and not exclusions and not rejection_reasons:
         return
     summary["source_quality_found_rows_total"] = int(totals.get("found_rows_total") or 0)
     summary["source_quality_prefilter_passed_rows_total"] = int(totals.get("prefilter_passed_rows_total") or 0)
     summary["source_quality_pushed_rows_total"] = int(totals.get("pushed_rows_total") or 0)
     summary["source_quality_exclusion_counts"] = dict(exclusions.most_common(20))
+    summary["source_quality_rejection_reason_counts"] = dict(rejection_reasons.most_common(20))
 
 
 def classify_source_summary(summary: dict[str, Any]) -> str:
@@ -669,24 +678,28 @@ def build_source_yield_report(
     source_quality_by_source: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "totals": Counter(),
         "exclusions": Counter(),
+        "rejection_reasons": Counter(),
     })
     source_quality_by_run: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "totals": Counter(),
         "exclusions": Counter(),
+        "rejection_reasons": Counter(),
     })
     if apify_token:
         for run_id in sorted(processed_positive_run_ids):
             proof = _fetch_apify_source_quality_proof(run_id, apify_token)
-            totals, exclusions = _source_quality_numeric_summary(proof)
-            if not totals and not exclusions:
+            totals, exclusions, rejection_reasons = _source_quality_numeric_summary(proof)
+            if not totals and not exclusions and not rejection_reasons:
                 continue
             source = _canon_source((proof or {}).get("source_site") or (proof or {}).get("source")) or run_sources.get(run_id, "unknown")
             if source != "unknown":
                 run_sources[run_id] = source
             source_quality_by_source[source]["totals"].update(totals)
             source_quality_by_source[source]["exclusions"].update(exclusions)
+            source_quality_by_source[source]["rejection_reasons"].update(rejection_reasons)
             source_quality_by_run[run_id]["totals"].update(totals)
             source_quality_by_run[run_id]["exclusions"].update(exclusions)
+            source_quality_by_run[run_id]["rejection_reasons"].update(rejection_reasons)
 
     delivery_columns = _available_columns(base_url, service_role_key, "ingest_delivery_log")
     delivery_select, delivery_order = _delivery_select_for_columns(delivery_columns)
@@ -914,6 +927,7 @@ def build_source_yield_report(
             summary,
             source_quality_counters["totals"],
             source_quality_counters["exclusions"],
+            source_quality_counters["rejection_reasons"],
         )
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
@@ -982,6 +996,7 @@ def build_source_yield_report(
                 run_summary,
                 source_quality_counters["totals"],
                 source_quality_counters["exclusions"],
+                source_quality_counters["rejection_reasons"],
             )
             run_summary["classification"] = classify_run_summary(run_summary)
             run_summaries.append(run_summary)
