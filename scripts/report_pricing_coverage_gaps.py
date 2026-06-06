@@ -153,11 +153,17 @@ def classify_gap(row: dict, *, min_seedable_history_rows: int = MIN_SEEDABLE_HIS
 
 def format_gap_row(row: dict) -> str:
     evidence_status = classify_gap(row)
+    origin = row.get("candidate_origin") or "opportunity_proxy"
+    opportunity_active = row.get("opportunity_active")
+    if opportunity_active is None and origin == "opportunity_proxy":
+        opportunity_active = row.get("is_active")
+    auction_active = row.get("auction_active")
     return (
         "- "
+        f"origin={origin} "
         f"{row['year']} {row['make']} {row['model']} "
         f"state={row.get('state') or 'unknown'} source={row.get('source') or row.get('source_site')} "
-        f"active={row.get('is_active')} dos={row.get('dos_score')} "
+        f"opportunity_active={opportunity_active} auction_active={auction_active} dos={row.get('dos_score')} "
         f"grade={row.get('investment_grade')} headroom={row.get('bid_headroom')} "
         f"bid={row.get('current_bid')} expected_close={row.get('expected_close_bid')} "
         f"retail_proxy={row.get('retail_asking_price_estimate')} "
@@ -366,6 +372,8 @@ def _fetch_delivery_pricing_skip_rows(
                 "pricing_maturity": "proxy",
                 "pricing_source": "delivery_skip",
                 "is_active": True,
+                "opportunity_active": None,
+                "auction_active": True,
                 "dos_score": None,
                 "processed_at": skip.get("created_at"),
                 "bid_headroom": None,
