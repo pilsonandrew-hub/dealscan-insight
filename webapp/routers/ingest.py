@@ -1568,6 +1568,43 @@ async def pass_opportunity(
 # Source-site normalization is kept behind these imported aliases so existing
 # ingest.py callers and tests can remain unchanged during incremental extraction.
 
+
+def _marketcheck_sample_count_from_source(pricing_source: Any) -> int:
+    match = re.fullmatch(r"marketcheck_jjkane_estimated_(\d+)samples", str(pricing_source or "").strip())
+    if not match:
+        return 0
+    return int(match.group(1))
+
+
+def _jjkane_marketcheck_retail_comp(vehicle: dict[str, Any]) -> dict[str, Any] | None:
+    source = str(vehicle.get("source_site") or vehicle.get("source") or "").strip().lower()
+    if source != "jjkane":
+        return None
+    pricing_source = str(vehicle.get("pricing_source") or "").strip()
+    sample_count = _marketcheck_sample_count_from_source(pricing_source)
+    if sample_count < 2:
+        return None
+    try:
+        retail_price = float(vehicle.get("marketcheck_retail_price") or 0)
+    except (TypeError, ValueError):
+        retail_price = 0.0
+    if retail_price <= 0:
+        return None
+
+    confidence = 0.45
+    confidence += min(sample_count, 8) * 0.04
+    # The JJKane actor fetches Marketcheck active retail listings during the run.
+    confidence += 0.12
+    return {
+        "retail_comp_price_estimate": retail_price,
+        "retail_comp_low": None,
+        "retail_comp_high": None,
+        "retail_comp_count": sample_count,
+        "retail_comp_confidence": min(confidence, 0.95),
+        "pricing_source": "marketcheck_jjkane",
+        "pricing_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
 def normalize_apify_vehicle(
     item: dict,
     run_id: str,
@@ -1714,6 +1751,15 @@ def normalize_apify_vehicle(
         )
         raw_description = item.get("description") or ""
         detail_text = item.get("detail_text") or item.get("assetLongDesc") or ""
+        pricing_source = item.get("pricing_source") or item.get("pricingSource")
+        marketcheck_retail_price = _extract_numeric_key(
+            "marketcheck_retail_price",
+            "marketcheckRetailPrice",
+            "retail_median",
+            "retailMedian",
+            "mmr",
+        )
+        marketcheck_sample_count = _marketcheck_sample_count_from_source(pricing_source)
 
         def _is_title_like_description(value: Any) -> bool:
             value_text = " ".join(str(value or "").split()).strip().lower()
@@ -1771,6 +1817,9 @@ def normalize_apify_vehicle(
             "apify_run_id": item.get("apify_run_id") or item_run_id,
             "detail_enriched": item.get("detail_enriched"),
             "detail_enriched_by_detail_page": item.get("detail_enriched_by_detail_page"),
+            "pricing_source": pricing_source,
+            "marketcheck_retail_price": marketcheck_retail_price,
+            "marketcheck_sample_count": marketcheck_sample_count,
         }
         normalized["canonical_id"] = compute_canonical_id(normalized)
         normalized["all_sources"] = [source] if source else []
@@ -1813,7 +1862,7 @@ def score_vehicle(vehicle: dict) -> dict:
     try:
         from backend.ingest.score import score_deal
         from backend.ingest.manheim_market import get_manheim_market_data
-        from backend.ingest.retail_comps import get_retail_comps
+        from backend.ingest.retail_comps import get_retail_comps, retail_comp_is_usable
 
         bid = vehicle.get("current_bid", 0)
         state = vehicle.get("state", "")
@@ -1862,6 +1911,9 @@ def score_vehicle(vehicle: dict) -> dict:
             state=state,
             supabase_client=supabase_client,
         )
+        actor_retail_comp_result = _jjkane_marketcheck_retail_comp(vehicle)
+        if actor_retail_comp_result and not retail_comp_is_usable(retail_comp_result):
+            retail_comp_result = actor_retail_comp_result
 
         result = score_deal(
             bid=bid,
