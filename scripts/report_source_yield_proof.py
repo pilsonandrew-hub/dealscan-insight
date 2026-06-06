@@ -21,6 +21,7 @@ from report_pricing_blocked_source_candidates import (
 GENERIC_SOURCES = {"", "unknown", "db_save", "sonar_mirror", "webhook", "apify"}
 DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
 DIRTY_REJECTION_REASON_BUCKETS = {"age_or_mileage_exceeded"}
+BUSINESS_REJECTION_STATUSES = {"skipped_margin", "skipped_ceiling"}
 MAX_CLEAN_AGE_YEARS = 4
 MAX_CLEAN_MILEAGE = 50_000
 
@@ -195,6 +196,19 @@ def _delivery_row_is_dirty_for_clean_yield(
     return False
 
 
+def _delivery_row_has_listing_metadata_gap(
+    row: dict[str, Any],
+    listing_by_key: dict[str, dict[str, Any]],
+) -> bool:
+    status = str(row.get("status") or "").strip()
+    if status not in BUSINESS_REJECTION_STATUSES:
+        return False
+    keys = _row_keys(row)
+    if not keys:
+        return True
+    return not any(key in listing_by_key for key in keys)
+
+
 def _row_keys(row: dict[str, Any]) -> list[str]:
     keys: list[str] = []
     for field in ("listing_id", "listing_url"):
@@ -228,22 +242,28 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
     reason_counts = summary.get("reason_counts") or {}
     dirty_rows = int(summary.get("dirty_rejection_rows") or _dirty_rejection_rows(status_counts, reason_counts))
-    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows)
+    listing_gap_rows = int(summary.get("listing_metadata_gap_rows") or 0)
+    listing_gap_status_counts = summary.get("listing_metadata_gap_status_counts") or {}
+    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows - listing_gap_rows)
     clean_gate_rows = max(0, gate_rows - dirty_rows)
+    clean_margin_rows = max(0, margin_rows - int(listing_gap_status_counts.get("skipped_margin") or 0))
+    clean_ceiling_rows = max(0, ceiling_rows - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
 
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
     if proof_rows == delivery_rows:
         return "proof_control_only"
+    if business_delivery_rows == 0 and listing_gap_rows > 0:
+        return "listing_metadata_gap"
     if business_delivery_rows == 0 and dirty_rows > 0:
         return "dirty_source_reject_only"
     if business_delivery_rows == 0:
         return "mixed_rejection_surface"
     if clean_gate_rows >= _dominance_threshold(business_delivery_rows, 0.5):
         return "source_quality_reject_dominant"
-    if margin_rows >= _dominance_threshold(business_delivery_rows, 0.35):
+    if clean_margin_rows >= _dominance_threshold(business_delivery_rows, 0.35):
         return "economic_reject_dominant"
-    if ceiling_rows >= _dominance_threshold(business_delivery_rows, 0.35):
+    if clean_ceiling_rows >= _dominance_threshold(business_delivery_rows, 0.35):
         return "pricing_ceiling_reject_dominant"
     return "mixed_rejection_surface"
 
@@ -264,21 +284,27 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     sonar_rows = int(status_counts.get("saved_sonar") or 0) + int(status_counts.get("sonar_error") or 0)
     reason_counts = summary.get("reason_counts") or {}
     dirty_rows = int(summary.get("dirty_rejection_rows") or _dirty_rejection_rows(status_counts, reason_counts))
-    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows)
+    listing_gap_rows = int(summary.get("listing_metadata_gap_rows") or 0)
+    listing_gap_status_counts = summary.get("listing_metadata_gap_status_counts") or {}
+    business_delivery_rows = max(0, delivery_rows - proof_rows - sonar_rows - dirty_rows - listing_gap_rows)
     clean_gate_rows = max(0, int(status_counts.get("skipped_gate") or 0) - dirty_rows)
+    clean_margin_rows = max(0, int(status_counts.get("skipped_margin") or 0) - int(listing_gap_status_counts.get("skipped_margin") or 0))
+    clean_ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
     if proof_rows == delivery_rows:
         return "proof_control_only"
+    if business_delivery_rows == 0 and listing_gap_rows > 0:
+        return "listing_metadata_gap"
     if business_delivery_rows == 0 and dirty_rows > 0:
         return "dirty_source_reject_only"
     if business_delivery_rows == 0:
         return "mixed_rejection_surface"
     if clean_gate_rows == business_delivery_rows:
         return "source_quality_reject_dominant"
-    if int(status_counts.get("skipped_margin") or 0) == business_delivery_rows:
+    if clean_margin_rows == business_delivery_rows:
         return "economic_reject_dominant"
-    if int(status_counts.get("skipped_ceiling") or 0) == business_delivery_rows:
+    if clean_ceiling_rows == business_delivery_rows:
         return "pricing_ceiling_reject_dominant"
     return classify_source_summary(summary)
 
@@ -666,11 +692,13 @@ def build_source_yield_report(
         "status": Counter(),
         "reason": Counter(),
         "dirty": Counter(),
+        "listing_gap": Counter(),
     })
     delivery_by_run: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "status": Counter(),
         "reason": Counter(),
         "dirty": Counter(),
+        "listing_gap": Counter(),
     })
     for row in all_delivery_rows:
         source = _source_from_row(row, run_sources=run_sources)
@@ -682,11 +710,15 @@ def build_source_yield_report(
         delivery_by_source[source]["reason"][_reason_bucket(row.get("error_message"))] += 1
         if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
             delivery_by_source[source]["dirty"]["dirty_source_row"] += 1
+        elif _delivery_row_has_listing_metadata_gap(row, listing_by_key):
+            delivery_by_source[source]["listing_gap"][str(row.get("status") or "unknown")[:80]] += 1
         if run_id:
             delivery_by_run[run_id]["status"][str(row.get("status") or "unknown")[:80]] += 1
             delivery_by_run[run_id]["reason"][_reason_bucket(row.get("error_message"))] += 1
             if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
                 delivery_by_run[run_id]["dirty"]["dirty_source_row"] += 1
+            elif _delivery_row_has_listing_metadata_gap(row, listing_by_key):
+                delivery_by_run[run_id]["listing_gap"][str(row.get("status") or "unknown")[:80]] += 1
 
     opportunity_columns = _available_columns(base_url, service_role_key, "opportunities")
     opportunity_order = "created_at"
@@ -773,6 +805,8 @@ def build_source_yield_report(
             "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_source[source].most_common(10)),
         }
         summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
+        summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
+        summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
 
@@ -833,6 +867,8 @@ def build_source_yield_report(
                 "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
             }
             run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
+            run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
+            run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
             run_summary["classification"] = classify_run_summary(run_summary)
             run_summaries.append(run_summary)
         report["run_detail_source"] = detail_source
