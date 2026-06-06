@@ -1446,6 +1446,110 @@ def test_build_report_uses_apify_source_quality_proof_for_proof_only_runs(monkey
     assert run_summary["source_quality_exclusion_counts"]["rows_excluded_age_mileage_prefilter"] == 1269
 
 
+def test_source_summary_separates_aggregate_and_latest_source_quality_proof(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-publicsurplus-old",
+                        "source": "publicsurplus",
+                        "status": "processed",
+                        "item_count": 1,
+                        "received_at": "2026-06-06T10:00:00+00:00",
+                    },
+                    {
+                        "run_id": "run-publicsurplus-new",
+                        "source": "publicsurplus",
+                        "status": "processed",
+                        "item_count": 1,
+                        "received_at": "2026-06-06T12:00:00+00:00",
+                    },
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-publicsurplus-old",
+                        "source_site": "publicsurplus",
+                        "status": "skipped_proof",
+                        "error_message": "source_quality_proof_record",
+                        "created_at": "2026-06-06T10:00:10+00:00",
+                    },
+                    {
+                        "run_id": "run-publicsurplus-new",
+                        "source_site": "publicsurplus",
+                        "status": "skipped_proof",
+                        "error_message": "source_quality_proof_record",
+                        "created_at": "2026-06-06T12:00:10+00:00",
+                    },
+                ]
+            if table in {"sonar_listings", "opportunities"}:
+                return []
+        if table in {"webhook_log", "ingest_delivery_log"}:
+            return fake_fetch(base_url, service_role_key, table, [("select", "*")])
+        if table in {"delivery_log", "sonar_listings", "opportunities"}:
+            return []
+        raise AssertionError(table)
+
+    def fake_apify_proof(run_id, token):
+        assert token == "apify-token"
+        if run_id == "run-publicsurplus-old":
+            return {
+                "source": "publicsurplus",
+                "found_rows_total": 159,
+                "prefilter_passed_rows_total": 0,
+                "pushed_rows_total": 0,
+                "rows_excluded_unaccounted_after_prefilter": 0,
+            }
+        if run_id == "run-publicsurplus-new":
+            return {
+                "source": "publicsurplus",
+                "found_rows_total": 318,
+                "prefilter_passed_rows_total": 0,
+                "pushed_rows_total": 0,
+                "rows_excluded_age_mileage_prefilter": 91,
+                "rows_excluded_bid_range": 107,
+                "rows_excluded_non_vehicle": 70,
+                "rows_excluded_out_of_scope": 14,
+                "rows_excluded_policy_prefilter": 2,
+                "rows_excluded_rust_state": 34,
+                "rows_excluded_unaccounted_after_prefilter": 0,
+            }
+        raise AssertionError(run_id)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_apify_source_quality_proof", fake_apify_proof)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=6,
+        limit=100,
+        now=datetime(2026, 6, 6, 12, 30, tzinfo=timezone.utc),
+        apify_token="apify-token",
+    )
+
+    source_summary = report["source_summaries"][0]
+
+    assert source_summary["source_quality_proof_run_count"] == 2
+    assert source_summary["source_quality_found_rows_total"] == 477
+    assert source_summary["source_quality_visible_exclusion_rows_total"] == 318
+    assert source_summary["latest_run_id"] == "run-publicsurplus-new"
+    assert source_summary["latest_run_source_quality_found_rows_total"] == 318
+    assert source_summary["latest_run_source_quality_visible_exclusion_rows_total"] == 318
+    assert source_summary["latest_run_source_quality_exclusion_counts"] == {
+        "rows_excluded_age_mileage_prefilter": 91,
+        "rows_excluded_bid_range": 107,
+        "rows_excluded_non_vehicle": 70,
+        "rows_excluded_out_of_scope": 14,
+        "rows_excluded_policy_prefilter": 2,
+        "rows_excluded_rust_state": 34,
+        "rows_excluded_unaccounted_after_prefilter": 0,
+    }
+
+
 def test_build_report_surfaces_sanitized_source_quality_rejection_reasons(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         query_dict = dict(query)

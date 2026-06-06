@@ -354,6 +354,7 @@ def _source_quality_numeric_summary(proof: dict[str, Any] | None) -> tuple[Count
     rejection_reasons: Counter[str] = Counter()
     if not isinstance(proof, dict):
         return totals, exclusions, rejection_reasons
+    totals["proof_run_count"] = 1
     for field in SOURCE_QUALITY_TOTAL_FIELDS:
         totals[field] = _safe_int(proof.get(field))
     for key, value in proof.items():
@@ -379,6 +380,8 @@ def _attach_source_quality_summary(
     summary["source_quality_found_rows_total"] = int(totals.get("found_rows_total") or 0)
     summary["source_quality_prefilter_passed_rows_total"] = int(totals.get("prefilter_passed_rows_total") or 0)
     summary["source_quality_pushed_rows_total"] = int(totals.get("pushed_rows_total") or 0)
+    summary["source_quality_proof_run_count"] = int(totals.get("proof_run_count") or 0)
+    summary["source_quality_visible_exclusion_rows_total"] = sum(int(value or 0) for value in exclusions.values())
     summary["source_quality_exclusion_counts"] = dict(exclusions.most_common(20))
     summary["source_quality_rejection_reason_counts"] = dict(rejection_reasons.most_common(20))
 
@@ -1085,6 +1088,19 @@ def build_source_yield_report(
             summary["latest_run_reason_counts"] = latest_run.get("reason_counts") or {}
             summary["latest_run_source_quality_pushed_rows_total"] = int(
                 latest_run.get("source_quality_pushed_rows_total") or 0
+            )
+            summary["latest_run_source_quality_found_rows_total"] = int(
+                latest_run.get("source_quality_found_rows_total") or 0
+            )
+            summary["latest_run_source_quality_prefilter_passed_rows_total"] = int(
+                latest_run.get("source_quality_prefilter_passed_rows_total") or 0
+            )
+            summary["latest_run_source_quality_visible_exclusion_rows_total"] = int(
+                latest_run.get("source_quality_visible_exclusion_rows_total") or 0
+            )
+            summary["latest_run_source_quality_exclusion_counts"] = latest_run.get("source_quality_exclusion_counts") or {}
+            summary["latest_run_source_quality_rejection_reason_counts"] = (
+                latest_run.get("source_quality_rejection_reason_counts") or {}
             )
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
