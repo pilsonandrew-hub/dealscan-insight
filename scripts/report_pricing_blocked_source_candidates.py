@@ -62,6 +62,15 @@ joined as (
          coalesce(sl.listing_url, ps.listing_url) as listing_url,
          (coalesce(nullif(ps.listing_id,''), nullif(ps.listing_url,'')) is not null) as listing_key_present,
          (sl.source_site is not null) as listing_found,
+         case
+           when sl.source_site is null then null
+           when sl.year is null or sl.year = 0 then 'missing_identity'
+           when sl.year < extract(year from now())::int - %(max_age_years)s then 'age_or_mileage_exceeded'
+           when sl.mileage is null or sl.mileage <= 0 then 'missing_identity'
+           when sl.mileage > %(max_mileage)s then 'age_or_mileage_exceeded'
+           when coalesce(sl.vin,'') = '' then 'missing_identity'
+           else null
+         end as clean_filter_exclusion,
          latest_delivery.status as latest_delivery_status,
          latest_delivery.error_message as latest_delivery_error_message,
          latest_delivery.created_at as latest_delivery_created_at,
@@ -109,15 +118,6 @@ select
     else auction_end_date >= timezone('utc', now())
   end as auction_active
 from joined
-where (%(include_dirty)s or (
-    listing_found = false
-    or (
-      year >= extract(year from now())::int - %(max_age_years)s
-      and coalesce(mileage, 999999999) > 0
-      and coalesce(mileage, 999999999) <= %(max_mileage)s
-      and coalesce(vin,'') <> ''
-    )
-  ))
 order by
   case
     when auction_end_date >= timezone('utc', now()) then 0
@@ -187,10 +187,12 @@ def classify_source_candidate(row: dict[str, Any]) -> str:
         return "listing_evidence_missing"
     if _matches_source_policy_reject(row):
         return "source_policy_reject"
-    if not row.get("vin") or not row.get("mileage"):
+    if row.get("clean_filter_exclusion") == "missing_identity" or not row.get("vin") or not row.get("mileage"):
         return "dirty_source_row"
     if _is_superseded_proxy_skip(row):
         return "superseded_after_skip"
+    if row.get("clean_filter_exclusion") == "age_or_mileage_exceeded":
+        return "age_mileage_excluded_pricing_gap"
     if row.get("has_market_price") or row.get("has_usable_dealer_sales"):
         return "covered_after_skip"
     parsed = parse_proxy_skip_reason(row.get("error_message"))
@@ -218,6 +220,7 @@ def format_candidate(row: dict[str, Any]) -> str:
         f"margin={parsed.get('margin')} floor={parsed.get('floor')} cost={parsed.get('cost')} "
         f"proxy_tier={parsed.get('tier')} proxy_pricing={parsed.get('pricing')} auction_active={row.get('auction_active')} "
         f"listing_key_present={row.get('listing_key_present')} listing_found={row.get('listing_found')} "
+        f"clean_filter_exclusion={row.get('clean_filter_exclusion')} "
         f"market_price={row.get('has_market_price')} dealer_sales={row.get('has_usable_dealer_sales')} "
         f"skip_at={row.get('skip_created_at')} title={row.get('title')} url={row.get('listing_url')}"
         f" latest_delivery_status={row.get('latest_delivery_status')}"
@@ -430,15 +433,27 @@ def _has_usable_dealer_sales(row: dict[str, Any], dealer_sales_rows: list[dict[s
     return False
 
 
-def _is_clean_candidate(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now: datetime) -> bool:
-    if int(row.get("year") or 0) < now.year - max_age_years:
-        return False
+def _clean_filter_exclusion(
+    row: dict[str, Any], *, max_mileage: int, max_age_years: int, now: datetime
+) -> str | None:
+    try:
+        parsed_year = int(row.get("year") or 0)
+    except (TypeError, ValueError):
+        return "missing_identity"
+    if parsed_year < now.year - max_age_years:
+        return "age_or_mileage_exceeded"
     mileage = row.get("mileage")
     try:
         parsed_mileage = int(mileage)
     except (TypeError, ValueError):
-        return False
-    return 0 < parsed_mileage <= max_mileage and bool(str(row.get("vin") or "").strip())
+        return "missing_identity"
+    if parsed_mileage <= 0:
+        return "missing_identity"
+    if parsed_mileage > max_mileage:
+        return "age_or_mileage_exceeded"
+    if not str(row.get("vin") or "").strip():
+        return "missing_identity"
+    return None
 
 
 def fetch_rows_via_rest(
@@ -548,10 +563,21 @@ def fetch_rows_via_rest(
         listing = latest_listings.get(key)
         listing_key_present = bool(_row_key(skip))
         auction_end = _parse_datetime((listing or {}).get("auction_end_date"))
+        clean_filter_exclusion = (
+            None
+            if not listing
+            else _clean_filter_exclusion(
+                listing,
+                max_mileage=max_mileage,
+                max_age_years=max_age_years,
+                now=current_time,
+            )
+        )
         row = {
             **(listing or {}),
             "listing_key_present": listing_key_present,
             "listing_found": bool(listing),
+            "clean_filter_exclusion": clean_filter_exclusion,
             "listing_id": (listing or {}).get("listing_id") or skip.get("listing_id"),
             "listing_url": (listing or {}).get("listing_url") or skip.get("listing_url"),
             "run_id": skip.get("run_id"),
@@ -565,13 +591,7 @@ def fetch_rows_via_rest(
             "has_usable_dealer_sales": bool(listing) and _has_usable_dealer_sales(listing, dealer_sales_rows),
             "auction_active": None if auction_end is None else auction_end >= current_time,
         }
-        if (
-            row["listing_key_present"] is False
-            or row["listing_found"] is False
-            or include_dirty
-            or _is_clean_candidate(row, max_mileage=max_mileage, max_age_years=max_age_years, now=current_time)
-        ):
-            joined.append(row)
+        joined.append(row)
 
     joined.sort(
         key=lambda row: (

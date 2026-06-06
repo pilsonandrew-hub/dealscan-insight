@@ -324,7 +324,7 @@ def test_fetch_rows_via_rest_uses_separate_proxy_and_latest_delivery_queries(mon
     assert report_pricing_blocked_source_candidates.classify_source_candidate(rows[0]) == "superseded_after_skip"
 
 
-def test_fetch_rows_via_rest_filters_dirty_rows_by_default(monkeypatch):
+def test_fetch_rows_via_rest_reports_dirty_rows_by_default(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "ingest_delivery_log":
             return [
@@ -379,9 +379,64 @@ def test_fetch_rows_via_rest_filters_dirty_rows_by_default(monkeypatch):
         now=datetime(2026, 6, 2, 12, 30, tzinfo=timezone.utc),
     )
 
-    assert clean_only == []
+    assert len(clean_only) == 1
+    assert report_pricing_blocked_source_candidates.classify_source_candidate(clean_only[0]) == "dirty_source_row"
     assert len(dirty_included) == 1
     assert report_pricing_blocked_source_candidates.classify_source_candidate(dirty_included[0]) == "dirty_source_row"
+
+
+def test_fetch_rows_via_rest_reports_age_mileage_excluded_proxy_rows_by_default(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "proxibid-run",
+                    "listing_id": "proxibid-escape",
+                    "listing_url": "https://www.proxibid.com/lotInformation/101102033",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy | bid=$4,000 mmr=$20,000 tier=standard",
+                    "created_at": "2026-06-05T19:13:22+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "source_site": "proxibid",
+                    "year": 2019,
+                    "make": "Ford",
+                    "model": "Escape",
+                    "state": "AL",
+                    "mileage": 49237,
+                    "vin": "1FMCU9GDXKUB65351",
+                    "current_bid": 4000,
+                    "auction_end_date": "2026-06-10T00:00:00+00:00",
+                    "created_at": "2026-06-05T19:13:20+00:00",
+                    "title": "2019 Ford Escape 4x4",
+                    "listing_id": "proxibid-escape",
+                    "listing_url": "https://www.proxibid.com/lotInformation/101102033",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(report_pricing_blocked_source_candidates, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_blocked_source_candidates.fetch_rows_via_rest(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=4,
+        include_dirty=False,
+        limit=50,
+        now=datetime(2026, 6, 6, 1, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["clean_filter_exclusion"] == "age_or_mileage_exceeded"
+    assert (
+        report_pricing_blocked_source_candidates.classify_source_candidate(rows[0])
+        == "age_mileage_excluded_pricing_gap"
+    )
 
 
 def test_fetch_rows_via_rest_reports_proxy_skip_without_listing_evidence(monkeypatch):
