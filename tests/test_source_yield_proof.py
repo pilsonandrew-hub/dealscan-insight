@@ -210,6 +210,151 @@ def test_build_report_groups_delivery_and_opportunity_truth(monkeypatch):
     assert by_source["hibid"]["dirty_rejection_rows"] == 2
 
 
+def test_build_report_excludes_dirty_margin_and_ceiling_rows_from_business_dominance(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        query_dict = dict(query)
+        select = query_dict.get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-hibid-dirty",
+                        "source": "hibid",
+                        "status": "processed",
+                        "item_count": 3,
+                        "received_at": "2026-06-05T19:00:00+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-hibid-dirty",
+                        "source_site": "hibid",
+                        "status": "skipped_margin",
+                        "error_message": "margin_below_floor",
+                        "listing_id": "old-clean-looking",
+                        "listing_url": "https://hibid.com/lot/old-clean-looking/",
+                        "created_at": "2026-06-05T19:01:00+00:00",
+                    },
+                    {
+                        "run_id": "run-hibid-dirty",
+                        "source_site": "hibid",
+                        "status": "skipped_ceiling",
+                        "error_message": "pricing_maturity_proxy",
+                        "listing_id": "missing-vin",
+                        "listing_url": "https://hibid.com/lot/missing-vin/",
+                        "created_at": "2026-06-05T19:02:00+00:00",
+                    },
+                    {
+                        "run_id": "run-hibid-dirty",
+                        "source_site": "hibid",
+                        "status": "skipped_proof",
+                        "error_message": "source_quality_proof_record",
+                        "created_at": "2026-06-05T19:03:00+00:00",
+                    },
+                ]
+            if table == "sonar_listings":
+                return [
+                    {
+                        "listing_id": "old-clean-looking",
+                        "listing_url": "https://hibid.com/lot/old-clean-looking/",
+                        "year": 2016,
+                        "mileage": 36492,
+                        "vin": "1FM5K7D80GGA00000",
+                        "created_at": "2026-06-05T19:00:30+00:00",
+                    },
+                    {
+                        "listing_id": "missing-vin",
+                        "listing_url": "https://hibid.com/lot/missing-vin/",
+                        "year": 2021,
+                        "mileage": 40436,
+                        "vin": None,
+                        "created_at": "2026-06-05T19:00:31+00:00",
+                    },
+                ]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-05T19:04:00+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-hibid-dirty",
+                    "source": "hibid",
+                    "status": "processed",
+                    "item_count": 3,
+                    "received_at": "2026-06-05T19:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-hibid-dirty",
+                    "source_site": "hibid",
+                    "status": "skipped_margin",
+                    "error_message": "margin_below_floor",
+                    "listing_id": "old-clean-looking",
+                    "listing_url": "https://hibid.com/lot/old-clean-looking/",
+                    "created_at": "2026-06-05T19:01:00+00:00",
+                },
+                {
+                    "run_id": "run-hibid-dirty",
+                    "source_site": "hibid",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy",
+                    "listing_id": "missing-vin",
+                    "listing_url": "https://hibid.com/lot/missing-vin/",
+                    "created_at": "2026-06-05T19:02:00+00:00",
+                },
+                {
+                    "run_id": "run-hibid-dirty",
+                    "source_site": "hibid",
+                    "status": "skipped_proof",
+                    "error_message": "source_quality_proof_record",
+                    "created_at": "2026-06-05T19:03:00+00:00",
+                },
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "listing_id": "old-clean-looking",
+                    "listing_url": "https://hibid.com/lot/old-clean-looking/",
+                    "year": 2016,
+                    "mileage": 36492,
+                    "vin": "1FM5K7D80GGA00000",
+                    "created_at": "2026-06-05T19:00:30+00:00",
+                },
+                {
+                    "listing_id": "missing-vin",
+                    "listing_url": "https://hibid.com/lot/missing-vin/",
+                    "year": 2021,
+                    "mileage": 40436,
+                    "vin": None,
+                    "created_at": "2026-06-05T19:00:31+00:00",
+                },
+            ]
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+        run_detail_source="hibid",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert source_summary["dirty_rejection_rows"] == 2
+    assert source_summary["classification"] == "dirty_source_reject_only"
+    assert run_summary["dirty_rejection_rows"] == 2
+    assert run_summary["classification"] == "dirty_source_reject_only"
+
+
 def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "webhook_log":
