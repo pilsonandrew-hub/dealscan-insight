@@ -193,6 +193,53 @@ def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
 
 
+def test_classify_source_prefers_larger_bid_ceiling_count_when_proxy_also_meets_threshold():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 12,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 10,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 7,
+            "pricing_maturity_proxy": 3,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_uses_full_proxy_count_when_display_reason_counts_are_truncated():
+    reason_counts = {f"other_reason_{index}": 2 for index in range(10)}
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 6,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 4,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "source_quality_proof_record": 1,
+            **reason_counts,
+        },
+        "pricing_maturity_proxy_rows": 4,
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
+
+
 def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
     dirty_only = {
         "source": "hibid",
@@ -1063,9 +1110,12 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
             "inactive_opportunity_lifecycle_counts": {},
             "dirty_rejection_rows": 1,
             "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
+            "pricing_maturity_proxy_rows": 0,
+            "dirty_pricing_maturity_proxy_rows": 0,
             "listing_metadata_gap_rows": 0,
             "listing_metadata_gap_status_counts": {},
             "listing_metadata_gap_reason_counts": {},
+            "listing_metadata_gap_pricing_maturity_proxy_rows": 0,
             "classification": "dirty_source_reject_only",
         }
     ]
