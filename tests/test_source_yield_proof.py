@@ -119,20 +119,46 @@ def test_classify_source_does_not_let_dirty_proxy_rows_override_clean_bid_ceilin
         "status_counts": {
             "saved_sonar": 1,
             "skipped_ceiling": 2,
-            "skipped_gate": 1,
             "skipped_proof": 1,
         },
         "reason_counts": {
             "none": 1,
             "bid_ceiling_exceeded": 1,
             "pricing_maturity_proxy": 1,
-            "age_or_mileage_exceeded": 1,
             "source_quality_proof_record": 1,
         },
+        "dirty_rejection_rows": 1,
+        "dirty_rejection_reason_counts": {"pricing_maturity_proxy": 1},
     }
 
     assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
     assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_keeps_clean_proxy_rows_when_dirty_rows_are_unrelated():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 5,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 2,
+            "skipped_gate": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "pricing_maturity_proxy": 2,
+            "age_or_mileage_exceeded": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 1,
+        "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
 
 
 def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_ceiling():
@@ -154,6 +180,7 @@ def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_
         },
         "listing_metadata_gap_rows": 5,
         "listing_metadata_gap_status_counts": {"skipped_ceiling": 5},
+        "listing_metadata_gap_reason_counts": {"pricing_maturity_proxy": 5},
     }
 
     assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
@@ -1029,8 +1056,10 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
             "active_dos80_rows": 0,
             "inactive_opportunity_lifecycle_counts": {},
             "dirty_rejection_rows": 1,
+            "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
             "listing_metadata_gap_rows": 0,
             "listing_metadata_gap_status_counts": {},
+            "listing_metadata_gap_reason_counts": {},
             "classification": "dirty_source_reject_only",
         }
     ]

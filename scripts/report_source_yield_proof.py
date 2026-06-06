@@ -275,13 +275,31 @@ def _pricing_proxy_rejection_rows(
     status_counts: dict[str, Any],
     reason_counts: dict[str, Any],
     *,
-    dirty_rows: int = 0,
+    dirty_proxy_rows: int = 0,
     listing_gap_ceiling_rows: int = 0,
+    listing_gap_proxy_rows: int = 0,
 ) -> int:
     ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - listing_gap_ceiling_rows)
     proxy_rows = int(reason_counts.get("pricing_maturity_proxy") or 0)
-    proxy_rows = max(0, proxy_rows - dirty_rows - listing_gap_ceiling_rows)
+    proxy_rows = max(0, proxy_rows - dirty_proxy_rows - listing_gap_proxy_rows)
     return min(ceiling_rows, proxy_rows)
+
+
+def _proxy_rows_inside_dirty_rejections(summary: dict[str, Any], reason_counts: dict[str, Any], dirty_rows: int) -> int:
+    dirty_reason_counts = summary.get("dirty_rejection_reason_counts")
+    if isinstance(dirty_reason_counts, dict):
+        return int(dirty_reason_counts.get("pricing_maturity_proxy") or 0)
+
+    dirty_reason_rows = sum(int(reason_counts.get(reason) or 0) for reason in DIRTY_REJECTION_REASON_BUCKETS)
+    proxy_rows = int(reason_counts.get("pricing_maturity_proxy") or 0)
+    return min(proxy_rows, max(0, dirty_rows - dirty_reason_rows))
+
+
+def _proxy_rows_inside_listing_gaps(summary: dict[str, Any], listing_gap_ceiling_rows: int) -> int:
+    listing_gap_reason_counts = summary.get("listing_metadata_gap_reason_counts")
+    if isinstance(listing_gap_reason_counts, dict):
+        return int(listing_gap_reason_counts.get("pricing_maturity_proxy") or 0)
+    return listing_gap_ceiling_rows
 
 
 def _delivery_row_is_dirty_for_clean_yield(
@@ -446,13 +464,16 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     clean_margin_rows = max(0, margin_rows - int(listing_gap_status_counts.get("skipped_margin") or 0))
     clean_ceiling_rows = max(0, ceiling_rows - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
     listing_gap_ceiling_rows = int(listing_gap_status_counts.get("skipped_ceiling") or 0)
+    dirty_proxy_rows = _proxy_rows_inside_dirty_rejections(summary, reason_counts, dirty_rows)
+    listing_gap_proxy_rows = _proxy_rows_inside_listing_gaps(summary, listing_gap_ceiling_rows)
     clean_proxy_pricing_rows = min(
         clean_ceiling_rows,
         _pricing_proxy_rejection_rows(
             status_counts,
             reason_counts,
-            dirty_rows=dirty_rows,
+            dirty_proxy_rows=dirty_proxy_rows,
             listing_gap_ceiling_rows=listing_gap_ceiling_rows,
+            listing_gap_proxy_rows=listing_gap_proxy_rows,
         ),
     )
     clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
@@ -506,13 +527,16 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     clean_margin_rows = max(0, int(status_counts.get("skipped_margin") or 0) - int(listing_gap_status_counts.get("skipped_margin") or 0))
     clean_ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
     listing_gap_ceiling_rows = int(listing_gap_status_counts.get("skipped_ceiling") or 0)
+    dirty_proxy_rows = _proxy_rows_inside_dirty_rejections(summary, reason_counts, dirty_rows)
+    listing_gap_proxy_rows = _proxy_rows_inside_listing_gaps(summary, listing_gap_ceiling_rows)
     clean_proxy_pricing_rows = min(
         clean_ceiling_rows,
         _pricing_proxy_rejection_rows(
             status_counts,
             reason_counts,
-            dirty_rows=dirty_rows,
+            dirty_proxy_rows=dirty_proxy_rows,
             listing_gap_ceiling_rows=listing_gap_ceiling_rows,
+            listing_gap_proxy_rows=listing_gap_proxy_rows,
         ),
     )
     clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
@@ -949,34 +973,44 @@ def build_source_yield_report(
         "status": Counter(),
         "reason": Counter(),
         "dirty": Counter(),
+        "dirty_reason": Counter(),
         "listing_gap": Counter(),
+        "listing_gap_reason": Counter(),
     })
     delivery_by_run: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {
         "status": Counter(),
         "reason": Counter(),
         "dirty": Counter(),
+        "dirty_reason": Counter(),
         "listing_gap": Counter(),
+        "listing_gap_reason": Counter(),
     })
     for row in all_delivery_rows:
         source = _source_from_row(row, run_sources=run_sources)
         run_id = str(row.get("run_id") or "").strip()
+        reason_bucket = _reason_bucket(row.get("error_message"))
+        status_bucket = str(row.get("status") or "unknown")[:80]
         if run_id and source != "unknown":
             run_sources[run_id] = source
         _remember_run_seen_at(run_seen_at, run_id, row.get("created_at"), row.get("updated_at"))
         delivery_by_source[source]["channel"][str(row.get("channel") or "unknown")[:80]] += 1
-        delivery_by_source[source]["status"][str(row.get("status") or "unknown")[:80]] += 1
-        delivery_by_source[source]["reason"][_reason_bucket(row.get("error_message"))] += 1
+        delivery_by_source[source]["status"][status_bucket] += 1
+        delivery_by_source[source]["reason"][reason_bucket] += 1
         if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
             delivery_by_source[source]["dirty"]["dirty_source_row"] += 1
+            delivery_by_source[source]["dirty_reason"][reason_bucket] += 1
         elif _delivery_row_has_listing_metadata_gap(row, listing_by_key):
-            delivery_by_source[source]["listing_gap"][str(row.get("status") or "unknown")[:80]] += 1
+            delivery_by_source[source]["listing_gap"][status_bucket] += 1
+            delivery_by_source[source]["listing_gap_reason"][reason_bucket] += 1
         if run_id:
-            delivery_by_run[run_id]["status"][str(row.get("status") or "unknown")[:80]] += 1
-            delivery_by_run[run_id]["reason"][_reason_bucket(row.get("error_message"))] += 1
+            delivery_by_run[run_id]["status"][status_bucket] += 1
+            delivery_by_run[run_id]["reason"][reason_bucket] += 1
             if _delivery_row_is_dirty_for_clean_yield(row, listing_by_key, now_year=current_time.year):
                 delivery_by_run[run_id]["dirty"]["dirty_source_row"] += 1
+                delivery_by_run[run_id]["dirty_reason"][reason_bucket] += 1
             elif _delivery_row_has_listing_metadata_gap(row, listing_by_key):
-                delivery_by_run[run_id]["listing_gap"][str(row.get("status") or "unknown")[:80]] += 1
+                delivery_by_run[run_id]["listing_gap"][status_bucket] += 1
+                delivery_by_run[run_id]["listing_gap_reason"][reason_bucket] += 1
 
     opportunity_columns = _available_columns(base_url, service_role_key, "opportunities")
     opportunity_order = "created_at"
@@ -1078,8 +1112,10 @@ def build_source_yield_report(
             run_summary["active_dos_score_buckets"] = dict(active_score_buckets_by_run[run_id].most_common())
             run_summary.update(_score_stats_summary(active_score_stats_by_run[run_id]))
         run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
+        run_summary["dirty_rejection_reason_counts"] = dict(delivery_counters["dirty_reason"].most_common(10))
         run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
+        run_summary["listing_metadata_gap_reason_counts"] = dict(delivery_counters["listing_gap_reason"].most_common(10))
         _attach_source_quality_summary(
             run_summary,
             source_quality_counters["totals"],
@@ -1129,8 +1165,10 @@ def build_source_yield_report(
             summary["active_dos_score_buckets"] = dict(active_score_buckets_by_source[source].most_common())
             summary.update(_score_stats_summary(active_score_stats_by_source[source]))
         summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
+        summary["dirty_rejection_reason_counts"] = dict(delivery_counters["dirty_reason"].most_common(10))
         summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
+        summary["listing_metadata_gap_reason_counts"] = dict(delivery_counters["listing_gap_reason"].most_common(10))
         _attach_source_quality_summary(
             summary,
             source_quality_counters["totals"],
