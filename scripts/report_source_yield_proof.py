@@ -77,6 +77,32 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _remember_run_seen_at(
+    run_seen_at: dict[str, datetime],
+    run_id: str,
+    *values: Any,
+) -> None:
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        return
+    for value in values:
+        parsed = _parse_timestamp(value)
+        if parsed is None:
+            continue
+        if run_id not in run_seen_at or parsed > run_seen_at[run_id]:
+            run_seen_at[run_id] = parsed
+
+
 def _truthy_vin(value: Any) -> bool:
     text = str(value or "").strip().upper()
     return len(text) == 17 and text.isalnum() and not any(ch in text for ch in "IOQ")
@@ -658,11 +684,13 @@ def build_source_yield_report(
     webhook_by_run: dict[str, Counter[str]] = defaultdict(Counter)
     webhook_item_count_by_run: Counter[str] = Counter()
     processed_positive_run_ids: set[str] = set()
+    run_seen_at: dict[str, datetime] = {}
     for row in webhook_rows:
         source = _source_from_row(row, actor_sources=actor_sources)
         run_id = str(row.get("run_id") or "").strip()
         if run_id and source != "unknown":
             run_sources[run_id] = source
+        _remember_run_seen_at(run_seen_at, run_id, row.get("received_at"), row.get("created_at"))
         status = str(row.get("status") or row.get("processing_status") or row.get("db_save") or "unknown")[:80]
         webhook_by_source[source][status] += 1
         if run_id:
@@ -820,6 +848,7 @@ def build_source_yield_report(
         run_id = str(row.get("run_id") or "").strip()
         if run_id and source != "unknown":
             run_sources[run_id] = source
+        _remember_run_seen_at(run_seen_at, run_id, row.get("created_at"), row.get("updated_at"))
         delivery_by_source[source]["channel"][str(row.get("channel") or "unknown")[:80]] += 1
         delivery_by_source[source]["status"][str(row.get("status") or "unknown")[:80]] += 1
         delivery_by_source[source]["reason"][_reason_bucket(row.get("error_message"))] += 1
@@ -881,6 +910,7 @@ def build_source_yield_report(
         run_id = str(row.get("source_run_id") or row.get("run_id") or "").strip()
         if run_id and source != "unknown":
             run_sources[run_id] = source
+        _remember_run_seen_at(run_seen_at, run_id, row.get("created_at"))
         opportunities_by_source[source]["opportunity_rows"] += 1
         if run_id:
             opportunities_by_run[run_id]["opportunity_rows"] += 1
@@ -898,6 +928,55 @@ def build_source_yield_report(
             inactive_lifecycle_by_source[source][_inactive_lifecycle_bucket(row)] += 1
             if run_id:
                 inactive_lifecycle_by_run[run_id][_inactive_lifecycle_bucket(row)] += 1
+
+    run_ids = sorted(set(webhook_by_run) | set(delivery_by_run) | set(opportunities_by_run) | set(source_quality_by_run))
+    all_run_summaries: list[dict[str, Any]] = []
+    for run_id in run_ids:
+        source = run_sources.get(run_id, "unknown")
+        webhook_status_counts = webhook_by_run[run_id]
+        delivery_counters = delivery_by_run[run_id]
+        opportunity_counts = opportunities_by_run[run_id]
+        source_quality_counters = source_quality_by_run[run_id]
+        run_summary = {
+            "run_id": run_id[:120],
+            "source": source,
+            "webhook_rows": sum(webhook_status_counts.values()),
+            "webhook_processed_rows": int(webhook_status_counts.get("processed") or 0),
+            "webhook_item_count_total": int(webhook_item_count_by_run[run_id]),
+            "delivery_rows": sum(delivery_counters["status"].values()),
+            "status_counts": dict(delivery_counters["status"].most_common(10)),
+            "reason_counts": dict(delivery_counters["reason"].most_common(10)),
+            "opportunity_rows": opportunity_counts["opportunity_rows"],
+            "active_opportunity_rows": opportunity_counts["active_opportunity_rows"],
+            "active_dos80_rows": opportunity_counts["active_dos80_rows"],
+            "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
+        }
+        run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
+        run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
+        run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
+        _attach_source_quality_summary(
+            run_summary,
+            source_quality_counters["totals"],
+            source_quality_counters["exclusions"],
+            source_quality_counters["rejection_reasons"],
+        )
+        run_summary["classification"] = classify_run_summary(run_summary)
+        all_run_summaries.append(run_summary)
+
+    latest_run_by_source: dict[str, dict[str, Any]] = {}
+    for run_summary in all_run_summaries:
+        source = str(run_summary.get("source") or "unknown")
+        if source == "unknown":
+            continue
+        existing = latest_run_by_source.get(source)
+        candidate_seen_at = run_seen_at.get(str(run_summary.get("run_id") or "")) or datetime.min.replace(tzinfo=timezone.utc)
+        existing_seen_at = (
+            run_seen_at.get(str((existing or {}).get("run_id") or ""))
+            if existing
+            else None
+        ) or datetime.min.replace(tzinfo=timezone.utc)
+        if existing is None or candidate_seen_at > existing_seen_at:
+            latest_run_by_source[source] = run_summary
 
     sources = sorted(set(webhook_by_source) | set(delivery_by_source) | set(opportunities_by_source) | set(source_quality_by_source))
     summaries: list[dict[str, Any]] = []
@@ -929,6 +1008,18 @@ def build_source_yield_report(
             source_quality_counters["exclusions"],
             source_quality_counters["rejection_reasons"],
         )
+        latest_run = latest_run_by_source.get(source)
+        if latest_run:
+            summary["latest_run_id"] = latest_run.get("run_id")
+            latest_seen_at = run_seen_at.get(str(latest_run.get("run_id") or ""))
+            if latest_seen_at:
+                summary["latest_run_seen_at"] = latest_seen_at.isoformat()
+            summary["latest_run_classification"] = latest_run.get("classification")
+            summary["latest_run_status_counts"] = latest_run.get("status_counts") or {}
+            summary["latest_run_reason_counts"] = latest_run.get("reason_counts") or {}
+            summary["latest_run_source_quality_pushed_rows_total"] = int(
+                latest_run.get("source_quality_pushed_rows_total") or 0
+            )
         summary["classification"] = classify_source_summary(summary)
         summaries.append(summary)
 
@@ -965,41 +1056,11 @@ def build_source_yield_report(
         "truth_boundary": "Read-only sanitized source-yield aggregate. It does not print titles, VINs, URLs, row payloads, tokens, or user data.",
     }
     if detail_source:
-        run_ids = sorted(set(webhook_by_run) | set(delivery_by_run) | set(opportunities_by_run) | set(source_quality_by_run))
-        run_summaries: list[dict[str, Any]] = []
-        for run_id in run_ids:
-            source = run_sources.get(run_id, "unknown")
-            if source != detail_source:
-                continue
-            webhook_status_counts = webhook_by_run[run_id]
-            delivery_counters = delivery_by_run[run_id]
-            opportunity_counts = opportunities_by_run[run_id]
-            source_quality_counters = source_quality_by_run[run_id]
-            run_summary = {
-                "run_id": run_id[:120],
-                "source": source,
-                "webhook_rows": sum(webhook_status_counts.values()),
-                "webhook_processed_rows": int(webhook_status_counts.get("processed") or 0),
-                "webhook_item_count_total": int(webhook_item_count_by_run[run_id]),
-                "delivery_rows": sum(delivery_counters["status"].values()),
-                "status_counts": dict(delivery_counters["status"].most_common(10)),
-                "reason_counts": dict(delivery_counters["reason"].most_common(10)),
-                "opportunity_rows": opportunity_counts["opportunity_rows"],
-                "active_opportunity_rows": opportunity_counts["active_opportunity_rows"],
-                "active_dos80_rows": opportunity_counts["active_dos80_rows"],
-                "inactive_opportunity_lifecycle_counts": dict(inactive_lifecycle_by_run[run_id].most_common(10)),
-            }
-            run_summary["dirty_rejection_rows"] = int(delivery_counters["dirty"].get("dirty_source_row") or 0)
-            run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
-            run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
-            _attach_source_quality_summary(
-                run_summary,
-                source_quality_counters["totals"],
-                source_quality_counters["exclusions"],
-                source_quality_counters["rejection_reasons"],
-            )
-            run_summary["classification"] = classify_run_summary(run_summary)
-            run_summaries.append(run_summary)
+        run_summaries = [
+            run_summary
+            for run_summary in all_run_summaries
+            if run_summary.get("source") == detail_source
+        ]
         report["run_detail_source"] = detail_source
         report["run_summaries"] = sorted(
             run_summaries,

@@ -933,6 +933,126 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
     assert "url" not in run_output
 
 
+def test_source_summary_exposes_latest_run_truth_when_lookback_has_stale_blockers(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        select = dict(query).get("select")
+        if select == "*":
+            if table == "webhook_log":
+                return [
+                    {
+                        "run_id": "run-new-margin",
+                        "source": "jjkane",
+                        "status": "processed",
+                        "item_count": 4,
+                        "received_at": "2026-06-06T11:05:00+00:00",
+                    }
+                ]
+            if table == "ingest_delivery_log":
+                return [
+                    {
+                        "run_id": "run-new-margin",
+                        "source_site": "jjkane",
+                        "channel": "db_save",
+                        "status": "skipped_margin",
+                        "error_message": "margin_below_floor",
+                        "listing_id": "new-margin",
+                        "created_at": "2026-06-06T11:05:01+00:00",
+                    }
+                ]
+            if table == "sonar_listings":
+                return [
+                    {
+                        "listing_id": "new-margin",
+                        "year": 2023,
+                        "mileage": 27021,
+                        "vin": "3C4NJDBN6PT520834",
+                        "created_at": "2026-06-06T11:05:01+00:00",
+                    }
+                ]
+            if table == "opportunities":
+                return [{"created_at": "2026-06-06T11:05:02+00:00"}]
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-new-margin",
+                    "source": "jjkane",
+                    "status": "processed",
+                    "item_count": 4,
+                    "received_at": "2026-06-06T11:05:00+00:00",
+                },
+                {
+                    "run_id": "run-old-proxy",
+                    "source": "jjkane",
+                    "status": "processed",
+                    "item_count": 4,
+                    "received_at": "2026-06-06T10:45:00+00:00",
+                },
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-new-margin",
+                    "source_site": "jjkane",
+                    "channel": "db_save",
+                    "status": "skipped_margin",
+                    "error_message": "margin_below_floor",
+                    "listing_id": "new-margin",
+                    "created_at": "2026-06-06T11:05:01+00:00",
+                },
+                {
+                    "run_id": "run-old-proxy",
+                    "source_site": "jjkane",
+                    "channel": "db_save",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy",
+                    "listing_id": "old-proxy",
+                    "created_at": "2026-06-06T10:45:01+00:00",
+                },
+            ]
+        if table == "sonar_listings":
+            return [
+                {
+                    "listing_id": "new-margin",
+                    "year": 2023,
+                    "mileage": 27021,
+                    "vin": "3C4NJDBN6PT520834",
+                    "created_at": "2026-06-06T11:05:01+00:00",
+                },
+                {
+                    "listing_id": "old-proxy",
+                    "year": 2023,
+                    "mileage": 27021,
+                    "vin": "3C4NJDBN6PT520834",
+                    "created_at": "2026-06-06T10:45:01+00:00",
+                },
+            ]
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=2,
+        limit=100,
+        now=datetime(2026, 6, 6, 11, 15, tzinfo=timezone.utc),
+        run_detail_source="jjkane",
+    )
+
+    source_summary = report["source_summaries"][0]
+
+    assert source_summary["reason_counts"] == {
+        "margin_below_floor": 1,
+        "pricing_maturity_proxy": 1,
+    }
+    assert source_summary["latest_run_id"] == "run-new-margin"
+    assert source_summary["latest_run_classification"] == "economic_reject_dominant"
+    assert source_summary["latest_run_reason_counts"] == {"margin_below_floor": 1}
+    assert "pricing_maturity_proxy" not in source_summary["latest_run_reason_counts"]
+
+
 def test_run_level_positive_item_gap_controls_overall_verdict(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if dict(query).get("select") == "*":
