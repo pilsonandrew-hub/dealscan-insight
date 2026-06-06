@@ -104,6 +104,14 @@ let detailVinsFound = 0;
 let detailMileagesFound = 0;
 let enrichedRowsAccepted = 0;
 let enrichedRowsRejected = 0;
+let rowsExcludedMissingTitle = 0;
+let rowsExcludedConditionPrefilter = 0;
+let rowsExcludedNonVehicle = 0;
+let rowsExcludedRustState = 0;
+let rowsExcludedNonTargetState = 0;
+let rowsExcludedBidRange = 0;
+let rowsExcludedAgeMileagePrefilter = 0;
+let rowsExcludedDuplicate = 0;
 const rejectionReasons = {};
 
 function incrementRejectionReason(reason) {
@@ -313,14 +321,17 @@ async function pushListing(listing, sourceUrl, log) {
     const mileage = parseMileage([title, description].filter(Boolean).join(' '));
 
     if (!title) {
+        rowsExcludedMissingTitle++;
         log.debug(`[SKIP] Missing title on ${sourceUrl}`);
         return false;
     }
     if (hasConditionReject({ title, description })) {
+        rowsExcludedConditionPrefilter++;
         log.debug(`[SKIP] Condition reject: ${title}`);
         return false;
     }
     if (!isVehicle(title)) {
+        rowsExcludedNonVehicle++;
         log.debug(`[SKIP] Not a vehicle: ${title}`);
         return false;
     }
@@ -331,25 +342,30 @@ async function pushListing(listing, sourceUrl, log) {
         if (year && year >= currentYear - 2) {
             log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
         } else {
+            rowsExcludedRustState++;
             log.debug(`[SKIP] High-rust state: ${state} - ${title}`);
             return false;
         }
     }
     if (!targetStateSet.has(state)) {
+        rowsExcludedNonTargetState++;
         log.debug(`[SKIP] Out-of-target state: ${state} - ${title}`);
         return false;
     }
     if (currentBid < minBid || currentBid > maxBid) {
+        rowsExcludedBidRange++;
         log.debug(`[SKIP] Out-of-range bid $${currentBid} - ${title}`);
         return false;
     }
     const currentYear = new Date().getFullYear();
     const age = currentYear - year;
     if (!year || age > MAX_ALLOWED_AGE_YEARS || age < 0) {
+        rowsExcludedAgeMileagePrefilter++;
         log.debug(`[SKIP] Too old or unknown year: ${year} - ${title}`);
         return false;
     }
     if (mileage !== null && mileage > MAX_ALLOWED_MILEAGE) {
+        rowsExcludedAgeMileagePrefilter++;
         log.debug(`[SKIP] Too many miles: ${mileage} - ${title}`);
         return false;
     }
@@ -357,6 +373,7 @@ async function pushListing(listing, sourceUrl, log) {
     const listingUrl = normalizeText(listing.listingUrl) || sourceUrl;
     const dedupeKey = listingUrl || `${title}-${state}-${currentBid}`;
     if (seenListings.has(dedupeKey)) {
+        rowsExcludedDuplicate++;
         return false;
     }
     seenListings.add(dedupeKey);
@@ -409,18 +426,22 @@ async function pushTXListing(listing, sourceUrl, log) {
     const currentBid = parseMoney(listing.currentBid);
 
     if (!title) {
+        rowsExcludedMissingTitle++;
         log.debug(`[TX][SKIP] Missing title on ${sourceUrl}`);
         return false;
     }
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(title.toLowerCase()))) {
+        rowsExcludedConditionPrefilter++;
         log.debug(`[TX][SKIP] Condition reject: ${title}`);
         return false;
     }
     if (!isVehicle(title)) {
+        rowsExcludedNonVehicle++;
         log.debug(`[TX][SKIP] Not a vehicle: ${title}`);
         return false;
     }
     if (currentBid !== 0 && (currentBid < minBid || currentBid > maxBid)) {
+        rowsExcludedBidRange++;
         log.debug(`[TX][SKIP] Out-of-range bid $${currentBid} - ${title}`);
         return false;
     }
@@ -428,6 +449,7 @@ async function pushTXListing(listing, sourceUrl, log) {
     const listingUrl = normalizeText(listing.listingUrl) || sourceUrl;
     const dedupeKey = listingUrl || `${title}-TX-${currentBid}`;
     if (seenListings.has(dedupeKey)) {
+        rowsExcludedDuplicate++;
         return false;
     }
     seenListings.add(dedupeKey);
@@ -437,10 +459,12 @@ async function pushTXListing(listing, sourceUrl, log) {
     const currentYear = new Date().getFullYear();
     const age = currentYear - year;
     if (!year || age > MAX_ALLOWED_AGE_YEARS || age < 0) {
+        rowsExcludedAgeMileagePrefilter++;
         log.debug(`[TX][SKIP] Too old or unknown year: ${year} - ${title}`);
         return false;
     }
     if (mileage !== null && mileage > MAX_ALLOWED_MILEAGE) {
+        rowsExcludedAgeMileagePrefilter++;
         log.debug(`[TX][SKIP] Too many miles: ${mileage} - ${title}`);
         return false;
     }
@@ -755,6 +779,16 @@ if (detailQueue.length > 0) {
 
 console.log(`[PUBLICSURPLUS COMPLETE] Found: ${totalFound} | Passed filters: ${totalAfterFilters} | Pushed: ${totalPushed}`);
 
+const accountedRows = totalAfterFilters
+    + rowsExcludedMissingTitle
+    + rowsExcludedConditionPrefilter
+    + rowsExcludedNonVehicle
+    + rowsExcludedRustState
+    + rowsExcludedNonTargetState
+    + rowsExcludedBidRange
+    + rowsExcludedAgeMileagePrefilter
+    + rowsExcludedDuplicate;
+
 await Actor.pushData({
     record_type: 'source_quality_proof',
     source: 'publicsurplus',
@@ -770,6 +804,15 @@ await Actor.pushData({
     detail_mileages_found: detailMileagesFound,
     enriched_rows_accepted: enrichedRowsAccepted,
     enriched_rows_rejected: enrichedRowsRejected,
+    rows_excluded_missing_required_data: rowsExcludedMissingTitle,
+    rows_excluded_non_vehicle: rowsExcludedNonVehicle,
+    rows_excluded_policy_prefilter: rowsExcludedConditionPrefilter,
+    rows_excluded_rust_state: rowsExcludedRustState,
+    rows_excluded_out_of_scope: rowsExcludedNonTargetState,
+    rows_excluded_bid_range: rowsExcludedBidRange,
+    rows_excluded_age_mileage_prefilter: rowsExcludedAgeMileagePrefilter,
+    rows_excluded_duplicate: rowsExcludedDuplicate,
+    rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - accountedRows),
     rejection_reasons: rejectionReasons,
     max_pages_total: effectiveMaxPages + maxTXPages,
     scraped_at: new Date().toISOString(),

@@ -104,4 +104,33 @@ describe('ds-publicsurplus source contract', () => {
     expect(source).toContain('detail_mileages_found: detailMileagesFound');
     expect(source).toContain('rejection_reasons: rejectionReasons');
   });
+
+  test('source-quality proof accounts for every prefilter discard class', () => {
+    expect(source).toContain('let rowsExcludedMissingTitle = 0;');
+    expect(source).toContain('let rowsExcludedConditionPrefilter = 0;');
+    expect(source).toContain('let rowsExcludedNonVehicle = 0;');
+    expect(source).toContain('let rowsExcludedRustState = 0;');
+    expect(source).toContain('let rowsExcludedNonTargetState = 0;');
+    expect(source).toContain('let rowsExcludedBidRange = 0;');
+    expect(source).toContain('let rowsExcludedAgeMileagePrefilter = 0;');
+    expect(source).toContain('let rowsExcludedDuplicate = 0;');
+    expect(source).toContain('const accountedRows = totalAfterFilters');
+    expect(source).toContain('+ rowsExcludedMissingTitle');
+    expect(source).toContain('+ rowsExcludedConditionPrefilter');
+    expect(source).toContain('+ rowsExcludedNonVehicle');
+    expect(source).toContain('+ rowsExcludedRustState');
+    expect(source).toContain('+ rowsExcludedNonTargetState');
+    expect(source).toContain('+ rowsExcludedBidRange');
+    expect(source).toContain('+ rowsExcludedAgeMileagePrefilter');
+    expect(source).toContain('+ rowsExcludedDuplicate');
+    expect(source).toContain('rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - accountedRows)');
+    expect(source).toContain('rows_excluded_missing_required_data: rowsExcludedMissingTitle');
+    expect(source).toContain('rows_excluded_non_vehicle: rowsExcludedNonVehicle');
+    expect(source).toContain('rows_excluded_policy_prefilter: rowsExcludedConditionPrefilter');
+    expect(source).toContain('rows_excluded_rust_state: rowsExcludedRustState');
+    expect(source).toContain('rows_excluded_out_of_scope: rowsExcludedNonTargetState');
+    expect(source).toContain('rows_excluded_bid_range: rowsExcludedBidRange');
+    expect(source).toContain('rows_excluded_age_mileage_prefilter: rowsExcludedAgeMileagePrefilter');
+    expect(source).toContain('rows_excluded_duplicate: rowsExcludedDuplicate');
+  });
 });
