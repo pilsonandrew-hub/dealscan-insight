@@ -240,6 +240,55 @@ def test_classify_source_uses_full_proxy_count_when_display_reason_counts_are_tr
     assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
 
 
+def test_classify_source_does_not_count_non_bid_ceiling_reasons_as_bid_ceiling():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 6,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 4,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "condition_unverified": 4,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+    assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
+
+
+def test_classify_source_non_bid_ceiling_reasons_do_not_suppress_proxy_dominance():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 7,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 5,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "condition_unverified": 3,
+            "pricing_maturity_proxy": 2,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
+
+
 def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
     dirty_only = {
         "source": "hibid",
@@ -1176,10 +1225,13 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
             "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
             "pricing_maturity_proxy_rows": 0,
             "dirty_pricing_maturity_proxy_rows": 0,
+            "bid_ceiling_exceeded_rows": 0,
+            "dirty_bid_ceiling_exceeded_rows": 0,
             "listing_metadata_gap_rows": 0,
             "listing_metadata_gap_status_counts": {},
             "listing_metadata_gap_reason_counts": {},
             "listing_metadata_gap_pricing_maturity_proxy_rows": 0,
+            "listing_metadata_gap_bid_ceiling_exceeded_rows": 0,
             "classification": "dirty_source_reject_only",
         }
     ]

@@ -311,6 +311,33 @@ def _proxy_rows_inside_listing_gaps(summary: dict[str, Any], listing_gap_ceiling
     return listing_gap_ceiling_rows
 
 
+def _bid_ceiling_rows(summary: dict[str, Any], reason_counts: dict[str, Any]) -> int:
+    if "bid_ceiling_exceeded_rows" in summary:
+        return int(summary.get("bid_ceiling_exceeded_rows") or 0)
+    return int(reason_counts.get("bid_ceiling_exceeded") or 0)
+
+
+def _bid_rows_inside_dirty_rejections(summary: dict[str, Any], reason_counts: dict[str, Any], dirty_rows: int) -> int:
+    if "dirty_bid_ceiling_exceeded_rows" in summary:
+        return int(summary.get("dirty_bid_ceiling_exceeded_rows") or 0)
+    dirty_reason_counts = summary.get("dirty_rejection_reason_counts")
+    if isinstance(dirty_reason_counts, dict):
+        return int(dirty_reason_counts.get("bid_ceiling_exceeded") or 0)
+
+    dirty_reason_rows = sum(int(reason_counts.get(reason) or 0) for reason in DIRTY_REJECTION_REASON_BUCKETS)
+    bid_rows = int(reason_counts.get("bid_ceiling_exceeded") or 0)
+    return min(bid_rows, max(0, dirty_rows - dirty_reason_rows))
+
+
+def _bid_rows_inside_listing_gaps(summary: dict[str, Any], listing_gap_ceiling_rows: int) -> int:
+    if "listing_metadata_gap_bid_ceiling_exceeded_rows" in summary:
+        return int(summary.get("listing_metadata_gap_bid_ceiling_exceeded_rows") or 0)
+    listing_gap_reason_counts = summary.get("listing_metadata_gap_reason_counts")
+    if isinstance(listing_gap_reason_counts, dict):
+        return int(listing_gap_reason_counts.get("bid_ceiling_exceeded") or 0)
+    return listing_gap_ceiling_rows
+
+
 def _delivery_row_is_dirty_for_clean_yield(
     row: dict[str, Any],
     listing_by_key: dict[str, dict[str, Any]],
@@ -476,8 +503,17 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     proxy_rows = _pricing_proxy_rows(summary, reason_counts)
     dirty_proxy_rows = _proxy_rows_inside_dirty_rejections(summary, reason_counts, dirty_rows)
     listing_gap_proxy_rows = _proxy_rows_inside_listing_gaps(summary, listing_gap_ceiling_rows)
-    clean_proxy_pricing_rows = min(
+    clean_bid_ceiling_rows = min(
         clean_ceiling_rows,
+        max(
+            0,
+            _bid_ceiling_rows(summary, reason_counts)
+            - _bid_rows_inside_dirty_rejections(summary, reason_counts, dirty_rows)
+            - _bid_rows_inside_listing_gaps(summary, listing_gap_ceiling_rows),
+        ),
+    )
+    clean_proxy_pricing_rows = min(
+        max(0, clean_ceiling_rows - clean_bid_ceiling_rows),
         _pricing_proxy_rejection_rows(
             status_counts,
             proxy_rows,
@@ -486,7 +522,6 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
             listing_gap_proxy_rows=listing_gap_proxy_rows,
         ),
     )
-    clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
 
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
@@ -547,8 +582,17 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     proxy_rows = _pricing_proxy_rows(summary, reason_counts)
     dirty_proxy_rows = _proxy_rows_inside_dirty_rejections(summary, reason_counts, dirty_rows)
     listing_gap_proxy_rows = _proxy_rows_inside_listing_gaps(summary, listing_gap_ceiling_rows)
-    clean_proxy_pricing_rows = min(
+    clean_bid_ceiling_rows = min(
         clean_ceiling_rows,
+        max(
+            0,
+            _bid_ceiling_rows(summary, reason_counts)
+            - _bid_rows_inside_dirty_rejections(summary, reason_counts, dirty_rows)
+            - _bid_rows_inside_listing_gaps(summary, listing_gap_ceiling_rows),
+        ),
+    )
+    clean_proxy_pricing_rows = min(
+        max(0, clean_ceiling_rows - clean_bid_ceiling_rows),
         _pricing_proxy_rejection_rows(
             status_counts,
             proxy_rows,
@@ -557,7 +601,6 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
             listing_gap_proxy_rows=listing_gap_proxy_rows,
         ),
     )
-    clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
     if (
@@ -1143,11 +1186,18 @@ def build_source_yield_report(
         run_summary["dirty_pricing_maturity_proxy_rows"] = int(
             delivery_counters["dirty_reason"].get("pricing_maturity_proxy") or 0
         )
+        run_summary["bid_ceiling_exceeded_rows"] = int(delivery_counters["reason"].get("bid_ceiling_exceeded") or 0)
+        run_summary["dirty_bid_ceiling_exceeded_rows"] = int(
+            delivery_counters["dirty_reason"].get("bid_ceiling_exceeded") or 0
+        )
         run_summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         run_summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
         run_summary["listing_metadata_gap_reason_counts"] = dict(delivery_counters["listing_gap_reason"].most_common(10))
         run_summary["listing_metadata_gap_pricing_maturity_proxy_rows"] = int(
             delivery_counters["listing_gap_reason"].get("pricing_maturity_proxy") or 0
+        )
+        run_summary["listing_metadata_gap_bid_ceiling_exceeded_rows"] = int(
+            delivery_counters["listing_gap_reason"].get("bid_ceiling_exceeded") or 0
         )
         _attach_source_quality_summary(
             run_summary,
@@ -1203,11 +1253,18 @@ def build_source_yield_report(
         summary["dirty_pricing_maturity_proxy_rows"] = int(
             delivery_counters["dirty_reason"].get("pricing_maturity_proxy") or 0
         )
+        summary["bid_ceiling_exceeded_rows"] = int(delivery_counters["reason"].get("bid_ceiling_exceeded") or 0)
+        summary["dirty_bid_ceiling_exceeded_rows"] = int(
+            delivery_counters["dirty_reason"].get("bid_ceiling_exceeded") or 0
+        )
         summary["listing_metadata_gap_rows"] = sum(delivery_counters["listing_gap"].values())
         summary["listing_metadata_gap_status_counts"] = dict(delivery_counters["listing_gap"].most_common(10))
         summary["listing_metadata_gap_reason_counts"] = dict(delivery_counters["listing_gap_reason"].most_common(10))
         summary["listing_metadata_gap_pricing_maturity_proxy_rows"] = int(
             delivery_counters["listing_gap_reason"].get("pricing_maturity_proxy") or 0
+        )
+        summary["listing_metadata_gap_bid_ceiling_exceeded_rows"] = int(
+            delivery_counters["listing_gap_reason"].get("bid_ceiling_exceeded") or 0
         )
         _attach_source_quality_summary(
             summary,
