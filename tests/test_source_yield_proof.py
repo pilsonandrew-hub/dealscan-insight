@@ -78,6 +78,38 @@ def test_classify_source_separates_gate_and_margin_dominance():
     assert report_source_yield_proof.classify_source_summary(margin_summary) == "economic_reject_dominant"
 
 
+def test_classify_source_separates_pricing_proxy_from_bid_ceiling_dominance():
+    proxy_summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {"saved_sonar": 1, "skipped_ceiling": 1, "skipped_proof": 1},
+        "reason_counts": {
+            "none": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+    ceiling_summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {"saved_sonar": 1, "skipped_ceiling": 1, "skipped_proof": 1},
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert report_source_yield_proof.classify_source_summary(proxy_summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(proxy_summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_source_summary(ceiling_summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(ceiling_summary) == "pricing_ceiling_reject_dominant"
+
+
 def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
     dirty_only = {
         "source": "hibid",

@@ -271,6 +271,12 @@ def _dirty_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str
     return min(gate_rows, dirty_reason_rows)
 
 
+def _pricing_proxy_rejection_rows(status_counts: dict[str, Any], reason_counts: dict[str, Any]) -> int:
+    ceiling_rows = int(status_counts.get("skipped_ceiling") or 0)
+    proxy_rows = int(reason_counts.get("pricing_maturity_proxy") or 0)
+    return min(ceiling_rows, proxy_rows)
+
+
 def _delivery_row_is_dirty_for_clean_yield(
     row: dict[str, Any],
     listing_by_key: dict[str, dict[str, Any]],
@@ -432,6 +438,11 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
     clean_gate_rows = max(0, gate_rows - dirty_rows)
     clean_margin_rows = max(0, margin_rows - int(listing_gap_status_counts.get("skipped_margin") or 0))
     clean_ceiling_rows = max(0, ceiling_rows - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
+    clean_proxy_pricing_rows = min(
+        clean_ceiling_rows,
+        _pricing_proxy_rejection_rows(status_counts, reason_counts),
+    )
+    clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
 
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
@@ -452,7 +463,9 @@ def classify_source_summary(summary: dict[str, Any]) -> str:
         return "source_quality_reject_dominant"
     if clean_margin_rows >= _dominance_threshold(business_delivery_rows, 0.35):
         return "economic_reject_dominant"
-    if clean_ceiling_rows >= _dominance_threshold(business_delivery_rows, 0.35):
+    if clean_proxy_pricing_rows >= _dominance_threshold(business_delivery_rows, 0.35):
+        return "pricing_proxy_reject_dominant"
+    if clean_bid_ceiling_rows >= _dominance_threshold(business_delivery_rows, 0.35):
         return "pricing_ceiling_reject_dominant"
     return "mixed_rejection_surface"
 
@@ -479,6 +492,11 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
     clean_gate_rows = max(0, int(status_counts.get("skipped_gate") or 0) - dirty_rows)
     clean_margin_rows = max(0, int(status_counts.get("skipped_margin") or 0) - int(listing_gap_status_counts.get("skipped_margin") or 0))
     clean_ceiling_rows = max(0, int(status_counts.get("skipped_ceiling") or 0) - int(listing_gap_status_counts.get("skipped_ceiling") or 0))
+    clean_proxy_pricing_rows = min(
+        clean_ceiling_rows,
+        _pricing_proxy_rejection_rows(status_counts, reason_counts),
+    )
+    clean_bid_ceiling_rows = max(0, clean_ceiling_rows - clean_proxy_pricing_rows)
     if delivery_rows == 0:
         return "no_recent_delivery_rows"
     if (
@@ -498,7 +516,9 @@ def classify_run_summary(summary: dict[str, Any]) -> str:
         return "source_quality_reject_dominant"
     if clean_margin_rows == business_delivery_rows:
         return "economic_reject_dominant"
-    if clean_ceiling_rows == business_delivery_rows:
+    if clean_proxy_pricing_rows == business_delivery_rows:
+        return "pricing_proxy_reject_dominant"
+    if clean_bid_ceiling_rows == business_delivery_rows:
         return "pricing_ceiling_reject_dominant"
     return classify_source_summary(summary)
 
