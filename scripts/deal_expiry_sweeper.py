@@ -23,6 +23,7 @@ from backend.ingest.alert_gating import (
     UNKNOWN_OR_WEAK_CONDITION_GRADES,
     has_source_condition_evidence,
 )
+from backend.business_rules import DOS_SAVE_THRESHOLD, HOT_DEAL_ALERT_THRESHOLD
 from supabase import create_client
 
 
@@ -65,6 +66,11 @@ def _dedupe_preserving_order(values: Iterable[str]) -> list[str]:
         seen.add(value)
         deduped.append(value)
     return deduped
+
+
+def _exclude_ids(values: Iterable[str], excluded: Iterable[str]) -> list[str]:
+    excluded_set = set(excluded)
+    return [value for value in values if value not in excluded_set]
 
 
 def _condition_grade_requires_source_evidence(row: dict[str, Any]) -> bool:
@@ -205,7 +211,7 @@ def run_sweep(
             supabase,
             [
                 lambda q: q.eq("is_active", True),
-                lambda q: q.gte("dos_score", 80),
+                lambda q: q.gte("dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 lambda q: q.is_("mileage", "null"),
             ],
         ),
@@ -213,7 +219,7 @@ def run_sweep(
             supabase,
             [
                 lambda q: q.eq("is_active", True),
-                lambda q: q.gte("dos_score", 80),
+                lambda q: q.gte("dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 lambda q: q.lte("mileage", 0),
             ],
         ),
@@ -223,7 +229,7 @@ def run_sweep(
             supabase,
             [
                 lambda q: q.eq("is_active", True),
-                lambda q: q.gte("dos_score", 80),
+                lambda q: q.gte("dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 lambda q: q.is_("vin", "null"),
             ],
         ),
@@ -231,7 +237,7 @@ def run_sweep(
             supabase,
             [
                 lambda q: q.eq("is_active", True),
-                lambda q: q.gte("dos_score", 80),
+                lambda q: q.gte("dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 lambda q: q.eq("vin", ""),
             ],
         ),
@@ -241,7 +247,7 @@ def run_sweep(
         "id,title,condition_grade,raw_data",
         [
             lambda q: q.eq("is_active", True),
-            lambda q: q.gte("dos_score", 80),
+            lambda q: q.gte("dos_score", HOT_DEAL_ALERT_THRESHOLD),
         ],
     )
     active_high_dos_missing_condition_evidence_ids = _missing_source_condition_evidence_ids(
@@ -252,7 +258,7 @@ def run_sweep(
             supabase,
             [
                 lambda q: q.eq("is_active", True),
-                lambda q: q.lt("dos_score", 50),
+                lambda q: q.lt("dos_score", DOS_SAVE_THRESHOLD),
             ],
         ),
         *_fetch_ids(
@@ -263,6 +269,15 @@ def run_sweep(
             ],
         ),
     ])
+    active_rejected_or_low_dos_ids = _exclude_ids(
+        active_rejected_or_low_dos_ids,
+        [
+            *expired_ids,
+            *active_high_dos_missing_mileage_ids,
+            *active_high_dos_missing_vin_ids,
+            *active_high_dos_missing_condition_evidence_ids,
+        ],
+    )
 
     post_close_request_count = (
         len([
