@@ -4,6 +4,9 @@
   "version": "0.0",
   "buildTag": "latest",
   "environmentVariables": {
-    "MARKETCHECK_KEY": "@MARKETCHECK_KEY"
+    "MARKETCHECK_KEY_1": "@MARKETCHECK_KEY_1",
+    "MARKETCHECK_KEY_2": "@MARKETCHECK_KEY_2",
+    "MARKETCHECK_KEY_3": "@MARKETCHECK_KEY_3",
+    "WEBHOOK_SECRET": "@WEBHOOK_SECRET"
   }
 }

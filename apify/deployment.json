@@ -100,10 +100,16 @@
       "scheduleId": "5eIHHDPO1Wp52hr4X",
       "webhookId": "vZW5IhQw7uTpXeFG2",
       "status": "enabled",
+      "secretEnv": [
+        "MARKETCHECK_KEY_1",
+        "MARKETCHECK_KEY_2",
+        "MARKETCHECK_KEY_3",
+        "WEBHOOK_SECRET"
+      ],
       "schedule": "0 */12 * * *",
       "scheduleName": "ds-jjkane-12hr",
       "scheduleStatus": "enabled_live",
-      "notes": "JJ Kane Government Surplus (jjkane.com) \u2014 Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Est. ~600-800 vehicles/run (FL ~420 alone)."
+      "notes": "JJ Kane Government Surplus (jjkane.com) \u2014 Algolia-based (no Playwright). Covers FL, NV, CA, TX, AZ and 20+ non-rust-belt states. Nevada State Surplus routes through JJ Kane. Marketcheck pricing uses secret-managed key rotation."
     },
     "ds-hibid-v2": {
       "id": "7s9e0eATTt1kuGGfE",
