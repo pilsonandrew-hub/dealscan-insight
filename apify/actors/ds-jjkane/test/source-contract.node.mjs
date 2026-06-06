@@ -23,10 +23,15 @@ test('JJKane rejects defect and unknown-condition phrases before pricing', () =>
     'Wrecked, Airbags Deployed, Jump To Start, Does Not Move - Broken Axle, Dash Warning Indicators On',
     'Does Not Move, Condition Unknown, Check Engine Light On, ABS Light On, Traction Control Light On',
     'Branded Title - Police Vehicle',
-    'sold AS IS/WHERE IS via Timed Auction',
   ];
 
   for (const text of blockedTexts) {
     assert.equal(helpers.hasConditionReject(text), true, text);
   }
+
+  assert.equal(
+    helpers.hasConditionReject('This unit is being sold AS IS/WHERE IS via Timed Auction and is located in FL.'),
+    false,
+    'JJ Kane boilerplate AS IS/WHERE IS is not sufficient source-policy evidence by itself',
+  );
 });
