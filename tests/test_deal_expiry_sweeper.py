@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 from scripts import deal_expiry_sweeper
+from backend.business_rules import DOS_SAVE_THRESHOLD, HOT_DEAL_ALERT_THRESHOLD
 
 
 class _Result:
@@ -172,12 +173,12 @@ def test_sweeper_archives_active_high_dos_rows_with_missing_or_invalid_mileage()
         {
             (
                 ("eq", "is_active", True),
-                ("gte", "dos_score", 80),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 ("is", "mileage", "null"),
             ): [{"id": "missing-mileage-1"}, {"id": "missing-mileage-2"}],
             (
                 ("eq", "is_active", True),
-                ("gte", "dos_score", 80),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 ("lte", "mileage", 0),
             ): [{"id": "zero-mileage-1"}],
         }
@@ -204,12 +205,12 @@ def test_sweeper_archives_active_high_dos_rows_with_missing_vin():
         {
             (
                 ("eq", "is_active", True),
-                ("gte", "dos_score", 80),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 ("is", "vin", "null"),
             ): [{"id": "missing-vin-1"}, {"id": "missing-vin-2"}],
             (
                 ("eq", "is_active", True),
-                ("gte", "dos_score", 80),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
                 ("eq", "vin", ""),
             ): [{"id": "blank-vin-1"}],
         }
@@ -236,7 +237,7 @@ def test_sweeper_archives_active_high_dos_rows_missing_source_condition_evidence
         {
             (
                 ("eq", "is_active", True),
-                ("gte", "dos_score", 80),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
             ): [
                 {
                     "id": "missing-condition-evidence-1",
@@ -281,6 +282,125 @@ def test_sweeper_archives_active_high_dos_rows_missing_source_condition_evidence
     } in client.updates
 
 
+def test_sweeper_archives_active_rows_below_save_threshold_or_rejected_grade():
+    now = datetime(2026, 6, 6, 5, 12, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("lt", "dos_score", DOS_SAVE_THRESHOLD),
+            ): [{"id": "dos-zero-row"}, {"id": "dos-49-row"}],
+            (
+                ("eq", "is_active", True),
+                ("eq", "investment_grade", "Rejected"),
+            ): [{"id": "dos-zero-row"}, {"id": "rejected-row"}],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["archived_untrusted_active_rejected_or_low_dos"] == 3
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_rejected",
+        },
+        "ids": ["dos-zero-row", "dos-49-row", "rejected-row"],
+        "filters": [("in", "id", ("dos-zero-row", "dos-49-row", "rejected-row"))],
+    } in client.updates
+
+
+def test_sweeper_preserves_expired_lifecycle_over_low_dos_archive():
+    now = datetime(2026, 6, 6, 5, 20, tzinfo=timezone.utc)
+    expired_cutoff = "2026-06-05T05:20:00+00:00"
+    client = _Client(
+        {
+            (
+                ("lt", "auction_end_date", expired_cutoff),
+                ("neq", "pipeline_step", "expired"),
+                ("eq", "is_active", True),
+            ): [
+                {
+                    "id": "expired-low-dos",
+                    "source_site": "govdeals",
+                    "listing_id": "asset-expired",
+                    "listing_url": "https://www.govdeals.com/asset/expired",
+                    "auction_end_date": "2026-06-04T05:00:00+00:00",
+                }
+            ],
+            (
+                ("eq", "is_active", True),
+                ("lt", "dos_score", DOS_SAVE_THRESHOLD),
+            ): [{"id": "expired-low-dos"}, {"id": "active-low-dos"}],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["expired"] == 1
+    assert summary["archived_untrusted_active_rejected_or_low_dos"] == 1
+    assert {
+        "table": "opportunities",
+        "payload": {"is_active": False, "pipeline_step": "expired"},
+        "ids": ["expired-low-dos"],
+        "filters": [("in", "id", ("expired-low-dos",))],
+    } in client.updates
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_rejected",
+        },
+        "ids": ["active-low-dos"],
+        "filters": [("in", "id", ("active-low-dos",))],
+    } in client.updates
+
+
+def test_sweeper_preserves_specific_high_dos_archive_status_over_rejected_grade():
+    now = datetime(2026, 6, 6, 5, 25, tzinfo=timezone.utc)
+    client = _Client(
+        {
+            (
+                ("eq", "is_active", True),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
+                ("is", "mileage", "null"),
+            ): [{"id": "rejected-missing-mileage"}],
+            (
+                ("eq", "is_active", True),
+                ("eq", "investment_grade", "Rejected"),
+            ): [{"id": "rejected-missing-mileage"}, {"id": "rejected-only"}],
+        }
+    )
+
+    summary = deal_expiry_sweeper.run_sweep(client, now=now, notify=lambda _text: True)
+
+    assert summary["archived_untrusted_active_high_dos_missing_mileage"] == 1
+    assert summary["archived_untrusted_active_rejected_or_low_dos"] == 1
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_no_mileage",
+        },
+        "ids": ["rejected-missing-mileage"],
+        "filters": [("in", "id", ("rejected-missing-mileage",))],
+    } in client.updates
+    assert {
+        "table": "opportunities",
+        "payload": {
+            "is_active": False,
+            "pipeline_step": "archived",
+            "step_status": "q_rejected",
+        },
+        "ids": ["rejected-only"],
+        "filters": [("in", "id", ("rejected-only",))],
+    } in client.updates
+
+
 def test_sweeper_condition_evidence_query_uses_live_opportunity_columns_only():
     now = datetime(2026, 6, 5, 10, 15, tzinfo=timezone.utc)
     client = _Client({})
@@ -311,7 +431,7 @@ def test_sweeper_archive_step_status_values_fit_live_schema_limit():
         {
             (
                 ("eq", "is_active", True),
-                ("gte", "dos_score", 80),
+                ("gte", "dos_score", HOT_DEAL_ALERT_THRESHOLD),
             ): [
                 {
                     "id": "missing-condition-evidence",
@@ -513,11 +633,13 @@ def test_sweeper_message_reports_post_close_outcome_referrals():
             "archived_untrusted_active_high_dos_missing_mileage": 0,
             "archived_untrusted_active_high_dos_missing_vin": 0,
             "archived_untrusted_active_high_dos_missing_condition_evidence": 0,
+            "archived_untrusted_active_rejected_or_low_dos": 0,
             "run_time": "2026-06-02 08:18 UTC",
         }
     )
 
     assert "Post-close outcome referrals: <b>2</b>" in message
+    assert "Archived active rejected/low-DOS deals: <b>0</b>" in message
 
 
 def test_sweeper_message_labels_dry_run():
@@ -531,6 +653,7 @@ def test_sweeper_message_labels_dry_run():
             "archived_untrusted_active_high_dos_missing_mileage": 0,
             "archived_untrusted_active_high_dos_missing_vin": 0,
             "archived_untrusted_active_high_dos_missing_condition_evidence": 0,
+            "archived_untrusted_active_rejected_or_low_dos": 0,
             "run_time": "2026-06-02 08:18 UTC",
         }
     )
