@@ -39,6 +39,14 @@ SOURCE_QUALITY_TOTAL_FIELDS = (
     "prefilter_passed_rows_total",
     "pushed_rows_total",
 )
+SOURCE_QUALITY_DIAGNOSTIC_EXCLUSION_PARENTS = {
+    "rows_excluded_missing_vin": "rows_excluded_missing_required_data",
+    "rows_excluded_missing_mileage": "rows_excluded_missing_required_data",
+    "rows_excluded_after_detail_attempt": "rows_excluded_missing_required_data",
+    "rows_excluded_without_detail_attempt": "rows_excluded_missing_required_data",
+    "rows_excluded_age_over_limit": "rows_excluded_age_or_mileage",
+    "rows_excluded_mileage_over_limit": "rows_excluded_age_or_mileage",
+}
 
 
 def _canon_source(value: Any) -> str | None:
@@ -369,6 +377,19 @@ def _source_quality_numeric_summary(proof: dict[str, Any] | None) -> tuple[Count
     return totals, exclusions, rejection_reasons
 
 
+def _source_quality_additive_exclusion_total(exclusions: Counter[str]) -> int:
+    total = 0
+    for key, value in exclusions.items():
+        count = int(value or 0)
+        if count <= 0:
+            continue
+        parent_key = SOURCE_QUALITY_DIAGNOSTIC_EXCLUSION_PARENTS.get(key)
+        if parent_key and int(exclusions.get(parent_key) or 0) > 0:
+            continue
+        total += count
+    return total
+
+
 def _attach_source_quality_summary(
     summary: dict[str, Any],
     totals: Counter[str],
@@ -381,7 +402,7 @@ def _attach_source_quality_summary(
     summary["source_quality_prefilter_passed_rows_total"] = int(totals.get("prefilter_passed_rows_total") or 0)
     summary["source_quality_pushed_rows_total"] = int(totals.get("pushed_rows_total") or 0)
     summary["source_quality_proof_run_count"] = int(totals.get("proof_run_count") or 0)
-    summary["source_quality_visible_exclusion_rows_total"] = sum(int(value or 0) for value in exclusions.values())
+    summary["source_quality_visible_exclusion_rows_total"] = _source_quality_additive_exclusion_total(exclusions)
     summary["source_quality_exclusion_counts"] = dict(exclusions.most_common(20))
     summary["source_quality_rejection_reason_counts"] = dict(rejection_reasons.most_common(20))
 
