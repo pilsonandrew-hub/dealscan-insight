@@ -996,6 +996,79 @@ class WebhookSecurityTests(unittest.TestCase):
             "margin_below_floor | margin=$100 floor=$2500 tier=standard bid=$19000 mmr=$21500 cost=$21400 max_bid=$20500 headroom=$1500 pricing=market_comp comp_price=$41182 comp_count=3 comp_conf=0.69",
         )
 
+    def test_apify_webhook_classifies_proxy_pricing_before_margin_floor(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-proxy-ceiling", "defaultDatasetId": "dataset-proxy-ceiling"},
+        }
+        vehicle = {
+            "run_id": "run-proxy-ceiling",
+            "listing_id": "govdeals-2025-mustang",
+            "listing_url": "https://www.govdeals.com/asset/697/26928",
+            "title": "New (Surplus Inventory) 2025 Ford Mustang EcoBoost Premium Coupe",
+            "year": 2025,
+            "make": "Ford",
+            "model": "Mustang",
+            "current_bid": 37283,
+            "state": "GA",
+            "mileage": 38,
+            "source_site": "govdeals",
+        }
+        delivery_calls = []
+        sonar_rows = []
+        fake_httpx = types.SimpleNamespace(AsyncClient=_HTTPXAsyncClient)
+
+        with patch.object(ingest, "WEBHOOK_SECRET", "topsecret"), patch.object(
+            ingest, "WEBHOOK_SECRET_PREVIOUS", ""
+        ), patch.object(ingest, "supabase_client", object()), patch.object(
+            ingest, "_find_recent_webhook_replay", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "insert_webhook_log", lambda *_args, **_kwargs: "log-proxy-ceiling"
+        ), patch.object(
+            ingest, "update_webhook_log", lambda *_args, **_kwargs: None
+        ), patch.object(
+            ingest, "normalize_apify_vehicle", lambda *_args, **_kwargs: dict(vehicle)
+        ), patch.object(
+            ingest, "passes_basic_gates", lambda *_args, **_kwargs: {"pass": True, "reason": "ok"}
+        ), patch.object(
+            ingest,
+            "score_vehicle",
+            lambda _vehicle: {
+                "dos_score": 0,
+                "vehicle_tier": "premium",
+                "wholesale_margin": -21037,
+                "ceiling_pass": False,
+                "ceiling_reason": "pricing_maturity_proxy",
+                "pricing_trust_blocked": True,
+                "pricing_trust_reason": "pricing_maturity_proxy",
+                "current_bid": 37283,
+                "gross_margin": -21037,
+                "mmr_estimated": 22000,
+                "total_cost": 43037,
+                "max_bid": 0,
+                "bid_headroom": 0,
+                "pricing_maturity": "proxy",
+            },
+        ), patch.object(
+            ingest, "passes_ingest_margin_floor", lambda *_args, **_kwargs: False
+        ), patch.object(
+            ingest, "_save_to_sonar_listings", lambda row: sonar_rows.append(dict(row))
+        ), patch.object(
+            ingest,
+            "_record_delivery_log",
+            lambda **kwargs: delivery_calls.append(kwargs),
+        ), patch.dict(sys.modules, {"httpx": fake_httpx}):
+            response = asyncio.run(
+                ingest.apify_webhook(_Request(payload), _StubBackgroundTasks(), x_apify_webhook_secret="topsecret")
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual([row["listing_id"] for row in sonar_rows], ["govdeals-2025-mustang"])
+        self.assertEqual([call["channel"] for call in delivery_calls], ["sonar_mirror", "db_save"])
+        self.assertEqual([call["status"] for call in delivery_calls], ["saved_sonar", "skipped_ceiling"])
+        self.assertTrue(delivery_calls[1]["error_message"].startswith("pricing_maturity_proxy |"))
+        self.assertIn("bid=$37,283", delivery_calls[1]["error_message"])
+
     def test_govdeals_sold_webhook_stages_candidate_instead_of_dealer_sales(self):
         payload = {
             "createdAt": datetime.now(timezone.utc).isoformat(),

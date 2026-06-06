@@ -1085,6 +1085,38 @@ async def _process_webhook_items(
             evaluated += 1
 
             vehicle_tier = score_result.get("vehicle_tier") or "rejected"
+            if score_result.get("pricing_trust_blocked"):
+                pricing_reason = score_result.get("pricing_trust_reason") or "pricing_maturity_proxy"
+                logger.info(
+                    "[CEILING] rejected — %s | headroom=$%s: %s",
+                    pricing_reason,
+                    score_result.get("bid_headroom", 0),
+                    vehicle.get("title", "?")[:60],
+                )
+                skipped += 1
+                increment_reason_counter(skip_reasons, f"ceiling:{pricing_reason}")
+                _bid = score_result.get("current_bid") or vehicle.get("current_bid") or 0
+                _max_bid = score_result.get("max_bid") or 0
+                _mmr = score_result.get("mmr_estimated") or 0
+                _headroom = score_result.get("bid_headroom") or (_max_bid - float(_bid))
+                _ceiling_msg = (
+                    f"{pricing_reason} | bid=${float(_bid):,.0f} max_bid=${float(_max_bid):,.0f} "
+                    f"mmr=${float(_mmr):,.0f} headroom=${float(_headroom):,.0f} "
+                    f"tier={score_result.get('vehicle_tier','?')}"
+                )
+                _record_delivery_log(
+                    run_id=vehicle.get("run_id") or apify_run_id,
+                    listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
+                    listing_url=vehicle.get("listing_url"),
+                    opportunity_id=None,
+                    channel="db_save",
+                    status="skipped_ceiling",
+                    error_message=_ceiling_msg,
+                    require_durable=True,
+                    audit_state=audit_state,
+                )
+                continue
+
             if not passes_ingest_margin_floor(
                 score_result.get("wholesale_margin", 0),
                 vehicle_tier,
