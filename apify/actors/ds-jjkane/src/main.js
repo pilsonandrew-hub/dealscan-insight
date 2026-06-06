@@ -127,6 +127,55 @@ function extractVin(text) {
     return anyVin ? anyVin[1] : null;
 }
 
+function decodeHtmlEntities(text) {
+    return normalizeText(text)
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&#0*39;/g, "'")
+        .replace(/&quot;/gi, '"')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>');
+}
+
+function stripHtml(text) {
+    return decodeHtmlEntities(String(text ?? '').replace(/<[^>]+>/g, ' '));
+}
+
+function extractVinFromDetailHtml(html) {
+    const source = String(html ?? '');
+    const tableVin = source.match(
+        /<th\b[^>]*>\s*VIN\s*:?\s*<\/th>\s*<td\b[^>]*>\s*([A-HJ-NPR-Z0-9]{17})\s*<\/td>/i
+    );
+    if (tableVin) return tableVin[1].toUpperCase();
+
+    return extractVin(stripHtml(source));
+}
+
+async function fetchDetailVin(itemId) {
+    if (!itemId) return null;
+    const url = buildListingUrl(itemId);
+
+    try {
+        const resp = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; DealerScopeBot/1.0; +https://dealscan-insight-production.up.railway.app)',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            signal: AbortSignal.timeout(15000),
+        });
+
+        if (!resp.ok) {
+            console.warn(`[JJKANE] Detail page VIN fetch failed for ${itemId}: HTTP ${resp.status}`);
+            return null;
+        }
+
+        return extractVinFromDetailHtml(await resp.text());
+    } catch (err) {
+        console.warn(`[JJKANE] Detail page VIN fetch error for ${itemId}: ${err.message}`);
+        return null;
+    }
+}
+
 function parseYear(v) {
     const y = parseInt(String(v ?? '').replace(/\D/g, ''), 10);
     return (y >= 1980 && y <= new Date().getFullYear() + 1) ? y : null;
@@ -433,7 +482,7 @@ for (const state of targetStates) {
                     normalizeText(hit.webDescription || ''),
                     normalizeText(hit.shortDescription || ''),
                 ].filter(Boolean).join(' ');
-                const vin = normalizeText(hit.vin || extractVin(conditionText) || '');
+                const vinFromSourceText = normalizeText(hit.vin || extractVin(conditionText) || '');
                 const sample = {
                     title: title || `${year || ''} ${make} ${model}`.trim(),
                     year,
@@ -477,6 +526,18 @@ for (const state of targetStates) {
                     rowsExcludedAgeMileagePrefilter++;
                     incrementCount(rejectionReasons, 'mileage_over_50k_prefilter');
                     addSample(prefilterAgeMileageRejectedSamples, sample);
+                    continue;
+                }
+
+                const detailVin = vinFromSourceText ? null : await fetchDetailVin(itemId);
+                const vin = normalizeText(vinFromSourceText || detailVin || '');
+                const vinSource = hit.vin
+                    ? 'algolia_vin'
+                    : (vinFromSourceText ? 'jjkane_serial_text' : (detailVin ? 'jjkane_detail_page' : null));
+
+                if (!vin) {
+                    rowsExcludedMissingRequiredData++;
+                    incrementCount(rejectionReasons, 'missing_vin');
                     continue;
                 }
 
@@ -565,7 +626,7 @@ for (const state of targetStates) {
                     auction_id: String(hit.auctionId || ''),
                     category: normalizeText(hit.category || ''),
                     description: catalogDescription,
-                    vin_source: hit.vin ? 'algolia_vin' : (vin ? 'jjkane_serial_text' : null),
+                    vin_source: vinSource,
                     agency_name: 'JJ Kane Government Surplus',
                     source_site: SOURCE,
                     scraped_at: new Date().toISOString(),

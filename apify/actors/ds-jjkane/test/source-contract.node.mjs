@@ -12,7 +12,7 @@ function loadHelperExports() {
   const helperStart = source.indexOf('const CONDITION_REJECT_PATTERNS');
   const helperEnd = source.indexOf('// ── Marketcheck API');
   const helperSource = source.slice(helperStart, helperEnd) + `
-({ hasConditionReject })`;
+({ hasConditionReject, extractVinFromDetailHtml })`;
   return vm.runInNewContext(helperSource, {});
 }
 
@@ -59,6 +59,33 @@ test('JJKane rejects defect and unknown-condition phrases before pricing', () =>
     helpers.hasConditionReject('This unit is being sold AS IS/WHERE IS via Timed Auction and is located in FL.'),
     false,
     'JJ Kane boilerplate AS IS/WHERE IS is not sufficient source-policy evidence by itself',
+  );
+});
+
+test('JJKane extracts VIN identity from item detail pages before pricing', () => {
+  const helpers = loadHelperExports();
+  const detailHtml = `
+    <table>
+      <tr><th scope="row">Odometer:</th><td>39294</td></tr>
+      <tr><th scope="row">VIN:</th><td>1FTFW1P86NKD26312</td></tr>
+    </table>
+  `;
+
+  assert.equal(helpers.extractVinFromDetailHtml(detailHtml), '1FTFW1P86NKD26312');
+  assert.equal(helpers.extractVinFromDetailHtml('<table><tr><th>VIN:</th><td></td></tr></table>'), null);
+
+  assert.ok(
+    source.indexOf('const detailVin =') > source.indexOf('const vinFromSourceText ='),
+    'detail-page VIN enrichment must run after source-text extraction',
+  );
+  assert.ok(
+    source.indexOf('const detailVin =') < source.indexOf('const mcResult = await getMarketcheckPrice'),
+    'detail-page VIN enrichment must run before Marketcheck pricing',
+  );
+  assert.ok(
+    source.indexOf("incrementCount(rejectionReasons, 'missing_vin')") <
+      source.indexOf('const mcResult = await getMarketcheckPrice'),
+    'missing VIN rows must be rejected before pricing',
   );
 });
 
