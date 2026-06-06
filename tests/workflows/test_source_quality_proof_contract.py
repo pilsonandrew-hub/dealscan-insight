@@ -134,6 +134,23 @@ def test_bidspotter_actor_accounts_for_all_prefilter_skips():
     assert 'rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - totalPassed - accountedRows)' in text
 
 
+def test_allsurplus_actor_accounts_for_all_found_row_discards():
+    text = Path('apify/actors/ds-allsurplus/src/main.js').read_text()
+
+    assert 'rowsExcludedDuplicate++' in text
+    assert 'rowsExcludedNonVehicle++' in text
+    assert 'rowsExcludedNonUsState++' in text
+    assert 'rowsExcludedNonUsdCurrency++' in text
+    assert 'rowsExcludedRustState++' in text
+    assert 'rowsExcludedNonTargetState++' in text
+    assert 'rowsExcludedBidRange++' in text
+    assert 'rowsExcludedAgeMileagePrefilter++' in text
+    assert 'rowsExcludedAgeMileageAfterDetail++' in text
+    assert 'rowsExcludedPolicyAfterDetail++' in text
+    assert 'const accountedRows = totalPassed' in text
+    assert 'rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - accountedRows)' in text
+
+
 def test_equipmentfacts_actor_is_safe_for_supply_reactivation():
     text = Path('apify/actors/ds-equipmentfacts/src/main.js').read_text()
 
