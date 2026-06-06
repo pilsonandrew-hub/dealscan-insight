@@ -1,0 +1,190 @@
+name: Configure EquipmentFacts Apify Schedule
+
+on:
+  workflow_dispatch:
+    inputs:
+      schedule_cron:
+        description: "Apify UTC cron for EquipmentFacts cadence"
+        required: false
+        default: "0 */6 * * *"
+      max_pages:
+        description: "Maximum EquipmentFacts result pages per scheduled run"
+        required: false
+        default: "15"
+
+jobs:
+  configure-equipmentfacts-apify-schedule:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      APIFY_WEBHOOK_SECRET: ${{ secrets.APIFY_WEBHOOK_SECRET }}
+      ACTOR_ID: "0XjoegYZVcPldLstl"
+      SCHEDULE_NAME: "legacy-disabled-ds-equipmentfacts-6hr"
+      DEFAULT_SCHEDULE_CRON: "0 */6 * * *"
+      SCHEDULE_CRON: ${{ inputs.schedule_cron || '0 */6 * * *' }}
+      MAX_PAGES: ${{ inputs.max_pages || '15' }}
+    steps:
+      - name: Configure actor secret env and Apify schedule
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
+          APIFY_WEBHOOK_SECRET = os.environ.get("APIFY_WEBHOOK_SECRET", "").strip()
+          ACTOR_ID = os.environ["ACTOR_ID"]
+          SCHEDULE_NAME = os.environ["SCHEDULE_NAME"]
+          DEFAULT_SCHEDULE_CRON = os.environ["DEFAULT_SCHEDULE_CRON"]
+          SCHEDULE_CRON = (os.environ.get("SCHEDULE_CRON") or DEFAULT_SCHEDULE_CRON).strip()
+          MAX_PAGES_RAW = (os.environ.get("MAX_PAGES") or "15").strip()
+
+          if not APIFY_TOKEN:
+              raise SystemExit("APIFY_TOKEN GitHub secret is required")
+          if not APIFY_WEBHOOK_SECRET:
+              raise SystemExit("APIFY_WEBHOOK_SECRET GitHub secret is required")
+          try:
+              MAX_PAGES = int(MAX_PAGES_RAW)
+          except ValueError as exc:
+              raise SystemExit("max_pages must be an integer") from exc
+          if MAX_PAGES < 1:
+              raise SystemExit("max_pages must be at least 1")
+
+          def request(method, path, body=None):
+              url = f"https://api.apify.com/v2{path}"
+              data = None if body is None else json.dumps(body).encode("utf-8")
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {APIFY_TOKEN}",
+                      "Content-Type": "application/json",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      return json.load(response).get("data")
+              except urllib.error.HTTPError as exc:
+                  detail = exc.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(f"{method} {path} failed: HTTP {exc.code}: {detail}") from exc
+
+          def paged_items(path):
+              data = request("GET", path)
+              if isinstance(data, dict) and "items" in data:
+                  return data["items"]
+              return []
+
+          def wait_for_terminal_build(build_id):
+              terminal = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
+              last = {}
+              for _ in range(90):
+                  last = request("GET", f"/actor-builds/{build_id}")
+                  status = last.get("status")
+                  print(json.dumps({
+                      "configured_build_id": build_id,
+                      "configured_build_status": status,
+                      "configured_build_number": last.get("buildNumber"),
+                  }, sort_keys=True))
+                  if status in terminal:
+                      if status != "SUCCEEDED":
+                          raise SystemExit(f"EquipmentFacts build {build_id} ended with {status}")
+                      return last
+                  time.sleep(10)
+              raise SystemExit(f"Timed out waiting for EquipmentFacts build {build_id}")
+
+          versions = paged_items(f"/actors/{ACTOR_ID}/versions?limit=100")
+          if not versions:
+              raise SystemExit(f"No versions found for actor {ACTOR_ID}")
+
+          def version_sort_key(version_number):
+              parts = []
+              for part in str(version_number).split("."):
+                  try:
+                      parts.append(int(part))
+                  except ValueError:
+                      parts.append(-1)
+              return tuple(parts)
+
+          active_version = max(versions, key=lambda version: version_sort_key(version["versionNumber"]))
+          active_version_number = active_version["versionNumber"]
+
+          configured_versions = []
+          for version in versions:
+              version_number = version["versionNumber"]
+              env_path = (
+                  f"/actors/{ACTOR_ID}/versions/"
+                  f"{urllib.parse.quote(version_number, safe='')}/env-vars"
+              )
+              env_vars = paged_items(env_path)
+              webhook_env_payload = {
+                  "name": "WEBHOOK_SECRET",
+                  "value": APIFY_WEBHOOK_SECRET,
+                  "isSecret": True,
+              }
+              if any(item.get("name") == "WEBHOOK_SECRET" for item in env_vars):
+                  request("PUT", f"{env_path}/WEBHOOK_SECRET", webhook_env_payload)
+              else:
+                  request("POST", env_path, webhook_env_payload)
+              configured_versions.append(version_number)
+
+          build = request(
+              "POST",
+              f"/actors/{ACTOR_ID}/builds?version={active_version_number}"
+              "&tag=latest&useCache=false&betaPackages=false",
+          )
+          build = wait_for_terminal_build(build["id"])
+
+          schedule_body = {
+              "name": SCHEDULE_NAME,
+              "title": "EquipmentFacts 6h source-quality run",
+              "description": (
+                  "DealerScope EquipmentFacts cadence. Webhook auth is provided by "
+                  "the actor secret environment variable, not schedule input."
+              ),
+              "isEnabled": True,
+              "isExclusive": True,
+              "cronExpression": SCHEDULE_CRON,
+              "timezone": "UTC",
+              "actions": [
+                  {
+                      "type": "RUN_ACTOR",
+                      "actorId": ACTOR_ID,
+                      "runInput": {
+                          "body": json.dumps({"maxPages": MAX_PAGES}, sort_keys=True),
+                          "contentType": "application/json; charset=utf-8",
+                      },
+                      "runOptions": {
+                          "build": "latest",
+                          "timeoutSecs": 300,
+                          "memoryMbytes": 1024,
+                      },
+                  }
+              ],
+          }
+
+          schedules = paged_items("/schedules?limit=1000")
+          existing = next((item for item in schedules if item.get("name") == SCHEDULE_NAME), None)
+          if existing:
+              schedule = request("PUT", f"/schedules/{existing['id']}", schedule_body)
+          else:
+              schedule = request("POST", "/schedules", schedule_body)
+
+          print(json.dumps({
+              "actor_id": ACTOR_ID,
+              "configured_versions": configured_versions,
+              "active_version": active_version_number,
+              "build_id": build.get("id"),
+              "build_number": build.get("buildNumber"),
+              "schedule_id": schedule.get("id"),
+              "schedule_name": schedule.get("name"),
+              "schedule_enabled": schedule.get("isEnabled"),
+              "schedule_cron": schedule.get("cronExpression"),
+              "schedule_max_pages": MAX_PAGES,
+          }, sort_keys=True))
+          PY

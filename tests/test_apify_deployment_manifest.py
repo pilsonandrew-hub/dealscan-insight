@@ -42,8 +42,15 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
     def test_equipmentfacts_actor_is_manifested_deployable_and_enabled(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"
         workflow_path = self.repo_root / ".github" / "workflows" / "apify-deploy.yml"
+        configure_workflow_path = (
+            self.repo_root
+            / ".github"
+            / "workflows"
+            / "configure-equipmentfacts-apify-schedule.yml"
+        )
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         workflow = workflow_path.read_text(encoding="utf-8")
+        configure_workflow = configure_workflow_path.read_text(encoding="utf-8")
 
         actor = payload["actors"].get("ds-equipmentfacts")
         self.assertIsNotNone(actor)
@@ -51,7 +58,16 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["scheduleId"], "uJyfnyv7p5UmTzPmn")
         self.assertEqual(actor["status"], "enabled")
         self.assertEqual(actor["scheduleStatus"], "enabled_live")
+        self.assertEqual(actor["secretEnv"], ["WEBHOOK_SECRET"])
         self.assertRegex(workflow, r'"ds-equipmentfacts":\s+"0XjoegYZVcPldLstl"')
+        self.assertIn("APIFY_WEBHOOK_SECRET: ${{ secrets.APIFY_WEBHOOK_SECRET }}", configure_workflow)
+        self.assertIn('"name": "WEBHOOK_SECRET"', configure_workflow)
+        self.assertIn('"isSecret": True', configure_workflow)
+        self.assertIn("legacy-disabled-ds-equipmentfacts-6hr", configure_workflow)
+        self.assertIn('default: "15"', configure_workflow)
+        self.assertIn('"maxPages": MAX_PAGES', configure_workflow)
+        self.assertNotIn('"webhookSecret"', configure_workflow)
+        self.assertNotIn("rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA", configure_workflow)
 
     def test_bidspotter_actor_is_enabled_on_github_actions_schedule(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"
