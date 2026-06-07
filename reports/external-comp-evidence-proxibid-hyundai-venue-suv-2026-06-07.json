@@ -1,0 +1,53 @@
+{
+  "source_run_id": "manual-2026-06-07-proxibid-hyundai-venue-suv",
+  "source_url": "https://www.carfax.com/Used-2022-Hyundai-Venue-SEL_x49689",
+  "vehicle": {
+    "year": 2022,
+    "make": "Hyundai",
+    "model": "Venue SUV",
+    "state": "FL"
+  },
+  "confidence_notes": "External retail listing comps for current Proxibid pricing gap. This row intentionally matches the live Proxibid model normalization, `venue suv`, so existing exact-match pricing proof and RetailCompService queries can consume the governed evidence. Active-listing evidence only, not closed-sale outcome evidence. Captured manually from CARFAX, TrueCar, and CarGurus indexed listing pages on 2026-06-07.",
+  "comps": [
+    {
+      "source_url": "https://www.carfax.com/vehicle/KMHRC8A33NU195240",
+      "captured_at": "2026-06-07T18:35:00Z",
+      "price": 15356,
+      "mileage": 61086,
+      "vin": "KMHRC8A33NU195240",
+      "title": "Used 2022 Hyundai Venue SEL - Tampa, FL"
+    },
+    {
+      "source_url": "https://www.carfax.com/vehicle/KMHRC8A39NU195789",
+      "captured_at": "2026-06-07T18:35:00Z",
+      "price": 17675,
+      "mileage": 37457,
+      "vin": "KMHRC8A39NU195789",
+      "title": "Used 2022 Hyundai Venue SEL - Miami, FL"
+    },
+    {
+      "source_url": "https://www.carfax.com/vehicle/KMHRC8A31NU165864",
+      "captured_at": "2026-06-07T18:35:00Z",
+      "price": 17024,
+      "mileage": 44776,
+      "vin": "KMHRC8A31NU165864",
+      "title": "Used 2022 Hyundai Venue SEL - San Antonio, TX"
+    },
+    {
+      "source_url": "https://www.truecar.com/used-cars-for-sale/listings/hyundai/venue/year-2022/location-pompano-beach-fl/",
+      "captured_at": "2026-06-07T18:35:00Z",
+      "price": 13990,
+      "mileage": 34857,
+      "vin": "KMHRC8A31NU194006",
+      "title": "Used 2022 Hyundai Venue SEL IVT - Homestead, FL"
+    },
+    {
+      "source_url": "https://www.cargurus.com/Cars/l-Used-2022-Hyundai-Venue-SEL-FWD-Shreveport-t98790_L13685",
+      "captured_at": "2026-06-07T18:35:00Z",
+      "price": 14998,
+      "mileage": 45108,
+      "vin": "KMHRC8A34NU167236",
+      "title": "Used 2022 Hyundai Venue SEL FWD - Johnson City, TN"
+    }
+  ]
+}
