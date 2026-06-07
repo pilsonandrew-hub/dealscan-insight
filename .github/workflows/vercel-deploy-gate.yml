@@ -1,0 +1,59 @@
+name: Vercel Deploy Gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-deploy-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      deploy: ${{ steps.decision.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether Vercel should run
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE="${PR_BASE_SHA}"
+            HEAD="${PR_HEAD_SHA}"
+          elif [[ -n "${PUSH_BEFORE_SHA}" && "${PUSH_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            BASE="${PUSH_BEFORE_SHA}"
+            HEAD="${GITHUB_SHA}"
+          else
+            BASE="origin/main"
+            HEAD="${GITHUB_SHA}"
+          fi
+
+          python3 scripts/vercel_deploy_gate.py \
+            --base "${BASE}" \
+            --head "${HEAD}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+          DEPLOY="$(grep '^deploy=' "${GITHUB_OUTPUT}" | tail -n 1 | cut -d= -f2)"
+          echo "deploy=${DEPLOY}"
+          echo "Vercel deploy decision: ${DEPLOY}"
+
+      - name: Report dry-run status
+        run: |
+          echo "Dry run only. This workflow does not call Vercel yet."
+          echo "Vercel deploy decision: ${{ steps.decision.outputs.deploy }}"
