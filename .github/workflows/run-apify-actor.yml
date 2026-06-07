@@ -23,6 +23,10 @@ on:
         description: "Max detail pages input"
         required: false
         default: "200"
+      actor_timeout_secs:
+        description: "Apify actor run timeout override in seconds"
+        required: false
+        default: "1200"
       jj_kane_max_items:
         description: "Max items for bounded JJ Kane proof runs"
         required: false
@@ -117,6 +121,7 @@ jobs:
           GOVDEALS_SOLD_MAX_ITEMS: ${{ inputs.govdeals_sold_max_items }}
           GOVDEALS_SOLD_MAX_PAGES: ${{ inputs.govdeals_sold_max_pages }}
           MAX_DETAIL_PAGES: ${{ inputs.max_detail_pages }}
+          ACTOR_TIMEOUT_SECS: ${{ inputs.actor_timeout_secs }}
           JJ_KANE_MAX_ITEMS: ${{ inputs.jj_kane_max_items }}
           GOVPLANET_MAX_ITEMS_PER_CATEGORY: ${{ inputs.govplanet_max_items_per_category }}
           GOVPLANET_MAX_DETAIL_PAGES: ${{ inputs.govplanet_max_detail_pages }}
@@ -280,7 +285,9 @@ jobs:
               target_categories = (os.environ.get("TARGET_CATEGORIES") or "").strip()
               if target_categories:
                   actor_input["targetCategories"] = target_categories
-          started = api("POST", f"/acts/{actor_id}/runs", actor_input).get("data", {})
+          run_timeout_secs = int(os.environ.get("ACTOR_TIMEOUT_SECS") or "1200")
+          run_path = f"/acts/{actor_id}/runs?timeout={run_timeout_secs}"
+          started = api("POST", run_path, actor_input).get("data", {})
           run_id = started.get("id")
           if not run_id:
               raise SystemExit("Apify did not return a run id")
