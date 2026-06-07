@@ -224,6 +224,55 @@ jobs:
                           by_id[row.get("id") or json.dumps(row, sort_keys=True)] = row
               return list(by_id.values())
 
+          def delivery_accounting_for_actor_run(actor_run_id):
+              if not actor_run_id:
+                  return {
+                      "available": False,
+                      "reason": "missing_actor_run_id",
+                      "delivery_rows": 0,
+                      "business_rejection_rows": 0,
+                      "status_counts": {},
+                      "reason_counts": {},
+                  }
+              query_args = {
+                  "select": "run_id,status,error_message,created_at",
+                  "run_id": f"eq.{actor_run_id}",
+                  "order": "created_at.desc",
+                  "limit": "1000",
+              }
+              try:
+                  delivery_rows = rest_get(f"/rest/v1/ingest_delivery_log?{urllib.parse.urlencode(query_args)}")
+              except Exception as exc:
+                  return {
+                      "available": False,
+                      "reason": f"delivery_log_unavailable:{type(exc).__name__}",
+                      "delivery_rows": 0,
+                      "business_rejection_rows": 0,
+                      "status_counts": {},
+                      "reason_counts": {},
+                  }
+
+              status_counts = {}
+              reason_counts = {}
+              business_rejection_statuses = {"skipped_margin", "skipped_ceiling"}
+              business_rejection_rows = 0
+              for row in delivery_rows:
+                  status = str(row.get("status") or "unknown").strip()
+                  reason = str(row.get("error_message") or "none").strip() or "none"
+                  status_counts[status] = status_counts.get(status, 0) + 1
+                  reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                  if status in business_rejection_statuses:
+                      business_rejection_rows += 1
+
+              return {
+                  "available": True,
+                  "actor_run_id": actor_run_id,
+                  "delivery_rows": len(delivery_rows),
+                  "business_rejection_rows": business_rejection_rows,
+                  "status_counts": dict(sorted(status_counts.items())),
+                  "reason_counts": dict(sorted(reason_counts.items())),
+              }
+
           query = urllib.parse.urlencode(base_query_args)
           source_window_rows = rest_get(f"/rest/v1/opportunities?{query}")
           rows = source_window_rows
@@ -267,6 +316,14 @@ jobs:
               "available": False,
               "reason": "no_recent_source_quality_proof_record",
               "actor_output_clean": False,
+          }
+          delivery_accounting = {
+              "available": False,
+              "reason": "no_recent_source_quality_proof_record",
+              "delivery_rows": 0,
+              "business_rejection_rows": 0,
+              "status_counts": {},
+              "reason_counts": {},
           }
           apify_token = os.environ.get("APIFY_TOKEN")
           actor_id = SOURCE_ACTOR_IDS.get(source)
@@ -330,6 +387,7 @@ jobs:
           if scraper_enrichment:
               scraper_enrichment["available"] = True
               lineage_rows = rows_for_actor_run(scraper_enrichment.get("actor_run_id"))
+              delivery_accounting = delivery_accounting_for_actor_run(scraper_enrichment.get("actor_run_id"))
               scraper_enrichment["accepted_opportunities_for_actor_run"] = len(lineage_rows)
               scraper_enrichment["run_lineage_proven"] = bool(lineage_rows)
               if lineage_rows:
@@ -406,6 +464,15 @@ jobs:
               and scraper_enrichment.get("rows_excluded_unaccounted_after_prefilter") is not None
               and int(scraper_enrichment.get("rows_excluded_unaccounted_after_prefilter") or 0) == 0
           )
+          governed_downstream_no_qualifying_inventory_detected = bool(
+              scraper_enrichment.get("available")
+              and actor_output_quality.get("available")
+              and actor_output_quality.get("actor_output_clean")
+              and delivery_accounting.get("available")
+              and not scraper_enrichment.get("run_lineage_proven")
+              and int(scraper_enrichment.get("pushed_rows_total") or 0) > 0
+              and int(delivery_accounting.get("business_rejection_rows") or 0) >= int(scraper_enrichment.get("pushed_rows_total") or 0)
+          )
 
           if scraper_enrichment.get("run_lineage_proven"):
               accepted_landing_status = "accepted_rows_present"
@@ -420,6 +487,8 @@ jobs:
               issue10_verdict = "PASS_ORIGINAL"
           elif no_eligible_source_inventory_detected:
               issue10_verdict = "PASS_NO_ELIGIBLE_INVENTORY"
+          elif governed_downstream_no_qualifying_inventory_detected:
+              issue10_verdict = "PASS_NO_QUALIFYING_INVENTORY"
           else:
               issue10_verdict = "BLOCK"
 
@@ -433,13 +502,19 @@ jobs:
                   else (
                       "Actor output was clean and fully accounted, but no source inventory was eligible to enter accepted opportunities."
                       if issue10_verdict == "PASS_NO_ELIGIBLE_INVENTORY"
-                      else "Issue #10 remains blocked: accepted rows did not land and actor output is either unavailable, dirty, or not fully accounted."
+                      else (
+                          "Actor output was clean and the pushed candidate was accounted by governed downstream rejection, so no qualifying inventory entered accepted opportunities."
+                          if issue10_verdict == "PASS_NO_QUALIFYING_INVENTORY"
+                          else "Issue #10 remains blocked: accepted rows did not land and actor output is either unavailable, dirty, or not fully accounted."
+                      )
                   )
               ),
               "low_yield_source_truth_detected": low_yield_source_truth_detected,
               "no_eligible_source_inventory_detected": no_eligible_source_inventory_detected,
+              "governed_downstream_no_qualifying_inventory_detected": governed_downstream_no_qualifying_inventory_detected,
               "accepted_opportunity_quality": accepted_quality,
               "actor_output_quality": actor_output_quality,
+              "delivery_accounting": delivery_accounting,
               "scraper_enrichment_attempt_quality": scraper_enrichment,
           }
 
