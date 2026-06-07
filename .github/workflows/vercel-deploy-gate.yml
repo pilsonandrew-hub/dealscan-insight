@@ -1,0 +1,90 @@
+name: Vercel Deploy Gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-deploy-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      deploy: ${{ steps.decision.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether Vercel should run
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE="${PR_BASE_SHA}"
+            HEAD="${PR_HEAD_SHA}"
+          elif [[ -n "${PUSH_BEFORE_SHA}" && "${PUSH_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            BASE="${PUSH_BEFORE_SHA}"
+            HEAD="${GITHUB_SHA}"
+          else
+            BASE="origin/main"
+            HEAD="${GITHUB_SHA}"
+          fi
+
+          python3 scripts/vercel_deploy_gate.py \
+            --base "${BASE}" \
+            --head "${HEAD}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+          DEPLOY="$(grep '^deploy=' "${GITHUB_OUTPUT}" | tail -n 1 | cut -d= -f2)"
+          echo "deploy=${DEPLOY}"
+          echo "Vercel deploy decision: ${DEPLOY}"
+
+      - name: Report dry-run status
+        run: |
+          echo "Dry run only. This workflow does not call Vercel yet."
+          echo "Vercel deploy decision: ${{ steps.decision.outputs.deploy }}"
+
+  vercel-deploy:
+    needs: gate
+    if: needs.gate.outputs.deploy == 'true' && vars.ENABLE_GATED_VERCEL_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ github.event_name == 'push' && 'production' || 'preview' }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ENVIRONMENT: ${{ github.event_name == 'push' && 'production' || 'preview' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment="${VERCEL_ENVIRONMENT}" --token="${VERCEL_TOKEN}"
+
+      - name: Build Vercel artifact
+        run: vercel build ${{ github.event_name == 'push' && '--prod' || '' }} --token="${VERCEL_TOKEN}"
+
+      - name: Deploy Vercel artifact
+        run: vercel deploy --prebuilt ${{ github.event_name == 'push' && '--prod' || '' }} --token="${VERCEL_TOKEN}"
