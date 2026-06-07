@@ -53,9 +53,9 @@ jobs:
           echo "deploy=${DEPLOY}"
           echo "Vercel deploy decision: ${DEPLOY}"
 
-      - name: Report dry-run status
+      - name: Report gate decision
         run: |
-          echo "Dry run only. This workflow does not call Vercel yet."
+          echo "Vercel deploy is controlled by the gate decision and ENABLE_GATED_VERCEL_DEPLOY."
           echo "Vercel deploy decision: ${{ steps.decision.outputs.deploy }}"
 
   vercel-deploy:

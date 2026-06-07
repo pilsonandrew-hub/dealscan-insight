@@ -13,7 +13,7 @@ def test_vercel_deploy_gate_workflow_has_safe_gate():
     assert "branches: [main]" in text
     assert "fetch-depth: 0" in text
     assert "scripts/vercel_deploy_gate.py" in text
-    assert "Dry run only. This workflow does not call Vercel yet." in text
+    assert "Vercel deploy is controlled by the gate decision" in text
 
 
 def test_vercel_deploy_gate_workflow_always_reports_a_decision():
