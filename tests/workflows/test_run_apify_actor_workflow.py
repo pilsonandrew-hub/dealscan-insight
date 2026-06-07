@@ -136,3 +136,11 @@ def test_run_apify_actor_workflow_supports_bounded_proxibid_source_parity_proof(
     assert "PROXIBID_MAX_MILEAGE" in text
     assert '"minYear": int(os.environ.get("PROXIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4))' in text
     assert '"maxMileage": int(os.environ.get("PROXIBID_MAX_MILEAGE") or "50000")' in text
+
+
+def test_run_apify_actor_workflow_overrides_apify_run_timeout_for_broad_proofs():
+    text = WORKFLOW.read_text()
+
+    assert "actor_timeout_secs" in text
+    assert "ACTOR_TIMEOUT_SECS" in text
+    assert "run_path = f\"/acts/{actor_id}/runs?timeout={run_timeout_secs}\"" in text
