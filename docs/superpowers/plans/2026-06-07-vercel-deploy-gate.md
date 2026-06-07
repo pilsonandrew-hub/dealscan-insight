@@ -4,7 +4,7 @@
 
 **Goal:** Stop backend/proof/report-only changes from burning Vercel preview deployment quota while keeping Vercel available for frontend-impacting changes.
 
-**Architecture:** Add a repo-owned Python path classifier with tests, then add a dry-run GitHub Actions check that always reports the Vercel decision but does not disable native Vercel yet. This is phase 1 only; Vercel auto-deploy remains on until the replacement gate proves itself.
+**Architecture:** Add a repo-owned Python path classifier with tests, then add a GitHub Actions check that always reports the Vercel decision. The workflow includes the future Vercel CLI deployment lane, but locks it behind `ENABLE_GATED_VERCEL_DEPLOY=true` so it cannot replace native Vercel until secrets and branch protection are deliberately switched over.
 
 **Tech Stack:** Python, pytest, GitHub Actions, Vercel CLI later.
 
@@ -22,7 +22,7 @@
 - [ ] Add CLI modes: `--files` for tests/dry-run and `--base/--head` for GitHub Actions diffing.
 - [ ] Verify focused tests pass.
 
-### Task 2: Dry-Run Workflow
+### Task 2: Gate Workflow
 
 **Files:**
 - Create: `.github/workflows/vercel-deploy-gate.yml`
@@ -30,6 +30,7 @@
 
 - [ ] Write workflow contract tests: always runs on PR and main push, uses `fetch-depth: 0`, runs the classifier, exposes decision output, does not invoke Vercel CLI yet.
 - [ ] Add workflow with a single always-green gate job that logs `deploy=true/false`.
+- [ ] Add a Vercel CLI deploy job locked behind `ENABLE_GATED_VERCEL_DEPLOY=true` and `deploy=true`.
 - [ ] Verify workflow tests pass.
 
 ### Task 3: Verification
@@ -42,6 +43,6 @@
 ### Explicit Non-Goals For This PR
 
 - Do not set `git.deploymentEnabled: false` yet.
-- Do not add Vercel secrets.
-- Do not deploy with Vercel CLI yet.
+- Do not add Vercel secrets directly in this PR.
+- Do not enable the Vercel CLI deploy job yet.
 - Do not update branch protection yet.
