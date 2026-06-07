@@ -135,6 +135,10 @@ jobs:
                   actor_source_name = f"src/{src_file.name}"
                   source_files.append({"name": actor_source_name, "format": "TEXT", "content": src_file.read_text()})
                   print(f"  + included {actor_source_name}")
+              for actor_meta_file in sorted(Path(src_dir, ".actor").glob("*.json")):
+                  actor_source_name = f".actor/{actor_meta_file.name}"
+                  source_files.append({"name": actor_source_name, "format": "TEXT", "content": actor_meta_file.read_text()})
+                  print(f"  + included {actor_source_name}")
 
               # Upload source
               result = api("PUT", f"/acts/{actor_id}/versions/{version}", {"sourceFiles": source_files})
