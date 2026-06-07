@@ -199,12 +199,17 @@ def test_proxibid_actor_enforces_dealerscope_age_mileage_source_gate():
     assert 'year < minYear' not in text
 
 
-def test_low_yield_source_truth_is_diagnostic_not_passing():
+def test_source_quality_proof_passes_clean_no_eligible_inventory_separately():
     text = WORKFLOW.read_text()
     assert 'low_yield_source_truth_detected' in text
-    assert 'PASS_CORRECTED_LOW_YIELD_SOURCE_TRUTH' not in text
-    assert 'issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else "BLOCK"' in text
-    assert 'Low-yield scraper truth is diagnostic only' in text
+    assert 'no_eligible_source_inventory_detected' in text
+    assert 'PASS_NO_ELIGIBLE_INVENTORY' in text
+    assert 'Actor output was clean and fully accounted' in text
+    assert 'rows_excluded_unaccounted_after_prefilter' in text
+    assert 'actor_output_quality.get("actor_output_clean")' in text
+    assert 'int(scraper_enrichment.get("pushed_rows_total") or 0) == 0' in text
+    assert 'scraper_enrichment.get("rows_excluded_unaccounted_after_prefilter") is not None' in text
+    assert 'issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else "BLOCK"' not in text
 
 
 def test_source_quality_proof_reports_required_live_db_fields():
