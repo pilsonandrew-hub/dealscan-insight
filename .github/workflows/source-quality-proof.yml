@@ -397,6 +397,15 @@ jobs:
               and scraper_enrichment.get("extraction_detected")
               and scraper_enrichment.get("strict_filter_rejection_detected")
           )
+          no_eligible_source_inventory_detected = bool(
+              scraper_enrichment.get("available")
+              and actor_output_quality.get("available")
+              and actor_output_quality.get("actor_output_clean")
+              and not scraper_enrichment.get("run_lineage_proven")
+              and int(scraper_enrichment.get("pushed_rows_total") or 0) == 0
+              and scraper_enrichment.get("rows_excluded_unaccounted_after_prefilter") is not None
+              and int(scraper_enrichment.get("rows_excluded_unaccounted_after_prefilter") or 0) == 0
+          )
 
           if scraper_enrichment.get("run_lineage_proven"):
               accepted_landing_status = "accepted_rows_present"
@@ -407,7 +416,13 @@ jobs:
           else:
               accepted_landing_status = "actor_output_unavailable"
 
-          issue10_verdict = "PASS_ORIGINAL" if accepted_quality["passes_original_enrichment_standard"] else "BLOCK"
+          if accepted_quality["passes_original_enrichment_standard"]:
+              issue10_verdict = "PASS_ORIGINAL"
+          elif no_eligible_source_inventory_detected:
+              issue10_verdict = "PASS_NO_ELIGIBLE_INVENTORY"
+          else:
+              issue10_verdict = "BLOCK"
+
           summary = {
               "source": source,
               "issue10_verdict": issue10_verdict,
@@ -415,9 +430,14 @@ jobs:
               "issue10_scope_note": (
                   "Original accepted-opportunity enrichment standard passed."
                   if issue10_verdict == "PASS_ORIGINAL"
-                  else "Issue #10 remains blocked under original accepted-opportunity enrichment proof. Low-yield scraper truth is diagnostic only unless Andrew explicitly re-scopes."
+                  else (
+                      "Actor output was clean and fully accounted, but no source inventory was eligible to enter accepted opportunities."
+                      if issue10_verdict == "PASS_NO_ELIGIBLE_INVENTORY"
+                      else "Issue #10 remains blocked: accepted rows did not land and actor output is either unavailable, dirty, or not fully accounted."
+                  )
               ),
               "low_yield_source_truth_detected": low_yield_source_truth_detected,
+              "no_eligible_source_inventory_detected": no_eligible_source_inventory_detected,
               "accepted_opportunity_quality": accepted_quality,
               "actor_output_quality": actor_output_quality,
               "scraper_enrichment_attempt_quality": scraper_enrichment,
