@@ -78,6 +78,300 @@ def test_classify_source_separates_gate_and_margin_dominance():
     assert report_source_yield_proof.classify_source_summary(margin_summary) == "economic_reject_dominant"
 
 
+def test_classify_source_separates_pricing_proxy_from_bid_ceiling_dominance():
+    proxy_summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {"saved_sonar": 1, "skipped_ceiling": 1, "skipped_proof": 1},
+        "reason_counts": {
+            "none": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+    ceiling_summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {"saved_sonar": 1, "skipped_ceiling": 1, "skipped_proof": 1},
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert report_source_yield_proof.classify_source_summary(proxy_summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(proxy_summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_source_summary(ceiling_summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(ceiling_summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_does_not_let_dirty_proxy_rows_override_clean_bid_ceiling():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 4,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 2,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 1,
+        "dirty_rejection_reason_counts": {"pricing_maturity_proxy": 1},
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_keeps_clean_proxy_rows_when_dirty_rows_are_unrelated():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 5,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 2,
+            "skipped_gate": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "pricing_maturity_proxy": 2,
+            "age_or_mileage_exceeded": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 1,
+        "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
+
+
+def test_classify_source_respects_explicit_zero_dirty_rows():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "skipped_gate": 1,
+            "skipped_ceiling": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "age_or_mileage_exceeded": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 0,
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+    assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
+
+
+def test_classify_source_does_not_compute_dirty_fallback_when_zero_is_explicit(monkeypatch):
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "skipped_gate": 1,
+            "skipped_ceiling": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "age_or_mileage_exceeded": 1,
+            "pricing_maturity_proxy": 1,
+            "source_quality_proof_record": 1,
+        },
+        "dirty_rejection_rows": 0,
+    }
+    calls = 0
+
+    def fail_if_called(status_counts, reason_counts):
+        nonlocal calls
+        calls += 1
+        return 1
+
+    monkeypatch.setattr(report_source_yield_proof, "_dirty_rejection_rows", fail_if_called)
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+    assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
+    assert calls == 0
+
+
+def test_classify_source_does_not_let_listing_gap_proxy_rows_override_clean_bid_ceiling():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 12,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 10,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 5,
+            "pricing_maturity_proxy": 5,
+            "source_quality_proof_record": 1,
+        },
+        "listing_metadata_gap_rows": 5,
+        "listing_metadata_gap_status_counts": {"skipped_ceiling": 5},
+        "listing_metadata_gap_reason_counts": {"pricing_maturity_proxy": 5},
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_prefers_larger_bid_ceiling_count_when_proxy_also_meets_threshold():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 12,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 10,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "bid_ceiling_exceeded": 7,
+            "pricing_maturity_proxy": 3,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
+def test_classify_source_uses_full_proxy_count_when_display_reason_counts_are_truncated():
+    reason_counts = {f"other_reason_{index}": 2 for index in range(10)}
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 6,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 4,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "source_quality_proof_record": 1,
+            **reason_counts,
+        },
+        "pricing_maturity_proxy_rows": 4,
+    }
+
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
+
+
+def test_classify_source_does_not_count_non_bid_ceiling_reasons_as_bid_ceiling():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 6,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 4,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "condition_unverified": 4,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "mixed_rejection_surface"
+    assert report_source_yield_proof.classify_run_summary(summary) == "mixed_rejection_surface"
+
+
+def test_classify_source_non_bid_ceiling_reasons_do_not_suppress_proxy_dominance():
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 7,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 5,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            "condition_unverified": 3,
+            "pricing_maturity_proxy": 2,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert summary["delivery_rows"] == sum(summary["status_counts"].values())
+    assert summary["delivery_rows"] == sum(summary["reason_counts"].values())
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_proxy_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_proxy_reject_dominant"
+
+
+def test_classify_source_counts_detailed_bid_ceiling_reason_bucket():
+    detailed_bid_reason = report_source_yield_proof._reason_bucket(
+        "bid_ceiling_exceeded | bid=$9,000 max_bid=$0 mmr=$17,000"
+    )
+    summary = {
+        "source": "proxibid",
+        "delivery_rows": 3,
+        "opportunity_rows": 0,
+        "active_opportunity_rows": 0,
+        "status_counts": {
+            "saved_sonar": 1,
+            "skipped_ceiling": 1,
+            "skipped_proof": 1,
+        },
+        "reason_counts": {
+            "none": 1,
+            detailed_bid_reason: 1,
+            "source_quality_proof_record": 1,
+        },
+    }
+
+    assert detailed_bid_reason == "bid_ceiling_exceeded"
+    assert report_source_yield_proof.classify_source_summary(summary) == "pricing_ceiling_reject_dominant"
+    assert report_source_yield_proof.classify_run_summary(summary) == "pricing_ceiling_reject_dominant"
+
+
 def test_classify_source_separates_dirty_age_mileage_from_clean_source_quality():
     dirty_only = {
         "source": "hibid",
@@ -670,6 +964,70 @@ def test_build_report_fetches_primary_delivery_listing_keys(monkeypatch):
     assert report["run_summaries"][0]["classification"] == "economic_reject_dominant"
 
 
+def test_build_report_reuses_delivery_dirty_gap_classification(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "webhook_log":
+            return [
+                {
+                    "run_id": "run-proxy",
+                    "source": "proxibid",
+                    "status": "processed",
+                    "item_count": 1,
+                    "received_at": "2026-06-05T19:00:00+00:00",
+                }
+            ]
+        if table == "ingest_delivery_log":
+            return [
+                {
+                    "run_id": "run-proxy",
+                    "source_site": "proxibid",
+                    "channel": "db_save",
+                    "status": "skipped_ceiling",
+                    "error_message": "pricing_maturity_proxy",
+                    "listing_id": "proxy-listing",
+                    "listing_url": "https://proxibid.example/lot/1",
+                    "created_at": "2026-06-05T19:01:00+00:00",
+                }
+            ]
+        if table == "sonar_listings":
+            return []
+        if table == "opportunities":
+            return []
+        raise AssertionError(table)
+
+    call_counts = {"dirty": 0, "gap": 0}
+
+    def fake_dirty(row, listing_by_key, now_year):
+        call_counts["dirty"] += 1
+        return False
+
+    def fake_gap(row, listing_by_key):
+        call_counts["gap"] += 1
+        return True
+
+    monkeypatch.setattr(report_source_yield_proof, "_fetch_postgrest_rows", fake_fetch)
+    monkeypatch.setattr(report_source_yield_proof, "_delivery_row_is_dirty_for_clean_yield", fake_dirty)
+    monkeypatch.setattr(report_source_yield_proof, "_delivery_row_has_listing_metadata_gap", fake_gap)
+
+    report = report_source_yield_proof.build_source_yield_report(
+        "https://example.supabase.co/rest/v1",
+        "service-key",
+        lookback_hours=24,
+        limit=100,
+        now=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+        run_detail_source="proxibid",
+    )
+
+    source_summary = report["source_summaries"][0]
+    run_summary = report["run_summaries"][0]
+
+    assert call_counts == {"dirty": 1, "gap": 1}
+    assert source_summary["listing_metadata_gap_rows"] == 1
+    assert source_summary["listing_metadata_gap_reason_counts"] == {"pricing_maturity_proxy": 1}
+    assert run_summary["listing_metadata_gap_rows"] == 1
+    assert run_summary["listing_metadata_gap_reason_counts"] == {"pricing_maturity_proxy": 1}
+
+
 def test_build_report_does_not_call_inactive_accepted_rows_current_yield(monkeypatch):
     def fake_fetch(base_url, service_role_key, table, query):
         if table == "webhook_log":
@@ -947,8 +1305,16 @@ def test_build_report_includes_sanitized_run_summaries_for_requested_source(monk
             "active_dos80_rows": 0,
             "inactive_opportunity_lifecycle_counts": {},
             "dirty_rejection_rows": 1,
+            "dirty_rejection_reason_counts": {"age_or_mileage_exceeded": 1},
+            "pricing_maturity_proxy_rows": 0,
+            "dirty_pricing_maturity_proxy_rows": 0,
+            "bid_ceiling_exceeded_rows": 0,
+            "dirty_bid_ceiling_exceeded_rows": 0,
             "listing_metadata_gap_rows": 0,
             "listing_metadata_gap_status_counts": {},
+            "listing_metadata_gap_reason_counts": {},
+            "listing_metadata_gap_pricing_maturity_proxy_rows": 0,
+            "listing_metadata_gap_bid_ceiling_exceeded_rows": 0,
             "classification": "dirty_source_reject_only",
         }
     ]
