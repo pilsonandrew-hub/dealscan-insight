@@ -167,6 +167,14 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
                 self.assertEqual(actor["schedule"], schedule)
                 self.assertEqual(actor["scheduleStatus"], "enabled_live")
 
+    def test_apify_deploy_uploads_actor_metadata_contract_files(self):
+        workflow_path = self.repo_root / ".github" / "workflows" / "apify-deploy.yml"
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        self.assertIn('Path(src_dir, ".actor").glob("*.json")', workflow)
+        self.assertIn('f".actor/{actor_meta_file.name}"', workflow)
+        self.assertIn("source_files.append", workflow)
+
     def test_manual_apify_runner_supports_govdeals_sold_date_diagnostics(self):
         workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
         workflow = workflow_path.read_text(encoding="utf-8")
