@@ -3,6 +3,9 @@
   "installCommand": "npm install",
   "outputDirectory": "dist",
   "framework": "vite",
+  "git": {
+    "deploymentEnabled": false
+  },
   "rewrites": [
     { "source": "/proxy/health", "destination": "https://dealscan-insight-production.up.railway.app/health" },
     { "source": "/api/outcomes", "destination": "https://dealscan-insight-production.up.railway.app/outcomes" },
