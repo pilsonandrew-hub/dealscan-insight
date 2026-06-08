@@ -331,6 +331,29 @@ jobs:
               "dealer_sales upsert returned zero rows" in outcomes_source
               and "test_sale_outcome_fails_closed_when_dealer_sales_upsert_returns_zero_rows" in outcomes_tests
             )
+            audit_evidence_proof["dealer_sales_payload_requires_essential_fields"] = (
+              "dealer_sales payload missing required columns" in outcomes_source
+              and "Outcome evidence payload missing required fields" in outcomes_source
+              and "test_dealer_sales_payload_rejects_empty_or_missing_required_fields" in outcomes_tests
+            )
+            audit_evidence_proof["score_deal_wrapper_enforces_premium_age_and_mileage"] = (
+              "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
+              and 'if vehicle_tier == "rejected":' in score_source
+              and 'selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard' in score_source
+              and "test_determine_vehicle_tier_enforces_age_and_mileage_hard_stops" in score_tests
+            )
+            audit_evidence_proof["bid_outcome_caller_sets_outcome_recorded_at"] = (
+              "def _mirror_bid_outcome_to_dealer_sales" in outcomes_source
+              and "async def create_bid_outcome" in outcomes_source
+              and '"outcome_recorded_at": datetime.now(timezone.utc).isoformat()' in outcomes_source
+              and "test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity" in outcomes_tests
+            )
+            audit_evidence_proof["legacy_mirror_is_realized_sale_only"] = (
+              "def _legacy_mirror_to_dealer_sales" in outcomes_source
+              and '"type": "realized_sale_outcome"' in outcomes_source
+              and 'async def create_outcome' in outcomes_source
+              and "test_sale_outcome_returns_explicit_persistence_success" in outcomes_tests
+            )
             audit_evidence_proof["outcomes_non_sale_price_zero"] = (
               '"sale_price": sold_price if sold_price is not None else 0' in outcomes_source
               and 'sale_price = normalized.purchase_price if normalized.outcome == "won" else 0' in outcomes_source
@@ -550,6 +573,15 @@ jobs:
                 and "result.data" in normalized
                 and ("zero rows after" in normalized or "zero-row" in normalized)
               )
+              is_dealer_sales_empty_payload_fixed = (
+                audit_evidence_proof.get("dealer_sales_payload_requires_essential_fields") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_upsert_dealer_sales_outcome" in normalized
+                and "dealer_sales" in normalized
+                and "payload" in normalized
+                and "empty payload" in normalized
+                and any(term in normalized for term in ("missing required fields", "essential fields", "critical fields", "not none"))
+              )
               is_outcome_non_sale_price_fixed = (
                 audit_evidence_proof.get("outcomes_non_sale_price_zero") is True
                 and "webapp/routers/outcomes.py" in normalized
@@ -593,6 +625,28 @@ jobs:
                 and "expired auction" in normalized
                 and ("auction velocity" in normalized or "_auction_velocity_score" in normalized)
                 and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently"))
+              )
+              is_premium_helper_gate_false_positive = (
+                audit_evidence_proof.get("score_deal_wrapper_enforces_premium_age_and_mileage") is True
+                and "backend/ingest/score.py" in normalized
+                and "score_deal_premium" in normalized
+                and "premium lane" in normalized
+                and any(term in normalized for term in ("missing age gate", "missing mileage gate", "max age", "max mileage"))
+              )
+              is_bid_outcome_timestamp_false_positive = (
+                audit_evidence_proof.get("bid_outcome_caller_sets_outcome_recorded_at") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_mirror_bid_outcome_to_dealer_sales" in normalized
+                and "outcome_recorded_at" in normalized
+                and any(term in normalized for term in ("does not set", "unlike patch_outcome", "inconsistency"))
+              )
+              is_legacy_realized_sale_semantics_false_positive = (
+                audit_evidence_proof.get("legacy_mirror_is_realized_sale_only") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_legacy_mirror_to_dealer_sales" in normalized
+                and "sale_price" in normalized
+                and "sold_price" in normalized
+                and any(term in normalized for term in ("redundant", "inconsistency", "confusion"))
               )
               is_high_demand_dynamic_policy_opinion = (
                 audit_evidence_proof.get("high_demand_model_list_is_curated_scorer_policy") is True
@@ -682,11 +736,15 @@ jobs:
                 or is_ingest_error_handling_speculation
                 or is_dealer_sales_error_handling_false_positive
                 or is_dealer_sales_empty_upsert_fixed
+                or is_dealer_sales_empty_payload_fixed
                 or is_outcome_non_sale_price_fixed
                 or is_operator_privilege_authorization_false_positive
                 or is_outcome_update_zero_row_semantics_false_positive
                 or is_operator_zero_row_conflict_expected_fail_closed
                 or is_expired_velocity_nonurgent_floor_false_positive
+                or is_premium_helper_gate_false_positive
+                or is_bid_outcome_timestamp_false_positive
+                or is_legacy_realized_sale_semantics_false_positive
                 or is_high_demand_dynamic_policy_opinion
                 or is_rust_state_penalty_policy_opinion
                 or is_duplicate_missing_url_canonical_fallback_false_positive

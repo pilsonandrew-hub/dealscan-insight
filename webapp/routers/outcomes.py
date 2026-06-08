@@ -109,6 +109,8 @@ def _safe_float(value: object) -> Optional[float]:
 def _normalize_bid_outcome(payload: BidOutcomePayload, opportunity: dict) -> BidOutcomeNormalized:
     if payload.won and not payload.bid:
         raise HTTPException(status_code=400, detail="Cannot mark won=true when bid=false")
+    if payload.won and payload.purchase_price is None:
+        raise HTTPException(status_code=400, detail="purchase_price is required when won=true")
     if payload.purchase_price is not None and not payload.won:
         raise HTTPException(status_code=400, detail="purchase_price is only valid when won=true")
 
@@ -177,6 +179,7 @@ DEALER_SALES_OUTCOME_COLUMNS = {
     "sale_price", "sold_price", "asking_price", "outcome", "gross_margin",
     "roi_pct", "sale_date", "days_to_sale", "metadata", "source", "updated_at",
 }
+DEALER_SALES_REQUIRED_OUTCOME_COLUMNS = {"opportunity_id", "user_id", "outcome", "sale_price", "source"}
 
 
 def _upsert_dealer_sales_outcome(payload: dict) -> None:
@@ -187,6 +190,15 @@ def _upsert_dealer_sales_outcome(payload: dict) -> None:
     if unknown_columns:
         logger.error("[OUTCOMES] dealer_sales payload has unknown columns: %s", unknown_columns)
         raise HTTPException(status_code=500, detail="Outcome evidence payload does not match schema")
+
+    missing_required_columns = sorted(
+        column
+        for column in DEALER_SALES_REQUIRED_OUTCOME_COLUMNS
+        if column not in payload or payload.get(column) is None
+    )
+    if missing_required_columns:
+        logger.error("[OUTCOMES] dealer_sales payload missing required columns: %s", missing_required_columns)
+        raise HTTPException(status_code=500, detail="Outcome evidence payload missing required fields")
 
     try:
         result = supabase_client.table("dealer_sales").upsert(payload, on_conflict="opportunity_id,user_id").execute()

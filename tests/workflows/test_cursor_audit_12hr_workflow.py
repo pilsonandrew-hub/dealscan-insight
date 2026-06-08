@@ -99,12 +99,20 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             workflow,
         )
         self.assertIn("dealer_sales_empty_upsert_fails_closed", workflow)
+        self.assertIn("dealer_sales_payload_requires_essential_fields", workflow)
+        self.assertIn("score_deal_wrapper_enforces_premium_age_and_mileage", workflow)
+        self.assertIn("bid_outcome_caller_sets_outcome_recorded_at", workflow)
+        self.assertIn("legacy_mirror_is_realized_sale_only", workflow)
         self.assertIn("score_uses_dynamic_current_year_for_age", workflow)
         self.assertIn("score_deal_wrapper_selects_vehicle_tier", workflow)
         self.assertIn("rover_numeric_defaults_are_serialization_fallbacks", workflow)
         self.assertIn("rover_heuristic_import_debug_visible", workflow)
         self.assertIn("is_outcome_non_sale_price_fixed", workflow)
         self.assertIn("is_dealer_sales_empty_upsert_fixed", workflow)
+        self.assertIn("is_dealer_sales_empty_payload_fixed", workflow)
+        self.assertIn("is_premium_helper_gate_false_positive", workflow)
+        self.assertIn("is_bid_outcome_timestamp_false_positive", workflow)
+        self.assertIn("is_legacy_realized_sale_semantics_false_positive", workflow)
         self.assertIn("is_duplicate_missing_url_canonical_fallback_false_positive", workflow)
         self.assertIn("is_webhook_direct_pg_durability_false_positive", workflow)
         self.assertIn("is_current_year_staleness_false_positive", workflow)
@@ -188,6 +196,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "operator_privileged_outcome_write_documented": True,
                 "operator_privilege_uses_authenticated_user_id": True,
                 "dealer_sales_empty_upsert_fails_closed": True,
+                "dealer_sales_payload_requires_essential_fields": True,
+                "score_deal_wrapper_enforces_premium_age_and_mileage": True,
+                "bid_outcome_caller_sets_outcome_recorded_at": True,
+                "legacy_mirror_is_realized_sale_only": True,
                 "score_uses_dynamic_current_year_for_age": True,
                 "score_deal_wrapper_selects_vehicle_tier": True,
                 "expired_auction_velocity_matches_nonurgent_floor": True,
@@ -218,10 +230,17 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "CRITICAL | webapp/routers/outcomes.py | Missing Zero-Row Conflict Handling for `dealer_sales` Upsert | The `_upsert_dealer_sales_outcome` function does not explicitly check for zero rows after an `upsert` operation on the `dealer_sales` table. | **FIX:** check result.data.",
                     "HIGH | backend/ingest/score.py | Inconsistent `_current_year()` Usage Leading to Potential Stale Data | The `CURRENT_YEAR` constant is initialized once at module load time using `_current_year()`, so calculations may become stale across a year boundary. | **FIX:** use dynamic year calls.",
                     "HIGH | backend/ingest/score.py | Inconsistent Application of `determine_vehicle_tier` | `score_deal_premium` does not call `determine_vehicle_tier`, which could lead to subtle inconsistencies and does not future-proof premium scoring. | **FIX:** call determine_vehicle_tier inside premium helper.",
+                    "CRITICAL | backend/ingest/score.py | Missing Age Gate for Premium Lane | The `score_deal_premium` function does not explicitly check the age of the vehicle against the business rule of Premium lane max age=4yr. | **FIX:** Add an age check in score_deal_premium.",
+                    "CRITICAL | backend/ingest/score.py | Missing Mileage Gate for Premium Lane | The `score_deal_premium` function does not explicitly check the mileage of the vehicle against the business rule of Premium lane max mileage=50k. | **FIX:** Add a mileage check in score_deal_premium.",
+                    "HIGH | webapp/routers/outcomes.py | Missing `outcome_recorded_at` for `_mirror_bid_outcome_to_dealer_sales` | The `_mirror_bid_outcome_to_dealer_sales` function updates dealer_sales but does not set outcome_recorded_at, unlike patch_outcome. | **FIX:** update opportunities.",
+                    "HIGH | webapp/routers/outcomes.py | `dealer_sales` Upsert Allows Empty Payload | The `_upsert_dealer_sales_outcome` function does not explicitly check if the payload is empty or contains only None values for critical fields. | **FIX:** validate required fields.",
+                    "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` Redundant `sale_price` and `sold_price` | Both sale_price and sold_price are set to payload.sale_price; this inconsistency could lead to confusion if not won. | **FIX:** align semantics.",
                     "CRITICAL | webapp/routers/ingest.py | `check_and_handle_duplicate` still has a duplicate race after canonical lookup during concurrent inserts. | **FIX:** enforce a transactional insert.",
                     "HIGH | webapp/routers/ingest.py | `_insert_webhook_log_direct_pg` fallback can lose webhook metadata after `supabase_client` timeout. | **FIX:** preserve metadata in fallback payload.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can write the wrong `dealer_sales` row because `on_conflict` omits source. | **FIX:** revisit conflict target.",
-                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` accepts an empty payload for `dealer_sales`. | **FIX:** validate required payload fields.",
+                    "HIGH | backend/ingest/score.py | `score_deal` returns premium for an over-age vehicle. | **FIX:** enforce the wrapper tier gate.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` empty payload can bypass required conflict keys for `dealer_sales`. | **FIX:** audit conflict-key handling.",
+                    "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` sale_price and sold_price can hide a non-win outcome. | **FIX:** audit caller routing.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can return zero rows when row-level security rejects `dealer_sales` writes. | **FIX:** audit RLS policy.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
@@ -234,17 +253,24 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("masking critical issues", filtered)
         self.assertNotIn("_auction_velocity_score", filtered)
         self.assertNotIn("rust_state_source", filtered)
-        self.assertNotIn("sale_price", filtered)
+        self.assertNotIn("recorded as `current_bid`", filtered)
         self.assertNotIn("default value of `0.0` for `dos_score` and `current_bid`", filtered)
         self.assertNotIn("_rover_debug_snapshot", filtered)
         self.assertNotIn("Privilege Escalation via `DEALERSCOPE_OPERATOR_USER_ID`", filtered)
         self.assertNotIn("Missing Zero-Row Conflict Handling", filtered)
         self.assertNotIn("Leading to Potential Stale Data", filtered)
         self.assertNotIn("Inconsistent Application of `determine_vehicle_tier`", filtered)
+        self.assertNotIn("Missing Age Gate for Premium Lane", filtered)
+        self.assertNotIn("Missing Mileage Gate for Premium Lane", filtered)
+        self.assertNotIn("Missing `outcome_recorded_at`", filtered)
+        self.assertNotIn("Upsert Allows Empty Payload", filtered)
+        self.assertNotIn("Redundant `sale_price` and `sold_price`", filtered)
         self.assertIn("duplicate race after canonical lookup", filtered)
         self.assertIn("fallback can lose webhook metadata", filtered)
         self.assertIn("on_conflict", filtered)
-        self.assertIn("empty payload", filtered)
+        self.assertIn("score_deal` returns premium", filtered)
+        self.assertIn("required conflict keys", filtered)
+        self.assertIn("non-win outcome", filtered)
         self.assertIn("row-level security", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
@@ -273,6 +299,52 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             and "test_foreign_owned_opportunity_rejects_bid_outcome" in outcomes_tests
         )
         self.assertTrue(proof)
+
+    def test_live5_audit_proofs_evaluate_current_source(self):
+        repo_root = WORKFLOW.parents[2]
+        outcomes_source = (
+            repo_root / "webapp" / "routers" / "outcomes.py"
+        ).read_text(encoding="utf-8")
+        outcomes_tests = (
+            repo_root / "tests" / "test_outcomes_operational_loop.py"
+        ).read_text(encoding="utf-8")
+        score_source = (
+            repo_root / "backend" / "ingest" / "score.py"
+        ).read_text(encoding="utf-8")
+        score_tests = (
+            repo_root / "tests" / "test_ingest_scoring.py"
+        ).read_text(encoding="utf-8")
+
+        proofs = {
+            "dealer_sales_payload_requires_essential_fields": (
+                "dealer_sales payload missing required columns" in outcomes_source
+                and "Outcome evidence payload missing required fields" in outcomes_source
+                and "test_dealer_sales_payload_rejects_empty_or_missing_required_fields" in outcomes_tests
+            ),
+            "score_deal_wrapper_enforces_premium_age_and_mileage": (
+                "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
+                and 'if vehicle_tier == "rejected":' in score_source
+                and 'selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard' in score_source
+                and "test_determine_vehicle_tier_enforces_age_and_mileage_hard_stops" in score_tests
+            ),
+            "bid_outcome_caller_sets_outcome_recorded_at": (
+                "def _mirror_bid_outcome_to_dealer_sales" in outcomes_source
+                and "async def create_bid_outcome" in outcomes_source
+                and '"outcome_recorded_at": datetime.now(timezone.utc).isoformat()' in outcomes_source
+                and "test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity" in outcomes_tests
+            ),
+            "legacy_mirror_is_realized_sale_only": (
+                "def _legacy_mirror_to_dealer_sales" in outcomes_source
+                and '"type": "realized_sale_outcome"' in outcomes_source
+                and "async def create_outcome" in outcomes_source
+                and "test_sale_outcome_returns_explicit_persistence_success" in outcomes_tests
+            ),
+        }
+
+        self.assertEqual(
+            {name for name, passed in proofs.items() if not passed},
+            set(),
+        )
 
 
 if __name__ == "__main__":
