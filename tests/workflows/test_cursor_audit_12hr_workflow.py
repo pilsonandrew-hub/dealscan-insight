@@ -26,6 +26,15 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("GEMINI_AUDIT_MAX_ATTEMPTS", workflow)
         self.assertIn("GEMINI_AUDIT_RETRY_DELAY_SECONDS", workflow)
 
+    def test_gemini_audit_has_openrouter_gemini_fallback(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("OPENROUTER_KEY", workflow)
+        self.assertIn("GEMINI_OPENROUTER_MODEL", workflow)
+        self.assertIn("https://openrouter.ai/api/v1/chat/completions", workflow)
+        self.assertIn("fetch_openrouter_gemini_audit", workflow)
+        self.assertIn("Direct Gemini audit unavailable", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
