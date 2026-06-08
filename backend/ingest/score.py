@@ -223,6 +223,8 @@ def _auction_velocity_score(vehicle: dict) -> float:
         hours = (end_dt - datetime.now(end_dt.tzinfo)).total_seconds() / 3600
     except Exception:
         return 50.0
+    if hours < 0:
+        return 25.0
     if hours <= 6:
         return 100.0
     if hours <= 24:

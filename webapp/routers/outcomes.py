@@ -88,6 +88,15 @@ def _verify_auth(authorization: Optional[str]) -> str:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+def _operator_user_id() -> str:
+    return os.getenv("DEALERSCOPE_OPERATOR_USER_ID", "").strip()
+
+
+def _is_operator_user(user_id: Optional[str]) -> bool:
+    operator_user_id = _operator_user_id()
+    return bool(user_id and operator_user_id and user_id == operator_user_id)
+
+
 def _safe_float(value: object) -> Optional[float]:
     if value is None:
         return None
@@ -137,13 +146,11 @@ def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = Non
     opp = opportunities[0]
     if require_user_id:
         opp_user_id = opp.get("user_id")
-        operator_user_id = os.getenv("DEALERSCOPE_OPERATOR_USER_ID", "").strip()
+        if _is_operator_user(require_user_id):
+            return opp
         if opp_user_id:
             if opp_user_id != require_user_id:
                 raise HTTPException(status_code=403, detail="Not authorized to modify this opportunity")
-        elif operator_user_id:
-            if require_user_id != operator_user_id:
-                raise HTTPException(status_code=403, detail="Not authorized to modify system opportunity")
         else:
             logger.warning(
                 "[OUTCOMES] system opportunity %s has no user_id and DEALERSCOPE_OPERATOR_USER_ID unset",
@@ -334,11 +341,15 @@ async def patch_outcome(
                 "sold_price": sold_price,
             }),
         }
-        _execute_scoped_opportunity_update(
+        opportunity_update_query = (
             supabase_client.table("opportunities")
             .update(opportunity_update)
             .eq("id", opportunity_id)
-            .eq("user_id", user_id),
+        )
+        if not _is_operator_user(user_id):
+            opportunity_update_query = opportunity_update_query.eq("user_id", user_id)
+        _execute_scoped_opportunity_update(
+            opportunity_update_query,
             opportunity_id,
         )
 
@@ -472,11 +483,15 @@ async def create_bid_outcome(
             normalized=normalized,
             notes=payload.notes,
         )
-        _execute_scoped_opportunity_update(
+        opportunity_update_query = (
             supabase_client.table("opportunities")
             .update(update_payload)
             .eq("id", payload.opportunity_id)
-            .eq("user_id", user_id),
+        )
+        if not _is_operator_user(user_id):
+            opportunity_update_query = opportunity_update_query.eq("user_id", user_id)
+        _execute_scoped_opportunity_update(
+            opportunity_update_query,
             payload.opportunity_id,
         )
         logger.info("[OUTCOMES/BID] recorded bid=%s won=%s opp=%s user=%s", payload.bid, payload.won, payload.opportunity_id, user_id)

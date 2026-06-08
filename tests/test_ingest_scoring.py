@@ -913,6 +913,12 @@ def test_auction_hours_remaining_far_future_above_24h():
     assert result > 24
 
 
+def test_auction_velocity_does_not_treat_expired_auctions_as_urgent():
+    expired = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+
+    assert score_module._auction_velocity_score({"auction_end": expired}) == 25.0
+
+
 # ─────────────────────────────────────────────────────────────
 # Strong-structural-economics bypass
 # ─────────────────────────────────────────────────────────────
