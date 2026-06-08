@@ -575,7 +575,11 @@ jobs:
                 and "check_and_handle_duplicate" in normalized
                 and "listing_url" in normalized
                 and "canonical_id" in normalized
-                and any(term in normalized for term in ("missing", "fallback", "duplicate"))
+                and (
+                  "if missing, fall back to" in normalized
+                  or ("listing_url is missing" in normalized and "fall back" in normalized)
+                  or ("listing_url is missing" in normalized and "canonical_id check immediately" in normalized)
+                )
               )
               is_webhook_direct_pg_durability_false_positive = (
                 audit_evidence_proof.get("webhook_log_direct_pg_fallback_is_durable_and_labelled") is True
@@ -593,7 +597,10 @@ jobs:
                 audit_evidence_proof.get("rover_numeric_defaults_are_serialization_fallbacks") is True
                 and "webapp/routers/rover.py" in normalized
                 and "_coerce_number" in normalized
-                and any(term in normalized for term in ("default", "0.0", "none", "missing or invalid"))
+                and "dos_score" in normalized
+                and "current_bid" in normalized
+                and "0.0" in normalized
+                and "missing or invalid" in normalized
               )
               is_rover_heuristic_import_debug_posture = (
                 audit_evidence_proof.get("rover_heuristic_import_debug_visible") is True

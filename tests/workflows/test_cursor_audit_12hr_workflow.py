@@ -194,18 +194,22 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/outcomes.py | In `patch_outcome`, the `sale_price` is recorded as `current_bid` for lost or passed outcomes, which is misleading as no sale occurred. | **FIX:** set sale_price to 0.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` function uses a default value of `0.0` for `dos_score` and `current_bid`. If these values are missing or invalid, consider using None. | **FIX:** Handle None.",
                     "HIGH | webapp/routers/rover.py | The `_rover_debug_snapshot` function logs a warning if `heuristic_scorer` import fails but does not prevent the application from starting, potentially leading to silent failures. | **FIX:** Treat as critical error.",
+                    "CRITICAL | webapp/routers/ingest.py | `check_and_handle_duplicate` still has a duplicate race after canonical lookup during concurrent inserts. | **FIX:** enforce a transactional insert.",
+                    "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
                 ]
             )
         )
 
         self.assertNotIn("HIGH_DEMAND_MODELS", filtered)
-        self.assertNotIn("check_and_handle_duplicate", filtered)
+        self.assertNotIn("listing_url check can be bypassed", filtered)
         self.assertNotIn("_insert_webhook_log_direct_pg", filtered)
         self.assertNotIn("_auction_velocity_score", filtered)
         self.assertNotIn("rust_state_source", filtered)
         self.assertNotIn("sale_price", filtered)
-        self.assertNotIn("_coerce_number", filtered)
+        self.assertNotIn("default value of `0.0` for `dos_score` and `current_bid`", filtered)
         self.assertNotIn("_rover_debug_snapshot", filtered)
+        self.assertIn("duplicate race after canonical lookup", filtered)
+        self.assertIn("buyer_premium", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
 
