@@ -299,6 +299,59 @@ def test_operator_patch_outcome_override_logs_outcome_details(monkeypatch, caplo
     assert "outcome=lost" in caplog.text
 
 
+def test_operator_patch_invalid_outcome_does_not_log_completed_override(monkeypatch, caplog):
+    client = _Supabase(
+        opportunity={
+            "id": "opp-1",
+            "user_id": "other-user",
+            "make": "Ford",
+            "model": "F-150",
+            "year": 2023,
+            "mileage": 18000,
+            "current_bid": 10000,
+            "state": "CA",
+        },
+        user_id="operator-user",
+    )
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+    monkeypatch.setenv("DEALERSCOPE_OPERATOR_USER_ID", "operator-user")
+    caplog.set_level(logging.INFO, logger=outcomes.__name__)
+
+    payload = outcomes.OutcomePatchPayload(outcome="won")
+    with pytest.raises(HTTPException) as exc:
+        _run(outcomes.patch_outcome("opp-1", payload, authorization=_auth_header()))
+
+    assert exc.value.status_code == 400
+    assert "operator outcome override" not in caplog.text
+
+
+def test_operator_bid_update_failure_does_not_log_completed_override(monkeypatch, caplog):
+    client = _Supabase(
+        opportunity={
+            "id": "opp-1",
+            "user_id": "other-user",
+            "make": "Ford",
+            "model": "F-150",
+            "year": 2023,
+            "mileage": 18000,
+            "current_bid": 10000,
+            "state": "CA",
+        },
+        user_id="operator-user",
+        fail_updates=True,
+    )
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+    monkeypatch.setenv("DEALERSCOPE_OPERATOR_USER_ID", "operator-user")
+    caplog.set_level(logging.INFO, logger=outcomes.__name__)
+
+    payload = outcomes.BidOutcomePayload(opportunity_id="opp-1", bid=True, won=False)
+    with pytest.raises(HTTPException) as exc:
+        _run(outcomes.create_bid_outcome(payload, authorization=_auth_header()))
+
+    assert exc.value.status_code == 409
+    assert "operator bid override" not in caplog.text
+
+
 def test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity(monkeypatch):
     client = _Supabase()
     monkeypatch.setattr(outcomes, "supabase_client", client)

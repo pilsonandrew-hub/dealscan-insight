@@ -312,15 +312,6 @@ async def patch_outcome(
 
     user_id = _verify_auth(authorization)
     opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)
-    if _is_operator_user(user_id):
-        logger.info(
-            "[OUTCOMES] operator outcome override opp=%s operator=%s owner=%s outcome=%s sold_price=%s",
-            opportunity_id,
-            user_id,
-            opportunity.get("user_id"),
-            payload.outcome,
-            payload.sold_price,
-        )
     current_bid = _safe_float(opportunity.get("current_bid")) or 0.0
 
     sold_price = _safe_float(payload.sold_price)
@@ -388,6 +379,15 @@ async def patch_outcome(
             opportunity_update_query,
             opportunity_id,
         )
+        if _is_operator_user(user_id):
+            logger.info(
+                "[OUTCOMES] operator outcome override opp=%s operator=%s owner=%s outcome=%s sold_price=%s",
+                opportunity_id,
+                user_id,
+                opportunity.get("user_id"),
+                payload.outcome,
+                sold_price,
+            )
 
         return {
             "success": True,
@@ -487,15 +487,6 @@ async def create_bid_outcome(
 
     user_id = _verify_auth(authorization)
     opportunity = _fetch_opportunity(payload.opportunity_id, require_user_id=user_id)
-    if _is_operator_user(user_id):
-        logger.info(
-            "[OUTCOMES/BID] operator bid override opp=%s operator=%s owner=%s bid=%s won=%s",
-            payload.opportunity_id,
-            user_id,
-            opportunity.get("user_id"),
-            payload.bid,
-            payload.won,
-        )
 
     normalized = _normalize_bid_outcome(payload, opportunity)
 
@@ -541,6 +532,15 @@ async def create_bid_outcome(
             opportunity_update_query,
             payload.opportunity_id,
         )
+        if _is_operator_user(user_id):
+            logger.info(
+                "[OUTCOMES/BID] operator bid override opp=%s operator=%s owner=%s bid=%s won=%s",
+                payload.opportunity_id,
+                user_id,
+                opportunity.get("user_id"),
+                payload.bid,
+                payload.won,
+            )
         logger.info("[OUTCOMES/BID] recorded bid=%s won=%s opp=%s user=%s", payload.bid, payload.won, payload.opportunity_id, user_id)
         return {"success": True, "outcome": normalized.outcome, "outcome_persisted": True, "opportunity": opportunity}
     except HTTPException:
