@@ -314,7 +314,9 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | backend/ingest/score.py | `_auction_velocity_score` incomplete stage logic for 25+ hour auctions. | **FIX:** prove the auction velocity helper handles long-window auctions.",
                     "HIGH | webapp/routers/ingest.py | `insert_webhook_log` can ignore direct PG errors if require_durable is false. | **FIX:** preserve durable-mode handling semantics.",
                     "HIGH | webapp/routers/ingest.py | Duplicate Check Bypass for `canonical_id` with `listing_url` | The `check_and_handle_duplicate` function can inherit an already marked duplicate listing_url match without ensuring consistency when canonical_record_id differs. | **FIX:** flag the data inconsistency.",
-                    "HIGH | webapp/routers/ingest.py | Incomplete `webhook_log` Fallback Error Handling | The current implementation doesn't fully expose the initial `primary_error`; log `primary_error` before direct PG fallback succeeds.",
+                    "HIGH | webapp/routers/ingest.py | Incomplete `webhook_log` Fallback Error Handling | The `insert_webhook_log` implementation doesn't fully expose the initial `primary_error`; log `primary_error` before direct PG fallback succeeds.",
+                    "HIGH | webapp/routers/ingest.py | `update_webhook_log` fallback hides primary_error on success. | **FIX:** log update primary_error before fallback success.",
+                    "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` must ensure consistency between listing_url and canonical_id during source refresh. | **FIX:** verify refreshed canonical source history.",
                 ]
             )
         )
@@ -387,6 +389,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Incomplete `webhook_log` Fallback Error Handling", filtered)
         self.assertIn("incomplete stage logic for 25+ hour auctions", filtered)
         self.assertIn("ignore direct PG errors if require_durable is false", filtered)
+        self.assertIn("update_webhook_log` fallback hides primary_error", filtered)
+        self.assertIn("ensure consistency between listing_url and canonical_id during source refresh", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):

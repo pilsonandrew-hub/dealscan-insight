@@ -863,12 +863,12 @@ jobs:
                 and "check_and_handle_duplicate" in normalized
                 and "listing_url" in normalized
                 and "canonical_id" in normalized
-                and any(term in normalized for term in ("already marked duplicate", "canonical_record_id differs", "ensure consistency", "identity conflict", "data inconsistency"))
+                and any(term in normalized for term in ("already marked duplicate", "canonical_record_id differs", "identity conflict", "data inconsistency"))
               )
               is_webhook_direct_pg_durability_false_positive = (
                 audit_evidence_proof.get("webhook_log_direct_pg_fallback_is_durable_and_labelled") is True
                 and "webapp/routers/ingest.py" in normalized
-                and any(term in normalized for term in ("_insert_webhook_log_direct_pg", "insert_webhook_log", "webhook_log"))
+                and any(term in normalized for term in ("_insert_webhook_log_direct_pg", "insert_webhook_log"))
                 and "fallback" in normalized
                 and (
                   (
@@ -891,7 +891,7 @@ jobs:
                   )
                   or (
                     audit_evidence_proof.get("webhook_log_primary_error_logged_on_successful_fallback") is True
-                    and any(term in normalized for term in ("insert_webhook_log", "webhook_log"))
+                    and "insert_webhook_log" in normalized
                     and "primary_error" in normalized
                     and (
                       "incomplete `webhook_log` fallback error handling" in normalized
