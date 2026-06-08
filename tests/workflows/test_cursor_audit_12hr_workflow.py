@@ -45,6 +45,14 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("Mileage-per-year Rejection Bypass", workflow)
         self.assertIn("Incomplete Bid Ceiling Enforcement", workflow)
 
+    def test_gemini_audit_escapes_telegram_html_and_names_alert_delivery_failures(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("send_telegram_html_message", workflow)
+        self.assertIn("html.escape(findings)", workflow)
+        self.assertIn("DealerScope audit alert delivery failed", workflow)
+        self.assertIn("raise RuntimeError(\"DealerScope audit alert delivery failed", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

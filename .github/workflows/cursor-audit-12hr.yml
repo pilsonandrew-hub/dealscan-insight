@@ -328,7 +328,7 @@ jobs:
           url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key={GEMINI_KEY}"
           req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
 
-          def send_telegram_message(message: str) -> None:
+          def send_telegram_html_message(message: str) -> None:
             if not BOT_TOKEN:
               return
             tg_payload = json.dumps({"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}).encode()
@@ -425,18 +425,6 @@ jobs:
 
           try:
             data = fetch_gemini_audit()
-            raw_findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            findings = suppress_deterministically_false_findings(raw_findings)
-
-            print("=== GEMINI AUDIT FINDINGS ===")
-            print(findings)
-
-            # Send to Telegram if there's anything critical after deterministic suppression.
-            if findings and ("CRITICAL" in findings or "HIGH" in findings) and BOT_TOKEN:
-              now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-              msg = f"🔍 <b>DealerScope 12hr Audit — {now}</b>\n\n{findings[:3000]}"
-              send_telegram_message(msg)
-
           except Exception as e:
             now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
             error_message = f"Gemini audit unavailable after {MAX_ATTEMPTS} attempt(s): {e}"
@@ -448,9 +436,28 @@ jobs:
                 summary.write(f"- Time: {now}\n")
                 summary.write(f"- Status: {error_message}\n")
                 summary.write("- Result: failing this workflow so a degraded red-team audit is not represented as green.\n")
-            send_telegram_message(
-              f"⚠️ <b>DealerScope 12hr Audit degraded — {now}</b>\n\n"
-              f"{html.escape(error_message)[:3000]}"
-            )
+            try:
+              send_telegram_html_message(
+                f"⚠️ <b>DealerScope 12hr Audit degraded — {now}</b>\n\n"
+                f"{html.escape(error_message)[:3000]}"
+              )
+            except Exception as alert_error:
+              print(f"::error title=DealerScope audit alert delivery failed::{alert_error}")
             raise SystemExit(1)
+
+          raw_findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+          findings = suppress_deterministically_false_findings(raw_findings)
+
+          print("=== GEMINI AUDIT FINDINGS ===")
+          print(findings)
+
+          # Send to Telegram if there's anything critical after deterministic suppression.
+          if findings and ("CRITICAL" in findings or "HIGH" in findings) and BOT_TOKEN:
+            now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            msg = f"🔍 <b>DealerScope 12hr Audit — {now}</b>\n\n<pre>{html.escape(findings)[:3000]}</pre>"
+            try:
+              send_telegram_html_message(msg)
+            except Exception as alert_error:
+              print(f"::error title=DealerScope audit alert delivery failed::{alert_error}")
+              raise RuntimeError("DealerScope audit alert delivery failed: " + repr(alert_error)) from alert_error
           PYEOF
