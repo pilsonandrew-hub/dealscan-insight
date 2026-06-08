@@ -125,6 +125,8 @@ def _normalize_bid_outcome(payload: BidOutcomePayload, opportunity: dict) -> Bid
         )
 
     bid_amount = _safe_float(opportunity.get("current_bid"))
+    if payload.won and (bid_amount is None or bid_amount <= 0):
+        raise HTTPException(status_code=400, detail="current_bid is required to calculate outcome metrics")
     return BidOutcomeNormalized(
         bid=True,
         outcome="won" if payload.won else "lost",
@@ -151,6 +153,12 @@ def _fetch_opportunity(opportunity_id: str, require_user_id: Optional[str] = Non
     if require_user_id:
         opp_user_id = opp.get("user_id")
         if _is_operator_user(require_user_id):
+            logger.info(
+                "[OUTCOMES] operator override opp=%s operator=%s owner=%s",
+                opportunity_id,
+                require_user_id,
+                opp_user_id,
+            )
             return opp
         if opp_user_id:
             if opp_user_id != require_user_id:
@@ -231,11 +239,11 @@ def _execute_scoped_opportunity_update(query, opportunity_id: str) -> None:
 
 def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> None:
     asking_price = _safe_float(opportunity.get("current_bid"))
-    gross_margin = None
-    roi_pct = None
-    if asking_price and asking_price > 0:
-        gross_margin = round(payload.sale_price - asking_price, 2)
-        roi_pct = round((gross_margin / asking_price) * 100, 4)
+    if asking_price is None or asking_price <= 0:
+        raise HTTPException(status_code=400, detail="current_bid is required to calculate outcome metrics")
+
+    gross_margin = round(payload.sale_price - asking_price, 2)
+    roi_pct = round((gross_margin / asking_price) * 100, 4)
 
     insert_payload = {
         **_dealer_sales_base_payload(user_id, opportunity, payload.opportunity_id),

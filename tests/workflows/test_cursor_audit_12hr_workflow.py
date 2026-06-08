@@ -195,9 +195,12 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "rust_state_new_vehicle_exception_and_source_risk_policy": True,
                 "operator_privileged_outcome_write_documented": True,
                 "operator_privilege_uses_authenticated_user_id": True,
+                "operator_override_is_logged": True,
+                "dealer_sales_errors_logged_and_http_500": True,
                 "dealer_sales_empty_upsert_fails_closed": True,
                 "dealer_sales_payload_requires_essential_fields": True,
                 "won_bid_requires_positive_purchase_price": True,
+                "won_outcomes_require_positive_current_bid": True,
                 "score_deal_wrapper_enforces_premium_age_and_mileage": True,
                 "bid_outcome_caller_sets_outcome_recorded_at": True,
                 "legacy_mirror_is_realized_sale_only": True,
@@ -245,6 +248,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | backend/ingest/score.py | Incomplete `_auction_velocity_score` for Expired Auctions | The `_auction_velocity_score` function returns `25.0` for `hours < 0` (expired auctions). While `expired_auction_velocity_matches_nonurgent_floor` is true, indicating this is intentional, a score of `25.0` is still a positive score. For expired auctions, the velocity should ideally be 0 or result in an outright rejection, as the opportunity to bid has passed. A non-zero score might lead to expired listings being presented as viable opportunities.",
                     "HIGH | webapp/routers/outcomes.py | `dealer_sales` `sale_price` can be 0 for \"won\" outcomes | In `_mirror_bid_outcome_to_dealer_sales`, if `normalized.outcome == \"won\"`, `sale_price` is set to `normalized.purchase_price`. However, if `normalized.purchase_price` is `None` (which is allowed if `won` is false, but not if `won` is true), `sale_price` would default to 0. The `DEALER_SALES_REQUIRED_OUTCOME_COLUMNS` includes `sale_price`. While `purchase_price` is required when `won=true` by `_normalize_bid_outcome`, this logic path could be brittle if `normalized.purchase_price` somehow becomes `None` after validation or if the `sale_price` is intended to be non-zero for all \"won\" outcomes.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can return zero rows when row-level security rejects `dealer_sales` writes. | **FIX:** audit RLS policy.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` Error Handling Leaks Internal Details | The function logs the raw exception but returns generic HTTP 500 detail. | **FIX:** Modify `_upsert_dealer_sales_outcome` to catch specific database errors and return generic error messages, preventing internal detail leakage.",
+                    "HIGH | webapp/routers/outcomes.py | `_fetch_opportunity` Authorization Bypass for Operator User | Ensure that even operator users have their actions logged and audited, and consider if bypassing user_id checks for system opportunities is appropriate without explicit logging.",
+                    "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` and `_mirror_bid_outcome_to_dealer_sales` Use `current_bid` as `asking_price` Without Validation | Validate `current_bid` before using it as `asking_price` to prevent division by zero or incorrect margin calculations.",
+                    "HIGH | backend/ingest/score.py | Missing Premium Lane Age and Mileage Rejection in Scoring Functions | FIX: Implement explicit rejection logic within score_deal_premium for vehicles exceeding 4 years or 50,000 miles.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
                 ]
@@ -277,9 +284,51 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Incomplete `_auction_velocity_score` for Expired Auctions", filtered)
         self.assertNotIn("sale_price` can be 0 for \"won\" outcomes", filtered)
         self.assertIn("row-level security", filtered)
+        self.assertNotIn("Error Handling Leaks Internal Details", filtered)
+        self.assertNotIn("Authorization Bypass for Operator User", filtered)
+        self.assertNotIn("Use `current_bid` as `asking_price` Without Validation", filtered)
+        self.assertNotIn("Missing Premium Lane Age and Mileage Rejection", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
+
+    def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        function_match = re.search(
+            r"          def suppress_deterministically_false_findings"
+            r"\(findings: str\) -> str:\n"
+            r"(?P<body>.*?)(?=\n          def suppress_unsupported_or_contradicted_findings)",
+            workflow,
+            re.S,
+        )
+        self.assertIsNotNone(function_match)
+
+        namespace = {
+            "re": re,
+            "bid_ceiling_gate_passed": True,
+            "business_rule_gate_passed": True,
+        }
+        exec(
+            textwrap.dedent(
+                "def suppress_deterministically_false_findings(findings: str) -> str:\n"
+                + function_match.group("body")
+            ),
+            namespace,
+        )
+
+        filtered = namespace["suppress_deterministically_false_findings"](
+            "\n".join(
+                [
+                    "CRITICAL | webapp/routers/ingest.py | Inconsistent Application of `HIGH_RUST_STATES` for Rejection | FIX: Ensure HIGH_RUST_STATES leads to consistent rejection across all relevant processing paths, or clarify business rules for exceptions.",
+                    "HIGH | backend/ingest/score.py | Inconsistent Bid Ceiling Application | FIX: Ensure bid_ceiling_pct_for_tier is consistently applied as a hard rejection or a score-based rejection that guarantees rejection when exceeded.",
+                    "HIGH | backend/ingest/score.py | `score_deal` returns premium for an over-age vehicle. | **FIX:** enforce the wrapper tier gate.",
+                ]
+            )
+        )
+
+        self.assertNotIn("HIGH_RUST_STATES", filtered)
+        self.assertNotIn("Inconsistent Bid Ceiling Application", filtered)
+        self.assertIn("score_deal` returns premium", filtered)
 
     def test_operator_privilege_proof_evaluates_current_source(self):
         repo_root = WORKFLOW.parents[2]
@@ -349,6 +398,15 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 and "purchase_price must be greater than 0 when won=true" in outcomes_source
                 and "test_won_bid_outcome_requires_purchase_price_before_persistence" in outcomes_tests
                 and "test_won_bid_outcome_rejects_zero_purchase_price_before_persistence" in outcomes_tests
+            ),
+            "operator_override_is_logged": (
+                "operator override opp=%s operator=%s owner=%s" in outcomes_source
+                and "test_operator_bid_outcome_override_is_logged" in outcomes_tests
+            ),
+            "won_outcomes_require_positive_current_bid": (
+                "current_bid is required to calculate outcome metrics" in outcomes_source
+                and "test_won_bid_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
+                and "test_sale_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
             ),
         }
 

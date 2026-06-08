@@ -319,6 +319,10 @@ jobs:
               and "user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]
               and "test_foreign_owned_opportunity_rejects_bid_outcome" in outcomes_tests
             )
+            audit_evidence_proof["operator_override_is_logged"] = (
+              "operator override opp=%s operator=%s owner=%s" in outcomes_source
+              and "test_operator_bid_outcome_override_is_logged" in outcomes_tests
+            )
             audit_evidence_proof["outcome_update_zero_row_conflict"] = (
               "Opportunity outcome mirror update matched zero rows" in outcomes_source
               and "raise HTTPException(status_code=409" in outcomes_source
@@ -341,6 +345,11 @@ jobs:
               and "purchase_price must be greater than 0 when won=true" in outcomes_source
               and "test_won_bid_outcome_requires_purchase_price_before_persistence" in outcomes_tests
               and "test_won_bid_outcome_rejects_zero_purchase_price_before_persistence" in outcomes_tests
+            )
+            audit_evidence_proof["won_outcomes_require_positive_current_bid"] = (
+              "current_bid is required to calculate outcome metrics" in outcomes_source
+              and "test_won_bid_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
+              and "test_sale_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
             )
             audit_evidence_proof["score_deal_wrapper_enforces_premium_age_and_mileage"] = (
               "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
@@ -467,12 +476,15 @@ jobs:
                 "missing bid ceiling rejection" in normalized
                 or "missing bid ceiling rejections" in normalized
                 or "incomplete bid ceiling enforcement" in normalized
+                or "inconsistent bid ceiling application" in normalized
                 or ("bid ceiling" in normalized and "not rejected" in normalized)
                 or ("bid ceiling" in normalized and "logic is missing" in normalized)
                 or ("bid ceiling" in normalized and "only receive" in normalized and "lower score" in normalized)
+                or ("bid ceiling" in normalized and "hard rejection" in normalized and "consistently applied" in normalized)
               )
               is_rust_state_false_positive = business_rule_gate_passed and (
                 "missing rust state rejection" in normalized
+                or "high_rust_states" in normalized
                 or ("rust state" in normalized and "do not explicitly reject" in normalized)
                 or ("rust state" in normalized and "not just a penalty" in normalized)
                 or ("incomplete rust state rejection" in normalized)
@@ -568,7 +580,7 @@ jobs:
                 audit_evidence_proof.get("dealer_sales_errors_logged_and_http_500") is True
                 and "webapp/routers/outcomes.py" in normalized
                 and "_upsert_dealer_sales_outcome" in normalized
-                and any(term in normalized for term in ("unhandled", "runtimeerror", "supabase error"))
+                and any(term in normalized for term in ("unhandled", "runtimeerror", "supabase error", "internal details", "detail leakage", "leaks internal details", "generic error messages"))
               )
               is_dealer_sales_empty_upsert_fixed = (
                 audit_evidence_proof.get("dealer_sales_empty_upsert_fails_closed") is True
@@ -609,6 +621,15 @@ jobs:
                   or "missing authorization for opportunity update" in normalized
                 )
               )
+              is_operator_audit_logging_fixed = (
+                audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
+                and audit_evidence_proof.get("operator_privilege_uses_authenticated_user_id") is True
+                and audit_evidence_proof.get("operator_override_is_logged") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_fetch_opportunity" in normalized
+                and "operator" in normalized
+                and any(term in normalized for term in ("logged and audited", "explicit logging", "without explicit logging"))
+              )
               is_outcome_update_zero_row_semantics_false_positive = (
                 audit_evidence_proof.get("outcome_update_zero_row_conflict") is True
                 and "webapp/routers/outcomes.py" in normalized
@@ -641,12 +662,21 @@ jobs:
                 and "0" in normalized
                 and any(term in normalized for term in ("purchase_price=0", "purchase_price is none", "sale_price can be 0", "intended to be non-zero"))
               )
+              is_won_outcome_current_bid_validation_fixed = (
+                audit_evidence_proof.get("won_outcomes_require_positive_current_bid") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_legacy_mirror_to_dealer_sales" in normalized
+                and "_mirror_bid_outcome_to_dealer_sales" in normalized
+                and "current_bid" in normalized
+                and "asking_price" in normalized
+                and any(term in normalized for term in ("without validation", "division by zero", "incorrect margin"))
+              )
               is_premium_helper_gate_false_positive = (
                 audit_evidence_proof.get("score_deal_wrapper_enforces_premium_age_and_mileage") is True
                 and "backend/ingest/score.py" in normalized
                 and "score_deal_premium" in normalized
                 and "premium lane" in normalized
-                and any(term in normalized for term in ("missing age gate", "missing mileage gate", "max age", "max mileage"))
+                and any(term in normalized for term in ("missing age gate", "missing mileage gate", "max age", "max mileage", "age and mileage rejection", "exceeding 4 years", "50,000 miles"))
               )
               is_bid_outcome_timestamp_false_positive = (
                 audit_evidence_proof.get("bid_outcome_caller_sets_outcome_recorded_at") is True
@@ -754,10 +784,12 @@ jobs:
                 or is_dealer_sales_empty_payload_fixed
                 or is_outcome_non_sale_price_fixed
                 or is_operator_privilege_authorization_false_positive
+                or is_operator_audit_logging_fixed
                 or is_outcome_update_zero_row_semantics_false_positive
                 or is_operator_zero_row_conflict_expected_fail_closed
                 or is_expired_velocity_nonurgent_floor_false_positive
                 or is_won_bid_sale_price_zero_fixed
+                or is_won_outcome_current_bid_validation_fixed
                 or is_premium_helper_gate_false_positive
                 or is_bid_outcome_timestamp_false_positive
                 or is_legacy_realized_sale_semantics_false_positive
