@@ -356,12 +356,15 @@ jobs:
             suppressing_false_positive_block = False
             for line in findings.splitlines():
               normalized = line.lower()
+              stripped = normalized.strip()
               starts_new_finding = bool(re.match(r"^\s*(?:\d+\.|[-*])\s+.*\|", line))
+              starts_pipe_finding = stripped.startswith(("critical |", "high |"))
+              starts_markdown_finding = stripped.startswith(("**critical", "**high", "###"))
               if suppressing_false_positive_block:
                 if not line.strip():
                   suppressing_false_positive_block = False
                   continue
-                if starts_new_finding or normalized.strip().startswith(("**critical", "**high", "###")):
+                if starts_new_finding or starts_pipe_finding or starts_markdown_finding:
                   suppressing_false_positive_block = False
                 else:
                   suppressed.append(line)
