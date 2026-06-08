@@ -57,6 +57,11 @@ def test_passes_basic_gates_rejects_title_brand_keywords():
     assert result["reason"] == "title_brand_rejected (listing_text matched 'salvage')"
 
 
+def test_coerce_float_accepts_comma_formatted_numeric_strings():
+    assert score_module._coerce_float("12,345") == 12345.0
+    assert score_module._coerce_float(" $12,345.67 ") == 12345.67
+
+
 def test_passes_basic_gates_checks_vin_for_title_brand_keywords():
     vehicle = {
         "title": "2024 Honda Accord",

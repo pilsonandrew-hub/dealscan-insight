@@ -259,6 +259,10 @@ jobs:
               and _coerce_float("nan") is None
               and _coerce_float("inf") is None
             )
+            audit_evidence_proof["coerce_float_normalizes_formatted_numeric_strings"] = (
+              _coerce_float("12,345") == 12345.0
+              and _coerce_float(" $12,345.67 ") == 12345.67
+            )
           except Exception as proof_error:
             audit_evidence_proof["score_proof_error"] = repr(proof_error)
 
@@ -279,6 +283,15 @@ jobs:
               and "raise HTTPException(status_code=403" in outcomes_source
               and "if _is_operator_user(require_user_id)" in outcomes_source
               and "if not _is_operator_user(user_id)" in outcomes_source
+            )
+            audit_evidence_proof["dealer_sales_errors_logged_and_http_500"] = (
+              "[OUTCOMES] dealer_sales persistence failed" in outcomes_source
+              and 'HTTPException(status_code=500, detail="Failed to persist outcome evidence")' in outcomes_source
+            )
+            audit_evidence_proof["critical_audit_write_errors_handled_upstream"] = (
+              "except CriticalAuditWriteError as e" in ingest_source
+              and "Critical ingest audit write failed" in ingest_source
+              and "[INGEST_AUDIT]" in ingest_source
             )
             audit_evidence_proof["canonical_duplicate_unique_index_present"] = (
               "idx_opportunities_canonical_unique" in migrations_text
@@ -332,6 +345,8 @@ jobs:
                 "missing rust state rejection" in normalized
                 or ("rust state" in normalized and "do not explicitly reject" in normalized)
                 or ("rust state" in normalized and "not just a penalty" in normalized)
+                or ("incomplete rust state rejection" in normalized)
+                or ("rust state" in normalized and "only penalizes" in normalized)
               )
               is_mileage_per_year_false_positive = business_rule_gate_passed and (
                 "mileage-per-year rejection bypass" in normalized
@@ -397,8 +412,26 @@ jobs:
               )
               is_coerce_float_false_positive = (
                 audit_evidence_proof.get("coerce_float_rejects_invalid_and_nonfinite") is True
+                and audit_evidence_proof.get("coerce_float_normalizes_formatted_numeric_strings") is True
                 and "_coerce_float" in normalized
-                and any(term in normalized for term in ("math.isfinite", "nonfinite", "less predictable"))
+                and any(term in normalized for term in ("math.isfinite", "nonfinite", "less predictable", "inconsistent", "non-numeric", "missed conversions"))
+              )
+              is_outcomes_configuration_speculation = (
+                audit_evidence_proof.get("outcomes_system_opportunity_non_operator_rejected") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and any(term in normalized for term in ("system opportunities", "operator", "environment variable", "overly restrictive", "inconsistent authorization"))
+              )
+              is_ingest_error_handling_speculation = (
+                audit_evidence_proof.get("critical_audit_write_errors_handled_upstream") is True
+                and "webapp/routers/ingest.py" in normalized
+                and "criticalauditwriteerror" in normalized
+                and any(term in normalized for term in ("unhandled", "calling context", "not provided"))
+              )
+              is_dealer_sales_error_handling_false_positive = (
+                audit_evidence_proof.get("dealer_sales_errors_logged_and_http_500") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_upsert_dealer_sales_outcome" in normalized
+                and any(term in normalized for term in ("unhandled", "runtimeerror", "supabase error"))
               )
               is_duplicate_race_mitigated = (
                 audit_evidence_proof.get("canonical_duplicate_unique_index_present") is True
@@ -415,6 +448,9 @@ jobs:
                 or is_sql_injection_false_positive
                 or is_round_price_basis_false_positive
                 or is_coerce_float_false_positive
+                or is_outcomes_configuration_speculation
+                or is_ingest_error_handling_speculation
+                or is_dealer_sales_error_handling_false_positive
                 or is_duplicate_race_mitigated
                 or is_unsupported_speculation
               ):

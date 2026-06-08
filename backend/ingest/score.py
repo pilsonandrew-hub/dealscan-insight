@@ -86,6 +86,10 @@ def _legacy_condition_grade_label(condition_assessment: Optional[dict]) -> str:
 def _coerce_float(value: object) -> Optional[float]:
     if value is None or value == "":
         return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", "").replace("$", "")
+        if value == "":
+            return None
     try:
         normalized = float(value)
     except (TypeError, ValueError):
