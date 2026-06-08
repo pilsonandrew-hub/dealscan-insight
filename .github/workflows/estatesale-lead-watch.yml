@@ -1,0 +1,44 @@
+name: EstateSale Lead Watch
+
+on:
+  schedule:
+    - cron: '15 */12 * * *'
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'Optional newline- or comma-separated EstateSale URLs to inspect'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  estatesale-lead-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run EstateSale lead watch
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: "-1003672399222"
+          ESTATESALE_URLS: ${{ github.event.inputs.urls }}
+        run: python3 scripts/estatesale_lead_alert.py
