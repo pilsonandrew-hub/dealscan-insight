@@ -379,6 +379,15 @@ async def patch_outcome(
             opportunity_update_query,
             opportunity_id,
         )
+        if _is_operator_user(user_id):
+            logger.info(
+                "[OUTCOMES] operator outcome override opp=%s operator=%s owner=%s outcome=%s sold_price=%s",
+                opportunity_id,
+                user_id,
+                opportunity.get("user_id"),
+                payload.outcome,
+                sold_price,
+            )
 
         return {
             "success": True,
@@ -523,6 +532,15 @@ async def create_bid_outcome(
             opportunity_update_query,
             payload.opportunity_id,
         )
+        if _is_operator_user(user_id):
+            logger.info(
+                "[OUTCOMES/BID] operator bid override opp=%s operator=%s owner=%s bid=%s won=%s",
+                payload.opportunity_id,
+                user_id,
+                opportunity.get("user_id"),
+                payload.bid,
+                payload.won,
+            )
         logger.info("[OUTCOMES/BID] recorded bid=%s won=%s opp=%s user=%s", payload.bid, payload.won, payload.opportunity_id, user_id)
         return {"success": True, "outcome": normalized.outcome, "outcome_persisted": True, "opportunity": opportunity}
     except HTTPException:

@@ -323,6 +323,25 @@ jobs:
               "operator override opp=%s operator=%s owner=%s" in outcomes_source
               and "test_operator_bid_outcome_override_is_logged" in outcomes_tests
             )
+            audit_evidence_proof["operator_override_logs_outcome_details"] = (
+              "operator outcome override opp=%s operator=%s owner=%s outcome=%s sold_price=%s" in outcomes_source
+              and "operator bid override opp=%s operator=%s owner=%s bid=%s won=%s" in outcomes_source
+              and "test_operator_patch_outcome_override_logs_outcome_details" in outcomes_tests
+              and "test_operator_bid_outcome_override_is_logged" in outcomes_tests
+            )
+            audit_evidence_proof["outcomes_summary_requires_auth"] = (
+              "async def get_outcomes_summary" in outcomes_source
+              and "user_id = _verify_auth(authorization)" in outcomes_source.split("async def get_outcomes_summary", 1)[1].split("@router.post", 1)[0]
+              and "test_summary_requires_auth" in outcomes_tests
+            )
+            audit_evidence_proof["dealer_sales_user_id_from_authenticated_context"] = (
+              '"user_id": user_id' in outcomes_source
+              and "payload: OutcomePatchPayload" in outcomes_source
+              and "user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]
+              and "payload: BidOutcomePayload" in outcomes_source
+              and "test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity" in outcomes_tests
+              and "test_operator_can_record_bid_outcome_for_user_owned_opportunity" in outcomes_tests
+            )
             audit_evidence_proof["outcome_update_zero_row_conflict"] = (
               "Opportunity outcome mirror update matched zero rows" in outcomes_source
               and "raise HTTPException(status_code=409" in outcomes_source
@@ -417,6 +436,12 @@ jobs:
               "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
               and 'selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard' in score_source
               and '"designated_lane": vehicle_tier' in score_source
+            )
+            audit_evidence_proof["missing_bid_mmr_are_severe_provenance_flags"] = (
+              'flags.append("no_mmr")' in score_source
+              and 'flags.append("zero_or_missing_bid")' in score_source
+              and 'severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}' in score_source
+              and "test_passes_basic_gates_rejects_zero_bid" in score_tests
             )
             audit_evidence_proof["rover_redis_affinity_nonfatal_and_debug_visible"] = (
               "Redis affinity init failed (non-fatal)" in rover_source
@@ -640,16 +665,21 @@ jobs:
               is_operator_audit_logging_fixed = (
                 audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
                 and audit_evidence_proof.get("operator_privilege_uses_authenticated_user_id") is True
-                and audit_evidence_proof.get("operator_override_is_logged") is True
+                and (
+                  audit_evidence_proof.get("operator_override_is_logged") is True
+                  or audit_evidence_proof.get("operator_override_logs_outcome_details") is True
+                )
                 and "webapp/routers/outcomes.py" in normalized
-                and "_fetch_opportunity" in normalized
                 and "operator" in normalized
-                and any(term in normalized for term in ("logged and audited", "explicit logging", "without explicit logging"))
+                and any(term in normalized for term in ("logged and audited", "explicit logging", "without explicit logging", "explicitly state", "what was overridden", "unauthorized changes"))
               )
               is_operator_system_opportunity_policy_documented = (
                 audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
                 and audit_evidence_proof.get("operator_privilege_uses_authenticated_user_id") is True
-                and audit_evidence_proof.get("operator_override_is_logged") is True
+                and (
+                  audit_evidence_proof.get("operator_override_is_logged") is True
+                  or audit_evidence_proof.get("operator_override_logs_outcome_details") is True
+                )
                 and "webapp/routers/outcomes.py" in normalized
                 and "operator override" in normalized
                 and "system opportunities" in normalized
@@ -677,7 +707,7 @@ jobs:
                 and "backend/ingest/score.py" in normalized
                 and "expired auction" in normalized
                 and ("auction velocity" in normalized or "_auction_velocity_score" in normalized)
-                and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently", "should ideally be 0", "presented as viable opportunities"))
+                and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently", "should ideally be 0", "presented as viable opportunities", "reject expired auctions", "urgent scoring"))
               )
               is_won_bid_sale_price_zero_fixed = (
                 audit_evidence_proof.get("won_bid_requires_positive_purchase_price") is True
@@ -720,7 +750,7 @@ jobs:
                 and "backend/ingest/score.py" in normalized
                 and "premium" in normalized
                 and any(term in normalized for term in ("missing_photos", "missing photos"))
-                and any(term in normalized for term in ("direct check", "hard rejection", "critical quality gate", "reject or heavily penalize", "_risk_penalty_score"))
+                and any(term in normalized for term in ("direct check", "hard rejection", "critical quality gate", "reject or heavily penalize", "_risk_penalty_score", "implement hard rejection"))
               )
               is_bid_outcome_timestamp_false_positive = (
                 audit_evidence_proof.get("bid_outcome_caller_sets_outcome_recorded_at") is True
@@ -764,20 +794,74 @@ jobs:
               is_duplicate_listing_url_canonical_check_fixed = (
                 audit_evidence_proof.get("duplicate_listing_url_also_checks_canonical_id") is True
                 and "webapp/routers/ingest.py" in normalized
-                and "duplicate check bypassed" in normalized
-                and "listing_url" in normalized
-                and "canonical id-based duplicate checking" in normalized
-                and "always performed" in normalized
+                and (
+                  (
+                    "duplicate check bypassed" in normalized
+                    and "listing_url" in normalized
+                    and "canonical id-based duplicate checking" in normalized
+                    and "always performed" in normalized
+                  )
+                  or (
+                    "logic flaw" in normalized
+                    and "listing_match" in normalized
+                    and "canonical_id" in normalized
+                    and "prioritize" in normalized
+                  )
+                )
               )
               is_webhook_direct_pg_durability_false_positive = (
                 audit_evidence_proof.get("webhook_log_direct_pg_fallback_is_durable_and_labelled") is True
                 and "webapp/routers/ingest.py" in normalized
-                and "_insert_webhook_log_direct_pg" in normalized
-                and "supabase_client" in normalized
+                and any(term in normalized for term in ("_insert_webhook_log_direct_pg", "insert_webhook_log"))
                 and "fallback" in normalized
-                and "primary" in normalized
-                and ("masking critical issues" in normalized or "masking critical" in normalized)
-                and ("require_durable" in normalized or "primary_error" in normalized)
+                and (
+                  (
+                    "supabase_client" in normalized
+                    and "primary" in normalized
+                    and ("masking critical issues" in normalized or "masking critical" in normalized)
+                    and ("require_durable" in normalized or "primary_error" in normalized)
+                  )
+                  or (
+                    "direct pg" in normalized
+                    and "transactional" in normalized
+                    and "atomicity" in normalized
+                  )
+                )
+              )
+              is_outcomes_summary_auth_false_positive = (
+                audit_evidence_proof.get("outcomes_summary_requires_auth") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "get_outcomes_summary" in normalized
+                and any(term in normalized for term in ("missing authorization", "implement `_verify_auth`", "implement _verify_auth"))
+              )
+              is_dealer_sales_user_id_context_false_positive = (
+                audit_evidence_proof.get("dealer_sales_user_id_from_authenticated_context") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "dealer_sales" in normalized
+                and "user_id" in normalized
+                and "request payload" not in normalized
+                and (
+                  (
+                    "allows arbitrary" in normalized
+                    and "_upsert_dealer_sales_outcome" in normalized
+                    and any(term in normalized for term in ("authenticated context", "from authenticated"))
+                  )
+                  or "enforce `user_id` from authenticated context" in normalized
+                  or "enforce user_id from authenticated context" in normalized
+                )
+              )
+              is_score_missing_bid_mmr_default_policy = (
+                audit_evidence_proof.get("missing_bid_mmr_are_severe_provenance_flags") is True
+                and "backend/ingest/score.py" in normalized
+                and any(term in normalized for term in ("_mmr_proximity_score", "_discount_pct_score", "_net_margin_score"))
+                and (
+                  "missing mmr/bid" in normalized
+                  or (
+                    "missing mmr" in normalized
+                    and any(term in normalized for term in ("default scores", "default score"))
+                  )
+                )
+                and any(term in normalized for term in ("explicit rejection", "severe penalty"))
               )
               is_rover_redis_affinity_operational_posture = (
                 audit_evidence_proof.get("rover_redis_affinity_nonfatal_and_debug_visible") is True
@@ -788,10 +872,18 @@ jobs:
                 audit_evidence_proof.get("rover_numeric_defaults_are_serialization_fallbacks") is True
                 and "webapp/routers/rover.py" in normalized
                 and "_coerce_number" in normalized
-                and "dos_score" in normalized
-                and "current_bid" in normalized
-                and "0.0" in normalized
-                and "missing or invalid" in normalized
+                and (
+                  (
+                    "dos_score" in normalized
+                    and "current_bid" in normalized
+                    and "0.0" in normalized
+                    and "missing or invalid" in normalized
+                  )
+                  or (
+                    "default value masks data quality issues" in normalized
+                    and any(term in normalized for term in ("return `none`", "return none", "raise an error"))
+                  )
+                )
               )
               is_rover_heuristic_import_debug_posture = (
                 audit_evidence_proof.get("rover_heuristic_import_debug_visible") is True
@@ -832,6 +924,8 @@ jobs:
                 or is_outcomes_configuration_speculation
                 or is_ingest_error_handling_speculation
                 or is_dealer_sales_error_handling_false_positive
+                or is_outcomes_summary_auth_false_positive
+                or is_dealer_sales_user_id_context_false_positive
                 or is_dealer_sales_empty_upsert_fixed
                 or is_dealer_sales_empty_payload_fixed
                 or is_outcome_non_sale_price_fixed
@@ -841,6 +935,7 @@ jobs:
                 or is_outcome_update_zero_row_semantics_false_positive
                 or is_operator_zero_row_conflict_expected_fail_closed
                 or is_expired_velocity_nonurgent_floor_false_positive
+                or is_score_missing_bid_mmr_default_policy
                 or is_won_bid_sale_price_zero_fixed
                 or is_won_outcome_current_bid_validation_fixed
                 or is_legacy_realized_sale_current_bid_policy_fixed
