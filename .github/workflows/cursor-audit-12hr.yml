@@ -725,8 +725,9 @@ jobs:
               is_current_bid_trust_score_truncation_false_positive = (
                 audit_evidence_proof.get("current_bid_trust_score_24h_branch_complete") is True
                 and "backend/ingest/score.py" in normalized
-                and "_auction_velocity_score" in normalized
-                and any(term in normalized for term in ("truncated", "elif auction_stage_hours_remaining <= 24", "incomplete", "complete the conditional logic"))
+                and "elif auction_stage_hours_remaining <= 24" in normalized
+                and "auction_stage_hours_remaining" in normalized
+                and any(term in normalized for term in ("line is incomplete", "complete the conditional logic"))
               )
               is_won_bid_sale_price_zero_fixed = (
                 audit_evidence_proof.get("won_bid_requires_positive_purchase_price") is True
@@ -865,7 +866,9 @@ jobs:
                   or (
                     audit_evidence_proof.get("webhook_log_insert_fallback_error_handled") is True
                     and "insert_webhook_log" in normalized
-                    and any(term in normalized for term in ("incomplete fallback logic", "truncated", "if re", "silent failures", "complete the `except` block", "complete the except block"))
+                    and "incomplete fallback logic" in normalized
+                    and "except exception as fallback_error" in normalized
+                    and any(term in normalized for term in ("complete the `except` block", "complete the except block", "direct postgresql fallback"))
                   )
                 )
               )

@@ -306,6 +306,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` Inconsistent `listing_match` Handling | **FIX:** If `canonical_id` is provided, the primary check should be against `canonical_id` first, and `listing_url` should be a secondary check for potential duplicates.",
                     "HIGH | webapp/routers/ingest.py | `insert_webhook_log` Incomplete Fallback Logic | **FIX:** The `insert_webhook_log` function has a truncated `except Exception as fallback_error:` block. The `if re` line is incomplete, indicating missing error handling or logging for the direct PostgreSQL fallback. Complete the `except` block.",
                     "HIGH | webapp/routers/rover.py | `_coerce_number` Default Value for `None` | **FIX:** The `_coerce_number` function returns a `default` value (0.0) for `None` inputs. While this might be intended for some numeric fields, for fields like `dos_score` or `current_bid`, a `None` value might indicate missing data that should be handled differently. Review if defaulting to 0.0 for `None` is always the correct business logic.",
+                    "HIGH | backend/ingest/score.py | `_auction_velocity_score` incomplete stage logic for 25+ hour auctions. | **FIX:** prove the auction velocity helper handles long-window auctions.",
+                    "HIGH | webapp/routers/ingest.py | `insert_webhook_log` can ignore direct PG errors if require_durable is false. | **FIX:** preserve durable-mode handling semantics.",
                 ]
             )
         )
@@ -374,6 +376,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Inconsistent `listing_match` Handling", filtered)
         self.assertNotIn("Incomplete Fallback Logic", filtered)
         self.assertNotIn("Default Value for `None`", filtered)
+        self.assertIn("incomplete stage logic for 25+ hour auctions", filtered)
+        self.assertIn("ignore direct PG errors if require_durable is false", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
