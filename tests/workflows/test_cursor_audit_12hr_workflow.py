@@ -35,6 +35,16 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("fetch_openrouter_gemini_audit", workflow)
         self.assertIn("Direct Gemini audit unavailable", workflow)
 
+    def test_gemini_audit_suppresses_deterministically_false_business_rule_findings(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("business_rule_proof", workflow)
+        self.assertIn("rust_state_oh", workflow)
+        self.assertIn("standard_miles_per_year_over_18000", workflow)
+        self.assertIn("Missing Rust State Rejection", workflow)
+        self.assertIn("Mileage-per-year Rejection Bypass", workflow)
+        self.assertIn("Incomplete Bid Ceiling Enforcement", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

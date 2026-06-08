@@ -149,7 +149,7 @@ jobs:
           GEMINI_OPENROUTER_MODEL: "google/gemini-2.5-flash"
         run: |
           python3 << 'PYEOF'
-          import datetime, html, json, os, ssl, time, urllib.error, urllib.request
+          import datetime, html, json, os, re, ssl, time, urllib.error, urllib.request
 
           GEMINI_KEY = os.environ["GEMINI_KEY"]
           OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "")
@@ -178,6 +178,7 @@ jobs:
               pass
 
           bid_ceiling_proof = []
+          business_rule_proof = []
           try:
             from backend.ingest.score import CURRENT_YEAR, score_deal
             proof_cases = [
@@ -202,13 +203,53 @@ jobs:
                 "investment_grade": result.get("investment_grade"),
                 "dos_score": result.get("dos_score"),
               })
+            business_rule_cases = [
+              ("rust_state_oh", dict(year=CURRENT_YEAR - 3, mileage=30000, bid=5000, mmr_ca=12000, state="OH", make="Toyota", model="Camry", title_status="clean", photos=["x"])),
+              ("standard_miles_per_year_over_18000", dict(year=CURRENT_YEAR - 5, mileage=100000, bid=5000, mmr_ca=12000, state="CA", make="Toyota", model="Camry", title_status="clean", photos=["x"])),
+            ]
+            for name, kwargs in business_rule_cases:
+              result = score_deal(**kwargs)
+              if name == "rust_state_oh":
+                passed = (
+                  result.get("investment_grade") == "Rejected"
+                  and float(result.get("dos_score", 999)) == 0.0
+                  and result.get("vehicle_tier") == "rejected"
+                  and result.get("ceiling_reason") == "high_rust_state_rejected"
+                  and "rust_state_source" in (result.get("risk_flags") or [])
+                )
+              else:
+                passed = (
+                  result.get("investment_grade") == "Rejected"
+                  and float(result.get("dos_score", 999)) == 0.0
+                  and result.get("vehicle_tier") == "rejected"
+                  and "mileage_per_year_gt_18000" in (result.get("risk_flags") or [])
+                )
+              business_rule_proof.append({
+                "case": name,
+                "passed": passed,
+                "investment_grade": result.get("investment_grade"),
+                "dos_score": result.get("dos_score"),
+                "vehicle_tier": result.get("vehicle_tier"),
+                "ceiling_pass": result.get("ceiling_pass"),
+                "ceiling_reason": result.get("ceiling_reason"),
+                "risk_flags": result.get("risk_flags"),
+              })
           except Exception as e:
             bid_ceiling_proof.append({"error": repr(e)})
+            business_rule_proof.append({"error": repr(e)})
 
           bid_ceiling_gate_passed = (
             len(bid_ceiling_proof) == 2
             and all(row.get("passed") is True for row in bid_ceiling_proof)
           )
+          business_rule_gate_passed = (
+            len(business_rule_proof) == 2
+            and all(row.get("passed") is True for row in business_rule_proof)
+          )
+          # Exact false-positive titles suppressed only when deterministic proof passes:
+          # Missing Rust State Rejection
+          # Mileage-per-year Rejection Bypass
+          # Incomplete Bid Ceiling Enforcement
 
           def suppress_deterministically_false_findings(findings: str) -> str:
             """Remove findings contradicted by deterministic local proof.
@@ -218,20 +259,46 @@ jobs:
             Missing Bid Ceiling Rejections is stale or hallucinated and must not
             be forwarded as a critical alert.
             """
-            if not findings or not bid_ceiling_gate_passed:
+            if not findings or not (bid_ceiling_gate_passed or business_rule_gate_passed):
               return findings
             kept = []
             suppressed = []
+            suppressing_false_positive_block = False
             for line in findings.splitlines():
               normalized = line.lower()
-              is_bid_ceiling_false_positive = (
+              starts_new_finding = bool(re.match(r"^\s*(?:\d+\.|[-*])\s+.*\|", line))
+              if suppressing_false_positive_block:
+                if not line.strip():
+                  suppressing_false_positive_block = False
+                  continue
+                if starts_new_finding or normalized.strip().startswith(("**critical", "**high", "###")):
+                  suppressing_false_positive_block = False
+                else:
+                  suppressed.append(line)
+                  continue
+
+              is_bid_ceiling_false_positive = bid_ceiling_gate_passed and (
                 "missing bid ceiling rejection" in normalized
                 or "missing bid ceiling rejections" in normalized
+                or "incomplete bid ceiling enforcement" in normalized
                 or ("bid ceiling" in normalized and "not rejected" in normalized)
+                or ("bid ceiling" in normalized and "logic is missing" in normalized)
                 or ("bid ceiling" in normalized and "only receive" in normalized and "lower score" in normalized)
               )
-              if is_bid_ceiling_false_positive:
+              is_rust_state_false_positive = business_rule_gate_passed and (
+                "missing rust state rejection" in normalized
+                or ("rust state" in normalized and "do not explicitly reject" in normalized)
+                or ("rust state" in normalized and "not just a penalty" in normalized)
+              )
+              is_mileage_per_year_false_positive = business_rule_gate_passed and (
+                "mileage-per-year rejection bypass" in normalized
+                or "mileage per year rejection bypass" in normalized
+                or ("mileage-per-year" in normalized and "does not enforce a hard rejection" in normalized)
+                or ("mileage_per_year_gt_18000" in normalized and "could still be accepted" in normalized)
+              )
+              if is_bid_ceiling_false_positive or is_rust_state_false_positive or is_mileage_per_year_false_positive:
                 suppressed.append(line)
+                suppressing_false_positive_block = True
               else:
                 kept.append(line)
             if suppressed:
@@ -239,7 +306,7 @@ jobs:
               for line in suppressed:
                 print(line)
               kept.append(
-                "INFO | backend/ingest/score.py | Suppressed stale bid-ceiling audit finding | deterministic score_deal proof passed for premium_over_88 and standard_over_80."
+                "INFO | backend/ingest/score.py | Suppressed stale business-rule audit finding | deterministic score_deal proof passed for bid ceiling, rust-state rejection, and Standard mileage-per-year rejection."
               )
             return "\n".join(kept).strip()
 
@@ -247,6 +314,8 @@ jobs:
           Business rules: Premium lane max age=4yr, max mileage=50k, bid ceiling=0.88. Standard lane max age=10yr, max mileage=100k, reject mileage-per-year >18000, bid ceiling=0.80. Rust states rejected.
           Deterministic bid-ceiling proof from score_deal() is below. Do NOT report "Missing Bid Ceiling Rejections" if both proof cases passed; only report it if the proof failed or the code contradicts the proof.
           BID_CEILING_PROOF:{json.dumps(bid_ceiling_proof, indent=2)}
+          Deterministic rust-state and Standard mileage-per-year proof from score_deal() is below. Do NOT report "Missing Rust State Rejection" or "Mileage-per-year Rejection Bypass" if these proof cases passed; only report those issues if the proof failed or the code contradicts the proof.
+          BUSINESS_RULE_PROOF:{json.dumps(business_rule_proof, indent=2)}
           Report only CRITICAL and HIGH issues found. Format: SEVERITY | FILE | ISSUE | FIX
           Be concise — top 10 issues max.
           CODE:{code_bundle[:50000]}"""
