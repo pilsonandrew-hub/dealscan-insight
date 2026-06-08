@@ -997,6 +997,28 @@ def test_near_ceiling_bid_still_requires_ai_confidence():
     assert "dos_score" in result
 
 
+def test_premium_missing_photos_are_risk_flag_not_hard_rejection_policy():
+    result = score_deal(
+        year=CURRENT_YEAR - 1,
+        mileage=12000,
+        bid=12000,
+        mmr_ca=20000,
+        manheim_mmr_mid=20000,
+        manheim_source_status="live",
+        state="CA",
+        make="Toyota",
+        model="RAV4",
+        title_status="clean",
+        description="clean title, normal wear",
+        photos=[],
+    )
+
+    assert result["vehicle_tier"] == "premium"
+    assert "missing_photos" in result["risk_flags"]
+    assert result["ai_confidence_score"] >= 65
+    assert result["ceiling_pass"] is True
+
+
 
 def test_source_quality_proof_record_is_not_normalized_as_opportunity():
     proof = {

@@ -351,6 +351,11 @@ jobs:
               and "test_won_bid_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
               and "test_sale_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
             )
+            audit_evidence_proof["premium_missing_photos_are_risk_flag_not_hard_rejection_policy"] = (
+              'flags.append("missing_photos")' in score_source
+              and "prevents benign flags like 'missing_photos' from unconditionally" in score_source
+              and "test_premium_missing_photos_are_risk_flag_not_hard_rejection_policy" in score_tests
+            )
             audit_evidence_proof["score_deal_wrapper_enforces_premium_age_and_mileage"] = (
               "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
               and 'if vehicle_tier == "rejected":' in score_source
@@ -604,8 +609,11 @@ jobs:
                 audit_evidence_proof.get("outcomes_non_sale_price_zero") is True
                 and "webapp/routers/outcomes.py" in normalized
                 and "sale_price" in normalized
-                and any(term in normalized for term in ("lost", "passed", "non-sale", "no sale", "not won"))
-                and any(term in normalized for term in ("current_bid", "asking_price", "misleading", "misrepresenting"))
+                and any(term in normalized for term in ("lost", "passed", "non-sale", "no sale", "not won", "non-won"))
+                and (
+                  any(term in normalized for term in ("current_bid", "asking_price", "misleading", "misrepresenting"))
+                  or ("sold_price" in normalized and "none" in normalized and "inconsistency" in normalized)
+                )
               )
               is_operator_privilege_authorization_false_positive = (
                 audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
@@ -677,6 +685,14 @@ jobs:
                 and "score_deal_premium" in normalized
                 and "premium lane" in normalized
                 and any(term in normalized for term in ("missing age gate", "missing mileage gate", "max age", "max mileage", "age and mileage rejection", "exceeding 4 years", "50,000 miles"))
+              )
+              is_premium_missing_photos_policy_opinion = (
+                audit_evidence_proof.get("premium_missing_photos_are_risk_flag_not_hard_rejection_policy") is True
+                and "backend/ingest/score.py" in normalized
+                and "score_deal_premium" in normalized
+                and "premium" in normalized
+                and any(term in normalized for term in ("missing_photos", "missing photos"))
+                and any(term in normalized for term in ("direct check", "hard rejection", "critical quality gate", "reject or heavily penalize", "_risk_penalty_score"))
               )
               is_bid_outcome_timestamp_false_positive = (
                 audit_evidence_proof.get("bid_outcome_caller_sets_outcome_recorded_at") is True
@@ -791,6 +807,7 @@ jobs:
                 or is_won_bid_sale_price_zero_fixed
                 or is_won_outcome_current_bid_validation_fixed
                 or is_premium_helper_gate_false_positive
+                or is_premium_missing_photos_policy_opinion
                 or is_bid_outcome_timestamp_false_positive
                 or is_legacy_realized_sale_semantics_false_positive
                 or is_high_demand_dynamic_policy_opinion
