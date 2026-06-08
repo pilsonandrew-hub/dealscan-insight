@@ -179,6 +179,7 @@ DEALER_SALES_OUTCOME_COLUMNS = {
     "sale_price", "sold_price", "asking_price", "outcome", "gross_margin",
     "roi_pct", "sale_date", "days_to_sale", "metadata", "source", "updated_at",
 }
+DEALER_SALES_REQUIRED_OUTCOME_COLUMNS = {"opportunity_id", "user_id", "outcome", "sale_price", "source"}
 
 
 def _upsert_dealer_sales_outcome(payload: dict) -> None:
@@ -190,10 +191,9 @@ def _upsert_dealer_sales_outcome(payload: dict) -> None:
         logger.error("[OUTCOMES] dealer_sales payload has unknown columns: %s", unknown_columns)
         raise HTTPException(status_code=500, detail="Outcome evidence payload does not match schema")
 
-    required_columns = {"opportunity_id", "user_id", "outcome", "sale_price", "source"}
     missing_required_columns = sorted(
         column
-        for column in required_columns
+        for column in DEALER_SALES_REQUIRED_OUTCOME_COLUMNS
         if column not in payload or payload.get(column) is None
     )
     if missing_required_columns:
