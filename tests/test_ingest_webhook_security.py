@@ -189,7 +189,7 @@ class _DuplicateLookupQuery:
     def execute(self):
         self.client.queries.append(tuple(self.filters))
         if ("listing_url", self.client.listing_url) in self.filters:
-            return types.SimpleNamespace(data=[self.client.listing_row])
+            return types.SimpleNamespace(data=[self.client.listing_row] if self.client.listing_row else [])
         if ("canonical_id", self.client.canonical_id) in self.filters:
             return types.SimpleNamespace(data=[self.client.canonical_row] if self.client.canonical_row else [])
         if ("id", self.client.owner_id) in self.filters:
@@ -586,6 +586,12 @@ class WebhookSecurityTests(unittest.TestCase):
             "resource": {"id": "run-direct-log", "defaultDatasetId": "dataset-direct-log"},
         }
 
+        inserted_rows = []
+
+        def capture_direct_pg(row):
+            inserted_rows.append(row)
+            return "direct-log-1"
+
         with patch.object(
             ingest,
             "supabase_client",
@@ -593,11 +599,12 @@ class WebhookSecurityTests(unittest.TestCase):
         ), patch.object(ingest, "_direct_supabase_db_url", "postgresql://example"), patch.object(
             ingest,
             "_insert_webhook_log_direct_pg",
-            lambda _row: "direct-log-1",
+            capture_direct_pg,
         ), self.assertLogs(ingest.logger, level="WARNING") as logs:
             webhook_log_id = ingest.insert_webhook_log(payload, require_durable=True)
 
         self.assertEqual(webhook_log_id, "direct-log-1")
+        self.assertIn("primary_supabase_error=supabase webhook_log insert failed", inserted_rows[0]["error_message"])
         self.assertIn("insert failed; using direct PG fallback", "\n".join(logs.output))
         self.assertIn("supabase webhook_log insert failed", "\n".join(logs.output))
 
@@ -687,6 +694,23 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(result["identity_conflict"], True)
         self.assertIn((("id", "canonical-1"),), client.queries)
         self.assertIn("listing_url/canonical_id conflict", "\n".join(logs.output))
+
+    def test_duplicate_identity_conflict_is_propagated_to_vehicle_before_save(self):
+        vehicle = {"title": "2022 Ford F-150", "risk_flags": ["missing_photos"]}
+
+        ingest._apply_duplicate_result(
+            vehicle,
+            {
+                "is_duplicate": True,
+                "canonical_record_id": "canonical-1",
+                "canonical_update": None,
+                "identity_conflict": True,
+            },
+        )
+
+        self.assertEqual(vehicle["canonical_record_id"], "canonical-1")
+        self.assertEqual(vehicle["identity_conflict"], True)
+        self.assertIn("dedup_identity_conflict", vehicle["risk_flags"])
 
     def test_claim_webhook_log_direct_pg_serializes_pending_claim(self):
         payload = {

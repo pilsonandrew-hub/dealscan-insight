@@ -392,6 +392,17 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
         raise
 
 
+def _apply_duplicate_result(vehicle: dict, dedup: dict) -> None:
+    vehicle["is_duplicate"] = True
+    vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+    if dedup.get("identity_conflict"):
+        vehicle["identity_conflict"] = True
+        risk_flags = list(vehicle.get("risk_flags") or [])
+        if "dedup_identity_conflict" not in risk_flags:
+            risk_flags.append("dedup_identity_conflict")
+        vehicle["risk_flags"] = risk_flags
+
+
 # Datetime parsing helpers are imported from backend.ingest.time_utils.
 
 
@@ -425,8 +436,9 @@ def insert_webhook_log(
     try:
         fallback_label = "webhook_log_insert_direct_pg"
         fallback_row = dict(row)
+        primary_error_message = f"primary_supabase_error={primary_error}" if primary_error is not None else None
         fallback_row["error_message"] = merge_audit_error_message(
-            fallback_row.get("error_message"),
+            merge_audit_error_message(fallback_row.get("error_message"), [primary_error_message]),
             [fallback_label],
         )
         inserted_id = _insert_webhook_log_direct_pg(fallback_row)
@@ -1219,8 +1231,7 @@ async def _process_webhook_items(
                     continue
             is_dup = dedup["is_duplicate"]
             if is_dup:
-                vehicle["is_duplicate"] = True
-                vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+                _apply_duplicate_result(vehicle, dedup)
                 duplicate_count += 1
                 logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
 

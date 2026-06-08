@@ -465,6 +465,7 @@ jobs:
             audit_evidence_proof["webhook_log_primary_error_logged_on_successful_fallback"] = (
               "def insert_webhook_log" in ingest_source
               and "insert failed; using direct PG fallback" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+              and "primary_supabase_error=" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
               and "test_insert_webhook_log_logs_primary_error_when_direct_pg_fallback_succeeds" in ingest_tests
             )
             audit_evidence_proof["rover_redis_affinity_nonfatal_and_debug_visible"] = (

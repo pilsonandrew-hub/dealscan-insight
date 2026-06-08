@@ -563,6 +563,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             "webhook_log_primary_error_logged_on_successful_fallback": (
                 "def insert_webhook_log" in ingest_source
                 and "insert failed; using direct PG fallback" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+                and "primary_supabase_error=" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
                 and "test_insert_webhook_log_logs_primary_error_when_direct_pg_fallback_succeeds" in ingest_tests
             ),
             "duplicate_listing_url_also_checks_canonical_id": (
@@ -574,8 +575,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             ),
             "duplicate_listing_url_conflict_is_flagged": (
                 "test_duplicate_check_flags_listing_duplicate_with_conflicting_canonical_owner" in ingest_tests
+                and "test_duplicate_identity_conflict_is_propagated_to_vehicle_before_save" in ingest_tests
                 and "listing_url/canonical_id conflict" in ingest_source
                 and '"identity_conflict"' in ingest_source
+                and "dedup_identity_conflict" in ingest_source
                 and '.eq("id", canonical_record_id)' in ingest_source
             ),
         }
