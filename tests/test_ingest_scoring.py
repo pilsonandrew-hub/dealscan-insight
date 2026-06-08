@@ -57,6 +57,29 @@ def test_passes_basic_gates_rejects_title_brand_keywords():
     assert result["reason"] == "title_brand_rejected (listing_text matched 'salvage')"
 
 
+def test_coerce_float_accepts_comma_formatted_numeric_strings():
+    assert score_module._coerce_float("12,345") == 12345.0
+    assert score_module._coerce_float(" $12,345.67 ") == 12345.67
+
+
+def test_score_deal_rejected_tier_accepts_formatted_mmr_provenance():
+    result = score_deal(
+        bid=0,
+        mmr_ca=" $12,345.67 ",
+        state="CA",
+        source_site="GovDeals",
+        model="Camry",
+        make="Toyota",
+        year=2000,
+        mileage=300000,
+        title_status="clean",
+    )
+
+    assert result["vehicle_tier"] == "rejected"
+    assert result["score_provenance"]["mmr_source"] == "mmr_ca"
+    assert result["score_provenance"]["input_profile"]["has_mmr"] is True
+
+
 def test_passes_basic_gates_checks_vin_for_title_brand_keywords():
     vehicle = {
         "title": "2024 Honda Accord",

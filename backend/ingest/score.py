@@ -86,6 +86,10 @@ def _legacy_condition_grade_label(condition_assessment: Optional[dict]) -> str:
 def _coerce_float(value: object) -> Optional[float]:
     if value is None or value == "":
         return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", "").replace("$", "")
+        if value == "":
+            return None
     try:
         normalized = float(value)
     except (TypeError, ValueError):
@@ -122,9 +126,11 @@ def _resolve_mmr_source(
     pricing_source: Optional[str],
     mmr_lookup_basis: Optional[str],
 ) -> str:
-    if _coerce_float(manheim_mmr_mid) and float(manheim_mmr_mid) > 0:
+    manheim_mmr_mid_value = _coerce_float(manheim_mmr_mid)
+    mmr_ca_value = _coerce_float(mmr_ca)
+    if manheim_mmr_mid_value is not None and manheim_mmr_mid_value > 0:
         return "manheim_mmr_mid"
-    if _coerce_float(mmr_ca) and float(mmr_ca) > 0:
+    if mmr_ca_value is not None and mmr_ca_value > 0:
         return pricing_source or mmr_lookup_basis or "mmr_ca"
     return "none"
 
@@ -161,7 +167,7 @@ def _build_score_provenance(
     severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}
     assumption_level = "severe" if any(flag in severe_flags for flag in flags) else "minor" if flags else "none"
 
-    mileage_value = _coerce_float(str(mileage).replace(",", "").strip() if mileage is not None else None)
+    mileage_value = _coerce_float(mileage)
     has_valid_mileage = mileage_value is not None and mileage_value > 0
 
     return {
