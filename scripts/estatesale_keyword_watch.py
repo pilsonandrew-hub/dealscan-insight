@@ -223,7 +223,7 @@ def _matched_keywords(text: str, keywords: Iterable[str]) -> list[str]:
 
 
 def _absolute_url(href: str, source_url: str) -> str:
-    return urllib_parse.urljoin(source_url, href)
+    return urllib_parse.urljoin(source_url, href.strip()).strip()
 
 
 def _is_navigable_url(url: str) -> bool:

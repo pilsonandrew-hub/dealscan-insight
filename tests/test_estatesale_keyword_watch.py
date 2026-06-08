@@ -252,6 +252,18 @@ class EstateSaleKeywordWatchTests(unittest.TestCase):
 
         self.assertEqual(watcher._recommended_handoff(catalog_links, lots, candidates), "mixed_downstream_review")
 
+    def test_strips_downstream_catalog_urls_before_alert_handoff(self) -> None:
+        html = """
+        <html><body>
+          <a href="http://www.govdeals.com ">www.govdeals.com</a>
+          <p>2017 Toyota RAV4 Hybrid vehicle auction.</p>
+        </body></html>
+        """
+
+        report = watcher.analyze_html(html, source_url="https://www.estatesale.com/sales/view/873593")
+
+        self.assertEqual(report["downstream_catalog_links"][0]["url"], "http://www.govdeals.com")
+
     def test_ignores_navigation_links_as_candidates(self) -> None:
         html = """
         <html><body>
