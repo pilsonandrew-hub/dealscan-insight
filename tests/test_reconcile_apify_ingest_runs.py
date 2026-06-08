@@ -1132,6 +1132,92 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
 
+    def test_main_fail_on_issues_allows_historical_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_path = Path(tmpdir) / "runs.json"
+            runs_path.write_text("[]", encoding="utf-8")
+            with patch.object(reconcile, "load_actor_registry", return_value={"ds-equipmentfacts": "actor-1"}), patch.object(
+                reconcile,
+                "load_reconciliation_rows",
+                return_value=({}, {}, {}, "rest:env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY"),
+            ), patch.object(
+                reconcile,
+                "resolve_database_url",
+                return_value=(None, None),
+            ), patch.object(
+                reconcile,
+                "build_reports",
+                return_value=[
+                    {
+                        "run_id": "historical-run",
+                        "issues": ["superseded_source_quality_proof_pre_ledger"],
+                        "issue_scope": "historical_artifact",
+                    }
+                ],
+            ), patch.dict(
+                reconcile.os.environ,
+                {
+                    "SUPABASE_URL": "https://example.supabase.co",
+                    "SUPABASE_SERVICE_ROLE_KEY": "service-key",
+                },
+                clear=False,
+            ), redirect_stdout(io.StringIO()):
+                exit_code = reconcile.main(
+                    [
+                        "--runs-json",
+                        str(runs_path),
+                        "--actors",
+                        "ds-equipmentfacts",
+                        "--fail-on-issues",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+
+    def test_main_fail_on_issues_fails_current_landing_issues(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_path = Path(tmpdir) / "runs.json"
+            runs_path.write_text("[]", encoding="utf-8")
+            with patch.object(reconcile, "load_actor_registry", return_value={"ds-govdeals": "actor-1"}), patch.object(
+                reconcile,
+                "load_reconciliation_rows",
+                return_value=({}, {}, {}, "rest:env.SUPABASE_URL+SUPABASE_SERVICE_ROLE_KEY"),
+            ), patch.object(
+                reconcile,
+                "resolve_database_url",
+                return_value=(None, None),
+            ), patch.object(
+                reconcile,
+                "build_reports",
+                return_value=[
+                    {
+                        "run_id": "missing-webhook-run",
+                        "issues": ["missing_webhook"],
+                        "issue_scope": "current_landing_issue",
+                    }
+                ],
+            ), patch.dict(
+                reconcile.os.environ,
+                {
+                    "SUPABASE_URL": "https://example.supabase.co",
+                    "SUPABASE_SERVICE_ROLE_KEY": "service-key",
+                },
+                clear=False,
+            ), redirect_stdout(io.StringIO()):
+                exit_code = reconcile.main(
+                    [
+                        "--runs-json",
+                        str(runs_path),
+                        "--actors",
+                        "ds-govdeals",
+                        "--fail-on-issues",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

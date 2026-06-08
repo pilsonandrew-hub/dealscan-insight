@@ -98,6 +98,18 @@ def classify_issue_scope(issues: list[str]) -> str:
         return "historical_artifact"
     return "needs_review"
 
+
+def has_fatal_reconciliation_issues(reports: list[dict[str, Any]]) -> bool:
+    """Return true when reports contain current or unresolved landing risk."""
+    for report in reports:
+        issues = report.get("issues") or []
+        if not issues:
+            continue
+        scope = report.get("issue_scope") or classify_issue_scope(list(issues))
+        if scope in {"current_landing_issue", "needs_review"}:
+            return True
+    return False
+
 AUDIT_FALLBACK_MARKER = "audit_fallbacks="
 DIRECT_PG_UNAVAILABLE_FALLBACK_MARKER = "webhook_log_claim_direct_pg_unavailable"
 POSTGREST_PAGE_SIZE = 1000
@@ -1584,7 +1596,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print_issue_summary(reports)
         print_reports(reports, summary_only=args.summary_only)
 
-    if args.fail_on_issues and any(report["issues"] for report in reports):
+    if args.fail_on_issues and has_fatal_reconciliation_issues(reports):
         return 1
     return 0
 
