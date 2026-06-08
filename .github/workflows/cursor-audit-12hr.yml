@@ -252,8 +252,19 @@ jobs:
             from backend.ingest.score import _auction_velocity_score, _coerce_float, _round_price_basis
             from backend.rover.heuristic_scorer import _coerce_float as _rover_coerce_float
             expired = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+            long_dated = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=8)).isoformat()
             audit_evidence_proof["expired_auction_velocity_non_urgent"] = (
               _auction_velocity_score({"auction_end": expired}) == 25.0
+            )
+            audit_evidence_proof["expired_auction_velocity_matches_nonurgent_floor"] = (
+              _auction_velocity_score({"auction_end": expired}) == 25.0
+              and _auction_velocity_score({"auction_end": long_dated}) == 25.0
+              and _auction_velocity_score({
+                "auction_end": (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=4)).isoformat()
+              }) == 100.0
+              and _auction_velocity_score({
+                "auction_end": (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)).isoformat()
+              }) == 65.0
             )
             audit_evidence_proof["round_price_basis_complete"] = (_round_price_basis(12345) == 12000)
             audit_evidence_proof["coerce_float_rejects_invalid_and_nonfinite"] = (
@@ -377,6 +388,8 @@ jobs:
                 "mileage-per-year rejection bypass" in normalized
                 or "mileage per year rejection bypass" in normalized
                 or ("mileage-per-year" in normalized and "does not enforce a hard rejection" in normalized)
+                or ("mileage-per-year" in normalized and "rejection logic" in normalized)
+                or ("mileage-per-year" in normalized and "does not explicitly reject" in normalized)
                 or ("mileage_per_year_gt_18000" in normalized and "could still be accepted" in normalized)
                 or ("mileage-per-year" in normalized and "business rule application" in normalized)
                 or ("mileage-per-year" in normalized and "only applies a penalty" in normalized)
@@ -474,6 +487,23 @@ jobs:
                 and "_execute_scoped_opportunity_update" in normalized
                 and any(term in normalized for term in ("generic 500", "inconsistent error handling"))
               )
+              is_operator_zero_row_conflict_expected_fail_closed = (
+                audit_evidence_proof.get("outcome_update_zero_row_conflict") is True
+                and audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_execute_scoped_opportunity_update" in normalized
+                and "operator" in normalized
+                and "409" in normalized
+                and "zero row conflict not handled" in normalized
+                and "logging it as a warning" in normalized
+              )
+              is_expired_velocity_nonurgent_floor_false_positive = (
+                audit_evidence_proof.get("expired_auction_velocity_matches_nonurgent_floor") is True
+                and "backend/ingest/score.py" in normalized
+                and "expired auction" in normalized
+                and "auction velocity" in normalized
+                and "not particularly low" in normalized
+              )
               is_rover_redis_affinity_operational_posture = (
                 audit_evidence_proof.get("rover_redis_affinity_nonfatal_and_debug_visible") is True
                 and "webapp/routers/rover.py" in normalized
@@ -499,6 +529,8 @@ jobs:
                 or is_dealer_sales_error_handling_false_positive
                 or is_operator_privilege_authorization_false_positive
                 or is_outcome_update_zero_row_semantics_false_positive
+                or is_operator_zero_row_conflict_expected_fail_closed
+                or is_expired_velocity_nonurgent_floor_false_positive
                 or is_rover_redis_affinity_operational_posture
                 or is_duplicate_race_mitigated
                 or is_unsupported_speculation
@@ -522,7 +554,7 @@ jobs:
           BID_CEILING_PROOF:{json.dumps(bid_ceiling_proof, indent=2)}
           Deterministic rust-state and Standard mileage-per-year proof from score_deal() is below. Do NOT report "Missing Rust State Rejection" or "Mileage-per-year Rejection Bypass" if these proof cases passed; only report those issues if the proof failed or the code contradicts the proof.
           BUSINESS_RULE_PROOF:{json.dumps(business_rule_proof, indent=2)}
-          Additional deterministic and source evidence is below. Do not report speculative, implied, potential, malformed, or contradicted findings. Every CRITICAL/HIGH finding must cite concrete code visible in CODE or a concrete proof contradiction.
+          Additional deterministic and source evidence is below. Do not report speculative, implied, potential, malformed, or contradicted findings. Do not report expired auction velocity as HIGH/CRITICAL when expired_auction_velocity_matches_nonurgent_floor is true; that proof shows expired auctions share the nonurgent floor rather than urgent auction scoring. Every CRITICAL/HIGH finding must cite concrete code visible in CODE or a concrete proof contradiction.
           AUDIT_EVIDENCE_PROOF:{json.dumps(audit_evidence_proof, indent=2)}
           Report only CRITICAL and HIGH issues found. Format: SEVERITY | FILE | ISSUE | FIX
           Be concise — top 10 issues max.

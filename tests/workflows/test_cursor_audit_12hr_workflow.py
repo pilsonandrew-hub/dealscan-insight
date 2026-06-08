@@ -77,6 +77,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("only applies a penalty", workflow)
         self.assertIn("missing authorization for opportunity update", workflow)
         self.assertIn("redis affinity failure mode", workflow)
+        self.assertIn("mileage-per-year\" in normalized and \"rejection logic\" in normalized", workflow)
+        self.assertIn("zero row conflict not handled", workflow)
+        self.assertIn("logging it as a warning", workflow)
+        self.assertIn("expired_auction_velocity_matches_nonurgent_floor", workflow)
+        self.assertIn("not particularly low", workflow)
         self.assertNotIn(
             'any(term in normalized for term in ("generic 500", "empty", "zero rows", "inconsistent error handling"))',
             workflow,
