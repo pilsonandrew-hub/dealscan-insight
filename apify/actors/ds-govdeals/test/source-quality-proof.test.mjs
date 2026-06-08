@@ -53,8 +53,22 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('/\\bpickup\\s+bed\\b/i');
     expect(source).toContain('/\\bcamper\\s+shell\\b/i');
     expect(source).toContain('/\\btonneau\\s+cover\\b/i');
+    expect(source).toContain('/\\btruck\\s+cap\\b/i');
+    expect(source).toContain('/\\btruck\\s+topper\\b/i');
+    expect(source).toContain('/\\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\\s+(?:\\w+\\s+){0,3}tailgate\\b/i');
+    expect(source).toContain('/\\btailgate\\s+(?:assembly|part|only)\\b/i');
+    expect(source).toContain('/\\b(?:truck|pickup)\\s+bed\\s+liner\\b/i');
+    expect(source).toContain('/\\bbed\\s+liner\\s+(?:kit|only)\\b/i');
+    expect(source).toContain('/\\bvehicle\\s+parts\\b/i');
     expect(source).toContain('/\\blot\\s+of\\b/i');
     expect(source).toContain('/\\b(?:jail|prisoner)\\s+(?:van|transport)\\b/i');
+  });
+
+  test('reports non-vehicle part rejects separately in source-quality proof', () => {
+    expect(source).toContain('rows_excluded_non_vehicle_part_prefilter');
+    expect(source).toContain('rows_excluded_non_vehicle_part_after_detail');
+    expect(source).toContain('non_vehicle_part_rejected_samples');
+    expect(source).toContain('post_non_vehicle_part_rejected_samples');
   });
 
   test('rejects backend-policy condition phrases before pushing rows', () => {
@@ -67,7 +81,7 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('item.detail_text');
     expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
     expect(source).toContain('const pushableLots = completeLots.filter(lot => passes(lot));');
-    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !passes(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !isNonVehiclePartLot(lot) && !passes(lot));');
     expect(source).toContain('rows_excluded_policy_after_detail');
   });
 
@@ -83,9 +97,12 @@ describe('ds-govdeals source quality proof contract', () => {
   test('separates detail-enriched age/mileage rejects from generic policy rejects', () => {
     expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
     expect(source).toContain('const postAgeMileageRejectedLots = completeLots.filter(lot => failsAgeMileageCeiling(lot));');
-    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !passes(lot));');
+    expect(source).toContain('const postNonVehiclePartRejectedLots = completeLots.filter(lot => isNonVehiclePartLot(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !isNonVehiclePartLot(lot) && !passes(lot));');
     expect(source).toContain('rows_excluded_age_mileage_after_detail');
+    expect(source).toContain('rows_excluded_non_vehicle_part_after_detail');
     expect(source).toContain('post_age_mileage_rejected_samples');
+    expect(source).toContain('post_non_vehicle_part_rejected_samples');
   });
 
   test('reports source age and mileage rejects that happen before detail enrichment', () => {

@@ -89,6 +89,13 @@ const NON_DEALER_TARGET_PATTERNS = [
     /\bcamper\s+shell\b/i,
     /\btonneau\s+cover\b/i,
     /\bbed\s+cap\b/i,
+    /\btruck\s+cap\b/i,
+    /\btruck\s+topper\b/i,
+    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i,
+    /\btailgate\s+(?:assembly|part|only)\b/i,
+    /\b(?:truck|pickup)\s+bed\s+liner\b/i,
+    /\bbed\s+liner\s+(?:kit|only)\b/i,
+    /\bvehicle\s+parts\b/i,
     /\butility\s+body\b/i,
     /\bservice\s+body\b/i,
     /\brv\b/i,
@@ -108,6 +115,22 @@ const NON_DEALER_TARGET_PATTERNS = [
     /\blot\s+of\b/i,
     /\bassorted\b/i,
     /\b(?:jail|prisoner)\s+(?:van|transport)\b/i,
+];
+const NON_VEHICLE_PART_PATTERNS = [
+    /\btruck\s+bed\b/i,
+    /\bpickup\s+bed\b/i,
+    /\bcamper\s+shell\b/i,
+    /\btonneau\s+cover\b/i,
+    /\bbed\s+cap\b/i,
+    /\btruck\s+cap\b/i,
+    /\btruck\s+topper\b/i,
+    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i,
+    /\btailgate\s+(?:assembly|part|only)\b/i,
+    /\b(?:truck|pickup)\s+bed\s+liner\b/i,
+    /\bbed\s+liner\s+(?:kit|only)\b/i,
+    /\bvehicle\s+parts\b/i,
+    /\butility\s+body\b/i,
+    /\bservice\s+body\b/i,
 ];
 
 await Actor.init();
@@ -132,6 +155,8 @@ const sourceQualityStats = {
     rows_excluded_missing_mileage: 0,
     rows_excluded_age_mileage_prefilter: 0,
     rows_excluded_age_mileage_after_detail: 0,
+    rows_excluded_non_vehicle_part_prefilter: 0,
+    rows_excluded_non_vehicle_part_after_detail: 0,
     rows_excluded_policy_after_detail: 0,
     rows_excluded_after_detail_attempt: 0,
     rows_excluded_without_detail_attempt: 0,
@@ -139,7 +164,9 @@ const sourceQualityStats = {
     excluded_after_detail_attempt_samples: [],
     excluded_without_detail_attempt_samples: [],
     prefilter_age_mileage_rejected_samples: [],
+    non_vehicle_part_rejected_samples: [],
     post_age_mileage_rejected_samples: [],
+    post_non_vehicle_part_rejected_samples: [],
     post_policy_rejected_samples: [],
 };
 const capturedApi = {
@@ -198,6 +225,23 @@ function passes(item) {
     return true;
 }
 
+function isNonVehiclePartLot(item) {
+    const conditionText = [
+        item.assetTitle,
+        item.assetShortDescription,
+        item.longDescription,
+        item.itemDescription,
+        item.description,
+        item.detail_text,
+        item.notes,
+        item.assetLongDescription,
+        item.itemNotes,
+        item.title,
+        item.model,
+    ].filter(Boolean).join(' ');
+    return NON_VEHICLE_PART_PATTERNS.some((pattern) => pattern.test(conditionText));
+}
+
 function parseMileageValue(value) {
     if (value === null || value === undefined || value === '') return 0;
     const mileage = parseInt(String(value).replace(/,/g, ''), 10);
@@ -213,6 +257,13 @@ function failsAgeMileageCeiling(item) {
 }
 
 function recordPrefilterExclusion(lot) {
+    if (isNonVehiclePartLot(lot)) {
+        sourceQualityStats.rows_excluded_non_vehicle_part_prefilter++;
+        if (sourceQualityStats.non_vehicle_part_rejected_samples.length < 10) {
+            sourceQualityStats.non_vehicle_part_rejected_samples.push(normalizeLot(lot));
+        }
+        return;
+    }
     if (!failsAgeMileageCeiling(lot)) return;
     sourceQualityStats.rows_excluded_age_mileage_prefilter++;
     if (sourceQualityStats.prefilter_age_mileage_rejected_samples.length < 10) {
@@ -419,19 +470,22 @@ const crawler = new PlaywrightCrawler({
             const pushableLots = completeLots.filter(lot => passes(lot));
             const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);
             const postAgeMileageRejectedLots = completeLots.filter(lot => failsAgeMileageCeiling(lot));
-            const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !passes(lot));
+            const postNonVehiclePartRejectedLots = completeLots.filter(lot => isNonVehiclePartLot(lot));
+            const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !isNonVehiclePartLot(lot) && !passes(lot));
             const excludedAfterDetailAttempt = incompleteLots.filter(lot => sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             const excludedWithoutDetailAttempt = incompleteLots.filter(lot => !sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             sourceQualityStats.rows_excluded_missing_required_data = incompleteLots.length;
             sourceQualityStats.rows_excluded_missing_vin = incompleteLots.filter(lot => !lot.vin).length;
             sourceQualityStats.rows_excluded_missing_mileage = incompleteLots.filter(lot => !lot.mileage).length;
             sourceQualityStats.rows_excluded_age_mileage_after_detail = postAgeMileageRejectedLots.length;
+            sourceQualityStats.rows_excluded_non_vehicle_part_after_detail = postNonVehiclePartRejectedLots.length;
             sourceQualityStats.rows_excluded_policy_after_detail = postPolicyRejectedLots.length;
             sourceQualityStats.rows_excluded_after_detail_attempt = excludedAfterDetailAttempt.length;
             sourceQualityStats.rows_excluded_without_detail_attempt = excludedWithoutDetailAttempt.length;
             sourceQualityStats.excluded_after_detail_attempt_samples = sampleExcludedLots(excludedAfterDetailAttempt);
             sourceQualityStats.excluded_without_detail_attempt_samples = sampleExcludedLots(excludedWithoutDetailAttempt);
             sourceQualityStats.post_age_mileage_rejected_samples = sampleExcludedLots(postAgeMileageRejectedLots);
+            sourceQualityStats.post_non_vehicle_part_rejected_samples = sampleExcludedLots(postNonVehiclePartRejectedLots);
             sourceQualityStats.post_policy_rejected_samples = sampleExcludedLots(postPolicyRejectedLots);
             for (const lot of incompleteLots) {
                 const reasons = [
@@ -708,6 +762,7 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         pushedLots.length
         + sourceQualityStats.rows_excluded_missing_required_data
         + sourceQualityStats.rows_excluded_age_mileage_after_detail
+        + sourceQualityStats.rows_excluded_non_vehicle_part_after_detail
         + sourceQualityStats.rows_excluded_policy_after_detail
     );
     sourceQualityStats.rows_excluded_unaccounted_after_prefilter = Math.max(0, totalPassed - accountedRows);
@@ -727,6 +782,8 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         rows_excluded_missing_mileage: sourceQualityStats.rows_excluded_missing_mileage,
         rows_excluded_age_mileage_prefilter: sourceQualityStats.rows_excluded_age_mileage_prefilter,
         rows_excluded_age_mileage_after_detail: sourceQualityStats.rows_excluded_age_mileage_after_detail,
+        rows_excluded_non_vehicle_part_prefilter: sourceQualityStats.rows_excluded_non_vehicle_part_prefilter,
+        rows_excluded_non_vehicle_part_after_detail: sourceQualityStats.rows_excluded_non_vehicle_part_after_detail,
         rows_excluded_policy_after_detail: sourceQualityStats.rows_excluded_policy_after_detail,
         rows_excluded_after_detail_attempt: sourceQualityStats.rows_excluded_after_detail_attempt,
         rows_excluded_without_detail_attempt: sourceQualityStats.rows_excluded_without_detail_attempt,
@@ -734,7 +791,9 @@ async function pushSourceQualityProof(log, pushedLots = passingLots) {
         excluded_after_detail_attempt_samples: sourceQualityStats.excluded_after_detail_attempt_samples,
         excluded_without_detail_attempt_samples: sourceQualityStats.excluded_without_detail_attempt_samples,
         prefilter_age_mileage_rejected_samples: sourceQualityStats.prefilter_age_mileage_rejected_samples,
+        non_vehicle_part_rejected_samples: sourceQualityStats.non_vehicle_part_rejected_samples,
         post_age_mileage_rejected_samples: sourceQualityStats.post_age_mileage_rejected_samples,
+        post_non_vehicle_part_rejected_samples: sourceQualityStats.post_non_vehicle_part_rejected_samples,
         post_policy_rejected_samples: sourceQualityStats.post_policy_rejected_samples,
         detail_pages_attempted: sourceQualityStats.detail_pages_attempted,
         detail_pages_fetched: sourceQualityStats.detail_pages_fetched,

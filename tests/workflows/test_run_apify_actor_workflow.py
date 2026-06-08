@@ -19,8 +19,12 @@ def test_run_apify_actor_workflow_supports_bounded_govdeals_proof():
     assert "source_quality_proof" in text
     assert "rows_excluded_age_mileage_prefilter" in text
     assert "rows_excluded_age_mileage_after_detail" in text
+    assert "rows_excluded_non_vehicle_part_prefilter" in text
+    assert "rows_excluded_non_vehicle_part_after_detail" in text
     assert "prefilter_age_mileage_rejected_samples" in text
     assert "post_age_mileage_rejected_samples" in text
+    assert "non_vehicle_part_rejected_samples" in text
+    assert "post_non_vehicle_part_rejected_samples" in text
     assert "rows_excluded_policy_after_detail" in text
     assert "rows_excluded_unaccounted_after_prefilter" in text
     assert "post_policy_rejected_samples" in text
