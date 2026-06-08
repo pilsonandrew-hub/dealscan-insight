@@ -239,6 +239,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/ingest.py | `_insert_webhook_log_direct_pg` fallback can lose webhook metadata after `supabase_client` timeout. | **FIX:** preserve metadata in fallback payload.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can write the wrong `dealer_sales` row because `on_conflict` omits source. | **FIX:** revisit conflict target.",
                     "HIGH | backend/ingest/score.py | `score_deal` returns premium for an over-age vehicle. | **FIX:** enforce the wrapper tier gate.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` empty payload can bypass required conflict keys for `dealer_sales`. | **FIX:** audit conflict-key handling.",
+                    "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` sale_price and sold_price can hide a non-win outcome. | **FIX:** audit caller routing.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can return zero rows when row-level security rejects `dealer_sales` writes. | **FIX:** audit RLS policy.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
@@ -251,7 +253,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("masking critical issues", filtered)
         self.assertNotIn("_auction_velocity_score", filtered)
         self.assertNotIn("rust_state_source", filtered)
-        self.assertNotIn("sale_price", filtered)
+        self.assertNotIn("recorded as `current_bid`", filtered)
         self.assertNotIn("default value of `0.0` for `dos_score` and `current_bid`", filtered)
         self.assertNotIn("_rover_debug_snapshot", filtered)
         self.assertNotIn("Privilege Escalation via `DEALERSCOPE_OPERATOR_USER_ID`", filtered)
@@ -267,6 +269,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("fallback can lose webhook metadata", filtered)
         self.assertIn("on_conflict", filtered)
         self.assertIn("score_deal` returns premium", filtered)
+        self.assertIn("required conflict keys", filtered)
+        self.assertIn("non-win outcome", filtered)
         self.assertIn("row-level security", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)

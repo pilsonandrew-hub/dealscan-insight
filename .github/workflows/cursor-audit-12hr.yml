@@ -580,7 +580,7 @@ jobs:
                 and "dealer_sales" in normalized
                 and "payload" in normalized
                 and "empty payload" in normalized
-                and any(term in normalized for term in ("required", "essential", "critical fields", "not none"))
+                and any(term in normalized for term in ("missing required fields", "essential fields", "critical fields", "not none"))
               )
               is_outcome_non_sale_price_fixed = (
                 audit_evidence_proof.get("outcomes_non_sale_price_zero") is True
@@ -646,7 +646,7 @@ jobs:
                 and "_legacy_mirror_to_dealer_sales" in normalized
                 and "sale_price" in normalized
                 and "sold_price" in normalized
-                and any(term in normalized for term in ("redundant", "inconsistency", "not won", "confusion"))
+                and any(term in normalized for term in ("redundant", "inconsistency", "confusion"))
               )
               is_high_demand_dynamic_policy_opinion = (
                 audit_evidence_proof.get("high_demand_model_list_is_curated_scorer_policy") is True
