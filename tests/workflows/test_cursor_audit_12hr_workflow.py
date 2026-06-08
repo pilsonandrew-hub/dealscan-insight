@@ -1,4 +1,6 @@
 from pathlib import Path
+import re
+import textwrap
 import unittest
 
 
@@ -77,6 +79,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("only applies a penalty", workflow)
         self.assertIn("missing authorization for opportunity update", workflow)
         self.assertIn("redis affinity failure mode", workflow)
+        self.assertIn("mileage-per-year\" in normalized and \"rejection logic\" in normalized", workflow)
+        self.assertIn("zero row conflict not handled", workflow)
+        self.assertIn("logging it as a warning", workflow)
+        self.assertIn("expired_auction_velocity_matches_nonurgent_floor", workflow)
+        self.assertIn("not particularly low", workflow)
         self.assertNotIn(
             'any(term in normalized for term in ("generic 500", "empty", "zero rows", "inconsistent error handling"))',
             workflow,
@@ -89,6 +96,46 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             workflow,
         )
         self.assertNotIn('"(implied)" in normalized', workflow)
+
+    def test_deterministic_suppression_keeps_next_pipe_formatted_finding(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        function_match = re.search(
+            r"          def suppress_deterministically_false_findings"
+            r"\(findings: str\) -> str:\n"
+            r"(?P<body>.*?)(?=\n          def suppress_unsupported_or_contradicted_findings)",
+            workflow,
+            re.S,
+        )
+        self.assertIsNotNone(function_match)
+
+        namespace = {
+            "re": re,
+            "bid_ceiling_gate_passed": True,
+            "business_rule_gate_passed": True,
+        }
+        exec(
+            textwrap.dedent(
+                "def suppress_deterministically_false_findings(findings: str) -> str:\n"
+                + function_match.group("body")
+            ),
+            namespace,
+        )
+
+        filtered = namespace["suppress_deterministically_false_findings"](
+            "\n".join(
+                [
+                    "HIGH | backend/ingest/score.py | Mileage-per-year rejection logic | contradicted",
+                    "continued stale detail",
+                    "CRITICAL | backend/ingest/score.py | Real parser crash | keep this",
+                    "real detail must stay",
+                ]
+            )
+        )
+
+        self.assertNotIn("Mileage-per-year rejection logic", filtered)
+        self.assertNotIn("continued stale detail", filtered)
+        self.assertIn("CRITICAL | backend/ingest/score.py | Real parser crash | keep this", filtered)
+        self.assertIn("real detail must stay", filtered)
 
 
 if __name__ == "__main__":
