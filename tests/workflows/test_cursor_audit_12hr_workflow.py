@@ -201,6 +201,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "dealer_sales_payload_requires_essential_fields": True,
                 "won_bid_requires_positive_purchase_price": True,
                 "won_outcomes_require_positive_current_bid": True,
+                "premium_missing_photos_are_risk_flag_not_hard_rejection_policy": True,
                 "score_deal_wrapper_enforces_premium_age_and_mileage": True,
                 "bid_outcome_caller_sets_outcome_recorded_at": True,
                 "legacy_mirror_is_realized_sale_only": True,
@@ -252,8 +253,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/outcomes.py | `_fetch_opportunity` Authorization Bypass for Operator User | Ensure that even operator users have their actions logged and audited, and consider if bypassing user_id checks for system opportunities is appropriate without explicit logging.",
                     "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` and `_mirror_bid_outcome_to_dealer_sales` Use `current_bid` as `asking_price` Without Validation | Validate `current_bid` before using it as `asking_price` to prevent division by zero or incorrect margin calculations.",
                     "HIGH | backend/ingest/score.py | Missing Premium Lane Age and Mileage Rejection in Scoring Functions | FIX: Implement explicit rejection logic within score_deal_premium for vehicles exceeding 4 years or 50,000 miles.",
+                    "HIGH | webapp/routers/outcomes.py | Inconsistent `sale_price` Handling for Non-Won Bid Outcomes | In `_mirror_bid_outcome_to_dealer_sales`, if `normalized.outcome` is not \"won\", `sale_price` is explicitly set to `0`. However, `sold_price` is set to `None` in the same scenario. This creates an inconsistency where `sale_price` is `0` for non-won outcomes, while `sold_price` is `None`.",
+                    "HIGH | backend/ingest/score.py | Missing Photo Rejection for Premium Lane | The `compute_risk_flags` function correctly identifies `missing_photos` as a risk. This flag contributes to `_risk_penalty_score`, which is used in `score_deal_standard`. However, `score_deal_premium` does not incorporate `_risk_penalty_score` or any direct check for missing photos. Missing photos are a significant indicator of risk and can severely impact a vehicle's marketability, especially for premium listings. Allowing premium vehicles to be scored without photos bypasses a critical quality gate.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
+                    "HIGH | backend/ingest/score.py | `score_deal` wrapper drops `missing_photos` from risk flags before AI confidence. | **FIX:** preserve the risk flag.",
                 ]
             )
         )
@@ -288,8 +292,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Authorization Bypass for Operator User", filtered)
         self.assertNotIn("Use `current_bid` as `asking_price` Without Validation", filtered)
         self.assertNotIn("Missing Premium Lane Age and Mileage Rejection", filtered)
+        self.assertNotIn("Inconsistent `sale_price` Handling for Non-Won Bid Outcomes", filtered)
+        self.assertNotIn("Missing Photo Rejection for Premium Lane", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
+        self.assertIn("wrapper drops `missing_photos`", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
@@ -409,6 +416,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "current_bid is required to calculate outcome metrics" in outcomes_source
                 and "test_won_bid_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
                 and "test_sale_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
+            ),
+            "premium_missing_photos_are_risk_flag_not_hard_rejection_policy": (
+                'flags.append("missing_photos")' in score_source
+                and "prevents benign flags like 'missing_photos' from unconditionally" in score_source
+                and "test_premium_missing_photos_are_risk_flag_not_hard_rejection_policy" in score_tests
             ),
         }
 
