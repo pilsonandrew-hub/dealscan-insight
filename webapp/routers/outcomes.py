@@ -247,7 +247,7 @@ def _mirror_bid_outcome_to_dealer_sales(
     notes: Optional[str],
 ) -> None:
     asking_price = normalized.bid_amount
-    sale_price = normalized.purchase_price if normalized.outcome == "won" else (asking_price or 0)
+    sale_price = normalized.purchase_price if normalized.outcome == "won" else 0
     gross_margin = None
     roi_pct = None
     if normalized.outcome == "won" and normalized.purchase_price is not None and asking_price and asking_price > 0:
@@ -315,7 +315,7 @@ async def patch_outcome(
         "model": opportunity.get("model"),
         "year": opportunity.get("year"),
         "mileage": opportunity.get("mileage"),
-        "sale_price": sold_price if sold_price is not None else current_bid,
+        "sale_price": sold_price if sold_price is not None else 0,
         "sold_price": sold_price,
         "outcome": mapped_outcome,
         "gross_margin": gross_margin,
