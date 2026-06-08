@@ -347,11 +347,44 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
         )
         if not result.data:
             if listing_match:
-                return {
+                duplicate_result = {
                     "is_duplicate": listing_match.get("is_duplicate", False),
                     "canonical_record_id": listing_match.get("canonical_record_id"),
                     "canonical_update": None,
                 }
+                canonical_record_id = listing_match.get("canonical_record_id")
+                if listing_match.get("is_duplicate") and canonical_id and canonical_record_id:
+                    try:
+                        owner_result = (
+                            supabase_client.table("opportunities")
+                            .select("id, canonical_id")
+                            .eq("id", canonical_record_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        owner_row = owner_result.data[0] if owner_result.data else {}
+                        owner_canonical_id = owner_row.get("canonical_id")
+                    except Exception as owner_lookup_error:
+                        logger.warning(
+                            "[DEDUP] listing_url/canonical_id conflict check failed listing_url=%s provided_canonical_id=%s canonical_record_id=%s error=%s",
+                            listing_url,
+                            canonical_id,
+                            canonical_record_id,
+                            owner_lookup_error,
+                        )
+                        duplicate_result["identity_conflict_check_failed"] = True
+                    else:
+                        if owner_canonical_id and owner_canonical_id != canonical_id:
+                            logger.warning(
+                                "[DEDUP] listing_url/canonical_id conflict listing_url=%s provided_canonical_id=%s canonical_record_id=%s owner_canonical_id=%s",
+                                listing_url,
+                                canonical_id,
+                                canonical_record_id,
+                                owner_canonical_id,
+                            )
+                            duplicate_result["identity_conflict"] = True
+
+                return duplicate_result
             return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
         existing = result.data[0]
@@ -369,6 +402,22 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
     except Exception as lookup_error:
         logger.warning(f"[DEDUP] check failed: {lookup_error}")
         raise
+
+
+def _apply_duplicate_result(vehicle: dict, dedup: dict) -> None:
+    vehicle["is_duplicate"] = True
+    vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+    risk_flags = list(vehicle.get("risk_flags") or [])
+    if dedup.get("identity_conflict"):
+        vehicle["identity_conflict"] = True
+        if "dedup_identity_conflict" not in risk_flags:
+            risk_flags.append("dedup_identity_conflict")
+    if dedup.get("identity_conflict_check_failed"):
+        vehicle["identity_conflict_check_failed"] = True
+        if "dedup_identity_conflict_unverified" not in risk_flags:
+            risk_flags.append("dedup_identity_conflict_unverified")
+    if risk_flags:
+        vehicle["risk_flags"] = risk_flags
 
 
 # Datetime parsing helpers are imported from backend.ingest.time_utils.
@@ -404,12 +453,15 @@ def insert_webhook_log(
     try:
         fallback_label = "webhook_log_insert_direct_pg"
         fallback_row = dict(row)
+        primary_error_message = f"primary_supabase_error={primary_error}" if primary_error is not None else None
         fallback_row["error_message"] = merge_audit_error_message(
-            fallback_row.get("error_message"),
+            merge_audit_error_message(fallback_row.get("error_message"), [primary_error_message]),
             [fallback_label],
         )
         inserted_id = _insert_webhook_log_direct_pg(fallback_row)
         record_audit_fallback(audit_state, fallback_label)
+        if primary_error is not None:
+            logger.warning("[WEBHOOK_LOG] insert failed; using direct PG fallback: %s", primary_error)
         return inserted_id
     except Exception as fallback_error:
         if require_durable:
@@ -1196,8 +1248,7 @@ async def _process_webhook_items(
                     continue
             is_dup = dedup["is_duplicate"]
             if is_dup:
-                vehicle["is_duplicate"] = True
-                vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+                _apply_duplicate_result(vehicle, dedup)
                 duplicate_count += 1
                 logger.info(f"[DEDUP] duplicate of {dedup['canonical_record_id']}: {vehicle.get('title','?')[:50]}")
 
