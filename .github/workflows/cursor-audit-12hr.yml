@@ -443,6 +443,19 @@ jobs:
               and 'severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}' in score_source
               and "test_passes_basic_gates_rejects_zero_bid" in score_tests
             )
+            audit_evidence_proof["current_bid_trust_score_24h_branch_complete"] = (
+              "def _current_bid_trust_score" in score_source
+              and "elif auction_stage_hours_remaining <= 24:" in score_source
+              and "base = min(1.0, base + 0.1)" in score_source
+              and "return round(base, 3)" in score_source
+            )
+            audit_evidence_proof["webhook_log_insert_fallback_error_handled"] = (
+              "def insert_webhook_log" in ingest_source
+              and "except Exception as fallback_error:" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+              and "CriticalAuditWriteError" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+              and "direct PG fallback failed" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+              and "return None" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+            )
             audit_evidence_proof["rover_redis_affinity_nonfatal_and_debug_visible"] = (
               "Redis affinity init failed (non-fatal)" in rover_source
               and "Redis not configured" in rover_source
@@ -671,7 +684,7 @@ jobs:
                 )
                 and "webapp/routers/outcomes.py" in normalized
                 and "operator" in normalized
-                and any(term in normalized for term in ("logged and audited", "explicit logging", "without explicit logging", "explicitly state", "what was overridden", "unauthorized changes"))
+                and any(term in normalized for term in ("logged and audited", "explicit logging", "without explicit logging", "explicitly state", "what was overridden", "unauthorized changes", "clearly indicate", "which operator id", "better auditability", "logging inconsistency"))
               )
               is_operator_system_opportunity_policy_documented = (
                 audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
@@ -709,6 +722,13 @@ jobs:
                 and ("auction velocity" in normalized or "_auction_velocity_score" in normalized)
                 and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently", "should ideally be 0", "presented as viable opportunities", "reject expired auctions", "urgent scoring"))
               )
+              is_current_bid_trust_score_truncation_false_positive = (
+                audit_evidence_proof.get("current_bid_trust_score_24h_branch_complete") is True
+                and "backend/ingest/score.py" in normalized
+                and "elif auction_stage_hours_remaining <= 24" in normalized
+                and "auction_stage_hours_remaining" in normalized
+                and any(term in normalized for term in ("line is incomplete", "complete the conditional logic"))
+              )
               is_won_bid_sale_price_zero_fixed = (
                 audit_evidence_proof.get("won_bid_requires_positive_purchase_price") is True
                 and "webapp/routers/outcomes.py" in normalized
@@ -738,11 +758,12 @@ jobs:
               )
               is_premium_helper_gate_false_positive = (
                 audit_evidence_proof.get("score_deal_wrapper_enforces_premium_age_and_mileage") is True
-                and "backend/ingest/score.py" in normalized
+                and any(path in normalized for path in ("backend/ingest/score.py", "webapp/routers/ingest.py"))
                 and "premium lane" in normalized
                 and (
                   ("score_deal_premium" in normalized and any(term in normalized for term in ("missing age gate", "missing mileage gate", "max age", "max mileage", "age and mileage rejection", "exceeding 4 years", "50,000 miles")))
                   or ("mileage-per-year" in normalized and "hard rejection" in normalized and any(term in normalized for term in ("12,500", "4yr/50k", "premium lane vehicles")))
+                  or ("age and mileage hard rejection" in normalized and "determine_vehicle_tier" in normalized)
                 )
               )
               is_premium_missing_photos_policy_opinion = (
@@ -776,8 +797,17 @@ jobs:
               is_rust_state_penalty_policy_opinion = (
                 audit_evidence_proof.get("rust_state_new_vehicle_exception_and_source_risk_policy") is True
                 and "backend/ingest/score.py" in normalized
-                and "rust_state_source" in normalized
-                and any(term in normalized for term in ("vehicle age", "overly harsh", "newer vehicles", "conditional penalty"))
+                and (
+                  (
+                    "rust_state_source" in normalized
+                    and any(term in normalized for term in ("vehicle age", "overly harsh", "newer vehicles", "conditional penalty"))
+                  )
+                  or (
+                    "inconsistent rust state rejection logic" in normalized
+                    and "is_high_rust_state_rejected" in normalized
+                    and "hard rejection" in normalized
+                  )
+                )
               )
               is_duplicate_missing_url_canonical_fallback_false_positive = (
                 audit_evidence_proof.get("duplicate_missing_listing_url_uses_canonical_id") is True
@@ -807,6 +837,13 @@ jobs:
                     and "canonical_id" in normalized
                     and "prioritize" in normalized
                   )
+                  or (
+                    "inconsistent" in normalized
+                    and "listing_match" in normalized
+                    and "canonical_id" in normalized
+                    and "listing_url" in normalized
+                    and "primary check" in normalized
+                  )
                 )
               )
               is_webhook_direct_pg_durability_false_positive = (
@@ -825,6 +862,13 @@ jobs:
                     "direct pg" in normalized
                     and "transactional" in normalized
                     and "atomicity" in normalized
+                  )
+                  or (
+                    audit_evidence_proof.get("webhook_log_insert_fallback_error_handled") is True
+                    and "insert_webhook_log" in normalized
+                    and "incomplete fallback logic" in normalized
+                    and "except exception as fallback_error" in normalized
+                    and any(term in normalized for term in ("complete the `except` block", "complete the except block", "direct postgresql fallback"))
                   )
                 )
               )
@@ -883,6 +927,11 @@ jobs:
                     "default value masks data quality issues" in normalized
                     and any(term in normalized for term in ("return `none`", "return none", "raise an error"))
                   )
+                  or (
+                    "default value for `none`" in normalized
+                    and any(term in normalized for term in ("dos_score", "current_bid"))
+                    and "business logic" in normalized
+                  )
                 )
               )
               is_rover_heuristic_import_debug_posture = (
@@ -935,6 +984,7 @@ jobs:
                 or is_outcome_update_zero_row_semantics_false_positive
                 or is_operator_zero_row_conflict_expected_fail_closed
                 or is_expired_velocity_nonurgent_floor_false_positive
+                or is_current_bid_trust_score_truncation_false_positive
                 or is_score_missing_bid_mmr_default_policy
                 or is_won_bid_sale_price_zero_fixed
                 or is_won_outcome_current_bid_validation_fixed

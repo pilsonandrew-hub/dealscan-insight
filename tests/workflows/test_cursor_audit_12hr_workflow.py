@@ -95,6 +95,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("outcomes_summary_requires_auth", workflow)
         self.assertIn("dealer_sales_user_id_from_authenticated_context", workflow)
         self.assertIn("missing_bid_mmr_are_severe_provenance_flags", workflow)
+        self.assertIn("current_bid_trust_score_24h_branch_complete", workflow)
+        self.assertIn("webhook_log_insert_fallback_error_handled", workflow)
         self.assertIn(
             '"user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]',
             workflow,
@@ -221,6 +223,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "score_uses_dynamic_current_year_for_age": True,
                 "score_deal_wrapper_selects_vehicle_tier": True,
                 "missing_bid_mmr_are_severe_provenance_flags": True,
+                "current_bid_trust_score_24h_branch_complete": True,
+                "webhook_log_insert_fallback_error_handled": True,
                 "expired_auction_velocity_matches_nonurgent_floor": True,
                 "rover_numeric_defaults_are_serialization_fallbacks": True,
                 "rover_heuristic_import_debug_visible": True,
@@ -295,6 +299,15 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | backend/ingest/score.py | `score_deal` accepts zero bid and missing MMR as a viable final opportunity. | **FIX:** reject the final score path.",
                     "HIGH | backend/ingest/score.py | Missing bid ceiling leaves `_discount_pct_score` with an optimistic severe penalty fallback. | **FIX:** enforce bid ceiling availability before discount scoring.",
                     "HIGH | backend/ingest/score.py | Expired auction parser failure should receive a lower score before `_auction_velocity_score`. | **FIX:** validate source auction end time parsing.",
+                    "CRITICAL | backend/ingest/score.py | Inconsistent Rust State Rejection Logic | **FIX:** The `is_high_rust_state_rejected` function is imported but not used in `score_deal_premium` or `score_deal_standard` for hard rejection. Instead, `compute_risk_flags` only adds a `rust_state_source` flag, which results in a penalty but not a hard rejection.",
+                    "CRITICAL | webapp/routers/ingest.py | Missing Premium Lane Age and Mileage Hard Rejection | **FIX:** The `score_deal_wrapper_enforces_premium_age_and_mileage` proof states that age and mileage are enforced, but the provided `score.py` code does not show a hard rejection for premium lane vehicles exceeding 4 years or 50,000 miles. The current `determine_vehicle_tier` only assigns a tier, it doesn't reject.",
+                    "HIGH | backend/ingest/score.py | Incomplete `_auction_velocity_score` Logic | **FIX:** The `_auction_velocity_score` function is truncated. The `elif auction_stage_hours_remaining <= 24:` line is incomplete, leading to potential logical errors. Complete the conditional logic to assign an appropriate score.",
+                    "HIGH | webapp/routers/outcomes.py | Operator Override Logging Inconsistency | **FIX:** The `_is_operator_user` function checks `DEALERSCOPE_OPERATOR_USER_ID` but the logging statement for operator override in `patch_outcome` only logs `operator=%s` and `owner=%s` without explicitly stating that an override occurred or the specific `DEALERSCOPE_OPERATOR_USER_ID` value. Enhance the logging to clearly indicate when an operator override is being used and which operator ID is performing it for better auditability.",
+                    "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` Inconsistent `listing_match` Handling | **FIX:** If `canonical_id` is provided, the primary check should be against `canonical_id` first, and `listing_url` should be a secondary check for potential duplicates.",
+                    "HIGH | webapp/routers/ingest.py | `insert_webhook_log` Incomplete Fallback Logic | **FIX:** The `insert_webhook_log` function has a truncated `except Exception as fallback_error:` block. The `if re` line is incomplete, indicating missing error handling or logging for the direct PostgreSQL fallback. Complete the `except` block.",
+                    "HIGH | webapp/routers/rover.py | `_coerce_number` Default Value for `None` | **FIX:** The `_coerce_number` function returns a `default` value (0.0) for `None` inputs. While this might be intended for some numeric fields, for fields like `dos_score` or `current_bid`, a `None` value might indicate missing data that should be handled differently. Review if defaulting to 0.0 for `None` is always the correct business logic.",
+                    "HIGH | backend/ingest/score.py | `_auction_velocity_score` incomplete stage logic for 25+ hour auctions. | **FIX:** prove the auction velocity helper handles long-window auctions.",
+                    "HIGH | webapp/routers/ingest.py | `insert_webhook_log` can ignore direct PG errors if require_durable is false. | **FIX:** preserve durable-mode handling semantics.",
                 ]
             )
         )
@@ -356,6 +369,15 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("accepts zero bid and missing MMR as a viable final opportunity", filtered)
         self.assertIn("Missing bid ceiling", filtered)
         self.assertIn("Expired auction parser failure", filtered)
+        self.assertNotIn("Inconsistent Rust State Rejection Logic", filtered)
+        self.assertNotIn("Missing Premium Lane Age and Mileage Hard Rejection", filtered)
+        self.assertNotIn("Incomplete `_auction_velocity_score` Logic", filtered)
+        self.assertNotIn("Operator Override Logging Inconsistency", filtered)
+        self.assertNotIn("Inconsistent `listing_match` Handling", filtered)
+        self.assertNotIn("Incomplete Fallback Logic", filtered)
+        self.assertNotIn("Default Value for `None`", filtered)
+        self.assertIn("incomplete stage logic for 25+ hour auctions", filtered)
+        self.assertIn("ignore direct PG errors if require_durable is false", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
@@ -511,6 +533,19 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 and 'flags.append("zero_or_missing_bid")' in score_source
                 and 'severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}' in score_source
                 and "test_passes_basic_gates_rejects_zero_bid" in score_tests
+            ),
+            "current_bid_trust_score_24h_branch_complete": (
+                "def _current_bid_trust_score" in score_source
+                and "elif auction_stage_hours_remaining <= 24:" in score_source
+                and "base = min(1.0, base + 0.1)" in score_source
+                and "return round(base, 3)" in score_source
+            ),
+            "webhook_log_insert_fallback_error_handled": (
+                "def insert_webhook_log" in ingest_source
+                and "except Exception as fallback_error:" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+                and "CriticalAuditWriteError" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+                and "direct PG fallback failed" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+                and "return None" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
             ),
             "duplicate_listing_url_also_checks_canonical_id": (
                 "test_duplicate_check_updates_canonical_sources_when_listing_url_matches" in ingest_tests
