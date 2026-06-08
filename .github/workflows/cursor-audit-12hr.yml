@@ -14,7 +14,7 @@ env:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Set Git default branch for quiet checkout
@@ -141,19 +141,23 @@ jobs:
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "-1003672399222"
           GEMINI_AUDIT_MAX_ATTEMPTS: "3"
           GEMINI_AUDIT_RETRY_DELAY_SECONDS: "60"
+          GEMINI_OPENROUTER_MODEL: "google/gemini-2.5-flash"
         run: |
           python3 << 'PYEOF'
           import datetime, html, json, os, ssl, time, urllib.error, urllib.request
 
           GEMINI_KEY = os.environ["GEMINI_KEY"]
+          OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "")
           BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
           CHAT_ID = os.environ.get("CHAT_ID", "")
           MAX_ATTEMPTS = int(os.environ.get("GEMINI_AUDIT_MAX_ATTEMPTS", "3"))
           RETRY_DELAY_SECONDS = int(os.environ.get("GEMINI_AUDIT_RETRY_DELAY_SECONDS", "60"))
+          OPENROUTER_MODEL = os.environ.get("GEMINI_OPENROUTER_MODEL", "google/gemini-2.5-flash")
           ctx = ssl.create_default_context()
 
           # Read key files for audit
@@ -266,7 +270,7 @@ jobs:
             with urllib.request.urlopen(tg_req, context=ctx) as r:
               print("Telegram alert sent:", json.loads(r.read()).get("ok"))
 
-          def fetch_gemini_audit() -> dict:
+          def fetch_direct_gemini_audit() -> dict:
             last_error = None
             retryable_statuses = {429, 500, 502, 503, 504}
             for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -286,6 +290,69 @@ jobs:
                 print(f"Gemini audit attempt {attempt}/{MAX_ATTEMPTS} failed with URL error; retrying in {RETRY_DELAY_SECONDS}s: {e}")
                 time.sleep(RETRY_DELAY_SECONDS)
             raise RuntimeError(f"Gemini audit unavailable after {MAX_ATTEMPTS} attempt(s): {last_error}") from last_error
+
+          def fetch_openrouter_gemini_audit() -> dict:
+            if not OPENROUTER_KEY:
+              raise RuntimeError("OPENROUTER_KEY is not configured for Gemini fallback")
+
+            openrouter_payload = json.dumps({
+              "model": OPENROUTER_MODEL,
+              "messages": [
+                {
+                  "role": "system",
+                  "content": "You are a senior red-team auditor for DealerScope. Report only CRITICAL and HIGH issues. Format: SEVERITY | FILE | ISSUE | FIX.",
+                },
+                {"role": "user", "content": prompt},
+              ],
+              "temperature": 0.0,
+              "max_tokens": 2000,
+            }).encode()
+            openrouter_req = urllib.request.Request(
+              "https://openrouter.ai/api/v1/chat/completions",
+              data=openrouter_payload,
+              headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json",
+              },
+              method="POST",
+            )
+
+            last_error = None
+            retryable_statuses = {408, 429, 500, 502, 503, 504}
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+              try:
+                with urllib.request.urlopen(openrouter_req, context=ctx, timeout=60) as r:
+                  data = json.loads(r.read())
+                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if not text:
+                  raise RuntimeError("OpenRouter Gemini returned no audit content")
+                return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+              except urllib.error.HTTPError as e:
+                last_error = e
+                if e.code not in retryable_statuses or attempt == MAX_ATTEMPTS:
+                  break
+                print(f"OpenRouter Gemini audit attempt {attempt}/{MAX_ATTEMPTS} got HTTP {e.code}; retrying in {RETRY_DELAY_SECONDS}s")
+                time.sleep(RETRY_DELAY_SECONDS)
+              except (urllib.error.URLError, RuntimeError) as e:
+                last_error = e
+                if attempt == MAX_ATTEMPTS:
+                  break
+                print(f"OpenRouter Gemini audit attempt {attempt}/{MAX_ATTEMPTS} failed; retrying in {RETRY_DELAY_SECONDS}s: {e}")
+                time.sleep(RETRY_DELAY_SECONDS)
+            raise RuntimeError(f"OpenRouter Gemini audit unavailable after {MAX_ATTEMPTS} attempt(s): {last_error}") from last_error
+
+          def fetch_gemini_audit() -> dict:
+            try:
+              return fetch_direct_gemini_audit()
+            except Exception as direct_error:
+              print(f"Direct Gemini audit unavailable: {direct_error}; falling back to OpenRouter {OPENROUTER_MODEL}")
+              try:
+                return fetch_openrouter_gemini_audit()
+              except Exception as fallback_error:
+                raise RuntimeError(
+                  "Gemini audit unavailable after direct and OpenRouter fallback: "
+                  f"direct={direct_error}; fallback={fallback_error}"
+                ) from fallback_error
 
           try:
             data = fetch_gemini_audit()
