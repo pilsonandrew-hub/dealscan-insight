@@ -30,7 +30,33 @@ def _current_year() -> int:
     return current_calendar_year()
 
 
-CURRENT_YEAR = _current_year()
+class _DynamicCurrentYear:
+    def __int__(self) -> int:
+        return _current_year()
+
+    def __index__(self) -> int:
+        return int(self)
+
+    def __sub__(self, other):
+        return int(self) - other
+
+    def __rsub__(self, other):
+        return other - int(self)
+
+    def __add__(self, other):
+        return int(self) + other
+
+    def __radd__(self, other):
+        return other + int(self)
+
+    def __eq__(self, other) -> bool:
+        return int(self) == other
+
+    def __repr__(self) -> str:
+        return str(int(self))
+
+
+CURRENT_YEAR = _DynamicCurrentYear()
 
 SCORE_ENGINE_VERSION = "v3_two_lane"
 SCORE_ENGINE_IMPL = "score_deal_v3_two_lane"

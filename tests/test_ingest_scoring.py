@@ -36,6 +36,13 @@ INVALID_MILEAGE_VALUES = (
 )
 
 
+def test_current_year_export_tracks_calendar_year_dynamically(monkeypatch):
+    monkeypatch.setattr(score_module, "current_calendar_year", lambda: 2031)
+
+    assert int(score_module.CURRENT_YEAR) == 2031
+    assert score_module.CURRENT_YEAR - 4 == 2027
+
+
 def test_passes_basic_gates_rejects_title_brand_keywords():
     vehicle = {
         "title": "2024 Toyota Camry Salvage Title",

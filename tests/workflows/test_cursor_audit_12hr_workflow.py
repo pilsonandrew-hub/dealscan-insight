@@ -211,6 +211,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "rust_state_new_vehicle_exception_and_source_risk_policy": True,
                 "operator_privileged_outcome_write_documented": True,
                 "operator_privilege_uses_authenticated_user_id": True,
+                "outcome_update_zero_row_conflict": True,
                 "operator_override_is_logged": True,
                 "operator_override_logs_outcome_details": True,
                 "outcomes_summary_requires_auth": True,
@@ -317,6 +318,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/ingest.py | Incomplete `webhook_log` Fallback Error Handling | The `insert_webhook_log` implementation doesn't fully expose the initial `primary_error`; log `primary_error` before direct PG fallback succeeds.",
                     "HIGH | webapp/routers/ingest.py | `update_webhook_log` fallback hides primary_error on success. | **FIX:** log update primary_error before fallback success.",
                     "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` must ensure consistency between listing_url and canonical_id during source refresh. | **FIX:** verify refreshed canonical source history.",
+                    "HIGH | backend/ingest/score.py | Inconsistent `_current_year()` Usage and Global `CURRENT_YEAR` | FIX: Consistently use `_current_year()` for dynamic year calculations or ensure `CURRENT_YEAR` is updated dynamically at runtime.",
+                    "HIGH | webapp/routers/ingest.py | Duplicate Listing URL Conflict Handling | FIX: Ensure that when a `listing_url` conflict is detected, and the `canonical_id` of the conflicting record does not match the incoming `canonical_id`, the incoming record is treated as a distinct, potentially conflicting entry rather than a simple duplicate or update.",
+                    "HIGH | webapp/routers/outcomes.py | `outcome_sale_price` and `sale_price` can be zero for \"won\" outcomes.",
+                    "HIGH | webapp/routers/outcomes.py | `_execute_scoped_opportunity_update` raises `HTTPException` for zero rows matched, which might be an expected scenario for concurrent updates.",
                 ]
             )
         )
@@ -360,7 +365,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Duplicate Check Bypassed if `listing_url` is Present", filtered)
         self.assertNotIn("Upsert Allows Zero-Row Update Without Error", filtered)
         self.assertNotIn("Requires `current_bid` for `won` Outcome", filtered)
-        self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
+        self.assertNotIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
         self.assertIn("wrapper drops `missing_photos`", filtered)
         self.assertIn("canonical_id lookup failure is swallowed", filtered)
@@ -391,6 +396,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("ignore direct PG errors if require_durable is false", filtered)
         self.assertIn("update_webhook_log` fallback hides primary_error", filtered)
         self.assertIn("ensure consistency between listing_url and canonical_id during source refresh", filtered)
+        kept_findings = filtered.split("=== SUPPRESSED UNSUPPORTED OR CONTRADICTED FINDINGS ===", 1)[0]
+        self.assertNotIn("Inconsistent `_current_year()` Usage and Global `CURRENT_YEAR`", kept_findings)
+        self.assertNotIn("Duplicate Listing URL Conflict Handling", kept_findings)
+        self.assertNotIn("`outcome_sale_price` and `sale_price` can be zero", kept_findings)
+        self.assertNotIn("zero rows matched, which might be an expected scenario", kept_findings)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
