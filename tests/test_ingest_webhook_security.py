@@ -193,6 +193,8 @@ class _DuplicateLookupQuery:
         if ("canonical_id", self.client.canonical_id) in self.filters:
             return types.SimpleNamespace(data=[self.client.canonical_row] if self.client.canonical_row else [])
         if ("id", self.client.owner_id) in self.filters:
+            if self.client.owner_error:
+                raise RuntimeError(self.client.owner_error)
             return types.SimpleNamespace(data=[self.client.owner_row] if self.client.owner_row else [])
         return types.SimpleNamespace(data=[])
 
@@ -206,6 +208,7 @@ class _DuplicateLookupSupabase:
         listing_row=None,
         owner_id=None,
         owner_row=None,
+        owner_error=None,
     ):
         self.canonical_id = canonical_id
         self.canonical_row = canonical_row
@@ -213,6 +216,7 @@ class _DuplicateLookupSupabase:
         self.listing_row = listing_row or {}
         self.owner_id = owner_id
         self.owner_row = owner_row or {}
+        self.owner_error = owner_error
         self.queries = []
 
     def table(self, name):
@@ -711,6 +715,49 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertEqual(vehicle["canonical_record_id"], "canonical-1")
         self.assertEqual(vehicle["identity_conflict"], True)
         self.assertIn("dedup_identity_conflict", vehicle["risk_flags"])
+
+        unverified_vehicle = {"title": "2022 Ford F-150"}
+        ingest._apply_duplicate_result(
+            unverified_vehicle,
+            {
+                "is_duplicate": True,
+                "canonical_record_id": "canonical-1",
+                "canonical_update": None,
+                "identity_conflict_check_failed": True,
+            },
+        )
+
+        self.assertEqual(unverified_vehicle["identity_conflict_check_failed"], True)
+        self.assertIn("dedup_identity_conflict_unverified", unverified_vehicle["risk_flags"])
+
+    def test_duplicate_check_preserves_duplicate_when_owner_conflict_lookup_fails(self):
+        client = _DuplicateLookupSupabase(
+            "new-canon",
+            {},
+            listing_url="https://example.com/vehicle/1",
+            listing_row={
+                "id": "duplicate-1",
+                "is_duplicate": True,
+                "canonical_record_id": "canonical-1",
+            },
+            owner_id="canonical-1",
+            owner_error="owner lookup timeout",
+        )
+
+        with self.assertLogs(ingest.logger, level="WARNING") as logs:
+            result = ingest.check_and_handle_duplicate(
+                client,
+                {
+                    "canonical_id": "new-canon",
+                    "source_site": "Proxibid",
+                    "listing_url": "https://example.com/vehicle/1",
+                },
+            )
+
+        self.assertEqual(result["is_duplicate"], True)
+        self.assertEqual(result["canonical_record_id"], "canonical-1")
+        self.assertEqual(result["identity_conflict_check_failed"], True)
+        self.assertIn("listing_url/canonical_id conflict check failed", "\n".join(logs.output))
 
     def test_claim_webhook_log_direct_pg_serializes_pending_claim(self):
         payload = {

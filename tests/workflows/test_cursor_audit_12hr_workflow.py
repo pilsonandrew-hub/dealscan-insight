@@ -575,10 +575,12 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             ),
             "duplicate_listing_url_conflict_is_flagged": (
                 "test_duplicate_check_flags_listing_duplicate_with_conflicting_canonical_owner" in ingest_tests
+                and "test_duplicate_check_preserves_duplicate_when_owner_conflict_lookup_fails" in ingest_tests
                 and "test_duplicate_identity_conflict_is_propagated_to_vehicle_before_save" in ingest_tests
                 and "listing_url/canonical_id conflict" in ingest_source
                 and '"identity_conflict"' in ingest_source
                 and "dedup_identity_conflict" in ingest_source
+                and "dedup_identity_conflict_unverified" in ingest_source
                 and '.eq("id", canonical_record_id)' in ingest_source
             ),
         }

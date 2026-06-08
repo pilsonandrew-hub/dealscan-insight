@@ -354,24 +354,36 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
                 }
                 canonical_record_id = listing_match.get("canonical_record_id")
                 if listing_match.get("is_duplicate") and canonical_id and canonical_record_id:
-                    owner_result = (
-                        supabase_client.table("opportunities")
-                        .select("id, canonical_id")
-                        .eq("id", canonical_record_id)
-                        .limit(1)
-                        .execute()
-                    )
-                    owner_row = owner_result.data[0] if owner_result.data else {}
-                    owner_canonical_id = owner_row.get("canonical_id")
-                    if owner_canonical_id and owner_canonical_id != canonical_id:
+                    try:
+                        owner_result = (
+                            supabase_client.table("opportunities")
+                            .select("id, canonical_id")
+                            .eq("id", canonical_record_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        owner_row = owner_result.data[0] if owner_result.data else {}
+                        owner_canonical_id = owner_row.get("canonical_id")
+                    except Exception as owner_lookup_error:
                         logger.warning(
-                            "[DEDUP] listing_url/canonical_id conflict listing_url=%s provided_canonical_id=%s canonical_record_id=%s owner_canonical_id=%s",
+                            "[DEDUP] listing_url/canonical_id conflict check failed listing_url=%s provided_canonical_id=%s canonical_record_id=%s error=%s",
                             listing_url,
                             canonical_id,
                             canonical_record_id,
-                            owner_canonical_id,
+                            owner_lookup_error,
                         )
-                        duplicate_result["identity_conflict"] = True
+                        duplicate_result["identity_conflict_check_failed"] = True
+                    else:
+                        if owner_canonical_id and owner_canonical_id != canonical_id:
+                            logger.warning(
+                                "[DEDUP] listing_url/canonical_id conflict listing_url=%s provided_canonical_id=%s canonical_record_id=%s owner_canonical_id=%s",
+                                listing_url,
+                                canonical_id,
+                                canonical_record_id,
+                                owner_canonical_id,
+                            )
+                            duplicate_result["identity_conflict"] = True
+
                 return duplicate_result
             return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
@@ -395,11 +407,16 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
 def _apply_duplicate_result(vehicle: dict, dedup: dict) -> None:
     vehicle["is_duplicate"] = True
     vehicle["canonical_record_id"] = dedup["canonical_record_id"]
+    risk_flags = list(vehicle.get("risk_flags") or [])
     if dedup.get("identity_conflict"):
         vehicle["identity_conflict"] = True
-        risk_flags = list(vehicle.get("risk_flags") or [])
         if "dedup_identity_conflict" not in risk_flags:
             risk_flags.append("dedup_identity_conflict")
+    if dedup.get("identity_conflict_check_failed"):
+        vehicle["identity_conflict_check_failed"] = True
+        if "dedup_identity_conflict_unverified" not in risk_flags:
+            risk_flags.append("dedup_identity_conflict_unverified")
+    if risk_flags:
         vehicle["risk_flags"] = risk_flags
 
 
