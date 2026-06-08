@@ -86,6 +86,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("not particularly low", workflow)
         self.assertIn("outcomes_non_sale_price_zero", workflow)
         self.assertIn("duplicate_missing_listing_url_uses_canonical_id", workflow)
+        self.assertIn("duplicate_listing_url_also_checks_canonical_id", workflow)
         self.assertIn("webhook_log_direct_pg_fallback_is_durable_and_labelled", workflow)
         self.assertIn("high_demand_model_list_is_curated_scorer_policy", workflow)
         self.assertIn("rust_state_new_vehicle_exception_and_source_risk_policy", workflow)
@@ -114,6 +115,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("is_bid_outcome_timestamp_false_positive", workflow)
         self.assertIn("is_legacy_realized_sale_semantics_false_positive", workflow)
         self.assertIn("is_duplicate_missing_url_canonical_fallback_false_positive", workflow)
+        self.assertIn("is_duplicate_listing_url_canonical_check_fixed", workflow)
         self.assertIn("is_webhook_direct_pg_durability_false_positive", workflow)
         self.assertIn("is_current_year_staleness_false_positive", workflow)
         self.assertIn("is_score_deal_premium_tier_helper_opinion", workflow)
@@ -190,6 +192,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
             "audit_evidence_proof": {
                 "outcomes_non_sale_price_zero": True,
                 "duplicate_missing_listing_url_uses_canonical_id": True,
+                "duplicate_listing_url_also_checks_canonical_id": True,
                 "webhook_log_direct_pg_fallback_is_durable_and_labelled": True,
                 "high_demand_model_list_is_curated_scorer_policy": True,
                 "rust_state_new_vehicle_exception_and_source_risk_policy": True,
@@ -255,9 +258,18 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | backend/ingest/score.py | Missing Premium Lane Age and Mileage Rejection in Scoring Functions | FIX: Implement explicit rejection logic within score_deal_premium for vehicles exceeding 4 years or 50,000 miles.",
                     "HIGH | webapp/routers/outcomes.py | Inconsistent `sale_price` Handling for Non-Won Bid Outcomes | In `_mirror_bid_outcome_to_dealer_sales`, if `normalized.outcome` is not \"won\", `sale_price` is explicitly set to `0`. However, `sold_price` is set to `None` in the same scenario. This creates an inconsistency where `sale_price` is `0` for non-won outcomes, while `sold_price` is `None`.",
                     "HIGH | backend/ingest/score.py | Missing Photo Rejection for Premium Lane | The `compute_risk_flags` function correctly identifies `missing_photos` as a risk. This flag contributes to `_risk_penalty_score`, which is used in `score_deal_standard`. However, `score_deal_premium` does not incorporate `_risk_penalty_score` or any direct check for missing photos. Missing photos are a significant indicator of risk and can severely impact a vehicle's marketability, especially for premium listings. Allowing premium vehicles to be scored without photos bypasses a critical quality gate.",
+                    "CRITICAL | backend/ingest/score.py | Missing Premium Lane Mileage-per-year Rejection | FIX: Implement a hard rejection for premium lane vehicles exceeding a mileage-per-year threshold (e.g., 12,500 miles/year for 4yr/50k).",
+                    "CRITICAL | webapp/routers/outcomes.py | Operator Override Bypasses Authorization for System Opportunities | FIX: Implement a clear policy and mechanism for system opportunity ownership transfer or explicit authorization for operator actions on system-owned opportunities, rather than a blanket bypass.",
+                    "HIGH | backend/ingest/score.py | Missing Premium Lane Missing Photos Hard Rejection | FIX: Implement a hard rejection for premium lane vehicles that are missing photos, as per the expectation for premium listings.",
+                    "HIGH | backend/ingest/score.py | Inconsistent `_current_year()` Usage for Age Calculation | FIX: Ensure `_current_year()` is consistently called at the point of calculation to avoid stale year values, or explicitly document the intended behavior if `CURRENT_YEAR` is meant to be static for a given process run.",
+                    "HIGH | webapp/routers/ingest.py | Duplicate Check Bypassed if `listing_url` is Present | FIX: Ensure canonical ID-based duplicate checking is always performed, even if a `listing_url` is present, to catch duplicates across different listing URLs for the same vehicle.",
+                    "HIGH | webapp/routers/outcomes.py | `dealer_sales` Upsert Allows Zero-Row Update Without Error | FIX: Explicitly check for zero rows affected by the `upsert` operation and raise an error, as a zero-row update indicates a potential issue.",
+                    "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` Requires `current_bid` for `won` Outcome | FIX: Re-evaluate if `current_bid` is strictly necessary for `won` outcomes in `_legacy_mirror_to_dealer_sales` or provide a fallback/default if it's missing, as a sale can occur without a recorded bid.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
                     "HIGH | backend/ingest/score.py | `score_deal` wrapper drops `missing_photos` from risk flags before AI confidence. | **FIX:** preserve the risk flag.",
+                    "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` canonical_id lookup failure is swallowed when `listing_url` is present. | **FIX:** surface the failed canonical lookup.",
+                    "HIGH | backend/ingest/score.py | Standard lane mileage-per-year rejection is missing for 19,000 miles/year vehicles. | **FIX:** reject over-threshold standard mileage velocity.",
                 ]
             )
         )
@@ -294,9 +306,18 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Missing Premium Lane Age and Mileage Rejection", filtered)
         self.assertNotIn("Inconsistent `sale_price` Handling for Non-Won Bid Outcomes", filtered)
         self.assertNotIn("Missing Photo Rejection for Premium Lane", filtered)
+        self.assertNotIn("Missing Premium Lane Mileage-per-year Rejection", filtered)
+        self.assertNotIn("Operator Override Bypasses Authorization for System Opportunities", filtered)
+        self.assertNotIn("Missing Premium Lane Missing Photos Hard Rejection", filtered)
+        self.assertNotIn("Inconsistent `_current_year()` Usage for Age Calculation", filtered)
+        self.assertNotIn("Duplicate Check Bypassed if `listing_url` is Present", filtered)
+        self.assertNotIn("Upsert Allows Zero-Row Update Without Error", filtered)
+        self.assertNotIn("Requires `current_bid` for `won` Outcome", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
         self.assertIn("wrapper drops `missing_photos`", filtered)
+        self.assertIn("canonical_id lookup failure is swallowed", filtered)
+        self.assertIn("Standard lane mileage-per-year rejection is missing", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
@@ -377,6 +398,12 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         score_tests = (
             repo_root / "tests" / "test_ingest_scoring.py"
         ).read_text(encoding="utf-8")
+        ingest_source = (
+            repo_root / "webapp" / "routers" / "ingest.py"
+        ).read_text(encoding="utf-8")
+        ingest_tests = (
+            repo_root / "tests" / "test_ingest_webhook_security.py"
+        ).read_text(encoding="utf-8")
 
         proofs = {
             "dealer_sales_payload_requires_essential_fields": (
@@ -421,6 +448,13 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 'flags.append("missing_photos")' in score_source
                 and "prevents benign flags like 'missing_photos' from unconditionally" in score_source
                 and "test_premium_missing_photos_are_risk_flag_not_hard_rejection_policy" in score_tests
+            ),
+            "duplicate_listing_url_also_checks_canonical_id": (
+                "test_duplicate_check_updates_canonical_sources_when_listing_url_matches" in ingest_tests
+                and "listing_match = None" in ingest_source
+                and "listing_match = existing.data[0]" in ingest_source
+                and '.eq("listing_url", listing_url)' in ingest_source
+                and '.eq("canonical_id", canonical_id)' in ingest_source
             ),
         }
 
