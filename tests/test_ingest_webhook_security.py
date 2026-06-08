@@ -188,15 +188,19 @@ class _DuplicateLookupQuery:
 
     def execute(self):
         self.client.queries.append(tuple(self.filters))
+        if ("listing_url", self.client.listing_url) in self.filters:
+            return types.SimpleNamespace(data=[self.client.listing_row])
         if ("canonical_id", self.client.canonical_id) in self.filters:
             return types.SimpleNamespace(data=[self.client.canonical_row])
         return types.SimpleNamespace(data=[])
 
 
 class _DuplicateLookupSupabase:
-    def __init__(self, canonical_id, canonical_row):
+    def __init__(self, canonical_id, canonical_row, listing_url=None, listing_row=None):
         self.canonical_id = canonical_id
         self.canonical_row = canonical_row
+        self.listing_url = listing_url
+        self.listing_row = listing_row or {}
         self.queries = []
 
     def table(self, name):
@@ -589,6 +593,36 @@ class WebhookSecurityTests(unittest.TestCase):
                 "duplicate_count": 1,
             },
         )
+        self.assertIn((("canonical_id", "canon-1"), ("is_duplicate", False)), client.queries)
+
+    def test_duplicate_check_updates_canonical_sources_when_listing_url_matches(self):
+        client = _DuplicateLookupSupabase(
+            "canon-1",
+            {"id": "existing-1", "all_sources": ["GovDeals"]},
+            listing_url="https://example.com/vehicle/1",
+            listing_row={"id": "existing-1", "is_duplicate": False, "canonical_record_id": None},
+        )
+
+        result = ingest.check_and_handle_duplicate(
+            client,
+            {
+                "canonical_id": "canon-1",
+                "source_site": "Proxibid",
+                "listing_url": "https://example.com/vehicle/1",
+            },
+        )
+
+        self.assertEqual(result["is_duplicate"], True)
+        self.assertEqual(result["canonical_record_id"], "existing-1")
+        self.assertEqual(
+            result["canonical_update"],
+            {
+                "id": "existing-1",
+                "all_sources": ["GovDeals", "Proxibid"],
+                "duplicate_count": 1,
+            },
+        )
+        self.assertIn((("listing_url", "https://example.com/vehicle/1"),), client.queries)
         self.assertIn((("canonical_id", "canon-1"), ("is_duplicate", False)), client.queries)
 
 

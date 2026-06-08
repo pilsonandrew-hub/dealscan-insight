@@ -316,6 +316,7 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
     listing_url = vehicle.get("listing_url", "")
 
     try:
+        listing_match = None
         if listing_url:
             existing = (
                 supabase_client.table("opportunities")
@@ -325,14 +326,15 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
                 .execute()
             )
             if existing.data:
-                existing_row = existing.data[0]
-                return {
-                    "is_duplicate": existing_row.get("is_duplicate", False),
-                    "canonical_record_id": existing_row.get("canonical_record_id"),
-                    "canonical_update": None,
-                }
+                listing_match = existing.data[0]
 
         if not canonical_id:
+            if listing_match:
+                return {
+                    "is_duplicate": listing_match.get("is_duplicate", False),
+                    "canonical_record_id": listing_match.get("canonical_record_id"),
+                    "canonical_update": None,
+                }
             return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
         result = (
@@ -344,6 +346,12 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
             .execute()
         )
         if not result.data:
+            if listing_match:
+                return {
+                    "is_duplicate": listing_match.get("is_duplicate", False),
+                    "canonical_record_id": listing_match.get("canonical_record_id"),
+                    "canonical_update": None,
+                }
             return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
         existing = result.data[0]
