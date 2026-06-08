@@ -143,13 +143,17 @@ jobs:
           GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "-1003672399222"
+          GEMINI_AUDIT_MAX_ATTEMPTS: "3"
+          GEMINI_AUDIT_RETRY_DELAY_SECONDS: "60"
         run: |
           python3 << 'PYEOF'
-          import json, urllib.request, ssl, os, datetime
+          import datetime, html, json, os, ssl, time, urllib.error, urllib.request
 
           GEMINI_KEY = os.environ["GEMINI_KEY"]
           BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
           CHAT_ID = os.environ.get("CHAT_ID", "")
+          MAX_ATTEMPTS = int(os.environ.get("GEMINI_AUDIT_MAX_ATTEMPTS", "3"))
+          RETRY_DELAY_SECONDS = int(os.environ.get("GEMINI_AUDIT_RETRY_DELAY_SECONDS", "60"))
           ctx = ssl.create_default_context()
 
           # Read key files for audit
@@ -251,9 +255,40 @@ jobs:
           url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key={GEMINI_KEY}"
           req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
 
+          def send_telegram_message(message: str) -> None:
+            if not BOT_TOKEN:
+              return
+            tg_payload = json.dumps({"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}).encode()
+            tg_req = urllib.request.Request(
+              f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+              data=tg_payload, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(tg_req, context=ctx) as r:
+              print("Telegram alert sent:", json.loads(r.read()).get("ok"))
+
+          def fetch_gemini_audit() -> dict:
+            last_error = None
+            retryable_statuses = {429, 500, 502, 503, 504}
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+              try:
+                with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+                  return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                last_error = e
+                if e.code not in retryable_statuses or attempt == MAX_ATTEMPTS:
+                  break
+                print(f"Gemini audit attempt {attempt}/{MAX_ATTEMPTS} got HTTP {e.code}; retrying in {RETRY_DELAY_SECONDS}s")
+                time.sleep(RETRY_DELAY_SECONDS)
+              except urllib.error.URLError as e:
+                last_error = e
+                if attempt == MAX_ATTEMPTS:
+                  break
+                print(f"Gemini audit attempt {attempt}/{MAX_ATTEMPTS} failed with URL error; retrying in {RETRY_DELAY_SECONDS}s: {e}")
+                time.sleep(RETRY_DELAY_SECONDS)
+            raise RuntimeError(f"Gemini audit unavailable after {MAX_ATTEMPTS} attempt(s): {last_error}") from last_error
+
           try:
-            with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
-              data = json.loads(r.read())
+            data = fetch_gemini_audit()
             raw_findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
             findings = suppress_deterministically_false_findings(raw_findings)
 
@@ -264,14 +299,22 @@ jobs:
             if findings and ("CRITICAL" in findings or "HIGH" in findings) and BOT_TOKEN:
               now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
               msg = f"🔍 <b>DealerScope 12hr Audit — {now}</b>\n\n{findings[:3000]}"
-              tg_payload = json.dumps({"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}).encode()
-              tg_req = urllib.request.Request(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                data=tg_payload, headers={"Content-Type": "application/json"}, method="POST"
-              )
-              with urllib.request.urlopen(tg_req, context=ctx) as r:
-                print("Telegram alert sent:", json.loads(r.read()).get("ok"))
+              send_telegram_message(msg)
 
           except Exception as e:
-            print(f"Gemini audit error: {e}")
+            now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            error_message = f"Gemini audit unavailable after {MAX_ATTEMPTS} attempt(s): {e}"
+            print(f"::error title=DealerScope Gemini audit degraded::{error_message}")
+            summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+            if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as summary:
+                summary.write("## DealerScope Gemini audit degraded\n\n")
+                summary.write(f"- Time: {now}\n")
+                summary.write(f"- Status: {error_message}\n")
+                summary.write("- Result: failing this workflow so a degraded red-team audit is not represented as green.\n")
+            send_telegram_message(
+              f"⚠️ <b>DealerScope 12hr Audit degraded — {now}</b>\n\n"
+              f"{html.escape(error_message)[:3000]}"
+            )
+            raise SystemExit(1)
           PYEOF
