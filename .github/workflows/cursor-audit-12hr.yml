@@ -586,7 +586,10 @@ jobs:
                 and "webapp/routers/ingest.py" in normalized
                 and "_insert_webhook_log_direct_pg" in normalized
                 and "supabase_client" in normalized
-                and any(term in normalized for term in ("primary_error", "fallback", "masking", "require_durable"))
+                and "fallback" in normalized
+                and "primary" in normalized
+                and ("masking critical issues" in normalized or "masking critical" in normalized)
+                and ("require_durable" in normalized or "primary_error" in normalized)
               )
               is_rover_redis_affinity_operational_posture = (
                 audit_evidence_proof.get("rover_redis_affinity_nonfatal_and_debug_visible") is True
