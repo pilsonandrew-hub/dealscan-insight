@@ -484,7 +484,7 @@ jobs:
               )
               is_rust_state_false_positive = business_rule_gate_passed and (
                 "missing rust state rejection" in normalized
-                or "high_rust_states" in normalized
+                or ("high_rust_states" in normalized and "inconsistent application" in normalized and "for rejection" in normalized)
                 or ("rust state" in normalized and "do not explicitly reject" in normalized)
                 or ("rust state" in normalized and "not just a penalty" in normalized)
                 or ("incomplete rust state rejection" in normalized)

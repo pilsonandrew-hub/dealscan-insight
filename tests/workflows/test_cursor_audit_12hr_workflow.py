@@ -321,13 +321,15 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 [
                     "CRITICAL | webapp/routers/ingest.py | Inconsistent Application of `HIGH_RUST_STATES` for Rejection | FIX: Ensure HIGH_RUST_STATES leads to consistent rejection across all relevant processing paths, or clarify business rules for exceptions.",
                     "HIGH | backend/ingest/score.py | Inconsistent Bid Ceiling Application | FIX: Ensure bid_ceiling_pct_for_tier is consistently applied as a hard rejection or a score-based rejection that guarantees rejection when exceeded.",
+                    "CRITICAL | webapp/routers/ingest.py | `HIGH_RUST_STATES` import missing in webhook normalization. | **FIX:** repair the import.",
                     "HIGH | backend/ingest/score.py | `score_deal` returns premium for an over-age vehicle. | **FIX:** enforce the wrapper tier gate.",
                 ]
             )
         )
 
-        self.assertNotIn("HIGH_RUST_STATES", filtered)
+        self.assertNotIn("Inconsistent Application of `HIGH_RUST_STATES`", filtered)
         self.assertNotIn("Inconsistent Bid Ceiling Application", filtered)
+        self.assertIn("import missing in webhook normalization", filtered)
         self.assertIn("score_deal` returns premium", filtered)
 
     def test_operator_privilege_proof_evaluates_current_source(self):
