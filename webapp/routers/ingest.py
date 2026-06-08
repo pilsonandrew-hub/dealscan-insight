@@ -347,11 +347,32 @@ def check_and_handle_duplicate(supabase_client, vehicle: dict) -> dict:
         )
         if not result.data:
             if listing_match:
-                return {
+                duplicate_result = {
                     "is_duplicate": listing_match.get("is_duplicate", False),
                     "canonical_record_id": listing_match.get("canonical_record_id"),
                     "canonical_update": None,
                 }
+                canonical_record_id = listing_match.get("canonical_record_id")
+                if listing_match.get("is_duplicate") and canonical_id and canonical_record_id:
+                    owner_result = (
+                        supabase_client.table("opportunities")
+                        .select("id, canonical_id")
+                        .eq("id", canonical_record_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    owner_row = owner_result.data[0] if owner_result.data else {}
+                    owner_canonical_id = owner_row.get("canonical_id")
+                    if owner_canonical_id and owner_canonical_id != canonical_id:
+                        logger.warning(
+                            "[DEDUP] listing_url/canonical_id conflict listing_url=%s provided_canonical_id=%s canonical_record_id=%s owner_canonical_id=%s",
+                            listing_url,
+                            canonical_id,
+                            canonical_record_id,
+                            owner_canonical_id,
+                        )
+                        duplicate_result["identity_conflict"] = True
+                return duplicate_result
             return {"is_duplicate": False, "canonical_record_id": None, "canonical_update": None}
 
         existing = result.data[0]
@@ -410,6 +431,8 @@ def insert_webhook_log(
         )
         inserted_id = _insert_webhook_log_direct_pg(fallback_row)
         record_audit_fallback(audit_state, fallback_label)
+        if primary_error is not None:
+            logger.warning("[WEBHOOK_LOG] insert failed; using direct PG fallback: %s", primary_error)
         return inserted_id
     except Exception as fallback_error:
         if require_durable:

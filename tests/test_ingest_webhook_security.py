@@ -191,16 +191,28 @@ class _DuplicateLookupQuery:
         if ("listing_url", self.client.listing_url) in self.filters:
             return types.SimpleNamespace(data=[self.client.listing_row])
         if ("canonical_id", self.client.canonical_id) in self.filters:
-            return types.SimpleNamespace(data=[self.client.canonical_row])
+            return types.SimpleNamespace(data=[self.client.canonical_row] if self.client.canonical_row else [])
+        if ("id", self.client.owner_id) in self.filters:
+            return types.SimpleNamespace(data=[self.client.owner_row] if self.client.owner_row else [])
         return types.SimpleNamespace(data=[])
 
 
 class _DuplicateLookupSupabase:
-    def __init__(self, canonical_id, canonical_row, listing_url=None, listing_row=None):
+    def __init__(
+        self,
+        canonical_id,
+        canonical_row,
+        listing_url=None,
+        listing_row=None,
+        owner_id=None,
+        owner_row=None,
+    ):
         self.canonical_id = canonical_id
         self.canonical_row = canonical_row
         self.listing_url = listing_url
         self.listing_row = listing_row or {}
+        self.owner_id = owner_id
+        self.owner_row = owner_row or {}
         self.queries = []
 
     def table(self, name):
@@ -568,6 +580,27 @@ class WebhookSecurityTests(unittest.TestCase):
             inserted_rows[0]["error_message"],
         )
 
+    def test_insert_webhook_log_logs_primary_error_when_direct_pg_fallback_succeeds(self):
+        payload = {
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "resource": {"id": "run-direct-log", "defaultDatasetId": "dataset-direct-log"},
+        }
+
+        with patch.object(
+            ingest,
+            "supabase_client",
+            _FailingWebhookLogInsertSupabase("supabase webhook_log insert failed"),
+        ), patch.object(ingest, "_direct_supabase_db_url", "postgresql://example"), patch.object(
+            ingest,
+            "_insert_webhook_log_direct_pg",
+            lambda _row: "direct-log-1",
+        ), self.assertLogs(ingest.logger, level="WARNING") as logs:
+            webhook_log_id = ingest.insert_webhook_log(payload, require_durable=True)
+
+        self.assertEqual(webhook_log_id, "direct-log-1")
+        self.assertIn("insert failed; using direct PG fallback", "\n".join(logs.output))
+        self.assertIn("supabase webhook_log insert failed", "\n".join(logs.output))
+
     def test_duplicate_check_uses_canonical_id_when_listing_url_missing(self):
         client = _DuplicateLookupSupabase(
             "canon-1",
@@ -625,6 +658,35 @@ class WebhookSecurityTests(unittest.TestCase):
         self.assertIn((("listing_url", "https://example.com/vehicle/1"),), client.queries)
         self.assertIn((("canonical_id", "canon-1"), ("is_duplicate", False)), client.queries)
 
+    def test_duplicate_check_flags_listing_duplicate_with_conflicting_canonical_owner(self):
+        client = _DuplicateLookupSupabase(
+            "new-canon",
+            {},
+            listing_url="https://example.com/vehicle/1",
+            listing_row={
+                "id": "duplicate-1",
+                "is_duplicate": True,
+                "canonical_record_id": "canonical-1",
+            },
+            owner_id="canonical-1",
+            owner_row={"id": "canonical-1", "canonical_id": "old-canon"},
+        )
+
+        with self.assertLogs(ingest.logger, level="WARNING") as logs:
+            result = ingest.check_and_handle_duplicate(
+                client,
+                {
+                    "canonical_id": "new-canon",
+                    "source_site": "Proxibid",
+                    "listing_url": "https://example.com/vehicle/1",
+                },
+            )
+
+        self.assertEqual(result["is_duplicate"], True)
+        self.assertEqual(result["canonical_record_id"], "canonical-1")
+        self.assertEqual(result["identity_conflict"], True)
+        self.assertIn((("id", "canonical-1"),), client.queries)
+        self.assertIn("listing_url/canonical_id conflict", "\n".join(logs.output))
 
     def test_claim_webhook_log_direct_pg_serializes_pending_claim(self):
         payload = {

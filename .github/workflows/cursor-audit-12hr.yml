@@ -411,6 +411,12 @@ jobs:
               and '.eq("listing_url", listing_url)' in ingest_source
               and '.eq("canonical_id", canonical_id)' in ingest_source
             )
+            audit_evidence_proof["duplicate_listing_url_conflict_is_flagged"] = (
+              "test_duplicate_check_flags_listing_duplicate_with_conflicting_canonical_owner" in ingest_tests
+              and "listing_url/canonical_id conflict" in ingest_source
+              and '"identity_conflict"' in ingest_source
+              and '.eq("id", canonical_record_id)' in ingest_source
+            )
             audit_evidence_proof["webhook_log_direct_pg_fallback_is_durable_and_labelled"] = (
               "test_insert_webhook_log_falls_back_to_direct_pg_and_marks_audit_state" in ingest_tests
               and "webhook_log_insert_direct_pg" in ingest_source
@@ -455,6 +461,11 @@ jobs:
               and "CriticalAuditWriteError" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
               and "direct PG fallback failed" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
               and "return None" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+            )
+            audit_evidence_proof["webhook_log_primary_error_logged_on_successful_fallback"] = (
+              "def insert_webhook_log" in ingest_source
+              and "insert failed; using direct PG fallback" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+              and "test_insert_webhook_log_logs_primary_error_when_direct_pg_fallback_succeeds" in ingest_tests
             )
             audit_evidence_proof["rover_redis_affinity_nonfatal_and_debug_visible"] = (
               "Redis affinity init failed (non-fatal)" in rover_source
@@ -846,10 +857,18 @@ jobs:
                   )
                 )
               )
+              is_duplicate_listing_conflict_visibility_fixed = (
+                audit_evidence_proof.get("duplicate_listing_url_conflict_is_flagged") is True
+                and "webapp/routers/ingest.py" in normalized
+                and "check_and_handle_duplicate" in normalized
+                and "listing_url" in normalized
+                and "canonical_id" in normalized
+                and any(term in normalized for term in ("already marked duplicate", "canonical_record_id differs", "ensure consistency", "identity conflict", "data inconsistency"))
+              )
               is_webhook_direct_pg_durability_false_positive = (
                 audit_evidence_proof.get("webhook_log_direct_pg_fallback_is_durable_and_labelled") is True
                 and "webapp/routers/ingest.py" in normalized
-                and any(term in normalized for term in ("_insert_webhook_log_direct_pg", "insert_webhook_log"))
+                and any(term in normalized for term in ("_insert_webhook_log_direct_pg", "insert_webhook_log", "webhook_log"))
                 and "fallback" in normalized
                 and (
                   (
@@ -869,6 +888,15 @@ jobs:
                     and "incomplete fallback logic" in normalized
                     and "except exception as fallback_error" in normalized
                     and any(term in normalized for term in ("complete the `except` block", "complete the except block", "direct postgresql fallback"))
+                  )
+                  or (
+                    audit_evidence_proof.get("webhook_log_primary_error_logged_on_successful_fallback") is True
+                    and any(term in normalized for term in ("insert_webhook_log", "webhook_log"))
+                    and "primary_error" in normalized
+                    and (
+                      "incomplete `webhook_log` fallback error handling" in normalized
+                      or any(term in normalized for term in ("not logged", "not propagated", "doesn't fully expose", "does not fully expose", "log `primary_error` before", "log primary_error before"))
+                    )
                   )
                 )
               )
@@ -997,6 +1025,7 @@ jobs:
                 or is_rust_state_penalty_policy_opinion
                 or is_duplicate_missing_url_canonical_fallback_false_positive
                 or is_duplicate_listing_url_canonical_check_fixed
+                or is_duplicate_listing_conflict_visibility_fixed
                 or is_webhook_direct_pg_durability_false_positive
                 or is_rover_redis_affinity_operational_posture
                 or is_rover_numeric_default_serialization_policy

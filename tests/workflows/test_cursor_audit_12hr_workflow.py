@@ -87,7 +87,9 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("outcomes_non_sale_price_zero", workflow)
         self.assertIn("duplicate_missing_listing_url_uses_canonical_id", workflow)
         self.assertIn("duplicate_listing_url_also_checks_canonical_id", workflow)
+        self.assertIn("duplicate_listing_url_conflict_is_flagged", workflow)
         self.assertIn("webhook_log_direct_pg_fallback_is_durable_and_labelled", workflow)
+        self.assertIn("webhook_log_primary_error_logged_on_successful_fallback", workflow)
         self.assertIn("high_demand_model_list_is_curated_scorer_policy", workflow)
         self.assertIn("rust_state_new_vehicle_exception_and_source_risk_policy", workflow)
         self.assertIn("operator_privilege_uses_authenticated_user_id", workflow)
@@ -122,6 +124,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("is_legacy_realized_sale_semantics_false_positive", workflow)
         self.assertIn("is_duplicate_missing_url_canonical_fallback_false_positive", workflow)
         self.assertIn("is_duplicate_listing_url_canonical_check_fixed", workflow)
+        self.assertIn("is_duplicate_listing_conflict_visibility_fixed", workflow)
         self.assertIn("is_webhook_direct_pg_durability_false_positive", workflow)
         self.assertIn("is_outcomes_summary_auth_false_positive", workflow)
         self.assertIn("is_dealer_sales_user_id_context_false_positive", workflow)
@@ -202,6 +205,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "outcomes_non_sale_price_zero": True,
                 "duplicate_missing_listing_url_uses_canonical_id": True,
                 "duplicate_listing_url_also_checks_canonical_id": True,
+                "duplicate_listing_url_conflict_is_flagged": True,
                 "webhook_log_direct_pg_fallback_is_durable_and_labelled": True,
                 "high_demand_model_list_is_curated_scorer_policy": True,
                 "rust_state_new_vehicle_exception_and_source_risk_policy": True,
@@ -225,6 +229,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "missing_bid_mmr_are_severe_provenance_flags": True,
                 "current_bid_trust_score_24h_branch_complete": True,
                 "webhook_log_insert_fallback_error_handled": True,
+                "webhook_log_primary_error_logged_on_successful_fallback": True,
                 "expired_auction_velocity_matches_nonurgent_floor": True,
                 "rover_numeric_defaults_are_serialization_fallbacks": True,
                 "rover_heuristic_import_debug_visible": True,
@@ -308,6 +313,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/rover.py | `_coerce_number` Default Value for `None` | **FIX:** The `_coerce_number` function returns a `default` value (0.0) for `None` inputs. While this might be intended for some numeric fields, for fields like `dos_score` or `current_bid`, a `None` value might indicate missing data that should be handled differently. Review if defaulting to 0.0 for `None` is always the correct business logic.",
                     "HIGH | backend/ingest/score.py | `_auction_velocity_score` incomplete stage logic for 25+ hour auctions. | **FIX:** prove the auction velocity helper handles long-window auctions.",
                     "HIGH | webapp/routers/ingest.py | `insert_webhook_log` can ignore direct PG errors if require_durable is false. | **FIX:** preserve durable-mode handling semantics.",
+                    "HIGH | webapp/routers/ingest.py | Duplicate Check Bypass for `canonical_id` with `listing_url` | The `check_and_handle_duplicate` function can inherit an already marked duplicate listing_url match without ensuring consistency when canonical_record_id differs. | **FIX:** flag the data inconsistency.",
+                    "HIGH | webapp/routers/ingest.py | Incomplete `webhook_log` Fallback Error Handling | The current implementation doesn't fully expose the initial `primary_error`; log `primary_error` before direct PG fallback succeeds.",
                 ]
             )
         )
@@ -376,6 +383,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Inconsistent `listing_match` Handling", filtered)
         self.assertNotIn("Incomplete Fallback Logic", filtered)
         self.assertNotIn("Default Value for `None`", filtered)
+        self.assertNotIn("Duplicate Check Bypass for `canonical_id` with `listing_url`", filtered)
+        self.assertNotIn("Incomplete `webhook_log` Fallback Error Handling", filtered)
         self.assertIn("incomplete stage logic for 25+ hour auctions", filtered)
         self.assertIn("ignore direct PG errors if require_durable is false", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
@@ -547,12 +556,23 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 and "direct PG fallback failed" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
                 and "return None" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
             ),
+            "webhook_log_primary_error_logged_on_successful_fallback": (
+                "def insert_webhook_log" in ingest_source
+                and "insert failed; using direct PG fallback" in ingest_source.split("def insert_webhook_log", 1)[1].split("def update_webhook_log", 1)[0]
+                and "test_insert_webhook_log_logs_primary_error_when_direct_pg_fallback_succeeds" in ingest_tests
+            ),
             "duplicate_listing_url_also_checks_canonical_id": (
                 "test_duplicate_check_updates_canonical_sources_when_listing_url_matches" in ingest_tests
                 and "listing_match = None" in ingest_source
                 and "listing_match = existing.data[0]" in ingest_source
                 and '.eq("listing_url", listing_url)' in ingest_source
                 and '.eq("canonical_id", canonical_id)' in ingest_source
+            ),
+            "duplicate_listing_url_conflict_is_flagged": (
+                "test_duplicate_check_flags_listing_duplicate_with_conflicting_canonical_owner" in ingest_tests
+                and "listing_url/canonical_id conflict" in ingest_source
+                and '"identity_conflict"' in ingest_source
+                and '.eq("id", canonical_record_id)' in ingest_source
             ),
         }
 
