@@ -192,6 +192,8 @@ def _upsert_dealer_sales_outcome(payload: dict) -> None:
         result = supabase_client.table("dealer_sales").upsert(payload, on_conflict="opportunity_id,user_id").execute()
         if getattr(result, "error", None):
             raise RuntimeError(result.error)
+        if getattr(result, "data", None) == []:
+            raise RuntimeError("dealer_sales upsert returned zero rows")
     except HTTPException:
         raise
     except Exception as exc:

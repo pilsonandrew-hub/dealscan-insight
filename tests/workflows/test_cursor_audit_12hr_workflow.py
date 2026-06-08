@@ -89,11 +89,26 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("webhook_log_direct_pg_fallback_is_durable_and_labelled", workflow)
         self.assertIn("high_demand_model_list_is_curated_scorer_policy", workflow)
         self.assertIn("rust_state_new_vehicle_exception_and_source_risk_policy", workflow)
+        self.assertIn("operator_privilege_uses_authenticated_user_id", workflow)
+        self.assertIn(
+            '"user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]',
+            workflow,
+        )
+        self.assertNotIn(
+            '"user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("class", 1)[0]',
+            workflow,
+        )
+        self.assertIn("dealer_sales_empty_upsert_fails_closed", workflow)
+        self.assertIn("score_uses_dynamic_current_year_for_age", workflow)
+        self.assertIn("score_deal_wrapper_selects_vehicle_tier", workflow)
         self.assertIn("rover_numeric_defaults_are_serialization_fallbacks", workflow)
         self.assertIn("rover_heuristic_import_debug_visible", workflow)
         self.assertIn("is_outcome_non_sale_price_fixed", workflow)
+        self.assertIn("is_dealer_sales_empty_upsert_fixed", workflow)
         self.assertIn("is_duplicate_missing_url_canonical_fallback_false_positive", workflow)
         self.assertIn("is_webhook_direct_pg_durability_false_positive", workflow)
+        self.assertIn("is_current_year_staleness_false_positive", workflow)
+        self.assertIn("is_score_deal_premium_tier_helper_opinion", workflow)
         self.assertIn("is_high_demand_dynamic_policy_opinion", workflow)
         self.assertIn("is_rust_state_penalty_policy_opinion", workflow)
         self.assertIn("is_rover_numeric_default_serialization_policy", workflow)
@@ -170,6 +185,11 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "webhook_log_direct_pg_fallback_is_durable_and_labelled": True,
                 "high_demand_model_list_is_curated_scorer_policy": True,
                 "rust_state_new_vehicle_exception_and_source_risk_policy": True,
+                "operator_privileged_outcome_write_documented": True,
+                "operator_privilege_uses_authenticated_user_id": True,
+                "dealer_sales_empty_upsert_fails_closed": True,
+                "score_uses_dynamic_current_year_for_age": True,
+                "score_deal_wrapper_selects_vehicle_tier": True,
                 "expired_auction_velocity_matches_nonurgent_floor": True,
                 "rover_numeric_defaults_are_serialization_fallbacks": True,
                 "rover_heuristic_import_debug_visible": True,
@@ -194,8 +214,16 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/outcomes.py | In `patch_outcome`, the `sale_price` is recorded as `current_bid` for lost or passed outcomes, which is misleading as no sale occurred. | **FIX:** set sale_price to 0.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` function uses a default value of `0.0` for `dos_score` and `current_bid`. If these values are missing or invalid, consider using None. | **FIX:** Handle None.",
                     "HIGH | webapp/routers/rover.py | The `_rover_debug_snapshot` function logs a warning if `heuristic_scorer` import fails but does not prevent the application from starting, potentially leading to silent failures. | **FIX:** Treat as critical error.",
+                    "CRITICAL | webapp/routers/outcomes.py | Privilege Escalation via `DEALERSCOPE_OPERATOR_USER_ID` | The `_is_operator_user` function and its usage in `patch_outcome` allow any authenticated user to bypass ownership checks on opportunities if they set their `user_id` to match `DEALERSCOPE_OPERATOR_USER_ID`. | **FIX:** restrict operator use.",
+                    "CRITICAL | webapp/routers/outcomes.py | Missing Zero-Row Conflict Handling for `dealer_sales` Upsert | The `_upsert_dealer_sales_outcome` function does not explicitly check for zero rows after an `upsert` operation on the `dealer_sales` table. | **FIX:** check result.data.",
+                    "HIGH | backend/ingest/score.py | Inconsistent `_current_year()` Usage Leading to Potential Stale Data | The `CURRENT_YEAR` constant is initialized once at module load time using `_current_year()`, so calculations may become stale across a year boundary. | **FIX:** use dynamic year calls.",
+                    "HIGH | backend/ingest/score.py | Inconsistent Application of `determine_vehicle_tier` | `score_deal_premium` does not call `determine_vehicle_tier`, which could lead to subtle inconsistencies and does not future-proof premium scoring. | **FIX:** call determine_vehicle_tier inside premium helper.",
                     "CRITICAL | webapp/routers/ingest.py | `check_and_handle_duplicate` still has a duplicate race after canonical lookup during concurrent inserts. | **FIX:** enforce a transactional insert.",
                     "HIGH | webapp/routers/ingest.py | `_insert_webhook_log_direct_pg` fallback can lose webhook metadata after `supabase_client` timeout. | **FIX:** preserve metadata in fallback payload.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can write the wrong `dealer_sales` row because `on_conflict` omits source. | **FIX:** revisit conflict target.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` accepts an empty payload for `dealer_sales`. | **FIX:** validate required payload fields.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can return zero rows when row-level security rejects `dealer_sales` writes. | **FIX:** audit RLS policy.",
+                    "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
                 ]
             )
@@ -209,10 +237,42 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("sale_price", filtered)
         self.assertNotIn("default value of `0.0` for `dos_score` and `current_bid`", filtered)
         self.assertNotIn("_rover_debug_snapshot", filtered)
+        self.assertNotIn("Privilege Escalation via `DEALERSCOPE_OPERATOR_USER_ID`", filtered)
+        self.assertNotIn("Missing Zero-Row Conflict Handling", filtered)
+        self.assertNotIn("Leading to Potential Stale Data", filtered)
+        self.assertNotIn("Inconsistent Application of `determine_vehicle_tier`", filtered)
         self.assertIn("duplicate race after canonical lookup", filtered)
         self.assertIn("fallback can lose webhook metadata", filtered)
+        self.assertIn("on_conflict", filtered)
+        self.assertIn("empty payload", filtered)
+        self.assertIn("row-level security", filtered)
+        self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
+
+    def test_operator_privilege_proof_evaluates_current_source(self):
+        repo_root = WORKFLOW.parents[2]
+        outcomes_source = (
+            repo_root / "webapp" / "routers" / "outcomes.py"
+        ).read_text(encoding="utf-8")
+        outcomes_tests = (
+            repo_root / "tests" / "test_outcomes_operational_loop.py"
+        ).read_text(encoding="utf-8")
+
+        payload_body = outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]
+        self.assertIn("outcome:", payload_body)
+        self.assertIn("sold_price:", payload_body)
+        self.assertNotIn("user_id:", payload_body)
+        self.assertIn("user_id:", outcomes_source.split("class OutcomePatchPayload", 1)[1])
+
+        proof = (
+            "return user.user.id" in outcomes_source
+            and "opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)" in outcomes_source
+            and "payload: OutcomePatchPayload" in outcomes_source
+            and "user_id:" not in payload_body
+            and "test_foreign_owned_opportunity_rejects_bid_outcome" in outcomes_tests
+        )
+        self.assertTrue(proof)
 
 
 if __name__ == "__main__":
