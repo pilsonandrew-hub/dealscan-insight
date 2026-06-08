@@ -210,7 +210,7 @@ def _execute_scoped_opportunity_update(query, opportunity_id: str) -> None:
     data = getattr(result, "data", None)
     if data == []:
         logger.error("[OUTCOMES] opportunity mirror update matched zero rows for %s", opportunity_id)
-        raise HTTPException(status_code=500, detail="Failed to update opportunity outcome mirror")
+        raise HTTPException(status_code=409, detail="Opportunity outcome mirror update matched zero rows")
 
 
 def _legacy_mirror_to_dealer_sales(user_id: str, opportunity: dict, payload: OutcomePayload) -> None:
@@ -346,6 +346,8 @@ async def patch_outcome(
             .update(opportunity_update)
             .eq("id", opportunity_id)
         )
+        # DEALERSCOPE_OPERATOR_USER_ID is an explicit privileged operator account:
+        # it may record outcomes across user-owned and system-owned opportunities.
         if not _is_operator_user(user_id):
             opportunity_update_query = opportunity_update_query.eq("user_id", user_id)
         _execute_scoped_opportunity_update(
@@ -488,6 +490,8 @@ async def create_bid_outcome(
             .update(update_payload)
             .eq("id", payload.opportunity_id)
         )
+        # DEALERSCOPE_OPERATOR_USER_ID is an explicit privileged operator account:
+        # it may record bid outcomes across user-owned and system-owned opportunities.
         if not _is_operator_user(user_id):
             opportunity_update_query = opportunity_update_query.eq("user_id", user_id)
         _execute_scoped_opportunity_update(

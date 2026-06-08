@@ -294,8 +294,8 @@ def test_bid_outcome_fails_closed_when_opportunity_update_matches_zero_rows(monk
     with pytest.raises(HTTPException) as exc:
         _run(outcomes.create_bid_outcome(payload, authorization=_auth_header()))
 
-    assert exc.value.status_code == 500
-    assert exc.value.detail == "Failed to update opportunity outcome mirror"
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Opportunity outcome mirror update matched zero rows"
 
 
 def test_patch_outcome_writes_dealer_sales_and_fails_closed_on_update_miss(monkeypatch):
@@ -306,8 +306,8 @@ def test_patch_outcome_writes_dealer_sales_and_fails_closed_on_update_miss(monke
     with pytest.raises(HTTPException) as exc:
         _run(outcomes.patch_outcome("opp-1", payload, authorization=_auth_header()))
 
-    assert exc.value.status_code == 500
-    assert exc.value.detail == "Failed to update opportunity outcome mirror"
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Opportunity outcome mirror update matched zero rows"
     dealer_payload = client.upserts["dealer_sales"][0][0]
     assert dealer_payload["outcome"] == "lost"
     assert dealer_payload["source"] == "manual_outcome_tracking"

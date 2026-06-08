@@ -70,6 +70,17 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("is_outcomes_configuration_speculation", workflow)
         self.assertIn("is_ingest_error_handling_speculation", workflow)
         self.assertIn("is_dealer_sales_error_handling_false_positive", workflow)
+        self.assertIn("is_operator_privilege_authorization_false_positive", workflow)
+        self.assertIn("is_outcome_update_zero_row_semantics_false_positive", workflow)
+        self.assertIn("is_rover_redis_affinity_operational_posture", workflow)
+        self.assertIn("business rule application", workflow)
+        self.assertIn("only applies a penalty", workflow)
+        self.assertIn("missing authorization for opportunity update", workflow)
+        self.assertIn("redis affinity failure mode", workflow)
+        self.assertNotIn(
+            'any(term in normalized for term in ("generic 500", "empty", "zero rows", "inconsistent error handling"))',
+            workflow,
+        )
         self.assertIn("starts_pipe_finding", workflow)
         self.assertIn('stripped.startswith(("critical |", "high |"))', workflow)
         self.assertIn("stripped.count(\"|\") < 3", workflow)
