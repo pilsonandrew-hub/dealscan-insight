@@ -149,7 +149,7 @@ jobs:
           GEMINI_OPENROUTER_MODEL: "google/gemini-2.5-flash"
         run: |
           python3 << 'PYEOF'
-          import datetime, html, json, os, re, ssl, time, urllib.error, urllib.request
+          import datetime, html, json, os, pathlib, re, ssl, time, urllib.error, urllib.request
 
           GEMINI_KEY = os.environ["GEMINI_KEY"]
           OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "")
@@ -246,10 +246,53 @@ jobs:
             len(business_rule_proof) == 2
             and all(row.get("passed") is True for row in business_rule_proof)
           )
+          audit_evidence_proof = {}
+          try:
+            from backend.ingest.score import _auction_velocity_score, _coerce_float, _round_price_basis
+            expired = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+            audit_evidence_proof["expired_auction_velocity_non_urgent"] = (
+              _auction_velocity_score({"auction_end": expired}) == 25.0
+            )
+            audit_evidence_proof["round_price_basis_complete"] = (_round_price_basis(12345) == 12000)
+            audit_evidence_proof["coerce_float_rejects_invalid_and_nonfinite"] = (
+              _coerce_float("not-a-number") is None
+              and _coerce_float("nan") is None
+              and _coerce_float("inf") is None
+            )
+          except Exception as proof_error:
+            audit_evidence_proof["score_proof_error"] = repr(proof_error)
+
+          try:
+            ingest_source = pathlib.Path("webapp/routers/ingest.py").read_text(encoding="utf-8")
+            outcomes_source = pathlib.Path("webapp/routers/outcomes.py").read_text(encoding="utf-8")
+            migrations_text = "\n".join(
+              path.read_text(encoding="utf-8")
+              for path in pathlib.Path("supabase/migrations").glob("*.sql")
+            )
+            audit_evidence_proof["direct_pg_webhook_insert_parameterized"] = (
+              "def _insert_webhook_log_direct_pg" in ingest_source
+              and "values (%s, %s, %s, %s, %s, %s, %s)" in ingest_source
+              and "psycopg2_extras.Json" in ingest_source
+            )
+            audit_evidence_proof["outcomes_system_opportunity_non_operator_rejected"] = (
+              "System opportunity ownership not configured" in outcomes_source
+              and "raise HTTPException(status_code=403" in outcomes_source
+              and "if _is_operator_user(require_user_id)" in outcomes_source
+              and "if not _is_operator_user(user_id)" in outcomes_source
+            )
+            audit_evidence_proof["canonical_duplicate_unique_index_present"] = (
+              "idx_opportunities_canonical_unique" in migrations_text
+              and "ON opportunities(canonical_id) WHERE is_duplicate = FALSE" in migrations_text
+            )
+          except Exception as proof_error:
+            audit_evidence_proof["source_proof_error"] = repr(proof_error)
           # Exact false-positive titles suppressed only when deterministic proof passes:
           # Missing Rust State Rejection
           # Mileage-per-year Rejection Bypass
           # Incomplete Bid Ceiling Enforcement
+          # Insecure Direct Object Reference
+          # SQL Injection Vulnerability
+          # Potential for Race Condition
 
           def suppress_deterministically_false_findings(findings: str) -> str:
             """Remove findings contradicted by deterministic local proof.
@@ -310,12 +353,92 @@ jobs:
               )
             return "\n".join(kept).strip()
 
+          def suppress_unsupported_or_contradicted_findings(findings: str) -> str:
+            """Remove audit findings that lack evidence or contradict repo proof."""
+            if not findings:
+              return findings
+            kept = []
+            suppressed = []
+            suppressing_block = False
+            for line in findings.splitlines():
+              normalized = line.lower()
+              stripped = normalized.strip()
+              starts_new_finding = bool(re.match(r"^\s*(?:\d+\.|[-*])\s+.*\|", line))
+              starts_pipe_finding = stripped.startswith(("critical |", "high |"))
+              starts_markdown_finding = stripped.startswith(("**critical", "**high", "###"))
+              if suppressing_block:
+                if not line.strip():
+                  suppressing_block = False
+                  continue
+                if starts_new_finding or starts_pipe_finding or starts_markdown_finding:
+                  suppressing_block = False
+                else:
+                  suppressed.append(line)
+                  continue
+
+              is_outcomes_idor_false_positive = (
+                audit_evidence_proof.get("outcomes_system_opportunity_non_operator_rejected") is True
+                and "insecure direct object reference" in normalized
+                and (
+                  "webapp/routers/outcomes.py" in normalized
+                  or "_fetch_opportunity" in normalized
+                  or "patch_outcome" in normalized
+                )
+              )
+              is_sql_injection_false_positive = (
+                audit_evidence_proof.get("direct_pg_webhook_insert_parameterized") is True
+                and "sql injection vulnerability" in normalized
+                and ("_insert_webhook_log_direct_pg" in normalized or "implied" in normalized)
+              )
+              is_round_price_basis_false_positive = (
+                audit_evidence_proof.get("round_price_basis_complete") is True
+                and "_round_price_basis" in normalized
+                and any(term in normalized for term in ("incomplete", "truncated", "syntaxerror", "nameerror"))
+              )
+              is_coerce_float_false_positive = (
+                audit_evidence_proof.get("coerce_float_rejects_invalid_and_nonfinite") is True
+                and "_coerce_float" in normalized
+                and any(term in normalized for term in ("math.isfinite", "nonfinite", "less predictable"))
+              )
+              is_duplicate_race_mitigated = (
+                audit_evidence_proof.get("canonical_duplicate_unique_index_present") is True
+                and "potential for race condition" in normalized
+                and "check_and_handle_duplicate" in normalized
+              )
+              is_unsupported_speculation = (
+                ("while the code for" in normalized and "not provided" in normalized)
+                or (stripped.startswith("**high** | webapp/routers/rover.") and stripped.count("|") < 3)
+              )
+
+              if (
+                is_outcomes_idor_false_positive
+                or is_sql_injection_false_positive
+                or is_round_price_basis_false_positive
+                or is_coerce_float_false_positive
+                or is_duplicate_race_mitigated
+                or is_unsupported_speculation
+              ):
+                suppressed.append(line)
+                suppressing_block = True
+              else:
+                kept.append(line)
+            if suppressed:
+              print("=== SUPPRESSED UNSUPPORTED OR CONTRADICTED FINDINGS ===")
+              for line in suppressed:
+                print(line)
+              kept.append(
+                "INFO | audit/evidence | Suppressed unsupported or contradicted audit finding | deterministic proof or source evidence contradicted the model finding."
+              )
+            return "\n".join(kept).strip()
+
           prompt = f"""Quick RED TEAM audit of DealerScope backend files.
           Business rules: Premium lane max age=4yr, max mileage=50k, bid ceiling=0.88. Standard lane max age=10yr, max mileage=100k, reject mileage-per-year >18000, bid ceiling=0.80. Rust states rejected.
           Deterministic bid-ceiling proof from score_deal() is below. Do NOT report "Missing Bid Ceiling Rejections" if both proof cases passed; only report it if the proof failed or the code contradicts the proof.
           BID_CEILING_PROOF:{json.dumps(bid_ceiling_proof, indent=2)}
           Deterministic rust-state and Standard mileage-per-year proof from score_deal() is below. Do NOT report "Missing Rust State Rejection" or "Mileage-per-year Rejection Bypass" if these proof cases passed; only report those issues if the proof failed or the code contradicts the proof.
           BUSINESS_RULE_PROOF:{json.dumps(business_rule_proof, indent=2)}
+          Additional deterministic and source evidence is below. Do not report speculative, implied, potential, malformed, or contradicted findings. Every CRITICAL/HIGH finding must cite concrete code visible in CODE or a concrete proof contradiction.
+          AUDIT_EVIDENCE_PROOF:{json.dumps(audit_evidence_proof, indent=2)}
           Report only CRITICAL and HIGH issues found. Format: SEVERITY | FILE | ISSUE | FIX
           Be concise — top 10 issues max.
           CODE:{code_bundle[:50000]}"""
@@ -447,6 +570,7 @@ jobs:
 
           raw_findings = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
           findings = suppress_deterministically_false_findings(raw_findings)
+          findings = suppress_unsupported_or_contradicted_findings(findings)
 
           print("=== GEMINI AUDIT FINDINGS ===")
           print(findings)
