@@ -171,6 +171,40 @@ class _FailingReplaySupabase:
         return _FailingReplayQuery(self.error_text)
 
 
+class _DuplicateLookupQuery:
+    def __init__(self, client):
+        self.client = client
+        self.filters = []
+
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        self.client.queries.append(tuple(self.filters))
+        if ("canonical_id", self.client.canonical_id) in self.filters:
+            return types.SimpleNamespace(data=[self.client.canonical_row])
+        return types.SimpleNamespace(data=[])
+
+
+class _DuplicateLookupSupabase:
+    def __init__(self, canonical_id, canonical_row):
+        self.canonical_id = canonical_id
+        self.canonical_row = canonical_row
+        self.queries = []
+
+    def table(self, name):
+        if name != "opportunities":
+            raise AssertionError(f"unexpected table: {name}")
+        return _DuplicateLookupQuery(self)
+
+
 class _Supabase:
     def __init__(self, rows):
         self.rows = rows
@@ -529,6 +563,33 @@ class WebhookSecurityTests(unittest.TestCase):
             "audit_fallbacks=webhook_log_insert_direct_pg",
             inserted_rows[0]["error_message"],
         )
+
+    def test_duplicate_check_uses_canonical_id_when_listing_url_missing(self):
+        client = _DuplicateLookupSupabase(
+            "canon-1",
+            {"id": "existing-1", "all_sources": ["GovDeals"]},
+        )
+
+        result = ingest.check_and_handle_duplicate(
+            client,
+            {
+                "canonical_id": "canon-1",
+                "source_site": "Proxibid",
+                "listing_url": "",
+            },
+        )
+
+        self.assertEqual(result["is_duplicate"], True)
+        self.assertEqual(result["canonical_record_id"], "existing-1")
+        self.assertEqual(
+            result["canonical_update"],
+            {
+                "id": "existing-1",
+                "all_sources": ["GovDeals", "Proxibid"],
+                "duplicate_count": 1,
+            },
+        )
+        self.assertIn((("canonical_id", "canon-1"), ("is_duplicate", False)), client.queries)
 
 
     def test_claim_webhook_log_direct_pg_serializes_pending_claim(self):

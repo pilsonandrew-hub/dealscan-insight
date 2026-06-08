@@ -224,7 +224,8 @@ def test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity(mon
     assert dealer_payload["opportunity_id"] == "opp-1"
     assert dealer_payload["user_id"] == "user-1"
     assert dealer_payload["outcome"] == "lost"
-    assert dealer_payload["sale_price"] == 10000
+    assert dealer_payload["sale_price"] == 0
+    assert dealer_payload["sold_price"] is None
     assert dealer_payload["asking_price"] == 10000
     assert dealer_payload["source"] == "bid_outcome_tracking"
     assert "recorded_at" not in dealer_payload
@@ -310,6 +311,9 @@ def test_patch_outcome_writes_dealer_sales_and_fails_closed_on_update_miss(monke
     assert exc.value.detail == "Opportunity outcome mirror update matched zero rows"
     dealer_payload = client.upserts["dealer_sales"][0][0]
     assert dealer_payload["outcome"] == "lost"
+    assert dealer_payload["sale_price"] == 0
+    assert dealer_payload["sold_price"] is None
+    assert dealer_payload["asking_price"] == 10000
     assert dealer_payload["source"] == "manual_outcome_tracking"
 
 
