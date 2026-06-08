@@ -547,11 +547,8 @@ jobs:
                 and "_upsert_dealer_sales_outcome" in normalized
                 and "dealer_sales" in normalized
                 and "upsert" in normalized
-                and (
-                  "zero rows after" in normalized
-                  or "zero-row" in normalized
-                  or "result.data" in normalized
-                )
+                and "result.data" in normalized
+                and ("zero rows after" in normalized or "zero-row" in normalized)
               )
               is_outcome_non_sale_price_fixed = (
                 audit_evidence_proof.get("outcomes_non_sale_price_zero") is True
