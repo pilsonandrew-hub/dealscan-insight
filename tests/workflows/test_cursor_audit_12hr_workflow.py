@@ -90,6 +90,14 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("high_demand_model_list_is_curated_scorer_policy", workflow)
         self.assertIn("rust_state_new_vehicle_exception_and_source_risk_policy", workflow)
         self.assertIn("operator_privilege_uses_authenticated_user_id", workflow)
+        self.assertIn(
+            '"user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]',
+            workflow,
+        )
+        self.assertNotIn(
+            '"user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("class", 1)[0]',
+            workflow,
+        )
         self.assertIn("dealer_sales_empty_upsert_fails_closed", workflow)
         self.assertIn("score_uses_dynamic_current_year_for_age", workflow)
         self.assertIn("score_deal_wrapper_selects_vehicle_tier", workflow)
@@ -241,6 +249,30 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
+
+    def test_operator_privilege_proof_evaluates_current_source(self):
+        repo_root = WORKFLOW.parents[2]
+        outcomes_source = (
+            repo_root / "webapp" / "routers" / "outcomes.py"
+        ).read_text(encoding="utf-8")
+        outcomes_tests = (
+            repo_root / "tests" / "test_outcomes_operational_loop.py"
+        ).read_text(encoding="utf-8")
+
+        payload_body = outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]
+        self.assertIn("outcome:", payload_body)
+        self.assertIn("sold_price:", payload_body)
+        self.assertNotIn("user_id:", payload_body)
+        self.assertIn("user_id:", outcomes_source.split("class OutcomePatchPayload", 1)[1])
+
+        proof = (
+            "return user.user.id" in outcomes_source
+            and "opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)" in outcomes_source
+            and "payload: OutcomePatchPayload" in outcomes_source
+            and "user_id:" not in payload_body
+            and "test_foreign_owned_opportunity_rejects_bid_outcome" in outcomes_tests
+        )
+        self.assertTrue(proof)
 
 
 if __name__ == "__main__":

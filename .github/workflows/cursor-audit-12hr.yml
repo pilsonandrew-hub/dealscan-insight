@@ -316,7 +316,7 @@ jobs:
               "return user.user.id" in outcomes_source
               and "opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)" in outcomes_source
               and "payload: OutcomePatchPayload" in outcomes_source
-              and "user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("class", 1)[0]
+              and "user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]
               and "test_foreign_owned_opportunity_rejects_bid_outcome" in outcomes_tests
             )
             audit_evidence_proof["outcome_update_zero_row_conflict"] = (
