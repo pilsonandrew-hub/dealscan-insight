@@ -91,6 +91,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("high_demand_model_list_is_curated_scorer_policy", workflow)
         self.assertIn("rust_state_new_vehicle_exception_and_source_risk_policy", workflow)
         self.assertIn("operator_privilege_uses_authenticated_user_id", workflow)
+        self.assertIn("operator_override_logs_outcome_details", workflow)
+        self.assertIn("outcomes_summary_requires_auth", workflow)
+        self.assertIn("dealer_sales_user_id_from_authenticated_context", workflow)
+        self.assertIn("missing_bid_mmr_are_severe_provenance_flags", workflow)
         self.assertIn(
             '"user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]',
             workflow,
@@ -117,6 +121,9 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("is_duplicate_missing_url_canonical_fallback_false_positive", workflow)
         self.assertIn("is_duplicate_listing_url_canonical_check_fixed", workflow)
         self.assertIn("is_webhook_direct_pg_durability_false_positive", workflow)
+        self.assertIn("is_outcomes_summary_auth_false_positive", workflow)
+        self.assertIn("is_dealer_sales_user_id_context_false_positive", workflow)
+        self.assertIn("is_score_missing_bid_mmr_default_policy", workflow)
         self.assertIn("is_current_year_staleness_false_positive", workflow)
         self.assertIn("is_score_deal_premium_tier_helper_opinion", workflow)
         self.assertIn("is_high_demand_dynamic_policy_opinion", workflow)
@@ -199,6 +206,9 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "operator_privileged_outcome_write_documented": True,
                 "operator_privilege_uses_authenticated_user_id": True,
                 "operator_override_is_logged": True,
+                "operator_override_logs_outcome_details": True,
+                "outcomes_summary_requires_auth": True,
+                "dealer_sales_user_id_from_authenticated_context": True,
                 "dealer_sales_errors_logged_and_http_500": True,
                 "dealer_sales_empty_upsert_fails_closed": True,
                 "dealer_sales_payload_requires_essential_fields": True,
@@ -210,6 +220,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "legacy_mirror_is_realized_sale_only": True,
                 "score_uses_dynamic_current_year_for_age": True,
                 "score_deal_wrapper_selects_vehicle_tier": True,
+                "missing_bid_mmr_are_severe_provenance_flags": True,
                 "expired_auction_velocity_matches_nonurgent_floor": True,
                 "rover_numeric_defaults_are_serialization_fallbacks": True,
                 "rover_heuristic_import_debug_visible": True,
@@ -270,6 +281,18 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | backend/ingest/score.py | `score_deal` wrapper drops `missing_photos` from risk flags before AI confidence. | **FIX:** preserve the risk flag.",
                     "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` canonical_id lookup failure is swallowed when `listing_url` is present. | **FIX:** surface the failed canonical lookup.",
                     "HIGH | backend/ingest/score.py | Standard lane mileage-per-year rejection is missing for 19,000 miles/year vehicles. | **FIX:** reject over-threshold standard mileage velocity.",
+                    "HIGH | backend/ingest/score.py | Missing Photo Rejection for Premium Lane | Implement hard rejection for premium lane vehicles with missing photos.",
+                    "CRITICAL | webapp/routers/outcomes.py | Missing Authorization for `get_outcomes_summary` | Implement `_verify_auth` for `get_outcomes_summary` endpoint.",
+                    "CRITICAL | webapp/routers/outcomes.py | `dealer_sales` Upsert Allows Arbitrary `user_id` | Modify `_upsert_dealer_sales_outcome` to enforce `user_id` from authenticated context.",
+                    "CRITICAL | webapp/routers/outcomes.py | `patch_outcome` Allows Operator to Update Any `user_id`'s Opportunity | Restrict operator override to system-owned opportunities or explicitly log operator actions. The current logging only states operator override but doesn't explicitly state what was overridden.",
+                    "HIGH | backend/ingest/score.py | `_auction_velocity_score` Returns 25.0 for Expired Auctions | Adjust `_auction_velocity_score` to return a lower score or reject expired auctions for urgent scoring.",
+                    "HIGH | backend/ingest/score.py | `_mmr_proximity_score` and `_discount_pct_score` Return Default Scores for Missing MMR/Bid | Implement explicit rejection or a more severe penalty for missing MMR/Bid.",
+                    "HIGH | backend/ingest/score.py | `_net_margin_score` Returns Default Score for Missing MMR/Bid | Implement explicit rejection or a more severe penalty for missing MMR/Bid.",
+                    "HIGH | webapp/routers/ingest.py | `check_and_handle_duplicate` Logic Flaw for `listing_match` with `canonical_id` | Refactor `check_and_handle_duplicate` to prioritize `canonical_id` match.",
+                    "HIGH | webapp/routers/ingest.py | `insert_webhook_log` Fallback to Direct PG is Not Transactional | Ensure atomicity of webhook log insertion and fallback.",
+                    "HIGH | webapp/routers/rover.py | `_coerce_number` Default Value Masks Data Quality Issues | Change `_coerce_number` to return `None` or raise an error for non-numeric values.",
+                    "HIGH | webapp/routers/outcomes.py | `dealer_sales` upsert writes arbitrary user_id from request payload. | **FIX:** this real payload-injection finding must survive unless the request model exposes no user_id.",
+                    "HIGH | backend/ingest/score.py | `score_deal` accepts zero bid and missing MMR as a viable final opportunity. | **FIX:** reject the final score path.",
                 ]
             )
         )
@@ -318,6 +341,17 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("wrapper drops `missing_photos`", filtered)
         self.assertIn("canonical_id lookup failure is swallowed", filtered)
         self.assertIn("Standard lane mileage-per-year rejection is missing", filtered)
+        self.assertNotIn("Missing Authorization for `get_outcomes_summary`", filtered)
+        self.assertNotIn("Allows Arbitrary `user_id`", filtered)
+        self.assertNotIn("Allows Operator to Update Any `user_id`", filtered)
+        self.assertNotIn("Returns 25.0 for Expired Auctions", filtered)
+        self.assertNotIn("_mmr_proximity_score", filtered)
+        self.assertNotIn("_net_margin_score", filtered)
+        self.assertNotIn("Logic Flaw for `listing_match` with `canonical_id`", filtered)
+        self.assertNotIn("Fallback to Direct PG is Not Transactional", filtered)
+        self.assertNotIn("Default Value Masks Data Quality Issues", filtered)
+        self.assertIn("writes arbitrary user_id from request payload", filtered)
+        self.assertIn("accepts zero bid and missing MMR as a viable final opportunity", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):
@@ -439,6 +473,25 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "operator override opp=%s operator=%s owner=%s" in outcomes_source
                 and "test_operator_bid_outcome_override_is_logged" in outcomes_tests
             ),
+            "operator_override_logs_outcome_details": (
+                "operator outcome override opp=%s operator=%s owner=%s outcome=%s sold_price=%s" in outcomes_source
+                and "operator bid override opp=%s operator=%s owner=%s bid=%s won=%s" in outcomes_source
+                and "test_operator_patch_outcome_override_logs_outcome_details" in outcomes_tests
+                and "test_operator_bid_outcome_override_is_logged" in outcomes_tests
+            ),
+            "outcomes_summary_requires_auth": (
+                "async def get_outcomes_summary" in outcomes_source
+                and "user_id = _verify_auth(authorization)" in outcomes_source.split("async def get_outcomes_summary", 1)[1].split("@router.post", 1)[0]
+                and "test_summary_requires_auth" in outcomes_tests
+            ),
+            "dealer_sales_user_id_from_authenticated_context": (
+                '"user_id": user_id' in outcomes_source
+                and "payload: OutcomePatchPayload" in outcomes_source
+                and "user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("def ", 1)[0]
+                and "payload: BidOutcomePayload" in outcomes_source
+                and "test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity" in outcomes_tests
+                and "test_operator_can_record_bid_outcome_for_user_owned_opportunity" in outcomes_tests
+            ),
             "won_outcomes_require_positive_current_bid": (
                 "current_bid is required to calculate outcome metrics" in outcomes_source
                 and "test_won_bid_outcome_requires_positive_current_bid_before_persistence" in outcomes_tests
@@ -448,6 +501,12 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 'flags.append("missing_photos")' in score_source
                 and "prevents benign flags like 'missing_photos' from unconditionally" in score_source
                 and "test_premium_missing_photos_are_risk_flag_not_hard_rejection_policy" in score_tests
+            ),
+            "missing_bid_mmr_are_severe_provenance_flags": (
+                'flags.append("no_mmr")' in score_source
+                and 'flags.append("zero_or_missing_bid")' in score_source
+                and 'severe_flags = {"no_mmr", "zero_or_missing_bid", "hard_fallback_score"}' in score_source
+                and "test_passes_basic_gates_rejects_zero_bid" in score_tests
             ),
             "duplicate_listing_url_also_checks_canonical_id": (
                 "test_duplicate_check_updates_canonical_sources_when_listing_url_matches" in ingest_tests

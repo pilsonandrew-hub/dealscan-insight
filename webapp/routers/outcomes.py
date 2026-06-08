@@ -312,6 +312,15 @@ async def patch_outcome(
 
     user_id = _verify_auth(authorization)
     opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)
+    if _is_operator_user(user_id):
+        logger.info(
+            "[OUTCOMES] operator outcome override opp=%s operator=%s owner=%s outcome=%s sold_price=%s",
+            opportunity_id,
+            user_id,
+            opportunity.get("user_id"),
+            payload.outcome,
+            payload.sold_price,
+        )
     current_bid = _safe_float(opportunity.get("current_bid")) or 0.0
 
     sold_price = _safe_float(payload.sold_price)
@@ -478,6 +487,15 @@ async def create_bid_outcome(
 
     user_id = _verify_auth(authorization)
     opportunity = _fetch_opportunity(payload.opportunity_id, require_user_id=user_id)
+    if _is_operator_user(user_id):
+        logger.info(
+            "[OUTCOMES/BID] operator bid override opp=%s operator=%s owner=%s bid=%s won=%s",
+            payload.opportunity_id,
+            user_id,
+            opportunity.get("user_id"),
+            payload.bid,
+            payload.won,
+        )
 
     normalized = _normalize_bid_outcome(payload, opportunity)
 

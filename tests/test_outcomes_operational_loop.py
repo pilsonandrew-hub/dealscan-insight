@@ -264,8 +264,39 @@ def test_operator_bid_outcome_override_is_logged(monkeypatch, caplog):
         assert "opp-1" in caplog.text
         assert "operator-user" in caplog.text
         assert "other-user" in caplog.text
+        assert "operator bid override" in caplog.text
+        assert "bid=True" in caplog.text
+        assert "won=False" in caplog.text
 
     _run(run())
+
+
+def test_operator_patch_outcome_override_logs_outcome_details(monkeypatch, caplog):
+    client = _Supabase(
+        opportunity={
+            "id": "opp-1",
+            "user_id": "other-user",
+            "make": "Ford",
+            "model": "F-150",
+            "year": 2023,
+            "mileage": 18000,
+            "current_bid": 10000,
+            "state": "CA",
+        },
+        user_id="operator-user",
+    )
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+    monkeypatch.setenv("DEALERSCOPE_OPERATOR_USER_ID", "operator-user")
+    caplog.set_level(logging.INFO, logger=outcomes.__name__)
+
+    payload = outcomes.OutcomePatchPayload(outcome="lost")
+    _run(outcomes.patch_outcome("opp-1", payload, authorization=_auth_header()))
+
+    assert "operator outcome override" in caplog.text
+    assert "opp-1" in caplog.text
+    assert "operator-user" in caplog.text
+    assert "other-user" in caplog.text
+    assert "outcome=lost" in caplog.text
 
 
 def test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity(monkeypatch):
