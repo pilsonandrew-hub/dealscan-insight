@@ -53,6 +53,24 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("DealerScope audit alert delivery failed", workflow)
         self.assertIn("raise RuntimeError(\"DealerScope audit alert delivery failed", workflow)
 
+    def test_gemini_audit_filters_unsupported_or_contradicted_findings(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("audit_evidence_proof", workflow)
+        self.assertIn("suppress_unsupported_or_contradicted_findings", workflow)
+        self.assertIn("Insecure Direct Object Reference", workflow)
+        self.assertIn("SQL Injection Vulnerability", workflow)
+        self.assertIn("Potential for Race Condition", workflow)
+        self.assertIn("Suppressed unsupported or contradicted audit finding", workflow)
+        self.assertIn("starts_pipe_finding", workflow)
+        self.assertIn('stripped.startswith(("critical |", "high |"))', workflow)
+        self.assertIn("stripped.count(\"|\") < 3", workflow)
+        self.assertNotIn(
+            'or stripped.startswith("**high** | webapp/routers/rover.")',
+            workflow,
+        )
+        self.assertNotIn('"(implied)" in normalized', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
