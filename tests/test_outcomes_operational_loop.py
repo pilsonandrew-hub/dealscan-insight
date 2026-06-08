@@ -181,6 +181,34 @@ def test_foreign_owned_opportunity_rejects_bid_outcome(monkeypatch):
     _run(run())
 
 
+def test_operator_can_record_bid_outcome_for_user_owned_opportunity(monkeypatch):
+    async def run():
+        client = _Supabase(
+            opportunity={
+                "id": "opp-1",
+                "user_id": "other-user",
+                "make": "Ford",
+                "model": "F-150",
+                "year": 2023,
+                "mileage": 18000,
+                "current_bid": 10000,
+                "state": "CA",
+            },
+            user_id="operator-user",
+        )
+        monkeypatch.setattr(outcomes, "supabase_client", client)
+        monkeypatch.setenv("DEALERSCOPE_OPERATOR_USER_ID", "operator-user")
+
+        payload = outcomes.BidOutcomePayload(opportunity_id="opp-1", bid=True, won=False)
+        result = await outcomes.create_bid_outcome(payload, authorization=_auth_header())
+
+        assert result["success"] is True
+        dealer_payload, _conflict = client.upserts["dealer_sales"][0]
+        assert dealer_payload["user_id"] == "operator-user"
+
+    _run(run())
+
+
 def test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity(monkeypatch):
     client = _Supabase()
     monkeypatch.setattr(outcomes, "supabase_client", client)
