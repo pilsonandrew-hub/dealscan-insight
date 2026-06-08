@@ -297,6 +297,20 @@ def test_won_bid_outcome_records_purchase_metrics(monkeypatch):
     assert dealer_payload["roi_pct"] == 20
 
 
+def test_won_bid_outcome_requires_purchase_price_before_persistence(monkeypatch):
+    client = _Supabase()
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+
+    payload = outcomes.BidOutcomePayload(opportunity_id="opp-1", bid=True, won=True)
+    with pytest.raises(HTTPException) as exc:
+        _run(outcomes.create_bid_outcome(payload, authorization=_auth_header()))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "purchase_price is required when won=true"
+    assert "dealer_sales" not in client.upserts
+    assert "opportunities" not in client.updates
+
+
 def test_sale_outcome_fails_closed_when_dealer_sales_persistence_fails(monkeypatch):
     client = _Supabase(fail_dealer_sales=True)
     monkeypatch.setattr(outcomes, "supabase_client", client)

@@ -109,6 +109,8 @@ def _safe_float(value: object) -> Optional[float]:
 def _normalize_bid_outcome(payload: BidOutcomePayload, opportunity: dict) -> BidOutcomeNormalized:
     if payload.won and not payload.bid:
         raise HTTPException(status_code=400, detail="Cannot mark won=true when bid=false")
+    if payload.won and payload.purchase_price is None:
+        raise HTTPException(status_code=400, detail="purchase_price is required when won=true")
     if payload.purchase_price is not None and not payload.won:
         raise HTTPException(status_code=400, detail="purchase_price is only valid when won=true")
 
