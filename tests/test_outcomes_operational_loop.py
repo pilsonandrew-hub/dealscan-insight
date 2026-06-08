@@ -48,6 +48,8 @@ class _Query:
         if self.client.fail_dealer_sales and self.table_name == "dealer_sales":
             raise RuntimeError("dealer_sales write failed")
         self.client.upserts.setdefault(self.table_name, []).append((payload, on_conflict))
+        self.payload = payload
+        self.operation = "upsert"
         return self
 
     def execute(self):
@@ -60,6 +62,10 @@ class _Query:
                 return SimpleNamespace(data=[])
             self.client.updates.setdefault(self.table_name, []).append((self.payload, tuple(self.filters)))
             return SimpleNamespace(data=[{**row, **self.payload} for row in rows])
+        if getattr(self, "operation", None) == "upsert":
+            if self.client.empty_dealer_sales_upsert and self.table_name == "dealer_sales":
+                return SimpleNamespace(data=[])
+            return SimpleNamespace(data=[self.payload])
 
         if self._limit is not None:
             rows = rows[: self._limit]
@@ -67,7 +73,14 @@ class _Query:
 
 
 class _Supabase:
-    def __init__(self, opportunity=None, user_id="user-1", fail_dealer_sales=False, fail_updates=False):
+    def __init__(
+        self,
+        opportunity=None,
+        user_id="user-1",
+        fail_dealer_sales=False,
+        fail_updates=False,
+        empty_dealer_sales_upsert=False,
+    ):
         self.auth = _Auth(user_id=user_id)
         self.rows = {
             "opportunities": [opportunity or {
@@ -86,6 +99,7 @@ class _Supabase:
         self.updates = {}
         self.fail_dealer_sales = fail_dealer_sales
         self.fail_updates = fail_updates
+        self.empty_dealer_sales_upsert = empty_dealer_sales_upsert
 
     def table(self, name):
         return _Query(self, name)
@@ -271,6 +285,24 @@ def test_won_bid_outcome_records_purchase_metrics(monkeypatch):
 
 def test_sale_outcome_fails_closed_when_dealer_sales_persistence_fails(monkeypatch):
     client = _Supabase(fail_dealer_sales=True)
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+
+    payload = outcomes.OutcomePayload(
+        opportunity_id="opp-1",
+        sale_price=14000,
+        sale_date="2026-05-29",
+        days_to_sale=12,
+        notes="sold",
+    )
+    with pytest.raises(HTTPException) as exc:
+        _run(outcomes.create_outcome(payload, authorization=_auth_header()))
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "Failed to persist outcome evidence"
+
+
+def test_sale_outcome_fails_closed_when_dealer_sales_upsert_returns_zero_rows(monkeypatch):
+    client = _Supabase(empty_dealer_sales_upsert=True)
     monkeypatch.setattr(outcomes, "supabase_client", client)
 
     payload = outcomes.OutcomePayload(

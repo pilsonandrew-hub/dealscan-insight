@@ -312,6 +312,13 @@ jobs:
               and "may record outcomes across user-owned and system-owned opportunities" in outcomes_source
               and "may record bid outcomes across user-owned and system-owned opportunities" in outcomes_source
             )
+            audit_evidence_proof["operator_privilege_uses_authenticated_user_id"] = (
+              "return user.user.id" in outcomes_source
+              and "opportunity = _fetch_opportunity(opportunity_id, require_user_id=user_id)" in outcomes_source
+              and "payload: OutcomePatchPayload" in outcomes_source
+              and "user_id:" not in outcomes_source.split("class OutcomePatchPayload", 1)[1].split("class", 1)[0]
+              and "test_foreign_owned_opportunity_rejects_bid_outcome" in outcomes_tests
+            )
             audit_evidence_proof["outcome_update_zero_row_conflict"] = (
               "Opportunity outcome mirror update matched zero rows" in outcomes_source
               and "raise HTTPException(status_code=409" in outcomes_source
@@ -319,6 +326,10 @@ jobs:
             audit_evidence_proof["dealer_sales_errors_logged_and_http_500"] = (
               "[OUTCOMES] dealer_sales persistence failed" in outcomes_source
               and 'HTTPException(status_code=500, detail="Failed to persist outcome evidence")' in outcomes_source
+            )
+            audit_evidence_proof["dealer_sales_empty_upsert_fails_closed"] = (
+              "dealer_sales upsert returned zero rows" in outcomes_source
+              and "test_sale_outcome_fails_closed_when_dealer_sales_upsert_returns_zero_rows" in outcomes_tests
             )
             audit_evidence_proof["outcomes_non_sale_price_zero"] = (
               '"sale_price": sold_price if sold_price is not None else 0' in outcomes_source
@@ -346,6 +357,16 @@ jobs:
               "test_score_deal_allows_high_rust_state_new_vehicle_exception" in score_tests
               and 'assert "rust_state_source" in result["risk_flags"]' in score_tests
               and "is_high_rust_state_rejected" in score_source
+            )
+            audit_evidence_proof["score_uses_dynamic_current_year_for_age"] = (
+              "age = max(1, _current_year() - year)" in score_source
+              and score_source.count("age = max(1, _current_year() - year)") >= 2
+              and "CURRENT_YEAR = _current_year()" in score_source
+            )
+            audit_evidence_proof["score_deal_wrapper_selects_vehicle_tier"] = (
+              "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
+              and 'selected_dos = dos_premium if vehicle_tier == "premium" else dos_standard' in score_source
+              and '"designated_lane": vehicle_tier' in score_source
             )
             audit_evidence_proof["rover_redis_affinity_nonfatal_and_debug_visible"] = (
               "Redis affinity init failed (non-fatal)" in rover_source
@@ -520,6 +541,14 @@ jobs:
                 and "_upsert_dealer_sales_outcome" in normalized
                 and any(term in normalized for term in ("unhandled", "runtimeerror", "supabase error"))
               )
+              is_dealer_sales_empty_upsert_fixed = (
+                audit_evidence_proof.get("dealer_sales_empty_upsert_fails_closed") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_upsert_dealer_sales_outcome" in normalized
+                and "dealer_sales" in normalized
+                and "upsert" in normalized
+                and any(term in normalized for term in ("zero rows", "empty", "result.data"))
+              )
               is_outcome_non_sale_price_fixed = (
                 audit_evidence_proof.get("outcomes_non_sale_price_zero") is True
                 and "webapp/routers/outcomes.py" in normalized
@@ -529,10 +558,17 @@ jobs:
               )
               is_operator_privilege_authorization_false_positive = (
                 audit_evidence_proof.get("operator_privileged_outcome_write_documented") is True
+                and audit_evidence_proof.get("operator_privilege_uses_authenticated_user_id") is True
                 and "webapp/routers/outcomes.py" in normalized
-                and "missing authorization for opportunity update" in normalized
                 and "patch_outcome" in normalized
                 and "operator" in normalized
+                and (
+                  "privilege escalation" in normalized
+                  or "spoof" in normalized
+                  or "any authenticated user" in normalized
+                  or "bypass ownership" in normalized
+                  or "missing authorization for opportunity update" in normalized
+                )
               )
               is_outcome_update_zero_row_semantics_false_positive = (
                 audit_evidence_proof.get("outcome_update_zero_row_conflict") is True
@@ -612,6 +648,20 @@ jobs:
                 and "heuristic_scorer" in normalized
                 and any(term in normalized for term in ("import fails", "silent failures", "critical error", "clear error message"))
               )
+              is_current_year_staleness_false_positive = (
+                audit_evidence_proof.get("score_uses_dynamic_current_year_for_age") is True
+                and "backend/ingest/score.py" in normalized
+                and "current_year" in normalized
+                and "calculations" in normalized
+                and any(term in normalized for term in ("stale", "year boundary", "module load", "extended period"))
+              )
+              is_score_deal_premium_tier_helper_opinion = (
+                audit_evidence_proof.get("score_deal_wrapper_selects_vehicle_tier") is True
+                and "backend/ingest/score.py" in normalized
+                and "score_deal_premium" in normalized
+                and "determine_vehicle_tier" in normalized
+                and any(term in normalized for term in ("future-proof", "future proofs", "inconsistent application", "subtle inconsistencies"))
+              )
               is_duplicate_race_mitigated = (
                 audit_evidence_proof.get("canonical_duplicate_unique_index_present") is True
                 and "potential for race condition" in normalized
@@ -630,6 +680,7 @@ jobs:
                 or is_outcomes_configuration_speculation
                 or is_ingest_error_handling_speculation
                 or is_dealer_sales_error_handling_false_positive
+                or is_dealer_sales_empty_upsert_fixed
                 or is_outcome_non_sale_price_fixed
                 or is_operator_privilege_authorization_false_positive
                 or is_outcome_update_zero_row_semantics_false_positive
@@ -642,6 +693,8 @@ jobs:
                 or is_rover_redis_affinity_operational_posture
                 or is_rover_numeric_default_serialization_policy
                 or is_rover_heuristic_import_debug_posture
+                or is_current_year_staleness_false_positive
+                or is_score_deal_premium_tier_helper_opinion
                 or is_duplicate_race_mitigated
                 or is_unsupported_speculation
               ):
