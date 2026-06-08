@@ -188,6 +188,16 @@ def _upsert_dealer_sales_outcome(payload: dict) -> None:
         logger.error("[OUTCOMES] dealer_sales payload has unknown columns: %s", unknown_columns)
         raise HTTPException(status_code=500, detail="Outcome evidence payload does not match schema")
 
+    required_columns = {"opportunity_id", "user_id", "outcome", "sale_price", "source"}
+    missing_required_columns = sorted(
+        column
+        for column in required_columns
+        if column not in payload or payload.get(column) is None
+    )
+    if missing_required_columns:
+        logger.error("[OUTCOMES] dealer_sales payload missing required columns: %s", missing_required_columns)
+        raise HTTPException(status_code=500, detail="Outcome evidence payload missing required fields")
+
     try:
         result = supabase_client.table("dealer_sales").upsert(payload, on_conflict="opportunity_id,user_id").execute()
         if getattr(result, "error", None):

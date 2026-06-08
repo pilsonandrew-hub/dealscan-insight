@@ -171,6 +171,20 @@ def test_dealer_sales_payload_rejects_unknown_schema_columns(monkeypatch):
     assert exc.value.detail == "Outcome evidence payload does not match schema"
 
 
+def test_dealer_sales_payload_rejects_empty_or_missing_required_fields(monkeypatch):
+    client = _Supabase()
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+
+    for payload in ({}, {"opportunity_id": "opp-1", "user_id": "user-1"}):
+        with pytest.raises(HTTPException) as exc:
+            outcomes._upsert_dealer_sales_outcome(payload)
+
+        assert exc.value.status_code == 500
+        assert exc.value.detail == "Outcome evidence payload missing required fields"
+
+    assert "dealer_sales" not in client.upserts
+
+
 def test_foreign_owned_opportunity_rejects_bid_outcome(monkeypatch):
     async def run():
         client = _Supabase(opportunity={
