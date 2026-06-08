@@ -317,6 +317,7 @@ async def patch_outcome(
         "mileage": opportunity.get("mileage"),
         "sale_price": sold_price if sold_price is not None else 0,
         "sold_price": sold_price,
+        "asking_price": current_bid,
         "outcome": mapped_outcome,
         "gross_margin": gross_margin,
         "roi_pct": roi_pct,
