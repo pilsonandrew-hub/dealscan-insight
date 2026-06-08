@@ -97,6 +97,25 @@ def test_passes_basic_gates_rejects_detached_truck_beds():
     }
 
 
+def test_passes_basic_gates_rejects_vehicle_adjacent_accessory_synonyms():
+    blocked_titles = [
+        "Ford F-150 Truck Cap",
+        "Chevrolet Silverado Truck Topper",
+        "Dodge Ram Tailgate",
+        "Pickup Bed Liner",
+        "Lot of Ford Vehicle Parts",
+    ]
+
+    for title in blocked_titles:
+        result = passes_basic_gates(
+            _vehicle(title=title, model=title, make="Ford"),
+            determine_vehicle_tier=_tier,
+        )
+
+        assert result["pass"] is False
+        assert result["reason"].startswith("non_vehicle_part"), title
+
+
 def test_passes_basic_gates_preserves_rejection_order_and_reasons():
     assert passes_basic_gates(_vehicle(make="", vin="", title="office chair", current_bid=0), determine_vehicle_tier=_tier) == {
         "pass": False,

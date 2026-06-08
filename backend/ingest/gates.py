@@ -45,6 +45,13 @@ NON_VEHICLE_PART_PATTERNS = [
     r"\bCamper\s+Shell\b",
     r"\bTonneau\s+Cover\b",
     r"\bBed\s+Cap\b",
+    r"\bTruck\s+Cap\b",
+    r"\bTruck\s+Topper\b",
+    r"\b(?:Ford|Chevrolet|Chevy|GMC|Dodge|Ram|Toyota|Nissan)\s+(?:\w+\s+){0,3}Tailgate\b",
+    r"\bTailgate\s+(?:Assembly|Part|Only)\b",
+    r"\b(?:Truck|Pickup)\s+Bed\s+Liner\b",
+    r"\bBed\s+Liner\s+(?:Kit|Only)\b",
+    r"\bVehicle\s+Parts?\b",
     r"\bUtility\s+Body\b",
     r"\bService\s+Body\b",
 ]
