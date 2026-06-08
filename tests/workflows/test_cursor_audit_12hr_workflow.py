@@ -293,6 +293,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/rover.py | `_coerce_number` Default Value Masks Data Quality Issues | Change `_coerce_number` to return `None` or raise an error for non-numeric values.",
                     "HIGH | webapp/routers/outcomes.py | `dealer_sales` upsert writes arbitrary user_id from request payload. | **FIX:** this real payload-injection finding must survive unless the request model exposes no user_id.",
                     "HIGH | backend/ingest/score.py | `score_deal` accepts zero bid and missing MMR as a viable final opportunity. | **FIX:** reject the final score path.",
+                    "HIGH | backend/ingest/score.py | Missing bid ceiling leaves `_discount_pct_score` with an optimistic severe penalty fallback. | **FIX:** enforce bid ceiling availability before discount scoring.",
+                    "HIGH | backend/ingest/score.py | Expired auction parser failure should receive a lower score before `_auction_velocity_score`. | **FIX:** validate source auction end time parsing.",
                 ]
             )
         )
@@ -300,7 +302,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("HIGH_DEMAND_MODELS", filtered)
         self.assertNotIn("listing_url check can be bypassed", filtered)
         self.assertNotIn("masking critical issues", filtered)
-        self.assertNotIn("_auction_velocity_score", filtered)
+        self.assertNotIn("returns a fixed `25.0` for expired auctions", filtered)
         self.assertNotIn("rust_state_source", filtered)
         self.assertNotIn("recorded as `current_bid`", filtered)
         self.assertNotIn("default value of `0.0` for `dos_score` and `current_bid`", filtered)
@@ -352,6 +354,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Default Value Masks Data Quality Issues", filtered)
         self.assertIn("writes arbitrary user_id from request payload", filtered)
         self.assertIn("accepts zero bid and missing MMR as a viable final opportunity", filtered)
+        self.assertIn("Missing bid ceiling", filtered)
+        self.assertIn("Expired auction parser failure", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):

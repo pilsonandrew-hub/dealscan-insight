@@ -707,7 +707,7 @@ jobs:
                 and "backend/ingest/score.py" in normalized
                 and "expired auction" in normalized
                 and ("auction velocity" in normalized or "_auction_velocity_score" in normalized)
-                and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently", "should ideally be 0", "presented as viable opportunities", "lower score", "reject expired auctions", "urgent scoring"))
+                and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently", "should ideally be 0", "presented as viable opportunities", "reject expired auctions", "urgent scoring"))
               )
               is_won_bid_sale_price_zero_fixed = (
                 audit_evidence_proof.get("won_bid_requires_positive_purchase_price") is True
@@ -854,7 +854,13 @@ jobs:
                 audit_evidence_proof.get("missing_bid_mmr_are_severe_provenance_flags") is True
                 and "backend/ingest/score.py" in normalized
                 and any(term in normalized for term in ("_mmr_proximity_score", "_discount_pct_score", "_net_margin_score"))
-                and any(term in normalized for term in ("missing mmr/bid", "missing mmr", "missing bid", "default scores", "default score"))
+                and (
+                  "missing mmr/bid" in normalized
+                  or (
+                    "missing mmr" in normalized
+                    and any(term in normalized for term in ("default scores", "default score"))
+                  )
+                )
                 and any(term in normalized for term in ("explicit rejection", "severe penalty"))
               )
               is_rover_redis_affinity_operational_posture = (
