@@ -213,6 +213,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "CRITICAL | webapp/routers/ingest.py | `check_and_handle_duplicate` still has a duplicate race after canonical lookup during concurrent inserts. | **FIX:** enforce a transactional insert.",
                     "HIGH | webapp/routers/ingest.py | `_insert_webhook_log_direct_pg` fallback can lose webhook metadata after `supabase_client` timeout. | **FIX:** preserve metadata in fallback payload.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can write the wrong `dealer_sales` row because `on_conflict` omits source. | **FIX:** revisit conflict target.",
+                    "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` accepts an empty payload for `dealer_sales`. | **FIX:** validate required payload fields.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
                 ]
@@ -234,6 +235,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("duplicate race after canonical lookup", filtered)
         self.assertIn("fallback can lose webhook metadata", filtered)
         self.assertIn("on_conflict", filtered)
+        self.assertIn("empty payload", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
