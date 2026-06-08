@@ -336,6 +336,12 @@ jobs:
               and "Outcome evidence payload missing required fields" in outcomes_source
               and "test_dealer_sales_payload_rejects_empty_or_missing_required_fields" in outcomes_tests
             )
+            audit_evidence_proof["won_bid_requires_positive_purchase_price"] = (
+              "purchase_price is required when won=true" in outcomes_source
+              and "purchase_price must be greater than 0 when won=true" in outcomes_source
+              and "test_won_bid_outcome_requires_purchase_price_before_persistence" in outcomes_tests
+              and "test_won_bid_outcome_rejects_zero_purchase_price_before_persistence" in outcomes_tests
+            )
             audit_evidence_proof["score_deal_wrapper_enforces_premium_age_and_mileage"] = (
               "vehicle_tier = determine_vehicle_tier(year, mileage)" in score_source
               and 'if vehicle_tier == "rejected":' in score_source
@@ -624,7 +630,16 @@ jobs:
                 and "backend/ingest/score.py" in normalized
                 and "expired auction" in normalized
                 and ("auction velocity" in normalized or "_auction_velocity_score" in normalized)
-                and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently"))
+                and any(term in normalized for term in ("not particularly low", "might not align", "should be rejected", "scored differently", "should ideally be 0", "presented as viable opportunities"))
+              )
+              is_won_bid_sale_price_zero_fixed = (
+                audit_evidence_proof.get("won_bid_requires_positive_purchase_price") is True
+                and "webapp/routers/outcomes.py" in normalized
+                and "_mirror_bid_outcome_to_dealer_sales" in normalized
+                and "won" in normalized
+                and "sale_price" in normalized
+                and "0" in normalized
+                and any(term in normalized for term in ("purchase_price=0", "purchase_price is none", "sale_price can be 0", "intended to be non-zero"))
               )
               is_premium_helper_gate_false_positive = (
                 audit_evidence_proof.get("score_deal_wrapper_enforces_premium_age_and_mileage") is True
@@ -742,6 +757,7 @@ jobs:
                 or is_outcome_update_zero_row_semantics_false_positive
                 or is_operator_zero_row_conflict_expected_fail_closed
                 or is_expired_velocity_nonurgent_floor_false_positive
+                or is_won_bid_sale_price_zero_fixed
                 or is_premium_helper_gate_false_positive
                 or is_bid_outcome_timestamp_false_positive
                 or is_legacy_realized_sale_semantics_false_positive
