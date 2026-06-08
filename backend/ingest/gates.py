@@ -39,6 +39,16 @@ COMMERCIAL_PATTERNS = [
     r"\bUtility\s*Bed\b", r"\bRefrigerator\s*Truck\b",
 ]
 
+NON_VEHICLE_PART_PATTERNS = [
+    r"\bTruck\s+Bed\b",
+    r"\bPickup\s+Bed\b",
+    r"\bCamper\s+Shell\b",
+    r"\bTonneau\s+Cover\b",
+    r"\bBed\s+Cap\b",
+    r"\bUtility\s+Body\b",
+    r"\bService\s+Body\b",
+]
+
 HD_PICKUP_MAKES = re.compile(
     r"\b(Ram|Chevy|Chevrolet|Silverado|GMC|Sierra|Ford|F-250|F-350)\b",
     re.IGNORECASE,
@@ -116,6 +126,19 @@ def find_title_brand_issue(vehicle: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def find_non_vehicle_part_issue(vehicle: dict[str, Any]) -> Optional[str]:
+    text_to_check = " ".join(filter(None, [
+        vehicle.get("title", ""),
+        vehicle.get("description", ""),
+        vehicle.get("notes", ""),
+        vehicle.get("model", ""),
+    ]))
+    if any(re.search(pattern, text_to_check, re.IGNORECASE) for pattern in NON_VEHICLE_PART_PATTERNS):
+        display_title = (vehicle.get("title") or text_to_check).strip()
+        return f"non_vehicle_part ({display_title[:50]})"
+    return None
+
+
 def passes_basic_gates(
     vehicle: dict[str, Any],
     *,
@@ -129,6 +152,10 @@ def passes_basic_gates(
     title_has_vehicle = any(kw in title for kw in VEHICLE_TITLE_KEYWORDS)
     if not make.strip() and len(vin) != 17 and not title_has_vehicle:
         return {"pass": False, "reason": "not_a_vehicle (no make or valid VIN)"}
+
+    non_vehicle_part_issue = find_non_vehicle_part_issue(vehicle)
+    if non_vehicle_part_issue:
+        return {"pass": False, "reason": non_vehicle_part_issue}
 
     bid = vehicle.get("current_bid", 0)
     state = vehicle.get("state", "")

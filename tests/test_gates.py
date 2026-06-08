@@ -78,6 +78,25 @@ def test_passes_basic_gates_rejects_brightdrop_cargo_delivery_vans():
     }
 
 
+def test_passes_basic_gates_rejects_detached_truck_beds():
+    assert passes_basic_gates(
+        _vehicle(
+            title="Ford Truck bed",
+            make="Ford",
+            model="Truck bed",
+            current_bid=500,
+            state="TN",
+            year=2026,
+            mileage=1,
+            listing_url="https://www.govdeals.com/asset/77/30240",
+        ),
+        determine_vehicle_tier=_tier,
+    ) == {
+        "pass": False,
+        "reason": "non_vehicle_part (Ford Truck bed)",
+    }
+
+
 def test_passes_basic_gates_preserves_rejection_order_and_reasons():
     assert passes_basic_gates(_vehicle(make="", vin="", title="office chair", current_bid=0), determine_vehicle_tier=_tier) == {
         "pass": False,
