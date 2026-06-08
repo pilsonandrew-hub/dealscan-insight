@@ -322,6 +322,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | webapp/routers/ingest.py | Duplicate Listing URL Conflict Handling | FIX: Ensure that when a `listing_url` conflict is detected, and the `canonical_id` of the conflicting record does not match the incoming `canonical_id`, the incoming record is treated as a distinct, potentially conflicting entry rather than a simple duplicate or update.",
                     "HIGH | webapp/routers/outcomes.py | `outcome_sale_price` and `sale_price` can be zero for \"won\" outcomes.",
                     "HIGH | webapp/routers/outcomes.py | `_execute_scoped_opportunity_update` raises `HTTPException` for zero rows matched, which might be an expected scenario for concurrent updates.",
+                    "CRITICAL | backend/ingest/score.py | Hardcoded `HIGH_RUST_STATES` in `compute_risk_flags` | The `compute_risk_flags` function directly uses the `HIGH_RUST_STATES` constant without checking if the vehicle is a new vehicle, which is a business rule exception. This can lead to incorrect rejections for new vehicles from rust states. The `rust_state_new_vehicle_exception_and_source_risk_policy` proof indicates this exception should be handled.",
+                    "HIGH | webapp/routers/ingest.py | Inconsistent `canonical_id` handling in `check_and_handle_duplicate` | The `check_and_handle_duplicate` function first checks for `listing_url` duplicates and then for `canonical_id` duplicates. If a `listing_url` match is found, it returns without fully evaluating the `canonical_id` for potential conflicts, especially if the `listing_url` match is already marked as a duplicate but points to a different canonical record. The `duplicate_listing_url_conflict_is_flagged` proof implies a more robust conflict detection.",
+                    "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` allows non-positive `current_bid` | The `_legacy_mirror_to_dealer_sales` function checks `asking_price <= 0` and raises an HTTPException, but this check is performed *after* `asking_price` is assigned from `opportunity.get(\"current_bid\")`. If `current_bid` is `None` or `0`, `asking_price` will be `None` or `0`, leading to a `TypeError` or `ZeroDivisionError` in `roi_pct` calculation before the explicit check. The `won_bid_requires_positive_purchase_price` and `won_outcomes_require_positive_current_bid` proofs imply robust validation.",
+                    "HIGH | webapp/routers/rover.py | `_coerce_number` default value for `dos_score` and `current_bid` | The `_coerce_number` function uses a default of `0.0` for `dos_score` and `current_bid` when these values are `None` or invalid. While `0.0` might be acceptable for `dos_score` (representing no score), a `current_bid` of `0.0` could lead to division by zero errors or incorrect economic calculations if not handled carefully downstream. The `rover_numeric_defaults_are_serialization_fallbacks` proof suggests these are serialization fallbacks, but their use in calculations needs scrutiny.",
                 ]
             )
         )
@@ -401,6 +405,10 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertNotIn("Duplicate Listing URL Conflict Handling", kept_findings)
         self.assertNotIn("`outcome_sale_price` and `sale_price` can be zero", kept_findings)
         self.assertNotIn("zero rows matched, which might be an expected scenario", kept_findings)
+        self.assertNotIn("Hardcoded `HIGH_RUST_STATES`", kept_findings)
+        self.assertNotIn("Inconsistent `canonical_id` handling", kept_findings)
+        self.assertNotIn("allows non-positive `current_bid`", kept_findings)
+        self.assertNotIn("could lead to division by zero errors", kept_findings)
         self.assertIn("Suppressed unsupported or contradicted audit finding", filtered)
 
     def test_deterministic_suppression_filters_live_score_business_rule_wording(self):

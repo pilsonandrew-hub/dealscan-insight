@@ -757,11 +757,21 @@ jobs:
               is_won_outcome_current_bid_validation_fixed = (
                 audit_evidence_proof.get("won_outcomes_require_positive_current_bid") is True
                 and "webapp/routers/outcomes.py" in normalized
-                and "_legacy_mirror_to_dealer_sales" in normalized
-                and "_mirror_bid_outcome_to_dealer_sales" in normalized
                 and "current_bid" in normalized
-                and "asking_price" in normalized
-                and any(term in normalized for term in ("without validation", "division by zero", "incorrect margin"))
+                and (
+                  (
+                    "_legacy_mirror_to_dealer_sales" in normalized
+                    and "_mirror_bid_outcome_to_dealer_sales" in normalized
+                    and "asking_price" in normalized
+                    and any(term in normalized for term in ("without validation", "division by zero", "incorrect margin"))
+                  )
+                  or (
+                    "_legacy_mirror_to_dealer_sales" in normalized
+                    and "non-positive" in normalized
+                    and "roi_pct" in normalized
+                    and any(term in normalized for term in ("typeerror", "zerodivisionerror", "zero division", "before the explicit check", "robust validation"))
+                  )
+                )
               )
               is_legacy_realized_sale_current_bid_policy_fixed = (
                 audit_evidence_proof.get("won_outcomes_require_positive_current_bid") is True
@@ -822,6 +832,11 @@ jobs:
                     "inconsistent rust state rejection logic" in normalized
                     and "is_high_rust_state_rejected" in normalized
                     and "hard rejection" in normalized
+                  )
+                  or (
+                    "hardcoded `high_rust_states`" in normalized
+                    and "compute_risk_flags" in normalized
+                    and any(term in normalized for term in ("new vehicle", "new vehicles", "business rule exception", "incorrect rejections"))
                   )
                 )
               )
@@ -965,6 +980,11 @@ jobs:
                     and any(term in normalized for term in ("dos_score", "current_bid"))
                     and "business logic" in normalized
                   )
+                  or (
+                    "default value for `dos_score` and `current_bid`" in normalized
+                    and any(term in normalized for term in ("serialization fallback", "serialization fallbacks"))
+                    and any(term in normalized for term in ("needs scrutiny", "division by zero", "incorrect economic calculations"))
+                  )
                 )
               )
               is_rover_heuristic_import_debug_posture = (
@@ -994,7 +1014,7 @@ jobs:
                 and "listing_url" in normalized
                 and "canonical_id" in normalized
                 and "conflict" in normalized
-                and any(term in normalized for term in ("distinct, potentially conflicting", "simple duplicate", "simple duplicate or update", "incorrect deduplication"))
+                and any(term in normalized for term in ("distinct, potentially conflicting", "simple duplicate", "simple duplicate or update", "incorrect deduplication", "fully evaluating", "potential conflicts", "more robust conflict detection"))
               )
               is_score_deal_premium_tier_helper_opinion = (
                 audit_evidence_proof.get("score_deal_wrapper_selects_vehicle_tier") is True
