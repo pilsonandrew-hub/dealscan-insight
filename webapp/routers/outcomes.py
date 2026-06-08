@@ -111,6 +111,8 @@ def _normalize_bid_outcome(payload: BidOutcomePayload, opportunity: dict) -> Bid
         raise HTTPException(status_code=400, detail="Cannot mark won=true when bid=false")
     if payload.won and payload.purchase_price is None:
         raise HTTPException(status_code=400, detail="purchase_price is required when won=true")
+    if payload.won and payload.purchase_price <= 0:
+        raise HTTPException(status_code=400, detail="purchase_price must be greater than 0 when won=true")
     if payload.purchase_price is not None and not payload.won:
         raise HTTPException(status_code=400, detail="purchase_price is only valid when won=true")
 

@@ -197,6 +197,7 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 "operator_privilege_uses_authenticated_user_id": True,
                 "dealer_sales_empty_upsert_fails_closed": True,
                 "dealer_sales_payload_requires_essential_fields": True,
+                "won_bid_requires_positive_purchase_price": True,
                 "score_deal_wrapper_enforces_premium_age_and_mileage": True,
                 "bid_outcome_caller_sets_outcome_recorded_at": True,
                 "legacy_mirror_is_realized_sale_only": True,
@@ -241,6 +242,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                     "HIGH | backend/ingest/score.py | `score_deal` returns premium for an over-age vehicle. | **FIX:** enforce the wrapper tier gate.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` empty payload can bypass required conflict keys for `dealer_sales`. | **FIX:** audit conflict-key handling.",
                     "HIGH | webapp/routers/outcomes.py | `_legacy_mirror_to_dealer_sales` sale_price and sold_price can hide a non-win outcome. | **FIX:** audit caller routing.",
+                    "HIGH | backend/ingest/score.py | Incomplete `_auction_velocity_score` for Expired Auctions | The `_auction_velocity_score` function returns `25.0` for `hours < 0` (expired auctions). While `expired_auction_velocity_matches_nonurgent_floor` is true, indicating this is intentional, a score of `25.0` is still a positive score. For expired auctions, the velocity should ideally be 0 or result in an outright rejection, as the opportunity to bid has passed. A non-zero score might lead to expired listings being presented as viable opportunities.",
+                    "HIGH | webapp/routers/outcomes.py | `dealer_sales` `sale_price` can be 0 for \"won\" outcomes | In `_mirror_bid_outcome_to_dealer_sales`, if `normalized.outcome == \"won\"`, `sale_price` is set to `normalized.purchase_price`. However, if `normalized.purchase_price` is `None` (which is allowed if `won` is false, but not if `won` is true), `sale_price` would default to 0. The `DEALER_SALES_REQUIRED_OUTCOME_COLUMNS` includes `sale_price`. While `purchase_price` is required when `won=true` by `_normalize_bid_outcome`, this logic path could be brittle if `normalized.purchase_price` somehow becomes `None` after validation or if the `sale_price` is intended to be non-zero for all \"won\" outcomes.",
                     "HIGH | webapp/routers/outcomes.py | `_upsert_dealer_sales_outcome` can return zero rows when row-level security rejects `dealer_sales` writes. | **FIX:** audit RLS policy.",
                     "HIGH | backend/ingest/score.py | `CURRENT_YEAR` export is stale in tests that import it. | **FIX:** update tests to call the calendar helper.",
                     "HIGH | webapp/routers/rover.py | The `_coerce_number` default for buyer_premium can hide missing fee data. | **FIX:** require explicit fee inputs.",
@@ -271,6 +274,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("score_deal` returns premium", filtered)
         self.assertIn("required conflict keys", filtered)
         self.assertIn("non-win outcome", filtered)
+        self.assertNotIn("Incomplete `_auction_velocity_score` for Expired Auctions", filtered)
+        self.assertNotIn("sale_price` can be 0 for \"won\" outcomes", filtered)
         self.assertIn("row-level security", filtered)
         self.assertIn("CURRENT_YEAR` export is stale in tests", filtered)
         self.assertIn("buyer_premium", filtered)
@@ -338,6 +343,12 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
                 and '"type": "realized_sale_outcome"' in outcomes_source
                 and "async def create_outcome" in outcomes_source
                 and "test_sale_outcome_returns_explicit_persistence_success" in outcomes_tests
+            ),
+            "won_bid_requires_positive_purchase_price": (
+                "purchase_price is required when won=true" in outcomes_source
+                and "purchase_price must be greater than 0 when won=true" in outcomes_source
+                and "test_won_bid_outcome_requires_purchase_price_before_persistence" in outcomes_tests
+                and "test_won_bid_outcome_rejects_zero_purchase_price_before_persistence" in outcomes_tests
             ),
         }
 
