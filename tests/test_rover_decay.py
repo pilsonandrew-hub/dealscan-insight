@@ -29,8 +29,8 @@ class RoverDecayTests(unittest.TestCase):
         """Raw Supabase string numerics should not crash the rover ranker."""
         prefs = {"price_bucket:10-20k": 1.0, "mileage_bucket:30-60k": 1.0}
         row = {
-            "current_bid": "15000",
-            "mileage": "45000",
+            "current_bid": "$15,000",
+            "mileage": "45,000",
             "dos_score": 80,
             "make": "Ford",
             "model": "F-150",

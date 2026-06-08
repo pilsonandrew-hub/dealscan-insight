@@ -30,6 +30,7 @@ def test_lane_constants():
 def test_determine_vehicle_tier_matches_canonical_policy():
     year = current_calendar_year()
     assert determine_vehicle_tier(year - 4, 50_000) == "premium"
+    assert determine_vehicle_tier(year - 4, "50,000") == "premium"
     assert determine_vehicle_tier(year - 4, 50_001) == "rejected"
     assert determine_vehicle_tier(year - 5, 90_000) == "standard"
     assert determine_vehicle_tier(year - 5, STANDARD_MAX_MILEAGE + 1) == "rejected"

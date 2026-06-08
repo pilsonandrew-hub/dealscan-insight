@@ -47,6 +47,10 @@ def _coerce_float(value, default: float = 0.0) -> float:
     try:
         if value is None:
             return default
+        if isinstance(value, str):
+            value = value.strip().replace(",", "").replace("$", "")
+            if value == "":
+                return default
         return float(value)
     except (TypeError, ValueError):
         return default

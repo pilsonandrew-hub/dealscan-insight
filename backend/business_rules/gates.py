@@ -28,6 +28,10 @@ def current_calendar_year() -> int:
 def _coerce_float(value: object) -> Optional[float]:
     if value is None or value == "":
         return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", "").replace("$", "")
+        if value == "":
+            return None
     try:
         normalized = float(value)
     except (TypeError, ValueError):

@@ -63,6 +63,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
         self.assertIn("Potential for Race Condition", workflow)
         self.assertIn("Suppressed unsupported or contradicted audit finding", workflow)
         self.assertIn("coerce_float_normalizes_formatted_numeric_strings", workflow)
+        self.assertIn("_gates_coerce_float", workflow)
+        self.assertIn("_rover_coerce_float", workflow)
         self.assertIn("critical_audit_write_errors_handled_upstream", workflow)
         self.assertIn("dealer_sales_errors_logged_and_http_500", workflow)
         self.assertIn("is_outcomes_configuration_speculation", workflow)

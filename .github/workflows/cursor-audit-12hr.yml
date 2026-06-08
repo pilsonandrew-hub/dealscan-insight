@@ -248,7 +248,9 @@ jobs:
           )
           audit_evidence_proof = {}
           try:
+            from backend.business_rules.gates import _coerce_float as _gates_coerce_float
             from backend.ingest.score import _auction_velocity_score, _coerce_float, _round_price_basis
+            from backend.rover.heuristic_scorer import _coerce_float as _rover_coerce_float
             expired = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
             audit_evidence_proof["expired_auction_velocity_non_urgent"] = (
               _auction_velocity_score({"auction_end": expired}) == 25.0
@@ -262,6 +264,10 @@ jobs:
             audit_evidence_proof["coerce_float_normalizes_formatted_numeric_strings"] = (
               _coerce_float("12,345") == 12345.0
               and _coerce_float(" $12,345.67 ") == 12345.67
+              and _gates_coerce_float("12,345") == 12345.0
+              and _gates_coerce_float(" $12,345.67 ") == 12345.67
+              and _rover_coerce_float("12,345") == 12345.0
+              and _rover_coerce_float(" $12,345.67 ") == 12345.67
             )
           except Exception as proof_error:
             audit_evidence_proof["score_proof_error"] = repr(proof_error)
@@ -419,7 +425,8 @@ jobs:
               is_outcomes_configuration_speculation = (
                 audit_evidence_proof.get("outcomes_system_opportunity_non_operator_rejected") is True
                 and "webapp/routers/outcomes.py" in normalized
-                and any(term in normalized for term in ("system opportunities", "operator", "environment variable", "overly restrictive", "inconsistent authorization"))
+                and "system opportunities" in normalized
+                and any(term in normalized for term in ("inconsistent authorization", "dealerscope_operator_user_id", "environment variable"))
               )
               is_ingest_error_handling_speculation = (
                 audit_evidence_proof.get("critical_audit_write_errors_handled_upstream") is True
