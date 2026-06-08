@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import asyncio
+import logging
 
 import pytest
 from fastapi import HTTPException
@@ -237,6 +238,36 @@ def test_operator_can_record_bid_outcome_for_user_owned_opportunity(monkeypatch)
     _run(run())
 
 
+def test_operator_bid_outcome_override_is_logged(monkeypatch, caplog):
+    async def run():
+        client = _Supabase(
+            opportunity={
+                "id": "opp-1",
+                "user_id": "other-user",
+                "make": "Ford",
+                "model": "F-150",
+                "year": 2023,
+                "mileage": 18000,
+                "current_bid": 10000,
+                "state": "CA",
+            },
+            user_id="operator-user",
+        )
+        monkeypatch.setattr(outcomes, "supabase_client", client)
+        monkeypatch.setenv("DEALERSCOPE_OPERATOR_USER_ID", "operator-user")
+        caplog.set_level(logging.INFO, logger=outcomes.__name__)
+
+        payload = outcomes.BidOutcomePayload(opportunity_id="opp-1", bid=True, won=False)
+        await outcomes.create_bid_outcome(payload, authorization=_auth_header())
+
+        assert "operator override" in caplog.text
+        assert "opp-1" in caplog.text
+        assert "operator-user" in caplog.text
+        assert "other-user" in caplog.text
+
+    _run(run())
+
+
 def test_bid_outcome_persists_queryable_dealer_sales_and_updates_opportunity(monkeypatch):
     client = _Supabase()
     monkeypatch.setattr(outcomes, "supabase_client", client)
@@ -297,6 +328,29 @@ def test_won_bid_outcome_records_purchase_metrics(monkeypatch):
     assert dealer_payload["roi_pct"] == 20
 
 
+def test_won_bid_outcome_requires_positive_current_bid_before_persistence(monkeypatch):
+    client = _Supabase(opportunity={
+        "id": "opp-1",
+        "user_id": "user-1",
+        "make": "Ford",
+        "model": "F-150",
+        "year": 2023,
+        "mileage": 18000,
+        "current_bid": 0,
+        "state": "CA",
+    })
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+
+    payload = outcomes.BidOutcomePayload(opportunity_id="opp-1", bid=True, won=True, purchase_price=12000)
+    with pytest.raises(HTTPException) as exc:
+        _run(outcomes.create_bid_outcome(payload, authorization=_auth_header()))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "current_bid is required to calculate outcome metrics"
+    assert "dealer_sales" not in client.upserts
+    assert "opportunities" not in client.updates
+
+
 def test_won_bid_outcome_requires_purchase_price_before_persistence(monkeypatch):
     client = _Supabase()
     monkeypatch.setattr(outcomes, "supabase_client", client)
@@ -341,6 +395,35 @@ def test_sale_outcome_fails_closed_when_dealer_sales_persistence_fails(monkeypat
 
     assert exc.value.status_code == 500
     assert exc.value.detail == "Failed to persist outcome evidence"
+
+
+def test_sale_outcome_requires_positive_current_bid_before_persistence(monkeypatch):
+    client = _Supabase(opportunity={
+        "id": "opp-1",
+        "user_id": "user-1",
+        "make": "Ford",
+        "model": "F-150",
+        "year": 2023,
+        "mileage": 18000,
+        "current_bid": 0,
+        "state": "CA",
+    })
+    monkeypatch.setattr(outcomes, "supabase_client", client)
+
+    payload = outcomes.OutcomePayload(
+        opportunity_id="opp-1",
+        sale_price=14000,
+        sale_date="2026-05-29",
+        days_to_sale=12,
+        notes="sold",
+    )
+    with pytest.raises(HTTPException) as exc:
+        _run(outcomes.create_outcome(payload, authorization=_auth_header()))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "current_bid is required to calculate outcome metrics"
+    assert "dealer_sales" not in client.upserts
+    assert "opportunities" not in client.updates
 
 
 def test_sale_outcome_fails_closed_when_dealer_sales_upsert_returns_zero_rows(monkeypatch):
