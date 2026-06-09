@@ -295,7 +295,7 @@ def _listing_freshness_score(vehicle: dict) -> float:
 
 
 def _make_velocity_score(vehicle: dict) -> float:
-    source = (vehicle.get("source_site") or vehicle.get("source") or "").lower()
+    source = _normalized_text(vehicle.get("source_site") or vehicle.get("source"))
     source_scores = {
         "govdeals": 80.0,
         "govdeals-sold": 70.0,
@@ -307,6 +307,8 @@ def _make_velocity_score(vehicle: dict) -> float:
         "jjkane": 68.0,
         "hibid": 68.0,
         "proxibid": 68.0,
+        "purplewave": 68.0,
+        "purple wave": 68.0,
         "bidspotter": 60.0,
         "usgovbid": 74.0,
     }
@@ -683,7 +685,7 @@ def _source_score_v2(vehicle: dict) -> float:
     # DEA-2: Gov sources no longer get a perfect 1.0; scored fairly alongside others
     if any(token in source for token in ("govdeals", "govplanet", "gsaauctions", "publicsurplus", "municibid")):
         return 0.75
-    if any(token in source for token in ("hibid", "proxibid", "bidspotter", "allsurplus", "jjkane", "usgovbid")):
+    if any(token in source for token in ("hibid", "proxibid", "purplewave", "purple wave", "bidspotter", "allsurplus", "jjkane", "usgovbid")):
         return 0.65
     return 0.4
 
