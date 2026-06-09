@@ -36,6 +36,13 @@ Proof-only aggregate:
 - High: $29,998
 - Sample size: 3
 
+Mileage-spread note: the selected public comps span 25,153 to 85,238 miles,
+while the Purple Wave candidate has 71,023 miles. The two closer-mileage comps
+average $22,792. Using that narrower sensitivity value still produced
+`market_comp`, Platinum, and ceiling pass locally, but with lower economics:
+MMR estimate $16,882.96, gross margin $15,367.96, max bid $13,291.37, and bid
+headroom $12,991.37.
+
 ## DealerScope Proof Result
 
 When scored locally with these proof comps only, the candidate produced:

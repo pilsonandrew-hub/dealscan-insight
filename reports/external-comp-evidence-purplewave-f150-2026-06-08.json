@@ -3,9 +3,9 @@
   "source_url": "https://www.truecar.com/used-cars-for-sale/listings/ford/f-150/year-2018/location-san-diego-ca/",
   "vehicle": {
     "year": 2018,
-    "make": "ford",
-    "model": "f-150",
-    "state": "ca"
+    "make": "Ford",
+    "model": "F-150",
+    "state": "CA"
   },
   "confidence_notes": "External active retail listing comps for a proof-only Purple Wave F-150 candidate. Active-listing evidence, not closed-sale outcome evidence. Do not use as an alert or production source-yield claim without governed seed workflow and source-row ingestion proof.",
   "comps": [
