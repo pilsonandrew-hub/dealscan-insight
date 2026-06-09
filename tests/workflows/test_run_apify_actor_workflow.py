@@ -123,6 +123,20 @@ def test_run_apify_actor_workflow_supports_bounded_govplanet_proof():
     assert "GOVPLANET_MAX_DETAIL_PAGES" in text
     assert '"maxItemsPerCategory": int(os.environ.get("GOVPLANET_MAX_ITEMS_PER_CATEGORY") or "1")' in text
     assert '"maxDetailPages": int(os.environ.get("GOVPLANET_MAX_DETAIL_PAGES") or "1")' in text
+    assert '"pushed_rows_with_auction_end"' in text
+    assert '"pushed_rows_missing_auction_end"' in text
+    assert '"quickview_rows_with_vin"' in text
+    assert '"quickview_rows_with_mileage"' in text
+    assert '"quickview_rows_with_auction_end"' in text
+    assert '"rows_excluded_mileage_over_limit"' in text
+    assert '"rows_excluded_age_over_limit"' in text
+    assert '"rows_excluded_non_govplanet_marketplace"' in text
+    assert '"detail_pages_queued"' in text
+    assert '"detail_pages_captcha"' in text
+    assert '"detail_missing_vin"' in text
+    assert '"excluded_missing_vin_samples"' in text
+    assert '"detail_captcha_samples"' in text
+    assert '"target_contract"' in text
 
 
 def test_run_apify_actor_workflow_supports_bounded_hibid_v2_proof():
