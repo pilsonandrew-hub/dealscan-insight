@@ -84,6 +84,22 @@ const CONDITION_REJECT_PATTERNS = [
     /\bbad\s+engine\b/i,
     /\bno\s+title\b/i,
 ];
+const NON_VEHICLE_PART_PATTERNS = [
+    /\btruck\s+bed\b/i, // truck bed
+    /\bpickup\s+bed\b/i, // pickup bed
+    /\bcamper\s+shell\b/i, // camper shell
+    /\btonneau\s+cover\b/i, // tonneau
+    /\bbed\s+cap\b/i, // bed cap
+    /\butility\s+body\b/i, // utility body
+    /\bservice\s+body\b/i, // service body
+    /\btruck\s+cap\b/i, // truck cap
+    /\btruck\s+topper\b/i, // truck topper
+    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i, // tailgate
+    /\btailgate\s+(?:assembly|part|only)\b/i, // tailgate
+    /\b(?:truck|pickup)\s+bed\s+liner\b/i, // bed liner
+    /\bbed\s+liner\s+(?:kit|only)\b/i, // bed liner
+    /\bvehicle\s+parts\b/i, // vehicle parts
+];
 
 const MAKES = new Set([
     'ford','chevrolet','chevy','dodge','ram','toyota','honda','nissan','jeep','gmc',
@@ -212,6 +228,7 @@ function isVehicle(desc = '') {
     // l2=USA already filters to US at source — no flagPath check needed
     const lower = desc.toLowerCase();
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
+    if (NON_VEHICLE_PART_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (COMMERCIAL_PATTERN.test(desc)) return false; // skip heavy equipment
     return true;
 }

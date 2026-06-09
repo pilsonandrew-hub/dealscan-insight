@@ -117,20 +117,20 @@ const NON_DEALER_TARGET_PATTERNS = [
     /\b(?:jail|prisoner)\s+(?:van|transport)\b/i,
 ];
 const NON_VEHICLE_PART_PATTERNS = [
-    /\btruck\s+bed\b/i,
-    /\bpickup\s+bed\b/i,
-    /\bcamper\s+shell\b/i,
-    /\btonneau\s+cover\b/i,
-    /\bbed\s+cap\b/i,
-    /\btruck\s+cap\b/i,
-    /\btruck\s+topper\b/i,
-    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i,
-    /\btailgate\s+(?:assembly|part|only)\b/i,
-    /\b(?:truck|pickup)\s+bed\s+liner\b/i,
-    /\bbed\s+liner\s+(?:kit|only)\b/i,
-    /\bvehicle\s+parts\b/i,
-    /\butility\s+body\b/i,
-    /\bservice\s+body\b/i,
+    /\btruck\s+bed\b/i, // truck bed
+    /\bpickup\s+bed\b/i, // pickup bed
+    /\bcamper\s+shell\b/i, // camper shell
+    /\btonneau\s+cover\b/i, // tonneau
+    /\bbed\s+cap\b/i, // bed cap
+    /\btruck\s+cap\b/i, // truck cap
+    /\btruck\s+topper\b/i, // truck topper
+    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i, // tailgate
+    /\btailgate\s+(?:assembly|part|only)\b/i, // tailgate
+    /\b(?:truck|pickup)\s+bed\s+liner\b/i, // bed liner
+    /\bbed\s+liner\s+(?:kit|only)\b/i, // bed liner
+    /\bvehicle\s+parts\b/i, // vehicle parts
+    /\butility\s+body\b/i, // utility body
+    /\bservice\s+body\b/i, // service body
 ];
 
 await Actor.init();

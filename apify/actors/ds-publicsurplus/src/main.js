@@ -61,6 +61,22 @@ const CONDITION_REJECT_PATTERNS = [
     /\bwarning\s+lights?\s+on\s+(?:the\s+)?dash\b/i,
     /\binvolved\s+in\s+(?:a\s+)?motor\s+vehicle\s+accident\b/i,
 ];
+const NON_VEHICLE_PART_PATTERNS = [
+    /\btruck\s+bed\b/i, // truck bed
+    /\bpickup\s+bed\b/i, // pickup bed
+    /\bcamper\s+shell\b/i, // camper shell
+    /\btonneau\s+cover\b/i, // tonneau
+    /\bbed\s+cap\b/i, // bed cap
+    /\butility\s+body\b/i, // utility body
+    /\bservice\s+body\b/i, // service body
+    /\btruck\s+cap\b/i, // truck cap
+    /\btruck\s+topper\b/i, // truck topper
+    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i, // tailgate
+    /\btailgate\s+(?:assembly|part|only)\b/i, // tailgate
+    /\b(?:truck|pickup)\s+bed\s+liner\b/i, // bed liner
+    /\bbed\s+liner\s+(?:kit|only)\b/i, // bed liner
+    /\bvehicle\s+parts\b/i, // vehicle parts
+];
 
 const BASE_URL = 'https://www.publicsurplus.com';
 // 'all' = nationwide search across all agencies (not just WA)
@@ -137,6 +153,7 @@ function normalizeText(value) {
 function isVehicle(title) {
     const lower = normalizeText(title).toLowerCase();
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
+    if (NON_VEHICLE_PART_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     return VEHICLE_KEYWORDS.some((keyword) => lower.includes(keyword))
         || VEHICLE_MAKES.some((make) => lower.includes(make));
 }
@@ -303,7 +320,8 @@ function hasConditionReject(vehicle) {
         vehicle?.description,
         vehicle?.detail_text,
     ].filter(Boolean).join(' ').toLowerCase();
-    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(text));
+    return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(text))
+        || NON_VEHICLE_PART_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function extractDetailText(bodyText) {
