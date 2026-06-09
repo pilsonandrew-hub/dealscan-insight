@@ -41,6 +41,22 @@ def test_classify_clean_age_mileage_gate_as_unexpected():
     )
 
 
+def test_default_clean_candidate_gate_uses_standard_lane_not_premium_only():
+    row = {
+        "status": "skipped_margin",
+        "error_message": "margin_below_floor",
+        "year": 2018,
+        "mileage": 57254,
+        "vin_present": True,
+        "auction_active": True,
+    }
+
+    assert (
+        report_delivery_rejection_candidates.classify_rejection(row, now_year=2026)
+        == "clean_margin_rejection"
+    )
+
+
 def test_classify_policy_gate_and_dirty_rows():
     policy = {
         "status": "skipped_gate",

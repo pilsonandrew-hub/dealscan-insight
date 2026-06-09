@@ -22,4 +22,7 @@ def test_delivery_rejection_proof_workflow_uses_rest_read_path_only():
     assert "--via-rest" in text
     assert "--lookback-hours" in text
     assert "--max-mileage" in text
+    assert 'default: "100000"' in text
+    assert 'default: "10"' in text
+    assert 'default: "50000"' not in text
     assert "set -x" not in lower

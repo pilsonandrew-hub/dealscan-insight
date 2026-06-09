@@ -17,6 +17,8 @@ from report_pricing_blocked_source_candidates import (
 
 
 DEFAULT_STATUSES = ("skipped_gate", "skipped_margin", "skipped_ceiling", "skipped_proof")
+STANDARD_MAX_MILEAGE = 100_000
+STANDARD_MAX_AGE_YEARS = 10
 POLICY_GATE_PREFIXES = (
     "title_brand_rejected",
     "commercial_vehicle",
@@ -52,8 +54,8 @@ def classify_rejection(
     row: dict[str, Any],
     *,
     now_year: Optional[int] = None,
-    max_mileage: int = 50000,
-    max_age_years: int = 4,
+    max_mileage: int = STANDARD_MAX_MILEAGE,
+    max_age_years: int = STANDARD_MAX_AGE_YEARS,
 ) -> str:
     status = str(row.get("status") or "").strip()
     reason = str(row.get("error_message") or "").strip()
@@ -207,8 +209,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", help="Env file to read for Supabase REST credentials.")
     parser.add_argument("--lookback-hours", type=int, default=4)
-    parser.add_argument("--max-mileage", type=int, default=50000)
-    parser.add_argument("--max-age-years", type=int, default=4)
+    parser.add_argument("--max-mileage", type=int, default=STANDARD_MAX_MILEAGE)
+    parser.add_argument("--max-age-years", type=int, default=STANDARD_MAX_AGE_YEARS)
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--include-dirty", action="store_true")
     parser.add_argument("--via-rest", action="store_true", help="Required: read through Supabase REST.")
