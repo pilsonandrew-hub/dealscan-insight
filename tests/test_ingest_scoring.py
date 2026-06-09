@@ -69,6 +69,16 @@ def test_coerce_float_accepts_comma_formatted_numeric_strings():
     assert score_module._coerce_float(" $12,345.67 ") == 12345.67
 
 
+def test_purple_wave_source_uses_peer_auction_source_scoring():
+    slug_vehicle = {"source_site": "purplewave"}
+    display_vehicle = {"source_site": "Purple Wave"}
+
+    assert score_module._make_velocity_score(slug_vehicle) == 68.0
+    assert score_module._source_score_v2(slug_vehicle) == 0.65
+    assert score_module._make_velocity_score(display_vehicle) == 68.0
+    assert score_module._source_score_v2(display_vehicle) == 0.65
+
+
 def test_score_deal_rejected_tier_accepts_formatted_mmr_provenance():
     result = score_deal(
         bid=0,
