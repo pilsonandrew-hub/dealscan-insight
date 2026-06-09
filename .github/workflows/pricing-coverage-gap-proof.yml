@@ -10,11 +10,11 @@ on:
       max_mileage:
         description: "Maximum mileage for clean proxy opportunity reporting"
         required: true
-        default: "50000"
+        default: "100000"
       max_age_years:
         description: "Maximum vehicle age in years for clean proxy opportunity reporting"
         required: true
-        default: "4"
+        default: "10"
       limit:
         description: "Maximum candidates to print"
         required: true

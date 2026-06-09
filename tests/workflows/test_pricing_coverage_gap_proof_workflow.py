@@ -14,3 +14,12 @@ def test_pricing_coverage_gap_proof_uses_supabase_rest():
     assert "max_age_years" in text
     assert "MAX_AGE_YEARS" in text
     assert "--max-age-years" in text
+
+
+def test_pricing_coverage_gap_proof_defaults_to_standard_lane():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'default: "100000"' in text
+    assert 'default: "10"' in text
+    assert 'default: "50000"' not in text
+    assert 'default: "4"' not in text

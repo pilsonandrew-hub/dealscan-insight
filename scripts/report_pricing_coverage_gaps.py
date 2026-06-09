@@ -12,6 +12,10 @@ from typing import Optional
 import psycopg2
 import psycopg2.extras
 
+from backend.business_rules.constants import (
+    STANDARD_MAX_MILEAGE,
+    STANDARD_VEHICLE_MAX_AGE_YEARS,
+)
 from live_verification_support import get_database_url
 from report_pricing_blocked_source_candidates import (
     _fetch_postgrest_rows,
@@ -530,8 +534,8 @@ def main() -> int:
     parser.add_argument("--dsn", help="Postgres DSN. Defaults to env/.env live helpers.")
     parser.add_argument("--env-file", help="Env file to read when DSN is not provided.")
     parser.add_argument("--lookback-days", type=int, default=7)
-    parser.add_argument("--max-mileage", type=int, default=50000)
-    parser.add_argument("--max-age-years", type=int, default=4)
+    parser.add_argument("--max-mileage", type=int, default=STANDARD_MAX_MILEAGE)
+    parser.add_argument("--max-age-years", type=int, default=STANDARD_VEHICLE_MAX_AGE_YEARS)
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument(
         "--via-rest",
