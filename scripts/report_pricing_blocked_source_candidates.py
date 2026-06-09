@@ -18,6 +18,10 @@ from urllib import request as urllib_request
 import psycopg2
 import psycopg2.extras
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from backend.business_rules.constants import (
     STANDARD_MAX_MILEAGE,
     STANDARD_VEHICLE_MAX_AGE_YEARS,
