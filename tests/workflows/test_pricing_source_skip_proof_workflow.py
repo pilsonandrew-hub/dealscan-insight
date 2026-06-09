@@ -22,3 +22,12 @@ def test_pricing_source_skip_proof_workflow_uses_rest_read_path_only():
     assert "--lookback-days" in text
     assert "--max-mileage" in text
     assert "set -x" not in lower
+
+
+def test_pricing_source_skip_proof_defaults_to_standard_lane():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'default: "100000"' in text
+    assert 'default: "10"' in text
+    assert 'default: "50000"' not in text
+    assert 'default: "4"' not in text
