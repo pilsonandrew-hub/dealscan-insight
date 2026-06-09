@@ -41,11 +41,17 @@ Proof-only aggregate:
 When scored locally with these proof comps only, the candidate produced:
 
 - Pricing maturity: `market_comp`
-- DOS: 85.6
+- DOS: 86.3
 - Investment grade: Platinum
 - Ceiling pass: true
-- Gross margin: $20,700
-- Max bid: $17,600
-- Bid headroom: $17,300
+- MMR estimate used by scorer: $18,662.22
+- Gross margin: $17,147.22
+- Max bid: $14,714.78
+- Bid headroom: $14,414.78
+- Expected close bid: $5,770.41
+
+The proof metrics above come from one deterministic `score_deal` invocation using
+the $25,194 retail-comp average, $300 current bid, 3 comps, 0.75 comp confidence,
+and the scorer's existing conservative retail-to-wholesale conversion.
 
 Truth label: **locally validated only** as an enriched proof candidate. Not live-confirmed accepted yield until the source row is ingested through a governed actor/proof path and the comp evidence is inserted only through the governed external market comp workflow.
