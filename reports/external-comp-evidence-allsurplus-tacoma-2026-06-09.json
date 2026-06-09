@@ -1,0 +1,53 @@
+{
+  "source_run_id": "manual-2026-06-09-allsurplus-tacoma-standard-lane-external-listing",
+  "source_url": "https://www.carfax.com/Used-Toyota-Tacoma-Birmingham-AL_w641_c19875",
+  "confidence_notes": "External active retail listing evidence for active clean AllSurplus 2025 Toyota Tacoma standard-lane pricing gaps in Alabama. Active listings are not closed-sale outcome evidence; this seed is restricted to the exact year/make/model/state pricing key and must not weaken proxy-pricing alert safety.",
+  "vehicle": {
+    "year": 2025,
+    "make": "Toyota",
+    "model": "Tacoma",
+    "state": "AL"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.carfax.com/Used-Toyota-Tacoma-Birmingham-AL_w641_c19875",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 42706,
+      "mileage": 4451,
+      "vin": "3TMLB5JN4SM106207",
+      "listing_id": "carfax-3TMLB5JN4SM106207",
+      "title": "2025 Toyota Tacoma TRD Off Road 4WD",
+      "title_history_caveat": "CARFAX active retail listing near Birmingham, AL; no accident/damage and one-owner claims shown; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-Toyota-Opelika-AL_m33_c2534",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 33595,
+      "mileage": 34919,
+      "vin": "3TMKB5FN4SM025633",
+      "listing_id": "carfax-3TMKB5FN4SM025633",
+      "title": "2025 Toyota Tacoma SR5",
+      "title_history_caveat": "CARFAX active retail listing in Opelika, AL; no accident/damage and one-owner claims shown; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2025-Toyota-Tacoma_z39963",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 39991,
+      "mileage": 4262,
+      "vin": "3TYLC5LN1ST033120",
+      "listing_id": "carfax-3TYLC5LN1ST033120",
+      "title": "2025 Toyota Tacoma 4WD",
+      "title_history_caveat": "CARFAX active retail listing; no accident/damage and one-owner claims shown; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://mullinaxford.com/for-sale/certified-toyota-tacoma-sr/2025-toyota-tacoma-sr-3tykd5hn9st025817",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 35200,
+      "mileage": 7027,
+      "vin": "3TYKD5HN9ST025817",
+      "listing_id": "mullinax-25817M",
+      "title": "2025 Toyota Tacoma SR RWD",
+      "title_history_caveat": "Mullinax Ford of Mobile active retail listing in Mobile, AL; Ford Blue Advantage/complete CARFAX language is listing context only, not closed-sale evidence."
+    }
+  ]
+}
