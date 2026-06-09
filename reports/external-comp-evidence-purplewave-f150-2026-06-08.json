@@ -1,0 +1,40 @@
+{
+  "source_run_id": "purplewave-f150-ec8354-proof-2026-06-08",
+  "source_url": "https://www.truecar.com/used-cars-for-sale/listings/ford/f-150/year-2018/location-san-diego-ca/",
+  "vehicle": {
+    "year": 2018,
+    "make": "ford",
+    "model": "f150",
+    "state": "ca"
+  },
+  "confidence_notes": "External active retail listing comps for a proof-only Purple Wave F-150 candidate. Active-listing evidence, not closed-sale outcome evidence. Do not use as an alert or production source-yield claim without governed seed workflow and source-row ingestion proof.",
+  "comps": [
+    {
+      "source_url": "https://www.truecar.com/used-cars-for-sale/listings/ford/f-150/year-2018/location-san-diego-ca/",
+      "captured_at": "2026-06-09T01:55:00Z",
+      "price": 22684,
+      "mileage": 85238,
+      "listing_id": "truecar-2018-f150-xlt-supercab-85238",
+      "title": "2018 Ford F-150 XLT SuperCab 6.5' Box 2WD",
+      "title_history_caveat": "Active retail listing evidence; title history not independently verified."
+    },
+    {
+      "source_url": "https://www.truecar.com/used-cars-for-sale/listings/ford/f-150/year-2018/location-san-diego-ca/",
+      "captured_at": "2026-06-09T01:55:00Z",
+      "price": 22900,
+      "mileage": 69255,
+      "listing_id": "truecar-2018-f150-xl-supercab-69255",
+      "title": "2018 Ford F-150 XL SuperCab 6.5' Box 2WD",
+      "title_history_caveat": "Active retail listing evidence; title history not independently verified."
+    },
+    {
+      "source_url": "https://www.truecar.com/used-cars-for-sale/listings/ford/f-150/year-2018/location-san-diego-ca/",
+      "captured_at": "2026-06-09T01:55:00Z",
+      "price": 29998,
+      "mileage": 25153,
+      "listing_id": "truecar-2018-f150-xl-supercab-25153",
+      "title": "2018 Ford F-150 XL SuperCab 6.5' Box 2WD",
+      "title_history_caveat": "Active retail listing evidence; title history not independently verified."
+    }
+  ]
+}
