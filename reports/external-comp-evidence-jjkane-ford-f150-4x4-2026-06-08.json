@@ -1,0 +1,43 @@
+{
+  "source_run_id": "manual-2026-06-08-jjkane-ford-f150-4x4-external-listing",
+  "source_url": "https://www.carfax.com/Used-2022-Ford-F-150-Police-Responder_x50389",
+  "confidence_notes": "External active retail listing evidence for the live JJ Kane 2022 Ford F150 4x4 Police Responder proxy-pricing gap. Active listings are not closed-sale outcome evidence; this seed only covers the exact model key used by DealerScope pricing coverage.",
+  "vehicle": {
+    "year": 2022,
+    "make": "Ford",
+    "model": "F150 4x4",
+    "state": "FL"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.carfax.com/Used-2022-Ford-F-150-Police-Responder_x50389",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 32001,
+      "mileage": 45320,
+      "vin": "1FTFW1P89NKE40692",
+      "listing_id": "carfax-1FTFW1P89NKE40692",
+      "title": "2022 Ford F-150 Police Responder 4WD SuperCrew",
+      "title_history_caveat": "CARFAX active retail listing; no accident or damage reported in displayed listing; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2022-Ford-F-150-Police-Responder_x50389",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 27880,
+      "mileage": 57955,
+      "vin": "1FTFW1P88NKE33443",
+      "listing_id": "carfax-1FTFW1P88NKE33443",
+      "title": "2022 Ford F-150 Police Responder 4WD SuperCrew",
+      "title_history_caveat": "CARFAX active retail listing with damage/commercial-use caveat shown; retained as low-end comp, not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carfax.com/Used-2022-Ford-F-150-Police-Responder_x50389",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 31969,
+      "mileage": 43566,
+      "vin": "1FTFW1P83NKE89922",
+      "listing_id": "carfax-1FTFW1P83NKE89922",
+      "title": "2022 Ford F-150 Police Responder 4WD SuperCrew",
+      "title_history_caveat": "CARFAX active retail listing with accident/government-use caveat shown; retained as retail comp context, not closed-sale evidence."
+    }
+  ]
+}

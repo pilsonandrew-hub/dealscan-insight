@@ -1,0 +1,43 @@
+{
+  "source_run_id": "manual-2026-06-08-jjkane-jeep-compass-external-listing",
+  "source_url": "https://www.carfax.com/Used-2023-Jeep-Compass-Latitude_x51839",
+  "confidence_notes": "External active retail listing evidence for the live JJ Kane 2023 Jeep Compass proxy-pricing gap. Active listings are not closed-sale outcome evidence; this seed only covers the exact model key used by DealerScope pricing coverage.",
+  "vehicle": {
+    "year": 2023,
+    "make": "Jeep",
+    "model": "Compass",
+    "state": "UT"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.carfax.com/Used-2023-Jeep-Compass-Latitude_x51839",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 20861,
+      "mileage": 21055,
+      "vin": "3C4NJDBN6PT504469",
+      "listing_id": "carfax-3C4NJDBN6PT504469",
+      "title": "2023 Jeep Compass Latitude 4WD",
+      "title_history_caveat": "CARFAX active retail listing; no accident or damage reported in displayed listing; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.cargurus.com/Cars/l-Used-2023-Jeep-Compass-Latitude-4WD-t105614",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 21241,
+      "mileage": 32724,
+      "vin": "3C4NJDBN0PT520103",
+      "listing_id": "cargurus-3C4NJDBN0PT520103",
+      "title": "2023 Jeep Compass Latitude 4WD",
+      "title_history_caveat": "CarGurus active retail listing; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.cargurus.com/Cars/l-Used-2023-Jeep-Compass-Latitude-4WD-t105614",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 21853,
+      "mileage": 10598,
+      "vin": "3C4NJDBN8PT505882",
+      "listing_id": "cargurus-3C4NJDBN8PT505882",
+      "title": "2023 Jeep Compass Latitude 4WD",
+      "title_history_caveat": "CarGurus active retail listing; not closed-sale evidence."
+    }
+  ]
+}

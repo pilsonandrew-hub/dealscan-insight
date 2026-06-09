@@ -1,0 +1,43 @@
+{
+  "source_run_id": "manual-2026-06-08-jjkane-tacoma-4x4-external-listing",
+  "source_url": "https://www.carfax.com/Used-2023-Toyota-Tacoma_z39044",
+  "confidence_notes": "External active retail listing evidence for the live JJ Kane 2023 Toyota Tacoma 4x4 proxy-pricing gap. Active listings are not closed-sale outcome evidence; this seed only covers the exact model key used by DealerScope pricing coverage.",
+  "vehicle": {
+    "year": 2023,
+    "make": "Toyota",
+    "model": "Tacoma 4x4",
+    "state": "AL"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.carfax.com/Used-2023-Toyota-Tacoma_z39044",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 37996,
+      "mileage": 35678,
+      "vin": "3TMCZ5AN1PM570431",
+      "listing_id": "carfax-3TMCZ5AN1PM570431",
+      "title": "2023 Toyota Tacoma TRD Off Road 4WD",
+      "title_history_caveat": "CARFAX active retail listing; no accident or damage reported in displayed listing; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.edmunds.com/toyota/tacoma/2023/double-cab/",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 38995,
+      "mileage": 23992,
+      "vin": "3TMDZ5BN5PM148536",
+      "listing_id": "edmunds-3TMDZ5BN5PM148536",
+      "title": "Certified 2023 Toyota Tacoma TRD Off Road Double Cab 4WD",
+      "title_history_caveat": "Edmunds active retail listing with AutoCheck clean-title summary shown; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.edmunds.com/toyota/tacoma/2023/double-cab/",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 35817,
+      "mileage": 19418,
+      "vin": "3TYCZ5AN9PT141574",
+      "listing_id": "edmunds-3TYCZ5AN9PT141574",
+      "title": "2023 Toyota Tacoma TRD Sport Double Cab",
+      "title_history_caveat": "Edmunds active retail listing with AutoCheck clean-title summary shown; not closed-sale evidence."
+    }
+  ]
+}

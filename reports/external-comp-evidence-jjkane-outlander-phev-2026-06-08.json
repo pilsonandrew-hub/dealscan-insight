@@ -1,0 +1,43 @@
+{
+  "source_run_id": "manual-2026-06-08-jjkane-outlander-phev-external-listing",
+  "source_url": "https://www.iseecars.com/used_cars-t5698-2022-mitsubishi-outlander-phev-for-sale",
+  "confidence_notes": "External active retail listing evidence for the live JJ Kane 2022 Mitsubishi Outlander PHEV proxy-pricing gap. Active listings are not closed-sale outcome evidence; this seed only covers the exact model key used by DealerScope pricing coverage.",
+  "vehicle": {
+    "year": 2022,
+    "make": "Mitsubishi",
+    "model": "Outlander PHEV",
+    "state": "NC"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.iseecars.com/used_cars-t5698-2022-mitsubishi-outlander-phev-for-sale",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 18992,
+      "mileage": 66512,
+      "vin": "JA4J2VA71NZ051754",
+      "listing_id": "iseecars-JA4J2VA71NZ051754",
+      "title": "2022 Mitsubishi Outlander PHEV GT",
+      "title_history_caveat": "iSeeCars active retail listing; mileage exceeds DealerScope acquisition ceiling but is used only as retail comp context, not candidate eligibility."
+    },
+    {
+      "source_url": "https://www.iseecars.com/used_cars-t5698-2022-mitsubishi-outlander-phev-for-sale",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 18988,
+      "mileage": 56430,
+      "vin": "JA4J2VA76NZ068520",
+      "listing_id": "iseecars-JA4J2VA76NZ068520",
+      "title": "2022 Mitsubishi Outlander PHEV SEL",
+      "title_history_caveat": "iSeeCars active retail listing; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.iseecars.com/used_cars-t5698-2022-mitsubishi-outlander-phev-for-sale",
+      "captured_at": "2026-06-09T00:40:00Z",
+      "price": 20649,
+      "mileage": 57329,
+      "vin": "JA4J2VA77NZ063181",
+      "listing_id": "iseecars-JA4J2VA77NZ063181",
+      "title": "2022 Mitsubishi Outlander PHEV SEL",
+      "title_history_caveat": "iSeeCars active retail listing; not closed-sale evidence."
+    }
+  ]
+}
