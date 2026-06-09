@@ -5,6 +5,9 @@ const SOURCE_TYPE = 'purplewave_proof';
 const BASE_URL = 'https://www.purplewave.com';
 const SEARCH_URL = `${BASE_URL}/v1/search/search`;
 const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_MIN_YEAR = CURRENT_YEAR - 10;
+const DEFAULT_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 const HIGH_RUST_STATES = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
@@ -174,10 +177,19 @@ function hasCompleteIdentity(row) {
     return Boolean(row.year && row.make && row.model && row.vin && row.mileage !== null);
 }
 
+function failsDealerScopeAgeMileageGate(year, mileage, minYear, maxMileage) {
+    const numericYear = Number(year);
+    const numericMileage = Number(mileage);
+    if (!numericYear || numericYear < minYear) return true;
+    if (!numericMileage || numericMileage <= 0) return false;
+    const ageYears = Math.max(1, CURRENT_YEAR - numericYear);
+    return numericMileage > maxMileage || numericMileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
+
 function classifyPurpleWaveLot(row, options = {}) {
     const {
-        minYear = CURRENT_YEAR - 4,
-        maxMileage = 50000,
+        minYear = DEFAULT_MIN_YEAR,
+        maxMileage = DEFAULT_MAX_MILEAGE,
         minBid = 500,
         maxBid = 75000,
         requireMarketPrice = true,
@@ -197,7 +209,7 @@ function classifyPurpleWaveLot(row, options = {}) {
     if (!hasCompleteIdentity(row)) {
         return { accepted: false, reason: 'missing_required_data' };
     }
-    if (Number(row.year) < minYear || Number(row.mileage) > maxMileage) {
+    if (failsDealerScopeAgeMileageGate(row.year, row.mileage, minYear, maxMileage)) {
         return { accepted: false, reason: 'age_mileage_prefilter' };
     }
     if (HIGH_RUST_STATES.has(row.state) && Number(row.year) < CURRENT_YEAR - 2) {
@@ -268,8 +280,9 @@ function buildSourceQualityProof(rows, options = {}) {
         fetch_failed: Boolean(options.fetchFailed),
         fetch_error: options.fetchError || '',
         target_contract: {
-            minYear: options.minYear ?? CURRENT_YEAR - 4,
-            maxMileage: options.maxMileage ?? 50000,
+            minYear: options.minYear ?? DEFAULT_MIN_YEAR,
+            maxMileage: options.maxMileage ?? DEFAULT_MAX_MILEAGE,
+            standardMaxMilesPerYear: STANDARD_MAX_MILES_PER_YEAR,
             minBid: options.minBid ?? 500,
             maxBid: options.maxBid ?? 75000,
             requireMarketPrice: options.requireMarketPrice ?? true,
@@ -304,8 +317,8 @@ try {
     const maxPages = Number(input.maxPages || 1);
     const perPage = Number(input.perPage || 30);
     const options = {
-        minYear: Number(input.minYear || CURRENT_YEAR - 4),
-        maxMileage: Number(input.maxMileage || 50000),
+        minYear: Number(input.minYear || DEFAULT_MIN_YEAR),
+        maxMileage: Number(input.maxMileage || DEFAULT_MAX_MILEAGE),
         minBid: Number(input.minBid || 500),
         maxBid: Number(input.maxBid || 75000),
         requireMarketPrice: input.requireMarketPrice !== false,

@@ -32,8 +32,9 @@ import { Actor } from 'apify';
 const SOURCE = 'hibid';
 const BASE_URL = 'https://hibid.com';
 const GRAPHQL_URL = `${BASE_URL}/graphql`;
-const DEFAULT_MIN_YEAR = new Date().getFullYear() - 4;
-const DEFAULT_MAX_MILEAGE = 50000;
+const DEFAULT_MIN_YEAR = new Date().getFullYear() - 10;
+const DEFAULT_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 // --- Canadian province codes to reject ---
 const CANADIAN_PROVINCES = new Set([
@@ -139,8 +140,8 @@ const {
     webhookSecret = null,
 } = input;
 
-const EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR);
-const EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE);
+const EFFECTIVE_MIN_YEAR = Number(minYear) || DEFAULT_MIN_YEAR;
+const EFFECTIVE_MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE;
 const targetStateSet = new Set(targetStates.map(s => String(s).toUpperCase()));
 const seenLotIds = new Set();
 let totalFound = 0;
@@ -268,6 +269,15 @@ function addProofSample(bucket, listing, reason) {
     });
 }
 
+function failsDealerScopeAgeMileageGate(year, mileage) {
+    if (!year) return false;
+    if (year < EFFECTIVE_MIN_YEAR) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const currentYear = new Date().getFullYear();
+    const ageYears = Math.max(1, currentYear - Number(year));
+    return mileage > EFFECTIVE_MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
+
 function passesFilters(listing, log) {
     const titleLower = String(listing.title || '').toLowerCase();
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(titleLower))) {
@@ -329,10 +339,10 @@ function passesFilters(listing, log) {
     }
 
     // Year
-    if (!listing.year || listing.year < EFFECTIVE_MIN_YEAR) {
+    if (!listing.year || failsDealerScopeAgeMileageGate(listing.year, listing.mileage)) {
         log.debug(`[SKIP-YEAR] ${listing.year}`);
         proofCounters.rows_excluded_age_mileage_prefilter++;
-        addProofSample('age_mileage_prefilter', listing, listing.year ? 'age_over_4_years' : 'missing_year');
+        addProofSample('age_mileage_prefilter', listing, listing.year ? 'age_or_mileage_exceeded' : 'missing_year');
         return false;
     }
 
@@ -343,13 +353,6 @@ function passesFilters(listing, log) {
         addProofSample('missing_mileage', listing, 'missing_mileage');
         return false;
     }
-    if (listing.mileage !== null && listing.mileage > EFFECTIVE_MAX_MILEAGE) {
-        log.debug(`[SKIP-MILES] ${listing.mileage}`);
-        proofCounters.rows_excluded_age_mileage_prefilter++;
-        addProofSample('age_mileage_prefilter', listing, 'mileage_over_50k');
-        return false;
-    }
-
     // Bid range. Apply after identity, age, and mileage so source-quality proof
     // does not hide old or incomplete inventory inside zero-pricing counts.
     const bid = listing.current_bid;
@@ -642,6 +645,7 @@ const proof = {
     requested_max_mileage: maxMileage,
     effective_min_year: EFFECTIVE_MIN_YEAR,
     effective_max_mileage: EFFECTIVE_MAX_MILEAGE,
+    standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR,
     ...proofCounters,
     missing_required_data_samples: proofSamples.missing_required_data,
     missing_mileage_samples: proofSamples.missing_mileage,

@@ -22,8 +22,9 @@ import { PlaywrightCrawler } from 'crawlee';
 const SOURCE = 'proxibid';
 const BASE = 'https://www.proxibid.com';
 const CURRENT_YEAR = new Date().getFullYear();
-const DEFAULT_MIN_YEAR = CURRENT_YEAR - 4;
-const DEFAULT_MAX_MILEAGE = 50000;
+const DEFAULT_MIN_YEAR = CURRENT_YEAR - 10;
+const DEFAULT_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 const DEFAULT_WEBHOOK_SECRET = 'rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA';
 const actorRunId = process.env.APIFY_ACTOR_RUN_ID || process.env.APIFY_RUN_ID || null;
 
@@ -101,8 +102,8 @@ const {
     targetCategories = "",
 } = input;
 
-const EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR);
-const EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE);
+const EFFECTIVE_MIN_YEAR = Number(minYear) || DEFAULT_MIN_YEAR;
+const EFFECTIVE_MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE;
 
 const CATEGORY_NAVIGATION_PATH = ['Vehicles', 'Cars & Vehicles', 'Cars'];
 
@@ -163,6 +164,7 @@ const enrichmentProof = {
     requested_max_mileage: Number(maxMileage) || null,
     effective_min_year: EFFECTIVE_MIN_YEAR,
     effective_max_mileage: EFFECTIVE_MAX_MILEAGE,
+    standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR,
     detail_pages_attempted: 0,
     detail_pages_fetched: 0,
     detail_pages_failed: 0,
@@ -297,6 +299,14 @@ function parseVin(text) {
     return null;
 }
 
+function failsDealerScopeAgeMileageGate(year, mileage) {
+    if (!year) return false;
+    if (year < EFFECTIVE_MIN_YEAR) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, CURRENT_YEAR - Number(year));
+    return mileage > EFFECTIVE_MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
+
 function hasConditionReject(text) {
     const lower = normalize(text).toLowerCase();
     return CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower));
@@ -306,7 +316,7 @@ function applyBuyerGradeFilters(lot) {
     const reasons = [];
     const text = `${lot.title ?? ''} ${lot.detail_text ?? ''}`;
     if (hasConditionReject(text)) reasons.push('condition_reject');
-    if (lot.mileage !== null && lot.mileage !== undefined && lot.mileage > 50000) reasons.push('mileage_over_50k');
+    if (failsDealerScopeAgeMileageGate(lot.year, lot.mileage)) reasons.push('age_or_mileage_exceeded');
     return reasons;
 }
 
@@ -414,12 +424,8 @@ const crawler = new PlaywrightCrawler({
                 seenLotIds.add(card.lotId);
 
                 if (!make) continue;
-                if (!year || year < EFFECTIVE_MIN_YEAR) {
-                    recordPrefilterAgeMileageReject(card, year ? 'age_over_4_years' : 'missing_year', year, mileage);
-                    continue;
-                }
-                if (mileage !== null && mileage !== undefined && mileage > EFFECTIVE_MAX_MILEAGE) {
-                    recordPrefilterAgeMileageReject(card, 'mileage_over_50k', year, mileage);
+                if (!year || failsDealerScopeAgeMileageGate(year, mileage)) {
+                    recordPrefilterAgeMileageReject(card, year ? 'age_or_mileage_exceeded' : 'missing_year', year, mileage);
                     continue;
                 }
                 if (bid > 0 && (bid < minBid || bid > maxBid)) continue;

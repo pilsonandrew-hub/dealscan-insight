@@ -291,23 +291,26 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
         source = source_path.read_text(encoding="utf-8")
 
-        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 4", source)
-        self.assertIn("const DEFAULT_MAX_MILEAGE = 50000", source)
+        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 10", source)
+        self.assertIn("const DEFAULT_MAX_MILEAGE = 100000", source)
+        self.assertIn("const STANDARD_MAX_MILES_PER_YEAR = 18000", source)
         self.assertIn("minYear = DEFAULT_MIN_YEAR", source)
         self.assertIn("maxMileage = DEFAULT_MAX_MILEAGE", source)
-        self.assertNotIn("minYear = new Date().getFullYear() - 10", source)
-        self.assertNotIn("maxMileage = 100000", source)
+        self.assertNotIn("minYear = new Date().getFullYear() - 4", source)
+        self.assertNotIn("maxMileage = 50000", source)
 
     def test_hibid_v2_clamps_loose_runtime_inputs_to_dealerscope_gate(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
         source = source_path.read_text(encoding="utf-8")
 
-        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 4", source)
-        self.assertIn("const DEFAULT_MAX_MILEAGE = 50000", source)
-        self.assertIn("const EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR)", source)
-        self.assertIn("const EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE)", source)
-        self.assertIn("listing.year < EFFECTIVE_MIN_YEAR", source)
-        self.assertIn("listing.mileage > EFFECTIVE_MAX_MILEAGE", source)
+        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 10", source)
+        self.assertIn("const DEFAULT_MAX_MILEAGE = 100000", source)
+        self.assertIn("const EFFECTIVE_MIN_YEAR = Number(minYear) || DEFAULT_MIN_YEAR", source)
+        self.assertIn("const EFFECTIVE_MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE", source)
+        self.assertIn("STANDARD_MAX_MILES_PER_YEAR", source)
+        self.assertIn("failsDealerScopeAgeMileageGate(listing.year, listing.mileage)", source)
+        self.assertIn("mileage > EFFECTIVE_MAX_MILEAGE", source)
+        self.assertIn("mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR", source)
         self.assertIn("effective_min_year: EFFECTIVE_MIN_YEAR", source)
         self.assertIn("effective_max_mileage: EFFECTIVE_MAX_MILEAGE", source)
 
@@ -333,15 +336,11 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         source = source_path.read_text(encoding="utf-8")
 
         self.assertLess(
-            source.index("if (!listing.year || listing.year < EFFECTIVE_MIN_YEAR)"),
+            source.index("if (!listing.year || failsDealerScopeAgeMileageGate(listing.year, listing.mileage))"),
             source.index("if (bid === 0)"),
         )
         self.assertLess(
             source.index("if (listing.mileage === null)"),
-            source.index("if (bid === 0)"),
-        )
-        self.assertLess(
-            source.index("if (listing.mileage !== null && listing.mileage > EFFECTIVE_MAX_MILEAGE)"),
             source.index("if (bid === 0)"),
         )
 

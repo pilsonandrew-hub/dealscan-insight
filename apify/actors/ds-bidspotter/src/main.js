@@ -16,7 +16,8 @@ import { Actor } from 'apify';
 
 const SOURCE = 'bidspotter';
 const CURRENT_YEAR = new Date().getFullYear();
-const DEFAULT_MAX_MILEAGE = 50000;
+const DEFAULT_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 // ── State sets ──────────────────────────────────────────────────────────────
 
@@ -319,7 +320,7 @@ const {
     webhookUrl = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify',
     maxCatalogues = 30,
     maxMileage = DEFAULT_MAX_MILEAGE,
-    minYear = CURRENT_YEAR - 4,
+    minYear = CURRENT_YEAR - 10,
     targetStates = [...TARGET_STATES],
     categoryCode = 'Automobiles',
 } = input;
@@ -332,7 +333,7 @@ if (!firecrawlApiKey) {
 
 const MIN_BID = 500;
 const MAX_BID = 75000;
-const MIN_YEAR = Number(minYear) || CURRENT_YEAR - 4;
+const MIN_YEAR = Number(minYear) || CURRENT_YEAR - 10;
 const MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE;
 const targetStateSet = new Set(Array.isArray(targetStates) && targetStates.length ? targetStates : [...TARGET_STATES]);
 
@@ -379,6 +380,14 @@ function rejectForProof(counterKey, sampleKey, lot, details, reason, extra = {})
     if (samples && samples.length < 5) {
         samples.push(sampleForProof(lot, details, { reason, ...extra }));
     }
+}
+
+function failsDealerScopeAgeMileageGate(year, mileage) {
+    if (!year) return true;
+    if (year < MIN_YEAR) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, CURRENT_YEAR - Number(year));
+    return mileage > MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 
 // ── STEP 1: Find vehicle catalogues from Automobiles category page ──────────
@@ -533,27 +542,15 @@ for (let i = 0; i < toProcess.length; i++) {
             }
             console.log(`[BYPASS] Rust ${details.state} allowed — ${year}`);
         }
-        if (!year || year < MIN_YEAR) {
+        if (failsDealerScopeAgeMileageGate(year, details.mileage)) {
             console.log(`[SKIP] Year ${year}: ${lot.title.slice(0, 60)}`);
             rejectForProof(
                 'rows_excluded_age_mileage_prefilter',
                 'prefilter_age_mileage_rejected_samples',
                 lot,
                 details,
-                'model_year_reject',
-                { min_year: MIN_YEAR },
-            );
-            continue;
-        }
-        if (details.mileage != null && Number(details.mileage) > MAX_MILEAGE) {
-            console.log(`[SKIP] Mileage ${details.mileage}: ${lot.title.slice(0, 60)}`);
-            rejectForProof(
-                'rows_excluded_age_mileage_prefilter',
-                'prefilter_age_mileage_rejected_samples',
-                lot,
-                details,
-                'mileage_reject',
-                { max_mileage: MAX_MILEAGE },
+                year ? 'age_or_mileage_exceeded' : 'missing_model_year',
+                { min_year: MIN_YEAR, max_mileage: MAX_MILEAGE, standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR },
             );
             continue;
         }

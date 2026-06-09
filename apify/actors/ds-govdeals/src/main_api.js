@@ -49,8 +49,9 @@ const NAVIGATION_BUDGET_REQUIRED_MS = 90000;
 const PAGINATION_PAGE_REQUIRED_MS = 12000;
 const DETAIL_PAGE_REQUIRED_MS = 12000;
 const DETAIL_PAGE_TIMEOUT_MS = 12000;
-const MAX_MODEL_AGE_YEARS = 4;
-const MAX_MILEAGE = 50000;
+const STANDARD_MAX_MODEL_AGE_YEARS = 10;
+const STANDARD_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -215,7 +216,7 @@ function passes(item) {
     const state = (item.locationState || item.state || '').toUpperCase();
     const bid = item.currentBid || item.current_bid || item.assetBidPrice || 0;
     if (bid < minBid || bid > maxBid) return false;
-    if (failsAgeMileageCeiling(item)) return false;
+    if (failsDealerScopeAgeMileageGate(item)) return false;
     const year = parseInt(item.modelYear || item.year || 0);
     const currentYear = new Date().getFullYear();
     if (HIGH_RUST_STATES.has(state)) {
@@ -248,12 +249,16 @@ function parseMileageValue(value) {
     return Number.isNaN(mileage) ? 0 : mileage;
 }
 
-function failsAgeMileageCeiling(item) {
+function failsDealerScopeAgeMileageGate(item) {
     const year = parseInt(item.modelYear || item.year || 0, 10);
     const currentYear = new Date().getFullYear();
-    if (year && (currentYear - year) > MAX_MODEL_AGE_YEARS) return true;
+    if (!year) return false;
+    const ageYears = Math.max(1, currentYear - year);
+    if (ageYears > STANDARD_MAX_MODEL_AGE_YEARS) return true;
     const mileage = parseMileageValue(item.meterCount ?? item.meter_count ?? item.mileage ?? 0);
-    return mileage > 0 && mileage > MAX_MILEAGE;
+    if (mileage <= 0) return false;
+    if (mileage > STANDARD_MAX_MILEAGE) return true;
+    return mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 
 function recordPrefilterExclusion(lot) {
@@ -264,7 +269,7 @@ function recordPrefilterExclusion(lot) {
         }
         return;
     }
-    if (!failsAgeMileageCeiling(lot)) return;
+    if (!failsDealerScopeAgeMileageGate(lot)) return;
     sourceQualityStats.rows_excluded_age_mileage_prefilter++;
     if (sourceQualityStats.prefilter_age_mileage_rejected_samples.length < 10) {
         sourceQualityStats.prefilter_age_mileage_rejected_samples.push(normalizeLot(lot));
@@ -469,9 +474,9 @@ const crawler = new PlaywrightCrawler({
             const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));
             const pushableLots = completeLots.filter(lot => passes(lot));
             const incompleteLots = passingLots.filter(lot => !lot.vin || !lot.mileage);
-            const postAgeMileageRejectedLots = completeLots.filter(lot => failsAgeMileageCeiling(lot));
+            const postAgeMileageRejectedLots = completeLots.filter(lot => failsDealerScopeAgeMileageGate(lot));
             const postNonVehiclePartRejectedLots = completeLots.filter(lot => isNonVehiclePartLot(lot));
-            const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !isNonVehiclePartLot(lot) && !passes(lot));
+            const postPolicyRejectedLots = completeLots.filter(lot => !failsDealerScopeAgeMileageGate(lot) && !isNonVehiclePartLot(lot) && !passes(lot));
             const excludedAfterDetailAttempt = incompleteLots.filter(lot => sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             const excludedWithoutDetailAttempt = incompleteLots.filter(lot => !sourceQualityStats.detail_attempted_urls.has(lot.listing_url));
             sourceQualityStats.rows_excluded_missing_required_data = incompleteLots.length;
