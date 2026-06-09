@@ -2,6 +2,10 @@
 
 Scope: proof-only market-comp enrichment for a public Purple Wave candidate. This report does not authorize alert delivery, live bidding, or relaxed DealerScope gates.
 
+Production-source caveat: Purple Wave is not yet a recognized source in the
+scoring engine's source-specific mappings. A production Purple Wave actor must
+add and test that mapping before any live accepted-yield claim.
+
 ## Candidate
 
 - Source: Purple Wave
@@ -38,10 +42,12 @@ Proof-only aggregate:
 
 Mileage-spread note: the selected public comps span 25,153 to 85,238 miles,
 while the Purple Wave candidate has 71,023 miles. The two closer-mileage comps
-average $22,792. Using that narrower sensitivity value still produced
-`market_comp`, Platinum, and ceiling pass locally, but with lower economics:
-MMR estimate $16,882.96, gross margin $15,367.96, max bid $13,291.37, and bid
-headroom $12,991.37.
+average exactly $22,792.00: `($22,684 + $22,900) / 2`. The scoring engine's
+existing retail-to-wholesale conversion then yields
+`round($22,792.00 / 1.35, 2) = $16,882.96`. Using that narrower sensitivity
+value still produced `market_comp`, Platinum, and ceiling pass locally, but
+with lower economics: MMR estimate $16,882.96, gross margin $15,367.96, max bid
+$13,291.37, and bid headroom $12,991.37.
 
 ## DealerScope Proof Result
 
