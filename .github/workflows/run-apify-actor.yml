@@ -285,6 +285,9 @@ jobs:
               target_categories = (os.environ.get("TARGET_CATEGORIES") or "").strip()
               if target_categories:
                   actor_input["targetCategories"] = target_categories
+              search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
+              if search_query:
+                  actor_input["searchQuery"] = search_query
           run_timeout_secs = int(os.environ.get("ACTOR_TIMEOUT_SECS") or "1200")
           run_path = f"/acts/{actor_id}/runs?timeout={run_timeout_secs}"
           started = api("POST", run_path, actor_input).get("data", {})

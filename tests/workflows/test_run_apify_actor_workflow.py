@@ -63,6 +63,15 @@ def test_run_apify_actor_workflow_supports_all_enabled_source_proofs():
         assert actor_id in text
 
 
+def test_run_apify_actor_workflow_passes_search_query_to_generic_source_proofs():
+    text = WORKFLOW.read_text()
+
+    generic_branch = text[text.index("else:") : text.index("run_timeout_secs = int")]
+    assert '"maxItems": int(os.environ.get("MAX_ITEMS") or "200")' in generic_branch
+    assert 'search_query = (os.environ.get("SEARCH_QUERY") or "").strip()' in generic_branch
+    assert 'actor_input["searchQuery"] = search_query' in generic_branch
+
+
 def test_run_apify_actor_workflow_supports_bounded_bidspotter_supply_proof():
     text = WORKFLOW.read_text()
 
