@@ -87,6 +87,23 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertIn("ds-bidspotter-12hr-apify-native", workflow)
         self.assertIn("FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}", workflow)
 
+    def test_purplewave_actor_is_manifested_deployable_and_manual_only(self):
+        manifest_path = self.repo_root / "apify" / "deployment.json"
+        deploy_workflow_path = self.repo_root / ".github" / "workflows" / "apify-deploy.yml"
+        run_workflow_path = self.repo_root / ".github" / "workflows" / "run-apify-actor.yml"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        deploy_workflow = deploy_workflow_path.read_text(encoding="utf-8")
+        run_workflow = run_workflow_path.read_text(encoding="utf-8")
+
+        actor = payload["actors"].get("ds-purplewave")
+        self.assertIsNotNone(actor)
+        self.assertEqual(actor["id"], "4U9HavhubOdV5vDCm")
+        self.assertEqual(actor["status"], "manual_proof")
+        self.assertNotIn("scheduleId", actor)
+        self.assertNotIn("webhookId", actor)
+        self.assertRegex(deploy_workflow, r'"ds-purplewave":\s+"4U9HavhubOdV5vDCm"')
+        self.assertRegex(run_workflow, r'"ds-purplewave":\s+"4U9HavhubOdV5vDCm"')
+
     def test_hibid_v2_actor_is_enabled_on_secret_managed_apify_schedule(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"
         workflow_path = self.repo_root / ".github" / "workflows" / "configure-hibid-v2-apify-schedule.yml"

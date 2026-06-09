@@ -1,0 +1,14 @@
+{
+  "name": "ds-purplewave-proof",
+  "version": "1.0.0",
+  "description": "DealerScope read-only Purple Wave pickup/van proof actor",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.mjs"
+  },
+  "dependencies": {
+    "apify": "^3.0.0"
+  }
+}

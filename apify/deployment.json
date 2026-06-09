@@ -131,6 +131,11 @@
       "notes": "BidSpotter.com \u2014 Firecrawl-backed actor for AWS WAF protected pages. US-only filter applied. Cadence is configured as an Apify-native schedule by GitHub Actions so FIRECRAWL_API_KEY and WEBHOOK_SECRET are stored as secret actor env vars, not in repo or schedule input.",
       "scheduleStatus": "enabled_live"
     },
+    "ds-purplewave": {
+      "id": "4U9HavhubOdV5vDCm",
+      "status": "manual_proof",
+      "notes": "Purple Wave pickup/van read-only proof actor. Manual proof only: no schedule, no webhook, no alert delivery. Requires explicit market-price evidence before any row can be pushed as accepted proof output."
+    },
     "ds-hibid": {
       "id": "e8UeyRvQ6QSnX5fhP",
       "status": "RETIRED",
