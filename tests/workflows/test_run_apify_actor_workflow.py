@@ -105,6 +105,20 @@ def test_run_apify_actor_workflow_supports_bounded_equipmentfacts_supply_proof()
     assert '"maxMileage": 50000' in text
 
 
+def test_run_apify_actor_workflow_supports_bounded_purplewave_proof():
+    text = WORKFLOW.read_text()
+
+    assert "ds-purplewave" in text
+    assert "4U9HavhubOdV5vDCm" in text
+    assert "PURPLEWAVE_MAX_PAGES" in text
+    assert '"maxPages": int(os.environ.get("PURPLEWAVE_MAX_PAGES") or "1")' in text
+    assert '"minYear": datetime.now(timezone.utc).year - 4' in text
+    assert '"maxMileage": 50000' in text
+    assert '"requireMarketPrice": True' in text
+    assert '"identity_complete_rows_total"' in text
+    assert '"rows_excluded_missing_market_price"' in text
+
+
 def test_run_apify_actor_workflow_prints_usgovbid_zero_output_proof_fields():
     text = WORKFLOW.read_text()
 

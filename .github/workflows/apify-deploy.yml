@@ -53,6 +53,7 @@ jobs:
               "ds-usgovbid":    "6XO9La81aEmtsCT3g",
               "ds-bidspotter":  "5Eu3hfCcBBdzp6I1u",
               "ds-equipmentfacts": "0XjoegYZVcPldLstl",
+              "ds-purplewave":  "4U9HavhubOdV5vDCm",
           }
 
           ctx = ssl.create_default_context()

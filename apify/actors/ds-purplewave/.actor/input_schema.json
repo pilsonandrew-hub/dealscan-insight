@@ -1,0 +1,64 @@
+{
+  "title": "DealerScope Purple Wave Proof Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxPages": {
+      "title": "Max Pages",
+      "type": "integer",
+      "description": "Maximum Purple Wave search pages to fetch",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 25,
+      "editor": "number"
+    },
+    "perPage": {
+      "title": "Rows Per Page",
+      "type": "integer",
+      "description": "Rows per Purple Wave search page",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 100,
+      "editor": "number"
+    },
+    "minYear": {
+      "title": "Minimum Model Year",
+      "type": "integer",
+      "description": "Minimum model year for accepted proof rows",
+      "default": 2022,
+      "minimum": 1990,
+      "editor": "number"
+    },
+    "maxMileage": {
+      "title": "Maximum Mileage",
+      "type": "integer",
+      "description": "Maximum mileage for accepted proof rows",
+      "default": 50000,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "minBid": {
+      "title": "Minimum Bid",
+      "type": "integer",
+      "description": "Minimum current bid for accepted proof rows",
+      "default": 500,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "maxBid": {
+      "title": "Maximum Bid",
+      "type": "integer",
+      "description": "Maximum current bid for accepted proof rows",
+      "default": 75000,
+      "minimum": 0,
+      "editor": "number"
+    },
+    "requireMarketPrice": {
+      "title": "Require Market Price Evidence",
+      "type": "boolean",
+      "description": "Reject rows that do not carry explicit market-price evidence",
+      "default": true,
+      "editor": "checkbox"
+    }
+  }
+}
