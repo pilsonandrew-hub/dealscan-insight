@@ -1,0 +1,53 @@
+{
+  "source_run_id": "manual-2026-06-09-allsurplus-tundra-standard-lane-external-listing",
+  "source_url": "https://www.capitalone.com/cars/vehicle-details/2025/Toyota/Tundra/SR5/5TFLA5DB5SX301117",
+  "confidence_notes": "External active retail listing evidence for active clean AllSurplus 2025 Toyota Tundra standard-lane pricing gaps in Alabama. Active listings are not closed-sale outcome evidence; this seed is restricted to the exact year/make/model/state pricing key and must not weaken proxy-pricing alert safety.",
+  "vehicle": {
+    "year": 2025,
+    "make": "Toyota",
+    "model": "Tundra",
+    "state": "AL"
+  },
+  "comps": [
+    {
+      "source_url": "https://www.capitalone.com/cars/vehicle-details/2025/Toyota/Tundra/SR5/5TFLA5DB5SX301117",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 49572,
+      "mileage": 14970,
+      "vin": "5TFLA5DB5SX301117",
+      "listing_id": "capitalone-5TFLA5DB5SX301117",
+      "title": "2025 Toyota Tundra SR5 4WD",
+      "title_history_caveat": "Capital One active retail listing from Springhill Toyota in Mobile, AL; not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.carmax.com/cars/toyota/tundra/tow-hitch",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 46998,
+      "mileage": 8708,
+      "vin": "5TFLA5DB6SX261789",
+      "listing_id": "carmax-27799350",
+      "title": "2025 Toyota Tundra SR5",
+      "title_history_caveat": "CarMax active retail listing in Mobile, AL; single-owner/low-miles/warranty highlights are listing claims, not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.cargurus.com/Cars/cl-Certified-Toyota-Tundra-Pensacola-d313_L5056",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 45990,
+      "mileage": 33140,
+      "vin": "5TFLA5DB2SX258727",
+      "listing_id": "cargurus-5TFLA5DB2SX258727",
+      "title": "2025 Toyota Tundra SR5 CrewMax Cab 4WD",
+      "title_history_caveat": "CarGurus active retail listing from Mobile, AL; third-party certified listing, not closed-sale evidence."
+    },
+    {
+      "source_url": "https://www.edmunds.com/toyota/tundra/2025/for-sale/",
+      "captured_at": "2026-06-09T07:30:00Z",
+      "price": 44463,
+      "mileage": 12527,
+      "vin": "5TFLA5DB9SX304814",
+      "listing_id": "edmunds-5TFLA5DB9SX304814",
+      "title": "2025 Toyota Tundra SR5 CrewMax 4WD",
+      "title_history_caveat": "Edmunds active retail listing with no-accident/one-owner summary displayed; national comp support only, not closed-sale evidence."
+    }
+  ]
+}
