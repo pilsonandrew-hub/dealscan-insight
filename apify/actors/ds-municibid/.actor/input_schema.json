@@ -30,16 +30,16 @@
     "maxMileage": {
       "title": "Maximum Mileage",
       "type": "integer",
-      "description": "Max odometer (miles)",
-      "default": 50000,
+      "description": "Max odometer for the DealerScope standard lane (miles)",
+      "default": 100000,
       "minimum": 0,
       "editor": "number"
     },
     "minYear": {
       "title": "Minimum Model Year",
       "type": "integer",
-      "description": "Oldest model year to include",
-      "default": 2022,
+      "description": "Oldest standard-lane model year to include",
+      "default": 2016,
       "minimum": 1990,
       "editor": "number"
     },

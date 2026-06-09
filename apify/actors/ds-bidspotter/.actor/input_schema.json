@@ -29,15 +29,15 @@
     "minYear": {
       "title": "Minimum Year",
       "type": "integer",
-      "description": "Minimum vehicle model year",
-      "default": 2022,
+      "description": "Minimum vehicle model year for the DealerScope standard lane",
+      "default": 2016,
       "editor": "number"
     },
     "maxMileage": {
       "title": "Maximum Mileage",
       "type": "integer",
-      "description": "Maximum accepted mileage",
-      "default": 50000,
+      "description": "Maximum accepted mileage for the DealerScope standard lane",
+      "default": 100000,
       "minimum": 0,
       "editor": "number"
     },

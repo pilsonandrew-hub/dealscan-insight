@@ -114,12 +114,11 @@ def test_bidspotter_actor_is_safe_for_supply_reactivation():
     assert 'rows_excluded_bid_range' in text
     assert 'await Actor.pushData(proof)' in text
     assert 'itemCount: totalPassed + 1' in text
-    assert 'CURRENT_YEAR - 4' in text
-    assert 'DEFAULT_MAX_MILEAGE = 50000' in text
+    assert 'CURRENT_YEAR - 10' in text
+    assert 'DEFAULT_MAX_MILEAGE = 100000' in text
     assert 'MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE' in text
     assert "webhookSecret = process.env.WEBHOOK_SECRET" in text
     assert "webhookSecret = '" not in text
-    assert 'CURRENT_YEAR - 10' not in text
 
 
 def test_bidspotter_actor_accounts_for_all_prefilter_skips():
@@ -164,11 +163,11 @@ def test_equipmentfacts_actor_is_safe_for_supply_reactivation():
     assert 'rows_excluded_unaccounted_after_prefilter' in text
     assert 'await Actor.pushData(proof)' in text
     assert 'itemCount: totalPassed + 1' in text
-    assert 'CURRENT_YEAR - 4' in text
-    assert 'DEFAULT_MAX_MILEAGE = 50000' in text
+    assert 'CURRENT_YEAR - 10' in text
+    assert 'DEFAULT_MAX_MILEAGE = 100000' in text
     assert 'mileage > MAX_MILEAGE' in text
     assert 'age > 10' not in text
-    assert 'mileage > 100000' not in text
+    assert 'mileage > 50000' not in text
 
 
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
@@ -176,7 +175,7 @@ def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     assert '!lot.rejected_after_detail' in text
     assert 'applyBuyerGradeFilters(lot).length === 0' in text
     assert 'lot.vin && lot.mileage' in text
-    assert 'mileage_over_50k' in text
+    assert 'age_or_mileage_exceeded' in text
     assert 'condition_reject' in text
     assert 'rejected_after_detail' in text
 
@@ -184,19 +183,95 @@ def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
 def test_proxibid_actor_enforces_dealerscope_age_mileage_source_gate():
     text = ACTOR.read_text()
 
-    assert 'DEFAULT_MIN_YEAR = CURRENT_YEAR - 4' in text
-    assert 'DEFAULT_MAX_MILEAGE = 50000' in text
-    assert 'EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR)' in text
-    assert 'EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE)' in text
+    assert 'DEFAULT_MIN_YEAR = CURRENT_YEAR - 10' in text
+    assert 'DEFAULT_MAX_MILEAGE = 100000' in text
+    assert 'STANDARD_MAX_MILES_PER_YEAR = 18000' in text
+    assert 'EFFECTIVE_MIN_YEAR = Number(minYear) || DEFAULT_MIN_YEAR' in text
+    assert 'EFFECTIVE_MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE' in text
     assert 'requested_min_year: Number(minYear) || null' in text
     assert 'requested_max_mileage: Number(maxMileage) || null' in text
     assert 'effective_min_year: EFFECTIVE_MIN_YEAR' in text
     assert 'effective_max_mileage: EFFECTIVE_MAX_MILEAGE' in text
+    assert 'standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR' in text
     assert 'rows_excluded_age_mileage_prefilter' in text
     assert 'prefilter_age_mileage_rejected_samples' in text
     assert 'year < EFFECTIVE_MIN_YEAR' in text
     assert 'mileage > EFFECTIVE_MAX_MILEAGE' in text
     assert 'year < minYear' not in text
+
+
+def test_govdeals_actor_enforces_dealerscope_standard_lane_source_gate():
+    text = Path('apify/actors/ds-govdeals/src/main_api.js').read_text()
+
+    assert 'const STANDARD_MAX_MODEL_AGE_YEARS = 10' in text
+    assert 'const STANDARD_MAX_MILEAGE = 100000' in text
+    assert 'const STANDARD_MAX_MILES_PER_YEAR = 18000' in text
+    assert 'failsDealerScopeAgeMileageGate' in text
+    assert 'mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR' in text
+    assert 'const MAX_MODEL_AGE_YEARS = 4' not in text
+    assert 'const MAX_MILEAGE = 50000' not in text
+
+
+def test_active_public_source_actors_do_not_embed_premium_only_age_mileage_gates():
+    actor_paths = [
+        Path('apify/actors/ds-govdeals/src/main_api.js'),
+        Path('apify/actors/ds-gsaauctions/src/main.js'),
+        Path('apify/actors/ds-allsurplus/src/main.js'),
+        Path('apify/actors/ds-publicsurplus/src/main.js'),
+        Path('apify/actors/ds-municibid/src/main.js'),
+        Path('apify/actors/ds-jjkane/src/main.js'),
+        Path('apify/actors/ds-govplanet/src/main.js'),
+        Path('apify/actors/ds-hibid-v2/src/main.js'),
+        Path('apify/actors/ds-proxibid/src/main.js'),
+        Path('apify/actors/ds-bidspotter/src/main.js'),
+        Path('apify/actors/ds-equipmentfacts/src/main.js'),
+        Path('apify/actors/ds-purplewave/src/main.js'),
+    ]
+    forbidden_fragments = [
+        'CURRENT_YEAR - 4',
+        'getFullYear() - 4',
+        'MAX_MODEL_AGE_YEARS = 4',
+        'MAX_ALLOWED_MILEAGE = 50000',
+        'DEFAULT_MAX_MILEAGE = 50000',
+        'MAX_MILEAGE = 50000',
+        'maxMileage = 50000',
+        'mileage > 50000',
+        'mileage_over_50k',
+        'age_over_4_years',
+    ]
+
+    offenders = []
+    for actor_path in actor_paths:
+        text = actor_path.read_text()
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                offenders.append(f'{actor_path}:{fragment}')
+
+    assert offenders == []
+
+
+def test_public_source_workflows_do_not_restore_premium_only_age_mileage_gates():
+    workflow_paths = [
+        Path('.github/workflows/run-apify-actor.yml'),
+        Path('.github/workflows/configure-bidspotter-apify-schedule.yml'),
+        Path('.github/workflows/configure-hibid-v2-apify-schedule.yml'),
+    ]
+    forbidden_fragments = [
+        'CURRENT_YEAR - 4',
+        'datetime.now(timezone.utc).year - 4',
+        '"maxMileage": 50000',
+        'or "50000"',
+        'DealerScope 4-year gate',
+    ]
+
+    offenders = []
+    for workflow_path in workflow_paths:
+        text = workflow_path.read_text()
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                offenders.append(f'{workflow_path}:{fragment}')
+
+    assert offenders == []
 
 
 def test_source_quality_proof_passes_clean_no_eligible_inventory_separately():

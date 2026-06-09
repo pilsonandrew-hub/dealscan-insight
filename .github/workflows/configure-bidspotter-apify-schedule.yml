@@ -159,8 +159,8 @@ jobs:
                               {
                                   "maxCatalogues": 2,
                                   "maxPages": 1,
-                                  "minYear": CURRENT_YEAR - 4,
-                                  "maxMileage": 50000,
+                                  "minYear": CURRENT_YEAR - 10,
+                                  "maxMileage": 100000,
                               },
                               sort_keys=True,
                           ),

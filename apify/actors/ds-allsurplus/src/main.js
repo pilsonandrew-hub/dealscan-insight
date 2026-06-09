@@ -332,10 +332,10 @@ function enrichListingFromDetail(listing, detail) {
     return listing;
 }
 
-// Age gate: ingest.py allows max 4 years old for AllSurplus
-// Calculate dynamic minYear to match the gate (current year - 4)
+// Age/mileage gate mirrors backend standard lane so public-auction rows reach scoring.
 const currentYear = new Date().getFullYear();
-const defaultMinYear = currentYear - 4;
+const defaultMinYear = currentYear - 10;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 const searchQuery = input.searchQuery || "";
 
@@ -344,7 +344,7 @@ const {
     displayRows = 50,
     minBid = 3000,
     maxBid = 35000,
-    maxMileage = 50000,
+    maxMileage = 100000,
     minYear = defaultMinYear,
     targetStatesOnly = false,
     allowHighRust = false,
@@ -353,6 +353,13 @@ const {
 
 const sessionId = `ds-allsurplus-${Date.now()}`;
 const seenIds = new Set();
+
+function failsDealerScopeAgeMileageGate(year, mileage) {
+    if (!year || year < minYear) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, currentYear - Number(year));
+    return mileage > maxMileage || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
 const allListings = [];
 const excludedMissingRequiredSamples = [];
 let totalFound = 0;
@@ -463,7 +470,7 @@ for (const searchText of searchTerms) {
                     continue;
                 }
 
-                if (!year || year < minYear) {
+                if (failsDealerScopeAgeMileageGate(year, null)) {
                     console.log(`[SKIP] Too old: ${year} — ${title}`);
                     rowsExcludedAgeMileagePrefilter++;
                     continue;
@@ -474,7 +481,7 @@ for (const searchText of searchTerms) {
                 if (parseVin(item.vinserial || item.vin || '')) listRowsWithVin++;
                 if (!isNaN(mileageNum) && mileageNum > 0) listRowsWithMileage++;
 
-                if (!isNaN(mileageNum) && mileageNum > 0 && mileageNum > maxMileage) {
+                if (!isNaN(mileageNum) && mileageNum > 0 && failsDealerScopeAgeMileageGate(year, mileageNum)) {
                     console.log('[SKIP-MILEAGE]', title, '| mileage:', mileageNum);
                     rowsExcludedAgeMileagePrefilter++;
                     continue;
@@ -546,7 +553,7 @@ for (const searchText of searchTerms) {
                 if (listing.vin) detailVinsFound++;
                 if (listing.mileage) detailMileagesFound++;
 
-                if (listing.mileage && listing.mileage > maxMileage) {
+                if (listing.mileage && failsDealerScopeAgeMileageGate(listing.year, listing.mileage)) {
                     console.log(`[SKIP-MILEAGE-DETAIL] ${listing.title} | mileage: ${listing.mileage}`);
                     rowsExcludedAgeMileageAfterDetail++;
                     continue;

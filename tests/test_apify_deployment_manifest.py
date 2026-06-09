@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import re
 import unittest
+from datetime import datetime
 
 
 class ApifyDeploymentManifestTests(unittest.TestCase):
@@ -119,10 +120,37 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["scheduleName"], "ds-hibid-v2-every-12h")
         self.assertEqual(actor["scheduleStatus"], "enabled_live")
         self.assertIn("WEBHOOK_SECRET: ${{ secrets.APIFY_WEBHOOK_SECRET }}", workflow)
-        self.assertIn('"minYear": CURRENT_YEAR - 4', workflow)
-        self.assertIn('"maxMileage": 50000', workflow)
+        self.assertIn('"minYear": CURRENT_YEAR - 10', workflow)
+        self.assertIn('"maxMileage": 100000', workflow)
+        self.assertNotIn('"minYear": CURRENT_YEAR - 4', workflow)
+        self.assertNotIn('"maxMileage": 50000', workflow)
         self.assertNotIn('"webhookSecret"', workflow)
         self.assertNotIn("rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA", workflow)
+
+    def test_active_source_actor_input_defaults_do_not_restore_premium_only_lane(self):
+        schema_paths = [
+            self.repo_root / "apify" / "actors" / "ds-bidspotter" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-govplanet" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-gsaauctions" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-hibid-v2" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-municibid" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-purplewave" / ".actor" / "input_schema.json",
+        ]
+        standard_min_year = datetime.now().year - 10
+
+        for path in schema_paths:
+            with self.subTest(schema=path):
+                properties = json.loads(path.read_text(encoding="utf-8")).get("properties", {})
+                max_mileage = properties.get("maxMileage", {}).get("default")
+                max_age_years = properties.get("maxAgeYears", {}).get("default")
+                min_year = properties.get("minYear", {}).get("default")
+
+                if max_mileage is not None:
+                    self.assertGreaterEqual(max_mileage, 100_000)
+                if max_age_years is not None:
+                    self.assertGreaterEqual(max_age_years, 10)
+                if min_year is not None:
+                    self.assertLessEqual(min_year, standard_min_year)
 
     def test_jjkane_actor_records_secret_managed_marketcheck_rotation(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"
@@ -291,23 +319,26 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
         source = source_path.read_text(encoding="utf-8")
 
-        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 4", source)
-        self.assertIn("const DEFAULT_MAX_MILEAGE = 50000", source)
+        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 10", source)
+        self.assertIn("const DEFAULT_MAX_MILEAGE = 100000", source)
+        self.assertIn("const STANDARD_MAX_MILES_PER_YEAR = 18000", source)
         self.assertIn("minYear = DEFAULT_MIN_YEAR", source)
         self.assertIn("maxMileage = DEFAULT_MAX_MILEAGE", source)
-        self.assertNotIn("minYear = new Date().getFullYear() - 10", source)
-        self.assertNotIn("maxMileage = 100000", source)
+        self.assertNotIn("minYear = new Date().getFullYear() - 4", source)
+        self.assertNotIn("maxMileage = 50000", source)
 
     def test_hibid_v2_clamps_loose_runtime_inputs_to_dealerscope_gate(self):
         source_path = self.repo_root / "apify" / "actors" / "ds-hibid-v2" / "src" / "main.js"
         source = source_path.read_text(encoding="utf-8")
 
-        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 4", source)
-        self.assertIn("const DEFAULT_MAX_MILEAGE = 50000", source)
-        self.assertIn("const EFFECTIVE_MIN_YEAR = Math.max(Number(minYear) || DEFAULT_MIN_YEAR, DEFAULT_MIN_YEAR)", source)
-        self.assertIn("const EFFECTIVE_MAX_MILEAGE = Math.min(Number(maxMileage) || DEFAULT_MAX_MILEAGE, DEFAULT_MAX_MILEAGE)", source)
-        self.assertIn("listing.year < EFFECTIVE_MIN_YEAR", source)
-        self.assertIn("listing.mileage > EFFECTIVE_MAX_MILEAGE", source)
+        self.assertIn("const DEFAULT_MIN_YEAR = new Date().getFullYear() - 10", source)
+        self.assertIn("const DEFAULT_MAX_MILEAGE = 100000", source)
+        self.assertIn("const EFFECTIVE_MIN_YEAR = Number(minYear) || DEFAULT_MIN_YEAR", source)
+        self.assertIn("const EFFECTIVE_MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE", source)
+        self.assertIn("STANDARD_MAX_MILES_PER_YEAR", source)
+        self.assertIn("failsDealerScopeAgeMileageGate(listing.year, listing.mileage)", source)
+        self.assertIn("mileage > EFFECTIVE_MAX_MILEAGE", source)
+        self.assertIn("mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR", source)
         self.assertIn("effective_min_year: EFFECTIVE_MIN_YEAR", source)
         self.assertIn("effective_max_mileage: EFFECTIVE_MAX_MILEAGE", source)
 
@@ -333,15 +364,11 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         source = source_path.read_text(encoding="utf-8")
 
         self.assertLess(
-            source.index("if (!listing.year || listing.year < EFFECTIVE_MIN_YEAR)"),
+            source.index("if (!listing.year || failsDealerScopeAgeMileageGate(listing.year, listing.mileage))"),
             source.index("if (bid === 0)"),
         )
         self.assertLess(
             source.index("if (listing.mileage === null)"),
-            source.index("if (bid === 0)"),
-        )
-        self.assertLess(
-            source.index("if (listing.mileage !== null && listing.mileage > EFFECTIVE_MAX_MILEAGE)"),
             source.index("if (bid === 0)"),
         )
 

@@ -245,17 +245,24 @@ function isAgeOverLimit(year, maxAgeYears, now = new Date()) {
     return (now.getFullYear() - year) > maxAgeYears;
 }
 
+function isMilesPerYearOverLimit(year, mileage, maxMilesPerYear = 18000, now = new Date()) {
+    if (!year || mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, now.getFullYear() - Number(year));
+    return mileage / ageYears > maxMilesPerYear;
+}
+
 function isGovPlanetMarketplace(item = {}) {
     return String(item.marketplace || '').toUpperCase() === 'G';
 }
 
-function passesFilters({ year, price, state, locationText = '', mileage = null, maxMileage = 50000, maxAgeYears = 4 }) {
+function passesFilters({ year, price, state, locationText = '', mileage = null, maxMileage = 100000, maxAgeYears = 10 }) {
     // Accept DC regardless of state extraction
     const isDC = DC_PATTERN.test(locationText);
     if (!isDC && (!state || !US_STATES.has(state))) return false;
     const currentYear = new Date().getFullYear();
     if (!year || isAgeOverLimit(year, maxAgeYears)) return false;
     if (isMileageOverLimit(mileage, maxMileage)) return false;
+    if (isMilesPerYearOverLimit(year, mileage)) return false;
     if (year && year < 1970) return false;
     // Rust-state: bypass for <=2yr old vehicles in high-rust states
     if (state && HIGH_RUST.has(state)) {
@@ -291,8 +298,8 @@ const {
     maxItemsPerCategory = 500,   // safety cap per category (override to 0 for unlimited)
     minBid = 200,
     maxBid = 40000,
-    maxMileage = 50000,
-    maxAgeYears = 4,
+    maxMileage = 100000,
+    maxAgeYears = 10,
     maxDetailPages = 120,
     searchQuery = '',
     webhookUrl = null,
@@ -443,7 +450,7 @@ const crawler = new CheerioCrawler({
             if (auctionEndTime) totalQuickviewsWithAuctionEnd++;
 
             if (!isVehicle(desc)) { totalSkipped++; continue; }
-            if (isMileageOverLimit(mileage, maxMileage)) {
+            if (isMileageOverLimit(mileage, maxMileage) || isMilesPerYearOverLimit(year, mileage)) {
                 totalSkipped++;
                 totalMileageOverLimit++;
                 continue;

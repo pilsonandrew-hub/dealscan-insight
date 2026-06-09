@@ -44,13 +44,13 @@ on:
         required: false
         default: "1"
       hibid_min_year:
-        description: "HiBid minimum model year; blank uses DealerScope 4-year gate"
+        description: "HiBid minimum model year; blank uses DealerScope standard lane"
         required: false
         default: ""
       hibid_max_mileage:
         description: "HiBid max mileage for bounded proof runs"
         required: false
-        default: "50000"
+        default: "100000"
       bidspotter_max_catalogues:
         description: "Max BidSpotter catalogues for bounded proof runs"
         required: false
@@ -68,13 +68,13 @@ on:
         required: false
         default: ""
       proxibid_min_year:
-        description: "Proxibid minimum model year; blank uses DealerScope 4-year gate"
+        description: "Proxibid minimum model year; blank uses DealerScope standard lane"
         required: false
         default: ""
       proxibid_max_mileage:
         description: "Proxibid max mileage for bounded proof runs"
         required: false
-        default: "50000"
+        default: "100000"
       max_pages:
         description: "GovDeals maxPages input for bounded proof runs"
         required: false
@@ -232,8 +232,8 @@ jobs:
           elif actor_name == "ds-hibid-v2":
               actor_input = {
                   "maxPages": int(os.environ.get("HIBID_MAX_PAGES") or "1"),
-                  "minYear": int(os.environ.get("HIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4)),
-                  "maxMileage": int(os.environ.get("HIBID_MAX_MILEAGE") or "50000"),
+                  "minYear": int(os.environ.get("HIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 10)),
+                  "maxMileage": int(os.environ.get("HIBID_MAX_MILEAGE") or "100000"),
                   "minBid": int(os.environ.get("MIN_BID") or "500"),
                   "maxBid": int(os.environ.get("MAX_BID") or "75000"),
               }
@@ -244,8 +244,8 @@ jobs:
               actor_input = {
                   "maxItems": int(os.environ.get("MAX_ITEMS") or "200"),
                   "maxDetailPages": int(os.environ.get("MAX_DETAIL_PAGES") or "200"),
-                  "minYear": int(os.environ.get("PROXIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4)),
-                  "maxMileage": int(os.environ.get("PROXIBID_MAX_MILEAGE") or "50000"),
+                  "minYear": int(os.environ.get("PROXIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 10)),
+                  "maxMileage": int(os.environ.get("PROXIBID_MAX_MILEAGE") or "100000"),
               }
               target_categories = (os.environ.get("TARGET_CATEGORIES") or "").strip()
               if target_categories:
@@ -261,8 +261,8 @@ jobs:
                   "firecrawlApiKey": firecrawl_api_key,
                   "maxCatalogues": int(os.environ.get("BIDSPOTTER_MAX_CATALOGUES") or "2"),
                   "maxPages": int(os.environ.get("BIDSPOTTER_MAX_PAGES") or "1"),
-                  "minYear": datetime.now(timezone.utc).year - 4,
-                  "maxMileage": 50000,
+                  "minYear": datetime.now(timezone.utc).year - 10,
+                  "maxMileage": 100000,
               }
               search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
               if search_query:
@@ -272,8 +272,8 @@ jobs:
                   "maxPages": int(os.environ.get("EQUIPMENTFACTS_MAX_PAGES") or "1"),
                   "minBid": int(os.environ.get("MIN_BID") or "500"),
                   "maxBid": int(os.environ.get("MAX_BID") or "75000"),
-                  "minYear": datetime.now(timezone.utc).year - 4,
-                  "maxMileage": 50000,
+                  "minYear": datetime.now(timezone.utc).year - 10,
+                  "maxMileage": 100000,
               }
               search_query = (os.environ.get("SEARCH_QUERY") or "").strip()
               if search_query:
@@ -283,8 +283,8 @@ jobs:
                   "maxPages": int(os.environ.get("MAX_PAGES") or "1"),
                   "minBid": int(os.environ.get("MIN_BID") or "500"),
                   "maxBid": int(os.environ.get("MAX_BID") or "75000"),
-                  "minYear": datetime.now(timezone.utc).year - 4,
-                  "maxMileage": 50000,
+                  "minYear": datetime.now(timezone.utc).year - 10,
+                  "maxMileage": 100000,
                   "requireMarketPrice": True,
               }
           else:

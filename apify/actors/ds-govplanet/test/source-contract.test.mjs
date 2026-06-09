@@ -70,11 +70,12 @@ describe('ds-govplanet source contract', () => {
     })).toBe(false);
   });
 
-  test('defaults GovPlanet source gates to DealerScope buyer-grade limits', () => {
-    expect(source).toContain('maxMileage = 50000');
-    expect(source).toContain('maxAgeYears = 4');
-    expect(inputSchema.properties.maxMileage.default).toBe(50000);
-    expect(inputSchema.properties.maxAgeYears.default).toBe(4);
+  test('defaults GovPlanet source gates to DealerScope standard lane limits', () => {
+    expect(source).toContain('maxMileage = 100000');
+    expect(source).toContain('maxAgeYears = 10');
+    expect(source).toContain('isMilesPerYearOverLimit(year, mileage)');
+    expect(inputSchema.properties.maxMileage.default).toBe(100000);
+    expect(inputSchema.properties.maxAgeYears.default).toBe(10);
   });
 
   test('keeps IronPlanet family aggregate rows out of the GovPlanet actor', () => {

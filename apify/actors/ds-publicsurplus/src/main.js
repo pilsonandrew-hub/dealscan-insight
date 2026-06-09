@@ -12,8 +12,9 @@ import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
 const MAX_DETAIL_PAGES = 200;
-const MAX_ALLOWED_MILEAGE = 50000;
-const MAX_ALLOWED_AGE_YEARS = 4;
+const STANDARD_MAX_MILEAGE = 100000;
+const STANDARD_MAX_AGE_YEARS = 10;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 const TARGET_STATES = new Set([
     'AZ', 'CA', 'NV', 'CO', 'NM', 'UT', 'TX', 'FL', 'GA', 'SC', 'TN', 'NC', 'VA', 'WA', 'OR', 'HI',
@@ -128,6 +129,15 @@ let rowsExcludedNonTargetState = 0;
 let rowsExcludedBidRange = 0;
 let rowsExcludedAgeMileagePrefilter = 0;
 let rowsExcludedDuplicate = 0;
+
+function failsDealerScopeAgeMileageGate(year, mileage, currentYear = new Date().getFullYear()) {
+    if (!year) return true;
+    const age = currentYear - year;
+    if (age > STANDARD_MAX_AGE_YEARS || age < 0) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, age);
+    return mileage > STANDARD_MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
 const rejectionReasons = {};
 
 function incrementRejectionReason(reason) {
@@ -376,15 +386,9 @@ async function pushListing(listing, sourceUrl, log) {
         return false;
     }
     const currentYear = new Date().getFullYear();
-    const age = currentYear - year;
-    if (!year || age > MAX_ALLOWED_AGE_YEARS || age < 0) {
+    if (failsDealerScopeAgeMileageGate(year, mileage, currentYear)) {
         rowsExcludedAgeMileagePrefilter++;
-        log.debug(`[SKIP] Too old or unknown year: ${year} - ${title}`);
-        return false;
-    }
-    if (mileage !== null && mileage > MAX_ALLOWED_MILEAGE) {
-        rowsExcludedAgeMileagePrefilter++;
-        log.debug(`[SKIP] Too many miles: ${mileage} - ${title}`);
+        log.debug(`[SKIP] Outside standard age/mileage lane: year=${year} mileage=${mileage} - ${title}`);
         return false;
     }
 
@@ -475,15 +479,9 @@ async function pushTXListing(listing, sourceUrl, log) {
     const { year, make, model, vin } = parseTXSurplusTitle(title);
     const mileage = parseMileage(title);
     const currentYear = new Date().getFullYear();
-    const age = currentYear - year;
-    if (!year || age > MAX_ALLOWED_AGE_YEARS || age < 0) {
+    if (failsDealerScopeAgeMileageGate(year, mileage, currentYear)) {
         rowsExcludedAgeMileagePrefilter++;
-        log.debug(`[TX][SKIP] Too old or unknown year: ${year} - ${title}`);
-        return false;
-    }
-    if (mileage !== null && mileage > MAX_ALLOWED_MILEAGE) {
-        rowsExcludedAgeMileagePrefilter++;
-        log.debug(`[TX][SKIP] Too many miles: ${mileage} - ${title}`);
+        log.debug(`[TX][SKIP] Outside standard age/mileage lane: year=${year} mileage=${mileage} - ${title}`);
         return false;
     }
 
@@ -565,9 +563,9 @@ const crawler = new PlaywrightCrawler({
                         log.info(`[MILEAGE DETAIL] Found mileage ${mileage} for: ${vehicle.title}`);
                     }
                 }
-                if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE) {
-                    incrementRejectionReason('mileage_over_50k');
-                    log.info(`[MILEAGE DETAIL][SKIP] Too many miles after detail enrichment: ${vehicle.mileage} - ${vehicle.title}`);
+                if (vehicle.mileage !== null && failsDealerScopeAgeMileageGate(vehicle.year, vehicle.mileage)) {
+                    incrementRejectionReason('age_or_mileage_exceeded');
+                    log.info(`[MILEAGE DETAIL][SKIP] Outside standard age/mileage lane after detail enrichment: ${vehicle.mileage} - ${vehicle.title}`);
                     return;
                 }
                 if (hasConditionReject(vehicle)) {

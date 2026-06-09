@@ -273,12 +273,16 @@ function parsePreviewDetail(detail) {
 await Actor.init();
 
 const input = await Actor.getInput() ?? {};
+const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_MIN_YEAR = CURRENT_YEAR - 10;
+const DEFAULT_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 const {
     minBid = 100,
     maxBid = 75000,
-    minYear = new Date().getFullYear() - 4,
-    maxYear = new Date().getFullYear() + 1,
-    maxMileage = 50000,
+    minYear = DEFAULT_MIN_YEAR,
+    maxYear = CURRENT_YEAR + 1,
+    maxMileage = DEFAULT_MAX_MILEAGE,
     pageSize = 50,
     // Number of pages from the END to scan (active items are at the end)
     pagesToScan = 20,
@@ -288,6 +292,13 @@ const {
     webhookSecret = null,
     searchQuery = null,
 } = input;
+
+function failsDealerScopeAgeMileageGate(year, mileage) {
+    if (!year || year < minYear || year > maxYear) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, CURRENT_YEAR - Number(year));
+    return mileage > maxMileage || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
 
 const currentYear = new Date().getFullYear();
 const seenIds = new Set();
@@ -397,7 +408,7 @@ for (let page = startPage; page <= totalPages; page++) {
 
         const { year, make, model } = parseVehicleTitle(title);
 
-        if (!year || year < minYear || year > maxYear) {
+        if (failsDealerScopeAgeMileageGate(year, null)) {
             rowsExcludedAgeOrMileage++;
             if (excludedAgeOrMileageSamples.length < 10) {
                 excludedAgeOrMileageSamples.push({
@@ -509,7 +520,7 @@ for (let page = startPage; page <= totalPages; page++) {
             continue;
         }
 
-        if (record.mileage > maxMileage) {
+        if (failsDealerScopeAgeMileageGate(year, record.mileage)) {
             rowsExcludedAgeOrMileage++;
             if (excludedAgeOrMileageSamples.length < 10) {
                 excludedAgeOrMileageSamples.push({
@@ -522,6 +533,7 @@ for (let page = startPage; page <= totalPages; page++) {
                     model,
                     mileage: record.mileage,
                     max_mileage: maxMileage,
+                    standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR,
                     rejection_reasons: ['age_or_mileage_rejected_after_detail'],
                 });
             }

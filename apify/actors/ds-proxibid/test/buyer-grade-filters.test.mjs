@@ -18,9 +18,12 @@ function loadParserExports() {
 const scraper = loadParserExports();
 
 describe('ds-proxibid buyer-grade filter source contract', () => {
-  test('enforces DealerScope max mileage and condition rejects found in live detail proof', () => {
-    expect(source).toContain('mileage > 50000');
-    expect(source).toContain('mileage_over_50k');
+  test('enforces DealerScope standard-lane mileage and condition rejects found in live detail proof', () => {
+    expect(source).toContain('const DEFAULT_MAX_MILEAGE = 100000;');
+    expect(source).toContain('const STANDARD_MAX_MILES_PER_YEAR = 18000;');
+    expect(source).toContain('function failsDealerScopeAgeMileageGate(year, mileage)');
+    expect(source).toContain('age_or_mileage_exceeded');
+    expect(source).not.toContain('mileage_over_50k');
     expect(source).toContain('do\\s+not\\s+operate');
     expect(source).toContain('not\\s+operable');
   });

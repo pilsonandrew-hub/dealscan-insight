@@ -34,14 +34,14 @@
     "minYear": {
       "title": "Minimum vehicle year",
       "type": "integer",
-      "default": 2000,
+      "default": 2016,
       "editor": "number",
       "description": "Minimum vehicle year"
     },
     "maxMileage": {
       "title": "Maximum mileage",
       "type": "integer",
-      "default": 150000,
+      "default": 100000,
       "editor": "number",
       "description": "Maximum mileage"
     },

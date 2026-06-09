@@ -21,8 +21,9 @@ const SOURCE = 'municibid';
 // NOTE: www.municibid.com 301-redirects to municibid.com (no-www).
 // CheerioCrawler must follow the redirect — use non-www base URL.
 const BASE = 'https://municibid.com';
-const MAX_MODEL_AGE_YEARS = 4;
-const MAX_MILEAGE = 50000;
+const STANDARD_MAX_MODEL_AGE_YEARS = 10;
+const STANDARD_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 // Passenger vehicle categories only (no buses, motorcycles, heavy trucks)
 const CATEGORY_URLS = [
@@ -38,6 +39,15 @@ const HIGH_RUST = new Set([
 const TARGET = new Set([
     'AZ','CA','NV','CO','NM','UT','TX','FL','GA','SC','TN','NC','VA','WA','OR','HI',
 ]);
+
+function failsDealerScopeAgeMileageGate(year, mileage, currentYear = new Date().getFullYear()) {
+    if (!year) return false;
+    const age = currentYear - year;
+    if (age > STANDARD_MAX_MODEL_AGE_YEARS || age < 0) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, age);
+    return mileage > STANDARD_MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
 const US_STATES = new Set([
     'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
     'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
@@ -280,9 +290,9 @@ const crawler = new CheerioCrawler({
                 addProofSample('policy_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'condition_reject_pattern' });
                 return;
             }
-            if (mileage !== null && mileage > MAX_MILEAGE) {
+            if (failsDealerScopeAgeMileageGate(year, mileage)) {
                 proofCounters.rows_excluded_age_mileage_prefilter++;
-                addProofSample('age_mileage_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'mileage_over_50k' });
+                addProofSample('age_mileage_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: 'age_or_mileage_exceeded' });
                 return;
             }
             if (!isPassengerVehicle(title)) {
@@ -308,13 +318,6 @@ const crawler = new CheerioCrawler({
                     console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
                 }
             }
-            const age = currentYear - year;
-            if (age > MAX_MODEL_AGE_YEARS || age < 0) {
-                proofCounters.rows_excluded_age_mileage_prefilter++;
-                addProofSample('age_mileage_prefilter', { title, year, mileage, state, bid, listing_url: listingUrl, reason: age < 0 ? 'future_model_year' : 'age_over_4_years' });
-                return;
-            }
-
             passed++;
             const model = parseModel(title, make);
 

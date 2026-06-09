@@ -47,8 +47,9 @@ if (MARKETCHECK_KEYS.length === 0) {
 
 // Auction-to-retail discount factor (government surplus clears at 60-75% retail)
 const AUCTION_DISCOUNT = 0.70;
-const DEFAULT_MAX_YEAR_AGE = 4;
-const MAX_ALLOWED_MILEAGE = 50000;
+const DEFAULT_MAX_YEAR_AGE = 10;
+const STANDARD_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 // Vehicle categories we want
 const VEHICLE_CATEGORIES = [
@@ -62,6 +63,15 @@ const VEHICLE_CATEGORIES = [
     'CARGO VAN',
     'SEDAN',
 ];
+
+function failsDealerScopeAgeMileageGate(year, mileage, currentYear = new Date().getFullYear(), maxYearAge = DEFAULT_MAX_YEAR_AGE) {
+    if (!year) return false;
+    const ageYears = currentYear - year;
+    if (ageYears > maxYearAge || ageYears < 0) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const denominator = Math.max(1, ageYears);
+    return mileage > STANDARD_MAX_MILEAGE || mileage / denominator > STANDARD_MAX_MILES_PER_YEAR;
+}
 
 const TARGET_STATES = [
     'FL', 'NV', 'CA', 'TX', 'AZ', 'CO', 'UT', 'OR', 'WA', 'GA',
@@ -515,16 +525,9 @@ for (const state of targetStates) {
                 }
 
                 // Year age
-                if ((currentYear - year) > maxYearAge) {
+                if (failsDealerScopeAgeMileageGate(year, odometer, currentYear, maxYearAge)) {
                     rowsExcludedAgeMileagePrefilter++;
-                    incrementCount(rejectionReasons, 'age_over_limit_prefilter');
-                    addSample(prefilterAgeMileageRejectedSamples, sample);
-                    continue;
-                }
-
-                if (odometer !== null && odometer > MAX_ALLOWED_MILEAGE) {
-                    rowsExcludedAgeMileagePrefilter++;
-                    incrementCount(rejectionReasons, 'mileage_over_50k_prefilter');
+                    incrementCount(rejectionReasons, 'age_or_mileage_exceeded_prefilter');
                     addSample(prefilterAgeMileageRejectedSamples, sample);
                     continue;
                 }
@@ -669,7 +672,8 @@ const proofRecord = {
     rows_excluded_zero_pricing_signal: rowsExcludedZeroPricingSignal,
     rows_excluded_pricing_unavailable: rowsExcludedPricingUnavailable,
     max_year_age: maxYearAge,
-    max_allowed_mileage: MAX_ALLOWED_MILEAGE,
+    max_allowed_mileage: STANDARD_MAX_MILEAGE,
+    standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR,
     target_states: targetStates,
     search_query: searchQuery,
     marketcheck_calls: marketcheckCallsThisRun,

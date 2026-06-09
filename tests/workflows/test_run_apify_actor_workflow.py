@@ -82,8 +82,8 @@ def test_run_apify_actor_workflow_supports_bounded_bidspotter_supply_proof():
     assert "BIDSPOTTER_MAX_PAGES" in text
     assert '"maxCatalogues": int(os.environ.get("BIDSPOTTER_MAX_CATALOGUES") or "2")' in text
     assert '"maxPages": int(os.environ.get("BIDSPOTTER_MAX_PAGES") or "1")' in text
-    assert '"minYear": datetime.now(timezone.utc).year - 4' in text
-    assert '"maxMileage": 50000' in text
+    assert '"minYear": datetime.now(timezone.utc).year - 10' in text
+    assert '"maxMileage": 100000' in text
 
 
 def test_run_apify_actor_workflow_keeps_bidspotter_manual_only():
@@ -101,8 +101,8 @@ def test_run_apify_actor_workflow_supports_bounded_equipmentfacts_supply_proof()
     assert "0XjoegYZVcPldLstl" in text
     assert "EQUIPMENTFACTS_MAX_PAGES" in text
     assert '"maxPages": int(os.environ.get("EQUIPMENTFACTS_MAX_PAGES") or "1")' in text
-    assert '"minYear": datetime.now(timezone.utc).year - 4' in text
-    assert '"maxMileage": 50000' in text
+    assert '"minYear": datetime.now(timezone.utc).year - 10' in text
+    assert '"maxMileage": 100000' in text
 
 
 def test_run_apify_actor_workflow_supports_bounded_purplewave_proof():
@@ -112,8 +112,8 @@ def test_run_apify_actor_workflow_supports_bounded_purplewave_proof():
     assert "4U9HavhubOdV5vDCm" in text
     assert "purplewave_max_pages" not in text
     assert '"maxPages": int(os.environ.get("MAX_PAGES") or "1")' in text
-    assert '"minYear": datetime.now(timezone.utc).year - 4' in text
-    assert '"maxMileage": 50000' in text
+    assert '"minYear": datetime.now(timezone.utc).year - 10' in text
+    assert '"maxMileage": 100000' in text
     assert '"requireMarketPrice": True' in text
     assert '"identity_complete_rows_total"' in text
     assert '"rows_excluded_missing_market_price"' in text
@@ -162,8 +162,8 @@ def test_run_apify_actor_workflow_supports_bounded_hibid_v2_proof():
     assert "HIBID_MAX_MILEAGE" in text
     assert "HIBID_MIN_YEAR" in text
     assert '"maxPages": int(os.environ.get("HIBID_MAX_PAGES") or "1")' in text
-    assert '"maxMileage": int(os.environ.get("HIBID_MAX_MILEAGE") or "50000")' in text
-    assert '"minYear": int(os.environ.get("HIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4))' in text
+    assert '"maxMileage": int(os.environ.get("HIBID_MAX_MILEAGE") or "100000")' in text
+    assert '"minYear": int(os.environ.get("HIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 10))' in text
     assert '"requested_min_year"' in text
     assert '"requested_max_mileage"' in text
     assert '"effective_min_year"' in text
@@ -175,8 +175,23 @@ def test_run_apify_actor_workflow_supports_bounded_proxibid_source_parity_proof(
 
     assert "PROXIBID_MIN_YEAR" in text
     assert "PROXIBID_MAX_MILEAGE" in text
-    assert '"minYear": int(os.environ.get("PROXIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 4))' in text
-    assert '"maxMileage": int(os.environ.get("PROXIBID_MAX_MILEAGE") or "50000")' in text
+    assert '"minYear": int(os.environ.get("PROXIBID_MIN_YEAR") or str(datetime.now(timezone.utc).year - 10))' in text
+    assert '"maxMileage": int(os.environ.get("PROXIBID_MAX_MILEAGE") or "100000")' in text
+
+
+def test_run_apify_actor_workflow_does_not_restore_premium_only_age_mileage_inputs():
+    text = WORKFLOW.read_text()
+
+    forbidden = [
+        'datetime.now(timezone.utc).year - 4',
+        'or "50000"',
+        '"maxMileage": 50000',
+        'DealerScope 4-year gate',
+    ]
+
+    offenders = [fragment for fragment in forbidden if fragment in text]
+
+    assert offenders == []
 
 
 def test_run_apify_actor_workflow_overrides_apify_run_timeout_for_broad_proofs():

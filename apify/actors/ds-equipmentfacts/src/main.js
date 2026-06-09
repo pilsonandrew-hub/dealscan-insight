@@ -24,7 +24,8 @@ const SOURCE = 'equipmentfacts';
 const BASE_URL = 'https://www.equipmentfacts.com';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const CURRENT_YEAR = new Date().getFullYear();
-const DEFAULT_MAX_MILEAGE = 50000;
+const DEFAULT_MAX_MILEAGE = 100000;
+const STANDARD_MAX_MILES_PER_YEAR = 18000;
 
 if (!WEBHOOK_SECRET) {
     console.warn('[EQUIPMENTFACTS] WARNING: WEBHOOK_SECRET env var not set');
@@ -272,14 +273,14 @@ const {
     maxPages = 15,
     minBid = 500,
     maxBid = 50000,
-    minYear = CURRENT_YEAR - 4,
+    minYear = CURRENT_YEAR - 10,
     maxMileage = DEFAULT_MAX_MILEAGE,
     webhookUrl = 'https://dealscan-insight-production.up.railway.app/api/ingest/apify',
     includeRustStates = false,
     searchQuery = '',
 } = input;
 const searchQueryLower = searchQuery ? searchQuery.toLowerCase() : '';
-const MIN_YEAR = Number(minYear) || CURRENT_YEAR - 4;
+const MIN_YEAR = Number(minYear) || CURRENT_YEAR - 10;
 const MAX_MILEAGE = Number(maxMileage) || DEFAULT_MAX_MILEAGE;
 
 let totalFound = 0;
@@ -331,6 +332,14 @@ function rejectForProof(counterKey, sampleKey, item, reason, extra = {}) {
     }
 }
 
+function failsDealerScopeAgeMileageGate(year, mileage) {
+    if (!year) return true;
+    if (year < MIN_YEAR || year > CURRENT_YEAR + 1) return true;
+    if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    const ageYears = Math.max(1, CURRENT_YEAR - Number(year));
+    return mileage > MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+}
+
 function passes(item) {
     item = withTitleVehicleIdentity(item);
     const conditionText = [
@@ -368,23 +377,13 @@ function passes(item) {
     const mileage = mileageValue == null || mileageValue === ''
         ? null
         : parseInt(String(mileageValue).replace(/,/g, ''), 10);
-    if (mileage !== null && mileage > MAX_MILEAGE) {
+    if (failsDealerScopeAgeMileageGate(year, mileage)) {
         rejectForProof(
             'rows_excluded_age_mileage_prefilter',
             'prefilter_age_mileage_rejected_samples',
             item,
-            'mileage_over_50k',
-            { max_mileage: MAX_MILEAGE },
-        );
-        return false;
-    }
-    if (!year || year < MIN_YEAR || year > CURRENT_YEAR + 1) {
-        rejectForProof(
-            'rows_excluded_age_mileage_prefilter',
-            'prefilter_age_mileage_rejected_samples',
-            item,
-            !year ? 'missing_model_year' : year > CURRENT_YEAR + 1 ? 'future_model_year' : 'model_year_reject',
-            { min_year: MIN_YEAR },
+            !year ? 'missing_model_year' : year > CURRENT_YEAR + 1 ? 'future_model_year' : 'age_or_mileage_exceeded',
+            { min_year: MIN_YEAR, max_mileage: MAX_MILEAGE, standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR },
         );
         return false;
     }
@@ -818,6 +817,7 @@ const proof = {
     max_pages: maxPages,
     min_year: MIN_YEAR,
     max_mileage: MAX_MILEAGE,
+    standard_max_miles_per_year: STANDARD_MAX_MILES_PER_YEAR,
     rows_excluded_unaccounted_after_prefilter: Math.max(0, totalFound - totalPassed - accountedRows),
     ...proofCounters,
     ...proofSamples,
