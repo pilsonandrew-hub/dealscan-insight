@@ -110,8 +110,8 @@ def test_run_apify_actor_workflow_supports_bounded_purplewave_proof():
 
     assert "ds-purplewave" in text
     assert "4U9HavhubOdV5vDCm" in text
-    assert "PURPLEWAVE_MAX_PAGES" in text
-    assert '"maxPages": int(os.environ.get("PURPLEWAVE_MAX_PAGES") or "1")' in text
+    assert "purplewave_max_pages" not in text
+    assert '"maxPages": int(os.environ.get("MAX_PAGES") or "1")' in text
     assert '"minYear": datetime.now(timezone.utc).year - 4' in text
     assert '"maxMileage": 50000' in text
     assert '"requireMarketPrice": True' in text
