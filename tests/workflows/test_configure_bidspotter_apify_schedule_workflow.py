@@ -39,5 +39,7 @@ def test_configure_bidspotter_apify_schedule_creates_native_schedule_without_sec
     assert '"firecrawlApiKey"' not in text
     assert '"maxCatalogues": 2' in text
     assert '"maxPages": 1' in text
-    assert '"minYear": CURRENT_YEAR - 4' in text
-    assert '"maxMileage": 50000' in text
+    assert '"minYear": CURRENT_YEAR - 10' in text
+    assert '"maxMileage": 100000' in text
+    assert '"minYear": CURRENT_YEAR - 4' not in text
+    assert '"maxMileage": 50000' not in text

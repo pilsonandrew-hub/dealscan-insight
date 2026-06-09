@@ -81,24 +81,26 @@ describe('ds-govdeals source quality proof contract', () => {
     expect(source).toContain('item.detail_text');
     expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
     expect(source).toContain('const pushableLots = completeLots.filter(lot => passes(lot));');
-    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !isNonVehiclePartLot(lot) && !passes(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsDealerScopeAgeMileageGate(lot) && !isNonVehiclePartLot(lot) && !passes(lot));');
     expect(source).toContain('rows_excluded_policy_after_detail');
   });
 
-  test('enforces governed backend age and mileage ceilings before pushing rows', () => {
-    expect(source).toContain('const MAX_MODEL_AGE_YEARS = 4;');
-    expect(source).toContain('const MAX_MILEAGE = 50000;');
-    expect(source).toContain('function failsAgeMileageCeiling(item)');
-    expect(source).toContain('if (failsAgeMileageCeiling(item)) return false;');
-    expect(source).not.toContain('(currentYear - year) > 10');
-    expect(source).not.toContain('mileage > 100000');
+  test('enforces governed backend standard-lane age and mileage ceilings before pushing rows', () => {
+    expect(source).toContain('const STANDARD_MAX_MODEL_AGE_YEARS = 10;');
+    expect(source).toContain('const STANDARD_MAX_MILEAGE = 100000;');
+    expect(source).toContain('const STANDARD_MAX_MILES_PER_YEAR = 18000;');
+    expect(source).toContain('function failsDealerScopeAgeMileageGate(item)');
+    expect(source).toContain('if (failsDealerScopeAgeMileageGate(item)) return false;');
+    expect(source).toContain('mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR');
+    expect(source).not.toContain('const MAX_MODEL_AGE_YEARS = 4;');
+    expect(source).not.toContain('const MAX_MILEAGE = 50000;');
   });
 
   test('separates detail-enriched age/mileage rejects from generic policy rejects', () => {
     expect(source).toContain('const completeLots = passingLots.filter(lot => Boolean(lot.vin) && Boolean(lot.mileage));');
-    expect(source).toContain('const postAgeMileageRejectedLots = completeLots.filter(lot => failsAgeMileageCeiling(lot));');
+    expect(source).toContain('const postAgeMileageRejectedLots = completeLots.filter(lot => failsDealerScopeAgeMileageGate(lot));');
     expect(source).toContain('const postNonVehiclePartRejectedLots = completeLots.filter(lot => isNonVehiclePartLot(lot));');
-    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsAgeMileageCeiling(lot) && !isNonVehiclePartLot(lot) && !passes(lot));');
+    expect(source).toContain('const postPolicyRejectedLots = completeLots.filter(lot => !failsDealerScopeAgeMileageGate(lot) && !isNonVehiclePartLot(lot) && !passes(lot));');
     expect(source).toContain('rows_excluded_age_mileage_after_detail');
     expect(source).toContain('rows_excluded_non_vehicle_part_after_detail');
     expect(source).toContain('post_age_mileage_rejected_samples');

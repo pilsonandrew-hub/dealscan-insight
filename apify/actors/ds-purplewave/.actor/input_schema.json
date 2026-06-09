@@ -24,16 +24,16 @@
     "minYear": {
       "title": "Minimum Model Year",
       "type": "integer",
-      "description": "Minimum model year for accepted proof rows",
-      "default": 2022,
+      "description": "Minimum standard-lane model year for accepted proof rows",
+      "default": 2016,
       "minimum": 1990,
       "editor": "number"
     },
     "maxMileage": {
       "title": "Maximum Mileage",
       "type": "integer",
-      "description": "Maximum mileage for accepted proof rows",
-      "default": 50000,
+      "description": "Maximum standard-lane mileage for accepted proof rows",
+      "default": 100000,
       "minimum": 0,
       "editor": "number"
     },

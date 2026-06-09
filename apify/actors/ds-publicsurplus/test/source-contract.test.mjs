@@ -20,18 +20,20 @@ describe('ds-publicsurplus source contract', () => {
     expect(source).toContain('(?:miles?|mi\\b)');
   });
 
-  test('re-applies mileage cap after detail-page enrichment before publishing', () => {
-    expect(source).toContain('const MAX_ALLOWED_MILEAGE = 50000;');
-    expect(detailHandler).toContain('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)');
+  test('re-applies standard-lane age/mileage cap after detail-page enrichment before publishing', () => {
+    expect(source).toContain('const STANDARD_MAX_MILEAGE = 100000;');
+    expect(source).toContain('const STANDARD_MAX_MILES_PER_YEAR = 18000;');
+    expect(detailHandler).toContain('if (vehicle.mileage !== null && failsDealerScopeAgeMileageGate(vehicle.year, vehicle.mileage))');
     expect(detailHandler).toContain('return;');
-    expect(detailHandler.indexOf('if (vehicle.mileage !== null && vehicle.mileage > MAX_ALLOWED_MILEAGE)'))
+    expect(detailHandler.indexOf('if (vehicle.mileage !== null && failsDealerScopeAgeMileageGate(vehicle.year, vehicle.mileage))'))
       .toBeLessThan(detailHandler.indexOf('await pushVehicle(vehicle);'));
   });
 
-  test('mirrors backend max-age gate before publishing standard and Texas rows', () => {
-    expect(source).toContain('const MAX_ALLOWED_AGE_YEARS = 4;');
-    expect(source).toContain('age > MAX_ALLOWED_AGE_YEARS');
-    expect(source.match(/age > MAX_ALLOWED_AGE_YEARS/g)).toHaveLength(2);
+  test('mirrors backend standard-lane max-age gate before publishing standard and Texas rows', () => {
+    expect(source).toContain('const STANDARD_MAX_AGE_YEARS = 10;');
+    expect(source).toContain('age > STANDARD_MAX_AGE_YEARS');
+    expect(source.match(/age > STANDARD_MAX_AGE_YEARS/g)).toHaveLength(1);
+    expect(source).toContain('failsDealerScopeAgeMileageGate(year, mileage, currentYear)');
   });
 
   test('detail-enriches rows missing condition evidence even when VIN is already present', () => {
@@ -93,7 +95,7 @@ describe('ds-publicsurplus source contract', () => {
 
   test('source-quality proof explains post-detail rejection outcomes', () => {
     expect(source).toContain('const rejectionReasons = {};');
-    expect(source).toContain("incrementRejectionReason('mileage_over_50k')");
+    expect(source).toContain("incrementRejectionReason('age_or_mileage_exceeded')");
     expect(source).toContain("incrementRejectionReason('condition_reject_after_detail')");
     expect(source).toContain("incrementRejectionReason('missing_detail_evidence_after_enrichment')");
     expect(source).toContain('enriched_rows_accepted: enrichedRowsAccepted');

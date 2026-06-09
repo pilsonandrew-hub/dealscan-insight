@@ -28,16 +28,16 @@
     "maxMileage": {
       "title": "Max Mileage",
       "type": "integer",
-      "description": "Maximum odometer mileage for DealerScope buyer-grade candidates",
-      "default": 50000,
+      "description": "Maximum odometer mileage for DealerScope standard-lane candidates",
+      "default": 100000,
       "minimum": 0,
       "editor": "number"
     },
     "maxAgeYears": {
       "title": "Max Age Years",
       "type": "integer",
-      "description": "Maximum vehicle age in years for DealerScope buyer-grade candidates",
-      "default": 4,
+      "description": "Maximum vehicle age in years for DealerScope standard-lane candidates",
+      "default": 10,
       "minimum": 0,
       "editor": "number"
     },

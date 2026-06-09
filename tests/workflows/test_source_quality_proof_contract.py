@@ -250,6 +250,30 @@ def test_active_public_source_actors_do_not_embed_premium_only_age_mileage_gates
     assert offenders == []
 
 
+def test_public_source_workflows_do_not_restore_premium_only_age_mileage_gates():
+    workflow_paths = [
+        Path('.github/workflows/run-apify-actor.yml'),
+        Path('.github/workflows/configure-bidspotter-apify-schedule.yml'),
+        Path('.github/workflows/configure-hibid-v2-apify-schedule.yml'),
+    ]
+    forbidden_fragments = [
+        'CURRENT_YEAR - 4',
+        'datetime.now(timezone.utc).year - 4',
+        '"maxMileage": 50000',
+        'or "50000"',
+        'DealerScope 4-year gate',
+    ]
+
+    offenders = []
+    for workflow_path in workflow_paths:
+        text = workflow_path.read_text()
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                offenders.append(f'{workflow_path}:{fragment}')
+
+    assert offenders == []
+
+
 def test_source_quality_proof_passes_clean_no_eligible_inventory_separately():
     text = WORKFLOW.read_text()
     assert 'low_yield_source_truth_detected' in text

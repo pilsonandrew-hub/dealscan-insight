@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import re
 import unittest
+from datetime import datetime
 
 
 class ApifyDeploymentManifestTests(unittest.TestCase):
@@ -119,10 +120,37 @@ class ApifyDeploymentManifestTests(unittest.TestCase):
         self.assertEqual(actor["scheduleName"], "ds-hibid-v2-every-12h")
         self.assertEqual(actor["scheduleStatus"], "enabled_live")
         self.assertIn("WEBHOOK_SECRET: ${{ secrets.APIFY_WEBHOOK_SECRET }}", workflow)
-        self.assertIn('"minYear": CURRENT_YEAR - 4', workflow)
-        self.assertIn('"maxMileage": 50000', workflow)
+        self.assertIn('"minYear": CURRENT_YEAR - 10', workflow)
+        self.assertIn('"maxMileage": 100000', workflow)
+        self.assertNotIn('"minYear": CURRENT_YEAR - 4', workflow)
+        self.assertNotIn('"maxMileage": 50000', workflow)
         self.assertNotIn('"webhookSecret"', workflow)
         self.assertNotIn("rDyApg2UUIMl0a8ZUz_swOqsHX7HbjN-gly3xHNwiyA", workflow)
+
+    def test_active_source_actor_input_defaults_do_not_restore_premium_only_lane(self):
+        schema_paths = [
+            self.repo_root / "apify" / "actors" / "ds-bidspotter" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-govplanet" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-gsaauctions" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-hibid-v2" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-municibid" / ".actor" / "input_schema.json",
+            self.repo_root / "apify" / "actors" / "ds-purplewave" / ".actor" / "input_schema.json",
+        ]
+        standard_min_year = datetime.now().year - 10
+
+        for path in schema_paths:
+            with self.subTest(schema=path):
+                properties = json.loads(path.read_text(encoding="utf-8")).get("properties", {})
+                max_mileage = properties.get("maxMileage", {}).get("default")
+                max_age_years = properties.get("maxAgeYears", {}).get("default")
+                min_year = properties.get("minYear", {}).get("default")
+
+                if max_mileage is not None:
+                    self.assertGreaterEqual(max_mileage, 100_000)
+                if max_age_years is not None:
+                    self.assertGreaterEqual(max_age_years, 10)
+                if min_year is not None:
+                    self.assertLessEqual(min_year, standard_min_year)
 
     def test_jjkane_actor_records_secret_managed_marketcheck_rotation(self):
         manifest_path = self.repo_root / "apify" / "deployment.json"

@@ -15,7 +15,8 @@ describe('AllSurplus detail enrichment source contract', () => {
     expect(source).toContain('detail.meterCount');
     expect(source).toContain('detail.vinserial');
     expect(source).toContain('stripHtmlToText(detail.assetLongDesc');
-    expect(source).toContain('if (listing.mileage && listing.mileage > maxMileage)');
+    expect(source).toContain('if (listing.mileage && failsDealerScopeAgeMileageGate(listing.year, listing.mileage))');
+    expect(source).toContain('const STANDARD_MAX_MILES_PER_YEAR = 18000;');
     expect(source).toContain('await Actor.pushData(listing)');
   });
 
