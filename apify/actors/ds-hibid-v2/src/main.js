@@ -90,6 +90,22 @@ const CONDITION_REJECT_PATTERNS = [
     /\bbad\s+engine\b/i,
     /\bno\s+title\b/i,
 ];
+const NON_VEHICLE_PART_PATTERNS = [
+    /\btruck\s+bed\b/i, // truck bed
+    /\bpickup\s+bed\b/i, // pickup bed
+    /\bcamper\s+shell\b/i, // camper shell
+    /\btonneau\s+cover\b/i, // tonneau
+    /\bbed\s+cap\b/i, // bed cap
+    /\butility\s+body\b/i, // utility body
+    /\bservice\s+body\b/i, // service body
+    /\btruck\s+cap\b/i, // truck cap
+    /\btruck\s+topper\b/i, // truck topper
+    /\b(?:ford|chevrolet|chevy|gmc|dodge|ram|toyota|nissan)\s+(?:\w+\s+){0,3}tailgate\b/i, // tailgate
+    /\btailgate\s+(?:assembly|part|only)\b/i, // tailgate
+    /\b(?:truck|pickup)\s+bed\s+liner\b/i, // bed liner
+    /\bbed\s+liner\s+(?:kit|only)\b/i, // bed liner
+    /\bvehicle\s+parts\b/i, // vehicle parts
+];
 
 // US state abbreviations set
 const US_STATES = new Set([
@@ -210,6 +226,7 @@ function isVehicle(text) {
     if (!text) return false;
     const lower = String(text).toLowerCase();
     if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(lower))) return false;
+    if (NON_VEHICLE_PART_PATTERNS.some((pattern) => pattern.test(lower))) return false;
     if (EXCLUDED_PATTERNS.test(lower)) return false;
     const hasMake = [...VEHICLE_MAKES].some(m => new RegExp(`\\b${m}\\b`).test(lower));
     const hasKeyword = VEHICLE_KEYWORDS.some(k => lower.includes(k));
@@ -252,10 +269,16 @@ function addProofSample(bucket, listing, reason) {
 }
 
 function passesFilters(listing, log) {
-    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(String(listing.title || '').toLowerCase()))) {
+    const titleLower = String(listing.title || '').toLowerCase();
+    if (CONDITION_REJECT_PATTERNS.some((pattern) => pattern.test(titleLower))) {
         log.debug(`[SKIP] Condition reject: ${listing.title || 'unknown title'}`);
         proofCounters.rows_excluded_policy_prefilter++;
         addProofSample('policy_prefilter', listing, 'condition_reject_pattern');
+        return false;
+    }
+    if (NON_VEHICLE_PART_PATTERNS.some((pattern) => pattern.test(titleLower))) {
+        log.debug(`[SKIP-NON-VEH-PART] ${listing.title?.slice(0, 60)}`);
+        proofCounters.rows_excluded_non_vehicle++;
         return false;
     }
     if (!isVehicle(listing.title)) {
