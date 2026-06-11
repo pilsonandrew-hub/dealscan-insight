@@ -33,6 +33,8 @@ class CursorAudit12hrWorkflowTest(unittest.TestCase):
 
         self.assertIn("OPENROUTER_KEY", workflow)
         self.assertIn("GEMINI_OPENROUTER_MODEL", workflow)
+        self.assertIn("~google/gemini-pro-latest", workflow)
+        self.assertNotIn("google/gemini-2.5-flash", workflow)
         self.assertIn("https://openrouter.ai/api/v1/chat/completions", workflow)
         self.assertIn("fetch_openrouter_gemini_audit", workflow)
         self.assertIn("Direct Gemini audit unavailable", workflow)

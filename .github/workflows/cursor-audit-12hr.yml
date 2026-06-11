@@ -146,7 +146,7 @@ jobs:
           CHAT_ID: "-1003672399222"
           GEMINI_AUDIT_MAX_ATTEMPTS: "3"
           GEMINI_AUDIT_RETRY_DELAY_SECONDS: "60"
-          GEMINI_OPENROUTER_MODEL: "google/gemini-2.5-flash"
+          GEMINI_OPENROUTER_MODEL: "~google/gemini-pro-latest"
         run: |
           python3 << 'PYEOF'
           import datetime, html, json, os, pathlib, re, ssl, time, urllib.error, urllib.request
@@ -157,7 +157,7 @@ jobs:
           CHAT_ID = os.environ.get("CHAT_ID", "")
           MAX_ATTEMPTS = int(os.environ.get("GEMINI_AUDIT_MAX_ATTEMPTS", "3"))
           RETRY_DELAY_SECONDS = int(os.environ.get("GEMINI_AUDIT_RETRY_DELAY_SECONDS", "60"))
-          OPENROUTER_MODEL = os.environ.get("GEMINI_OPENROUTER_MODEL", "google/gemini-2.5-flash")
+          OPENROUTER_MODEL = os.environ.get("GEMINI_OPENROUTER_MODEL", "~google/gemini-pro-latest")
           ctx = ssl.create_default_context()
 
           # Read key files for audit
