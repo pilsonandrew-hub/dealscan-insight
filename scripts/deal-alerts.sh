@@ -36,7 +36,7 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 HOT_DEAL_MIN_SCORE = float(os.environ.get("HOT_DEAL_MIN_SCORE", "80"))
 PLATINUM_MIN_ROI_DAY = float(os.environ.get("PLATINUM_MIN_ROI_DAY", "75"))
 ALERT_LIMIT = int(os.environ.get("ALERT_LIMIT", "10"))
-CANDIDATE_LIMIT = max(ALERT_LIMIT * 2, 10)
+CANDIDATE_LIMIT = max(ALERT_LIMIT * 3, 20)
 ALERT_MIN_TRUST_SCORE = float(os.environ.get("ALERT_MIN_TRUST_SCORE", "0.25"))
 ALERT_MIN_CONFIDENCE = float(os.environ.get("ALERT_MIN_CONFIDENCE", "55"))
 ALERT_MIN_BID_HEADROOM = float(os.environ.get("ALERT_MIN_BID_HEADROOM", "0"))
@@ -128,7 +128,8 @@ try:
             continue
         alerted_types_by_id.setdefault(opportunity_id, set()).add(normalize_alert_type(row.get("alert_type")))
 except Exception:
-    pass
+    print("Error: failed to load prior alert receipts; refusing to send duplicate-prone alerts.", file=sys.stderr)
+    raise
 
 deals = supabase_get(
     "opportunities?select=id,listing_id,run_id,source_site,title,year,make,model,state,current_bid,dos_score,listing_url,image_url,"
@@ -144,7 +145,8 @@ deals = supabase_get(
 raw_data_needed_ids = []
 for deal in deals:
     preliminary_gate = evaluate_alert_gate(deal, thresholds=THRESHOLDS)
-    if "condition_unverified" in preliminary_gate.get("blocking_reasons", []):
+    preliminary_blockers = set(preliminary_gate.get("blocking_reasons", []))
+    if "condition_evidence_missing" in preliminary_blockers:
         raw_data_needed_ids.append(deal.get("id"))
 raw_data_by_id = fetch_raw_data_by_id(raw_data_needed_ids)
 for deal in deals:
