@@ -213,9 +213,37 @@ def _is_competitor_sales_url_conflict(exc: Exception) -> bool:
     )
     mentions_url_target = (
         "idx_competitor_sales_source_url_upsert" in error_text
-        or "source,listing_url" in error_text
+        or "idx_competitor_sales_source_url" in error_text
+        or "competitor_sales_source_url" in error_text
     )
     return has_unique_violation and mentions_url_target
+
+
+def _existing_source_listing_id_for_url(row: Dict[str, Any], supabase_client: Any) -> tuple[bool, Optional[str]]:
+    try:
+        resp = (
+            supabase_client.table("competitor_sales")
+            .select("source_listing_id")
+            .eq("source", row.get("source"))
+            .eq("listing_url", row.get("listing_url"))
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover - network/db path
+        logger.error("[competitor_sales] could not verify url-conflict row identity: %s", exc)
+        return False, None
+    if not resp.data:
+        return True, None
+    existing_id = resp.data[0].get("source_listing_id")
+    return True, str(existing_id).strip() if existing_id else None
+
+
+def _url_fallback_is_identity_safe(row: Dict[str, Any], supabase_client: Any) -> bool:
+    lookup_ok, existing_id = _existing_source_listing_id_for_url(row, supabase_client)
+    if not lookup_ok:
+        return False
+    row_id = str(row.get("source_listing_id") or "").strip()
+    return existing_id in (None, "", row_id)
 
 
 def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> int:
@@ -263,6 +291,12 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
                         if not _is_competitor_sales_url_conflict(row_exc):
                             logger.error("[competitor_sales] row upsert by listing id failed: %s", row_exc)
                             continue
+                        if not _url_fallback_is_identity_safe(row, supabase_client):
+                            logger.error(
+                                "[competitor_sales] refusing url fallback for %s because listing_url is tied to another source_listing_id",
+                                row.get("listing_url"),
+                            )
+                            continue
                         try:
                             resp = (
                                 supabase_client.table("competitor_sales")
@@ -284,7 +318,21 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
             )
             written += len(resp.data) if resp.data else 0
         except Exception as exc:  # pragma: no cover - network/db path
-            logger.error("[competitor_sales] upsert by url failed: %s", exc)
+            logger.warning(
+                "[competitor_sales] url batch upsert failed; retrying %d rows individually: %s",
+                len(without_ids),
+                exc,
+            )
+            for row in without_ids:
+                try:
+                    resp = (
+                        supabase_client.table("competitor_sales")
+                        .upsert([row], on_conflict="source,listing_url", ignore_duplicates=False)
+                        .execute()
+                    )
+                    written += len(resp.data) if resp.data else 0
+                except Exception as row_exc:  # pragma: no cover - network/db path
+                    logger.error("[competitor_sales] row upsert by url failed: %s", row_exc)
 
     logger.info("[competitor_sales] wrote %d rows", written)
     return written

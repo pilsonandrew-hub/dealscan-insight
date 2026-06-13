@@ -13,6 +13,13 @@ def _all_competitor_sales_sql() -> str:
 def test_competitor_sales_url_upsert_conflict_target_has_non_partial_unique_index():
     sql = _all_competitor_sales_sql()
 
+    assert "begin;" in sql
+    assert "commit;" in sql
+    assert sql.index("begin;") < sql.index("commit;")
+    assert "max(source_listing_id)" not in sql
+    assert "first_value(source_listing_id)" in sql
+    assert "rows between unbounded preceding and unbounded following" in sql
+
     duplicate_cleanup = re.search(
         r"partition\s+by\s+source,\s*listing_url[\s\S]+"
         r"delete\s+from\s+public\.competitor_sales\s+as\s+duplicate[\s\S]+"
@@ -45,6 +52,8 @@ def test_competitor_sales_url_upsert_conflict_target_has_non_partial_unique_inde
     assert url_index is not None
     assert duplicate_cleanup.start() < url_index.start()
     assert listing_duplicate_cleanup.start() < listing_index.start()
+    assert listing_index.start() < sql.index("drop index if exists public.idx_competitor_sales_source_listing")
+    assert url_index.start() < sql.index("drop index if exists public.idx_competitor_sales_source_url")
     assert "drop index if exists public.idx_competitor_sales_source_listing" in sql
     assert "drop index if exists public.idx_competitor_sales_source_url" in sql
     assert "notify pgrst, 'reload schema'" in sql

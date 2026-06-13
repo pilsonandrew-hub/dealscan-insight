@@ -6,6 +6,8 @@
 -- writes while still allowing multiple NULL source_listing_id rows because
 -- PostgreSQL treats NULLs as distinct.
 
+BEGIN;
+
 WITH ranked_url_duplicates AS (
   SELECT
     id,
@@ -16,16 +18,25 @@ WITH ranked_url_duplicates AS (
         scraped_at DESC NULLS LAST,
         created_at DESC NULLS LAST,
         id
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS keep_id,
-    source_listing_id
+    first_value(source_listing_id) OVER (
+      PARTITION BY source, listing_url
+      ORDER BY
+        (source_listing_id IS NOT NULL) DESC,
+        scraped_at DESC NULLS LAST,
+        created_at DESC NULLS LAST,
+        id
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS keep_source_listing_id
   FROM public.competitor_sales
 ),
 merged_url_duplicates AS (
   SELECT
     keep_id,
-    max(source_listing_id) FILTER (WHERE source_listing_id IS NOT NULL) AS source_listing_id
+    keep_source_listing_id AS source_listing_id
   FROM ranked_url_duplicates
-  GROUP BY keep_id
+  GROUP BY keep_id, keep_source_listing_id
 )
 UPDATE public.competitor_sales AS keep
 SET source_listing_id = COALESCE(keep.source_listing_id, merged.source_listing_id)
@@ -43,6 +54,7 @@ WITH ranked_url_duplicates AS (
         scraped_at DESC NULLS LAST,
         created_at DESC NULLS LAST,
         id
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS keep_id
   FROM public.competitor_sales
 )
@@ -60,6 +72,7 @@ WITH ranked_listing_duplicates AS (
         scraped_at DESC NULLS LAST,
         created_at DESC NULLS LAST,
         id
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS keep_id
   FROM public.competitor_sales
   WHERE source_listing_id IS NOT NULL
@@ -79,3 +92,5 @@ DROP INDEX IF EXISTS public.idx_competitor_sales_source_listing;
 DROP INDEX IF EXISTS public.idx_competitor_sales_source_url;
 
 NOTIFY pgrst, 'reload schema';
+
+COMMIT;
