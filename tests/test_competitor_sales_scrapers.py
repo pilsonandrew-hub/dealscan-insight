@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import asyncio
+import httpx
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -204,6 +205,31 @@ def test_govdeals_seo_explicit_asset_urls_do_not_trigger_search(monkeypatch):
     rows = asyncio.run(govdeals._scrape_govdeals_seo(max_pages=1))
 
     assert len(rows) == 1
+
+
+def test_govdeals_seo_retries_transient_asset_fetch_failure(monkeypatch):
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def get(self, url, headers=None):
+            self.calls += 1
+            request = httpx.Request("GET", url)
+            if self.calls == 1:
+                return httpx.Response(502, request=request, text="")
+            return httpx.Response(200, request=request, text=SOLD_GOVDEALS_SEO_HTML)
+
+    client = FakeClient()
+
+    html = asyncio.run(
+        govdeals._fetch_text(
+            client,
+            "https://prod-seo.govdeals.com/en/asset/17167/7167",
+        )
+    )
+
+    assert html == SOLD_GOVDEALS_SEO_HTML
+    assert client.calls == 2
 
 
 def test_govdeals_seo_skips_failed_asset_fetches(monkeypatch):
