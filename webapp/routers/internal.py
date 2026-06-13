@@ -345,7 +345,7 @@ def build_seller_recovery_audit() -> dict[str, Any]:
     )
     sections["deliveries"], delivery_rows = _safe_section_rows(
         "ingest_delivery_log",
-        "source_site,source,status,error_message,created_at",
+        "status,error_message,created_at",
         order=("created_at", True),
         limit=500,
     )
@@ -357,7 +357,7 @@ def build_seller_recovery_audit() -> dict[str, Any]:
     )
     sections["opportunities"], opportunity_rows = _safe_section_rows(
         "opportunities",
-        "id,is_active,source_site,year,make,model,dos_score,score,gross_margin,potential_profit,bid_headroom,pricing_maturity,vin,mileage,condition_grade,auction_end_date,auction_end,auction_end_time,risk_flags",
+        "*",
         order=("updated_at", True),
         limit=500,
     )

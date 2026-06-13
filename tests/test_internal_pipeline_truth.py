@@ -166,6 +166,55 @@ def test_seller_recovery_audit_degrades_when_opportunities_unreadable(monkeypatc
     assert result["summary"]["candidate_count"] == 0
 
 
+def test_seller_recovery_audit_does_not_select_non_schema_delivery_or_opportunity_fields(monkeypatch):
+    class SchemaStrictQuery(_Query):
+        def __init__(self, table, rows):
+            super().__init__(rows)
+            self.table = table
+
+        def select(self, columns, **_kwargs):
+            selected = {column.strip() for column in str(columns).split(",") if column.strip()}
+            if self.table == "ingest_delivery_log":
+                assert "source_site" not in selected
+                assert "source" not in selected
+            if self.table == "opportunities":
+                assert columns == "*"
+            return self
+
+    class SchemaStrictSupabase:
+        def table(self, name):
+            rows = {
+                "source_health_daily": [],
+                "ingest_delivery_log": [{"status": "skipped_margin", "error_message": "margin_below_floor"}],
+                "parse_events": [],
+                "opportunities": [
+                    {
+                        "id": "recoverable-1",
+                        "is_active": True,
+                        "source_site": "govdeals",
+                        "year": 2023,
+                        "make": "Ford",
+                        "model": "F-150",
+                        "dos_score": 82,
+                        "gross_margin": 6200,
+                        "bid_headroom": 2400,
+                        "pricing_maturity": "proxy",
+                        "vin": None,
+                        "mileage": None,
+                        "condition_grade": "Unknown",
+                    }
+                ],
+            }[name]
+            return SchemaStrictQuery(name, rows)
+
+    monkeypatch.setattr(internal, "supabase_client", SchemaStrictSupabase())
+
+    result = internal.build_seller_recovery_audit()
+
+    assert result["status"] == "ok"
+    assert result["summary"]["candidate_count"] == 1
+
+
 def test_seller_recovery_audit_route_requires_internal_secret(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "internal-secret")
     try:
