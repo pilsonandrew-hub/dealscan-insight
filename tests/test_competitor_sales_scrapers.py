@@ -12,6 +12,7 @@ from backend.scrapers.competitor_sales.base import (
     dedup_key,
     extract_vin,
     normalize_state,
+    write_competitor_sales,
 )
 from backend.scrapers.competitor_sales.govdeals import normalize_govdeals_lot
 from backend.scrapers.competitor_sales import govdeals
@@ -32,6 +33,7 @@ def test_build_row_requires_positive_price_and_identity():
     assert row["state"] == "TX"
     assert row["vehicle_class"] == "f-150"
     assert row["currency"] == "USD"
+    assert row["updated_at"]
 
 
 def test_extract_vin_and_state_helpers():
@@ -45,6 +47,329 @@ def test_extract_vin_and_state_helpers():
 def test_dedup_key_prefers_listing_id():
     assert dedup_key("GovDeals", "123", "http://x") == "govdeals|123"
     assert dedup_key("GovDeals", None, "http://x") == "govdeals|http://x"
+
+
+class _FakeCompetitorSalesTable:
+    def __init__(self, failures=None, existing_by_url=None):
+        self.calls = []
+        self.select_calls = []
+        self.delete_calls = []
+        self._failures = list(failures or [])
+        self._existing_by_url = existing_by_url or {}
+        self._mode = None
+        self._filters = {}
+
+    def upsert(self, payload, **options):
+        self._mode = "upsert"
+        self.calls.append({"payload": payload, "options": options})
+        return self
+
+    def select(self, columns):
+        self._mode = "select"
+        self._filters = {}
+        self.select_calls.append({"columns": columns, "filters": self._filters})
+        return self
+
+    def delete(self):
+        self._mode = "delete"
+        self._filters = {}
+        self.delete_calls.append({"filters": self._filters})
+        return self
+
+    def eq(self, column, value):
+        self._filters[column] = value
+        return self
+
+    def is_(self, column, value):
+        self._filters[column] = value
+        return self
+
+    def limit(self, value):
+        self._filters["limit"] = value
+        return self
+
+    def execute(self):
+        if self._mode == "select":
+            key = (self._filters.get("source"), self._filters.get("listing_url"))
+            row = self._existing_by_url.get(key)
+            return type("Resp", (), {"data": [row] if row else []})()
+        if self._mode == "delete":
+            return type("Resp", (), {"data": [{"deleted": True}]})()
+        if self._failures:
+            failure = self._failures.pop(0)
+            if failure is not None:
+                raise failure
+        return type("Resp", (), {"data": self.calls[-1]["payload"]})()
+
+
+class _FakeRpcCall:
+    def __init__(self, client, name, params):
+        self._client = client
+        self._name = name
+        self._params = params
+
+    def execute(self):
+        self._client.rpc_calls.append({"name": self._name, "params": self._params})
+        if self._client.rpc_failures:
+            failure = self._client.rpc_failures.pop(0)
+            if failure is not None:
+                raise failure
+        row = self._params["row_payload"]
+        return type("Resp", (), {"data": [row]})()
+
+
+class _FakeSupabaseClient:
+    def __init__(self, failures=None, existing_by_url=None, rpc_failures=None):
+        self.sales_table = _FakeCompetitorSalesTable(
+            failures=failures,
+            existing_by_url=existing_by_url,
+        )
+        self.rpc_calls = []
+        self.rpc_failures = list(rpc_failures or [])
+
+    def table(self, name):
+        assert name == "competitor_sales"
+        return self.sales_table
+
+    def rpc(self, name, params):
+        return _FakeRpcCall(self, name, params)
+
+
+def test_write_competitor_sales_uses_listing_id_conflict_when_available():
+    client = _FakeSupabaseClient()
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "asset-1",
+            "listing_url": "https://www.govdeals.com/asset/asset-1",
+            "sale_price": 1000,
+        },
+        {
+            "source": "govdeals",
+            "source_listing_id": None,
+            "listing_url": "https://www.govdeals.com/asset/asset-2",
+            "sale_price": 2000,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 2
+
+    assert len(client.sales_table.calls) == 2
+    assert client.sales_table.calls[0]["options"]["on_conflict"] == "source,source_listing_id"
+    assert client.sales_table.calls[0]["payload"][0]["source_listing_id"] == "asset-1"
+    assert client.sales_table.calls[1]["options"]["on_conflict"] == "source,listing_url"
+    assert "source_listing_id" not in client.sales_table.calls[1]["payload"][0]
+
+
+def test_write_competitor_sales_retries_only_url_conflicting_id_backed_rows():
+    client = _FakeSupabaseClient(
+        failures=[
+            RuntimeError("duplicate key violates idx_competitor_sales_source_url_upsert"),
+            None,
+            RuntimeError("duplicate key violates idx_competitor_sales_source_url_upsert"),
+        ]
+    )
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "17000",
+            "listing_url": "https://www.govdeals.com/en/asset/17000/7167",
+            "sale_price": 2500,
+        },
+        {
+            "source": "govdeals",
+            "source_listing_id": "17167",
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 2
+
+    assert len(client.sales_table.calls) == 3
+    assert client.sales_table.calls[0]["options"]["on_conflict"] == "source,source_listing_id"
+    assert [r["source_listing_id"] for r in client.sales_table.calls[0]["payload"]] == ["17000", "17167"]
+    assert client.sales_table.calls[1]["options"]["on_conflict"] == "source,source_listing_id"
+    assert client.sales_table.calls[1]["payload"][0]["source_listing_id"] == "17000"
+    assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
+    assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
+    assert client.rpc_calls == [
+        {
+            "name": "reconcile_competitor_sale_url_only_duplicate",
+            "params": {"row_payload": rows[1]},
+        }
+    ]
+
+
+def test_write_competitor_sales_does_not_overwrite_conflicting_existing_listing_id():
+    client = _FakeSupabaseClient(
+        failures=[
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+        ],
+        existing_by_url={
+            ("govdeals", "https://www.govdeals.com/en/asset/17167/7167"): {
+                "source_listing_id": "different-stable-id"
+            }
+        },
+    )
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "17167",
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 0
+
+    assert len(client.sales_table.calls) == 2
+    assert all(call["options"]["on_conflict"] == "source,source_listing_id" for call in client.sales_table.calls)
+    assert client.sales_table.select_calls == [
+        {
+            "columns": "source_listing_id",
+            "filters": {
+                "source": "govdeals",
+                "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+                "limit": 1,
+            },
+        }
+    ]
+
+
+def test_write_competitor_sales_uses_atomic_reconcile_for_url_only_existing_row():
+    client = _FakeSupabaseClient(
+        failures=[
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+        ],
+        existing_by_url={
+            ("govdeals", "https://www.govdeals.com/en/asset/17167/7167"): {
+                "source_listing_id": None
+            }
+        },
+    )
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "17167",
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 1
+
+    assert len(client.sales_table.calls) == 2
+    assert client.sales_table.delete_calls == []
+    assert client.rpc_calls == [
+        {
+            "name": "reconcile_competitor_sale_url_only_duplicate",
+            "params": {"row_payload": rows[0]},
+        }
+    ]
+
+
+def test_write_competitor_sales_keeps_existing_url_row_when_atomic_reconcile_fails():
+    client = _FakeSupabaseClient(
+        failures=[
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+            None,
+        ],
+        existing_by_url={
+            ("govdeals", "https://www.govdeals.com/en/asset/17167/7167"): {
+                "source_listing_id": None
+            }
+        },
+        rpc_failures=[RuntimeError("rpc unavailable")],
+    )
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "17167",
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 0
+
+    assert client.sales_table.delete_calls == []
+    assert client.rpc_calls == [
+        {
+            "name": "reconcile_competitor_sale_url_only_duplicate",
+            "params": {"row_payload": rows[0]},
+        }
+    ]
+
+
+def test_write_competitor_sales_retries_url_only_rows_individually_after_batch_failure():
+    client = _FakeSupabaseClient(
+        failures=[
+            RuntimeError("temporary postgrest batch failure"),
+            None,
+            RuntimeError("row still malformed"),
+        ]
+    )
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": None,
+            "listing_url": "https://www.govdeals.com/en/asset/17000/7167",
+            "sale_price": 2500,
+        },
+        {
+            "source": "govdeals",
+            "source_listing_id": None,
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 1
+
+    assert len(client.sales_table.calls) == 3
+    assert client.sales_table.calls[0]["options"]["on_conflict"] == "source,listing_url"
+    assert len(client.sales_table.calls[0]["payload"]) == 2
+    assert client.sales_table.calls[1]["payload"][0]["listing_url"].endswith("/17000/7167")
+    assert client.sales_table.calls[2]["payload"][0]["listing_url"].endswith("/17167/7167")
+
+
+def test_write_competitor_sales_does_not_retry_unrelated_source_url_errors():
+    client = _FakeSupabaseClient(failures=[RuntimeError("source_url parser timeout")])
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "17167",
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 0
+
+    assert len(client.sales_table.calls) == 1
+    assert client.sales_table.calls[0]["options"]["on_conflict"] == "source,source_listing_id"
 
 
 def test_normalize_govdeals_lot():

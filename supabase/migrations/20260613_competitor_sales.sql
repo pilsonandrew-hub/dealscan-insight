@@ -91,6 +91,11 @@ CREATE POLICY "Service role can update competitor_sales"
   USING (auth.role() = 'service_role')
   WITH CHECK (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "Service role can delete competitor_sales" ON public.competitor_sales;
+CREATE POLICY "Service role can delete competitor_sales"
+  ON public.competitor_sales FOR DELETE
+  USING (auth.role() = 'service_role');
+
 COMMENT ON TABLE public.competitor_sales IS
   'Comparable completed/sold auction listings scraped from competitor sites (GovDeals, PublicSurplus, GovPlanet). Source of real market comps for DOS ceiling pricing.';
 COMMENT ON COLUMN public.competitor_sales.sale_price IS 'Actual winning/sold price for the lot (sold listings only).';

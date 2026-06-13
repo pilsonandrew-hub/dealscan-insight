@@ -181,6 +181,7 @@ def build_competitor_sale_row(
     if not make_clean and not model_clean and not vin:
         return None
 
+    scraped_at = datetime.now(timezone.utc).isoformat()
     row: Dict[str, Any] = {
         "source": (source or "").strip().lower(),
         "source_listing_id": (str(source_listing_id).strip() if source_listing_id else None),
@@ -199,9 +200,58 @@ def build_competitor_sale_row(
         "location": (location or "").strip() or None,
         "state": normalize_state(location, state),
         "raw_payload": raw or {},
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "scraped_at": scraped_at,
+        "updated_at": scraped_at,
     }
     return row
+
+
+def _is_competitor_sales_url_conflict(exc: Exception) -> bool:
+    error_text = str(exc).lower()
+    has_unique_violation = (
+        "duplicate key" in error_text
+        or "unique constraint" in error_text
+        or "23505" in error_text
+    )
+    mentions_url_target = (
+        "idx_competitor_sales_source_url_upsert" in error_text
+        or "idx_competitor_sales_source_url" in error_text
+        or "competitor_sales_source_url" in error_text
+    )
+    return has_unique_violation and mentions_url_target
+
+
+def _existing_source_listing_id_for_url(row: Dict[str, Any], supabase_client: Any) -> tuple[bool, Optional[str]]:
+    try:
+        resp = (
+            supabase_client.table("competitor_sales")
+            .select("source_listing_id")
+            .eq("source", row.get("source"))
+            .eq("listing_url", row.get("listing_url"))
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover - network/db path
+        logger.error("[competitor_sales] could not verify url-conflict row identity: %s", exc)
+        return False, None
+    if not resp.data:
+        return True, None
+    existing_id = resp.data[0].get("source_listing_id")
+    return True, str(existing_id).strip() if existing_id else None
+
+
+def _reconcile_url_only_duplicate(row: Dict[str, Any], supabase_client: Any) -> int:
+    try:
+        resp = (
+            supabase_client.rpc(
+                "reconcile_competitor_sale_url_only_duplicate",
+                {"row_payload": row},
+            ).execute()
+        )
+    except Exception as exc:  # pragma: no cover - network/db path
+        logger.error("[competitor_sales] could not atomically reconcile url-only duplicate: %s", exc)
+        return 0
+    return len(resp.data) if resp.data else 0
 
 
 def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> int:
@@ -214,7 +264,13 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
         return 0
 
     with_ids = [r for r in valid if r.get("source_listing_id")]
-    without_ids = [r for r in valid if not r.get("source_listing_id")]
+    without_ids: List[Dict[str, Any]] = []
+    for row in valid:
+        if row.get("source_listing_id"):
+            continue
+        payload = dict(row)
+        payload.pop("source_listing_id", None)
+        without_ids.append(payload)
     written = 0
 
     if with_ids:
@@ -226,7 +282,47 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
             )
             written += len(resp.data) if resp.data else 0
         except Exception as exc:  # pragma: no cover - network/db path
-            logger.error("[competitor_sales] upsert by listing id failed: %s", exc)
+            if _is_competitor_sales_url_conflict(exc):
+                logger.warning(
+                    "[competitor_sales] listing-id batch hit url conflict; retrying %d rows individually",
+                    len(with_ids),
+                )
+                for row in with_ids:
+                    try:
+                        resp = (
+                            supabase_client.table("competitor_sales")
+                            .upsert([row], on_conflict="source,source_listing_id", ignore_duplicates=False)
+                            .execute()
+                        )
+                        written += len(resp.data) if resp.data else 0
+                    except Exception as row_exc:  # pragma: no cover - network/db path
+                        if not _is_competitor_sales_url_conflict(row_exc):
+                            logger.error("[competitor_sales] row upsert by listing id failed: %s", row_exc)
+                            continue
+                        lookup_ok, existing_id = _existing_source_listing_id_for_url(row, supabase_client)
+                        if not lookup_ok:
+                            continue
+                        row_id = str(row.get("source_listing_id") or "").strip()
+                        if existing_id not in (None, "", row_id):
+                            logger.error(
+                                "[competitor_sales] refusing url fallback for %s because listing_url is tied to another source_listing_id",
+                                row.get("listing_url"),
+                            )
+                            continue
+                        if not existing_id and row_id:
+                            written += _reconcile_url_only_duplicate(row, supabase_client)
+                            continue
+                        try:
+                            resp = (
+                                supabase_client.table("competitor_sales")
+                                .upsert([row], on_conflict="source,listing_url", ignore_duplicates=False)
+                                .execute()
+                            )
+                            written += len(resp.data) if resp.data else 0
+                        except Exception as fallback_exc:  # pragma: no cover - network/db path
+                            logger.error("[competitor_sales] row upsert by url fallback failed: %s", fallback_exc)
+            else:
+                logger.error("[competitor_sales] upsert by listing id failed: %s", exc)
 
     if without_ids:
         try:
@@ -237,7 +333,21 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
             )
             written += len(resp.data) if resp.data else 0
         except Exception as exc:  # pragma: no cover - network/db path
-            logger.error("[competitor_sales] upsert by url failed: %s", exc)
+            logger.warning(
+                "[competitor_sales] url batch upsert failed; retrying %d rows individually: %s",
+                len(without_ids),
+                exc,
+            )
+            for row in without_ids:
+                try:
+                    resp = (
+                        supabase_client.table("competitor_sales")
+                        .upsert([row], on_conflict="source,listing_url", ignore_duplicates=False)
+                        .execute()
+                    )
+                    written += len(resp.data) if resp.data else 0
+                except Exception as row_exc:  # pragma: no cover - network/db path
+                    logger.error("[competitor_sales] row upsert by url failed: %s", row_exc)
 
     logger.info("[competitor_sales] wrote %d rows", written)
     return written
