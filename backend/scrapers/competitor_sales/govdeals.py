@@ -7,6 +7,7 @@ schema (instead of dealer_sales).
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -38,6 +39,8 @@ DEFAULT_SEO_QUERIES = (
     "ram 2500",
 )
 SEO_ASSETS_PER_PAGE = 24
+SEO_FETCH_ATTEMPTS = 3
+SEO_TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 STATE_NAME_TO_CODE = {
     "alabama": "AL",
     "alaska": "AK",
@@ -355,9 +358,41 @@ def _seo_queries() -> List[str]:
 
 
 async def _fetch_text(client: httpx.AsyncClient, url: str) -> str:
-    response = await client.get(url, headers=SEO_HEADERS)
-    response.raise_for_status()
-    return response.text
+    last_error: Optional[Exception] = None
+    for attempt in range(1, SEO_FETCH_ATTEMPTS + 1):
+        try:
+            response = await client.get(url, headers=SEO_HEADERS)
+            response.raise_for_status()
+            return response.text
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code not in SEO_TRANSIENT_STATUS_CODES or attempt >= SEO_FETCH_ATTEMPTS:
+                raise
+            logger.warning(
+                "[%s] SEO fetch transient HTTP %s for %s attempt=%d/%d",
+                SOURCE,
+                status_code,
+                url,
+                attempt,
+                SEO_FETCH_ATTEMPTS,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_error = exc
+            if attempt >= SEO_FETCH_ATTEMPTS:
+                raise
+            logger.warning(
+                "[%s] SEO fetch transient %s for %s attempt=%d/%d",
+                SOURCE,
+                type(exc).__name__,
+                url,
+                attempt,
+                SEO_FETCH_ATTEMPTS,
+            )
+        await asyncio.sleep(0.5 * attempt)
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"{SOURCE} SEO fetch failed for {url}")
 
 
 async def _scrape_govdeals_seo(max_pages: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -387,7 +422,7 @@ async def _scrape_govdeals_seo(max_pages: Optional[int] = None) -> List[Dict[str
             try:
                 lot = parse_govdeals_seo_asset(await _fetch_text(client, asset_url), asset_url)
             except Exception as exc:
-                logger.warning("[%s] SEO asset fetch failed for %s: %s", SOURCE, asset_url, exc)
+                logger.warning("[%s] SEO asset fetch failed for %s: %s: %s", SOURCE, asset_url, type(exc).__name__, exc)
                 continue
             if lot is None:
                 continue
