@@ -522,6 +522,51 @@ def _current_bid_trust_score(auction_stage_hours_remaining: Optional[float] = No
     return round(base, 3)
 
 
+def _estimate_days_to_sale(
+    *,
+    vehicle_tier: str,
+    dos_score: float,
+    pricing_maturity: str,
+    retail_comp_count: int = 0,
+    retail_comp_confidence: Optional[float] = None,
+    auction_stage_hours_remaining: Optional[float] = None,
+) -> Optional[int]:
+    if vehicle_tier == "rejected" or dos_score <= 0:
+        return None
+
+    days = 45.0
+    if dos_score >= 90:
+        days -= 16.0
+    elif dos_score >= 80:
+        days -= 12.0
+    elif dos_score >= 65:
+        days -= 6.0
+
+    if vehicle_tier == "premium":
+        days -= 5.0
+    elif vehicle_tier == "standard":
+        days += 4.0
+
+    if pricing_maturity == "live_market":
+        days -= 6.0
+    elif pricing_maturity == "market_comp":
+        days -= 4.0
+
+    if retail_comp_count >= 3:
+        days -= 3.0
+
+    confidence = _coerce_float(retail_comp_confidence)
+    if confidence is not None:
+        confidence_norm = confidence if confidence <= 1 else confidence / 100.0
+        if confidence_norm >= 0.80:
+            days -= 2.0
+
+    if auction_stage_hours_remaining is not None and auction_stage_hours_remaining <= 72:
+        days -= 2.0
+
+    return int(round(max(7.0, min(days, 90.0))))
+
+
 def _round_price_basis(price: float) -> float:
     if price <= 0:
         return 0
@@ -1173,6 +1218,19 @@ def score_deal(
     expected_close_source = expected_close_metrics.get("expected_close_source") or "current_bid"
     acquisition_price_basis = _round_price_basis(expected_close_bid)
     ctm_pct = (bid_value / mmr) if mmr > 0 else None
+    estimated_days_to_sale = _estimate_days_to_sale(
+        vehicle_tier=vehicle_tier,
+        dos_score=selected_dos,
+        pricing_maturity=pricing_maturity,
+        retail_comp_count=retail_comp_count or 0,
+        retail_comp_confidence=retail_comp_confidence,
+        auction_stage_hours_remaining=auction_stage_hours_remaining,
+    )
+    roi_per_day = (
+        round(gross_margin / estimated_days_to_sale, 2)
+        if estimated_days_to_sale and gross_margin > 0
+        else None
+    )
 
     # Weighted risk penalty: severity-aware rather than uniform 15pts/flag.
     # frame_damage = high-severity (15pts), others = low-severity (8pts).
@@ -1288,8 +1346,8 @@ def score_deal(
         "wholesale_ctm_pct": ctm_pct,
         "retail_ctm_pct": None,
         "ctm_pct": ctm_pct,
-        "estimated_days_to_sale": None,
-        "roi_per_day": None,
+        "estimated_days_to_sale": estimated_days_to_sale,
+        "roi_per_day": roi_per_day,
         "roi_pct": roi_pct,
         "investment_grade": investment_grade,
         "bid_ceiling_pct": bid_ceiling_pct,

@@ -1275,6 +1275,36 @@ def test_score_deal_market_comp_pricing_can_remain_capital_ready_when_otherwise_
     assert result["pricing_trust_blocked"] is False
 
 
+def test_score_deal_market_comp_platinum_survives_alert_gate_as_platinum():
+    result = score_deal(**_strong_proxy_priced_score_kwargs(
+        description="Starts, runs and drives. Minor scratches noted. Clean title.",
+        retail_comp_count=5,
+        retail_comp_price_estimate=33000,
+        retail_comp_confidence=0.9,
+        manheim_source_status="fallback",
+    ))
+    record = {
+        **result,
+        "vin": "1HGCM82633A004352",
+        "mileage": 22000,
+        "raw_data": {
+            "detail_text": "Starts, runs and drives. Minor scratches noted. Clean title.",
+        },
+    }
+
+    gate = evaluate_alert_gate(record, thresholds=AlertThresholds())
+
+    assert result["pricing_maturity"] == "market_comp"
+    assert result["investment_grade"] == "Platinum"
+    assert result["estimated_days_to_sale"] is not None
+    assert result["estimated_days_to_sale"] > 0
+    assert result["roi_per_day"] is not None
+    assert result["roi_per_day"] >= AlertThresholds().platinum_min_roi_day
+    assert gate["eligible"] is True
+    assert gate["alert_type"] == "platinum"
+    assert gate["blocking_reasons"] == []
+
+
 def test_score_deal_uses_conservative_market_comp_wholesale_value_when_proxy_is_low():
     result = score_deal(
         bid=31000,
