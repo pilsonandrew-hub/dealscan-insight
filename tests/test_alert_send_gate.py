@@ -169,6 +169,85 @@ def test_send_telegram_alert_sends_when_recomputed_confidence_gate_passes(monkey
     assert deal["alert_gate"]["blocking_reasons"] == []
 
 
+def test_send_telegram_alert_does_not_suppress_platinum_upgrade_after_prior_hot_alert(monkeypatch):
+    client = _install_fake_httpx(message_id=777)
+    ingest = _ingest_module(monkeypatch)
+    recorded = []
+    monkeypatch.setattr(
+        ingest,
+        "_record_delivery_log",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+
+    class Query:
+        def __init__(self):
+            self.filters = []
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, key, value):
+            self.filters.append((key, value))
+            return self
+
+        def gte(self, key, value):
+            self.filters.append((key, value))
+            return self
+
+        def execute(self):
+            return types.SimpleNamespace(
+                data=[
+                    {
+                        "id": "old-hot-alert",
+                        "alert_type": "hot_deal",
+                        "delivery_state": "sent",
+                    }
+                ]
+            )
+
+    class FakeSupabase:
+        def table(self, name):
+            assert name == "alert_log"
+            return Query()
+
+    monkeypatch.setattr(ingest, "supabase_client", FakeSupabase())
+    deal = _send_eligible_deal()
+
+    message_id = asyncio.run(ingest.send_telegram_alert(deal))
+
+    assert message_id == "777"
+    assert client.post.call_count == 1
+    assert any(row["channel"] == "telegram_alert" and row["status"] == "sent" for row in recorded)
+
+
+def test_insert_alert_log_persists_current_alert_type(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
+    ingest = importlib.import_module("webapp.routers.ingest")
+    inserted = []
+
+    class InsertQuery:
+        def insert(self, row):
+            inserted.append(row)
+            return self
+
+        def execute(self):
+            return types.SimpleNamespace(data=inserted)
+
+    class FakeSupabase:
+        def table(self, name):
+            assert name == "alert_log"
+            return InsertQuery()
+
+    monkeypatch.setattr(ingest, "supabase_client", FakeSupabase())
+    deal = _send_eligible_deal(
+        alert_gate={"eligible": True, "alert_type": "platinum", "blocking_reasons": []},
+    )
+
+    assert asyncio.run(ingest.insert_alert_log(deal, "777")) is True
+    assert inserted[0]["alert_type"] == "platinum"
+
+
 def test_send_telegram_alert_records_delivery_skip_when_telegram_config_missing(monkeypatch):
     client = _install_fake_httpx()
     ingest = _ingest_module(monkeypatch)
@@ -263,13 +342,13 @@ def test_ai_validate_hot_deals_treats_invalid_model_as_advisory_and_records_it(m
 
 def test_duplicate_existing_opportunity_re_enters_alert_pipeline_when_no_alert_delivery(monkeypatch):
     ingest = _ingest_module(monkeypatch)
-    monkeypatch.setattr(ingest, "_alert_delivery_exists_for_opportunity", lambda opportunity_id: False)
+    monkeypatch.setattr(ingest, "_alert_delivery_exists_for_opportunity", lambda opportunity_id, desired_alert_type=None: False)
 
     assert ingest._should_evaluate_alert_delivery("duplicate_existing", True, "opp-issue-5") is True
 
 
 def test_duplicate_existing_opportunity_does_not_realert_when_delivery_exists(monkeypatch):
     ingest = _ingest_module(monkeypatch)
-    monkeypatch.setattr(ingest, "_alert_delivery_exists_for_opportunity", lambda opportunity_id: True)
+    monkeypatch.setattr(ingest, "_alert_delivery_exists_for_opportunity", lambda opportunity_id, desired_alert_type=None: True)
 
     assert ingest._should_evaluate_alert_delivery("duplicate_existing", True, "opp-issue-5") is False
