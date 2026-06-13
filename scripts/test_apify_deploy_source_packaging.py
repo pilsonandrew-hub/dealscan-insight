@@ -45,3 +45,14 @@ def test_apify_deploy_does_not_keep_dead_main_js_read() -> None:
     workflow = WORKFLOW.read_text()
 
     assert "main_js = open" not in workflow
+
+
+def test_apify_deploy_waits_for_each_build_before_next_actor() -> None:
+    workflow = WORKFLOW.read_text()
+
+    assert "import json, os, subprocess, sys, time, urllib.request, ssl" in workflow
+    assert "def wait_for_terminal_build(actor_dir, build_id):" in workflow
+    assert 'terminal = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}' in workflow
+    assert 'api("GET", f"/actor-builds/{build_id}")' in workflow
+    assert "time.sleep(10)" in workflow
+    assert "wait_for_terminal_build(actor_dir, build_id)" in workflow
