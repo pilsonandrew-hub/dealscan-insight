@@ -24,6 +24,10 @@ on:
         options:
           - "false"
           - "true"
+      govdeals_seo_asset_urls:
+        description: "Optional newline/comma-separated GovDeals SEO asset URLs for sold-page fallback proof"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -57,5 +61,6 @@ jobs:
           COMPETITOR_SCRAPER_SOURCES: ${{ inputs.sources }}
           COMPETITOR_SCRAPER_MAX_PAGES: ${{ inputs.max_pages || '10' }}
           COMPETITOR_SCRAPER_DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          COMPETITOR_GOVDEALS_SEO_ASSET_URLS: ${{ inputs.govdeals_seo_asset_urls || '' }}
         run: |
           python scripts/run_competitor_sales_scraper.py

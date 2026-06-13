@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import asyncio
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -12,6 +13,7 @@ from backend.scrapers.competitor_sales.base import (
     normalize_state,
 )
 from backend.scrapers.competitor_sales.govdeals import normalize_govdeals_lot
+from backend.scrapers.competitor_sales import govdeals
 from backend.scrapers.competitor_sales.govplanet import normalize_govplanet_record
 from backend.scrapers.competitor_sales.publicsurplus import normalize_publicsurplus_record
 
@@ -68,6 +70,162 @@ def test_normalize_govdeals_lot():
 
 def test_normalize_govdeals_lot_without_price_is_dropped():
     assert normalize_govdeals_lot({"assetId": "1", "modelYear": 2021, "make": "Ford", "model": "F-150"}) is None
+
+
+SOLD_GOVDEALS_SEO_HTML = """
+<html>
+  <head>
+    <script id="seoSchemaScript" type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Vehicle",
+        "name": "3052A/ 2014 Ford F-150",
+        "image": "https://webassets.lqdt1.com/assets/photos/7167/7167_17167_main.jpg",
+        "model": "F-150",
+        "offers": {
+          "@type": "Offer",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/SoldOut",
+          "url": "https://www.govdeals.com/en/asset/17167/7167",
+          "price": 3074
+        },
+        "seller": {
+          "@type": "Organization",
+          "name": "Miami-Dade County, FL",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Doral",
+            "addressRegion": "Florida"
+          }
+        },
+        "vehicleModelDate": "2014",
+        "vehicleIdentificationNumber": "1FTEX1CM9EFB48531",
+        "mileageFromOdometer": {
+          "@type": "QuantitativeValue",
+          "value": 143553,
+          "unitText": "Miles"
+        },
+        "subjectOf": {
+          "@type": "Auction",
+          "endDate": "2026-05-16T00:08:00Z"
+        },
+        "brand": {"@type": "Brand", "name": "Ford"}
+      }
+    </script>
+  </head>
+  <body>
+    <p id="lblSoldAmount" data-value="3458.25">USD 3,458.25</p>
+    <p id="lblTotalAmount" data-value="3700.33">USD 3,700.33</p>
+  </body>
+</html>
+"""
+
+
+def test_parse_govdeals_seo_asset_normalizes_soldout_vehicle():
+    lot = govdeals.parse_govdeals_seo_asset(
+        SOLD_GOVDEALS_SEO_HTML,
+        "https://prod-seo.govdeals.com/en/asset/17167/7167",
+    )
+
+    assert lot["assetId"] == "17167"
+    assert lot["accountId"] == "7167"
+    assert lot["title"] == "3052A/ 2014 Ford F-150"
+    assert lot["make"] == "Ford"
+    assert lot["model"] == "F-150"
+    assert lot["year"] == 2014
+    assert lot["winningBid"] == 3074.0
+    assert lot["sold_price_all_in"] == 3458.25
+    assert lot["vin"] == "1FTEX1CM9EFB48531"
+    assert lot["meterCount"] == 143553
+    assert lot["state"] == "FL"
+    assert lot["source_discovery"] == "govdeals-seo"
+
+
+def test_parse_govdeals_seo_asset_rejects_active_vehicle():
+    active_html = SOLD_GOVDEALS_SEO_HTML.replace("https://schema.org/SoldOut", "https://schema.org/InStock")
+
+    assert govdeals.parse_govdeals_seo_asset(
+        active_html,
+        "https://prod-seo.govdeals.com/en/asset/17167/7167",
+    ) is None
+
+
+def test_scrape_govdeals_sold_falls_back_to_explicit_seo_asset_url(monkeypatch):
+    async def failing_api(max_pages=None):
+        raise RuntimeError("api key unavailable")
+
+    async def fake_fetch_text(client, url):
+        if "/en/search" in url:
+            return ""
+        assert url == "https://prod-seo.govdeals.com/en/asset/17167/7167"
+        return SOLD_GOVDEALS_SEO_HTML
+
+    monkeypatch.setattr(govdeals, "_scrape_govdeals_api", failing_api)
+    monkeypatch.setattr(govdeals, "_fetch_text", fake_fetch_text)
+    monkeypatch.setenv("COMPETITOR_GOVDEALS_SEO_ASSET_URLS", "https://prod-seo.govdeals.com/en/asset/17167/7167")
+
+    rows = asyncio.run(govdeals.scrape_govdeals_sold(max_pages=1))
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == "govdeals"
+    assert rows[0]["source_listing_id"] == "17167"
+    assert rows[0]["sale_price"] == 3074.0
+    assert rows[0]["state"] == "FL"
+    assert rows[0]["vin"] == "1FTEX1CM9EFB48531"
+
+
+def test_govdeals_seo_fallback_keeps_max_pages_as_page_budget(monkeypatch):
+    async def fake_fetch_text(client, url):
+        if "/en/search" in url:
+            start = 2000 if "F-250" in url else 1000
+            return "\n".join(
+                f'<a href="/en/asset/{asset_id}/7167">asset {asset_id}</a>'
+                for asset_id in range(start, start + 60)
+            )
+        return SOLD_GOVDEALS_SEO_HTML
+
+    monkeypatch.setattr(govdeals, "_fetch_text", fake_fetch_text)
+    monkeypatch.setattr(govdeals, "_seo_queries", lambda: ["Ford F-150", "Ford F-250"])
+    monkeypatch.delenv("COMPETITOR_GOVDEALS_SEO_ASSET_URLS", raising=False)
+
+    rows = asyncio.run(govdeals._scrape_govdeals_seo(max_pages=2))
+
+    assert len(rows) == 48
+
+
+def test_govdeals_seo_explicit_asset_urls_do_not_trigger_search(monkeypatch):
+    async def fake_fetch_text(client, url):
+        assert "/en/search" not in url
+        return SOLD_GOVDEALS_SEO_HTML
+
+    monkeypatch.setattr(govdeals, "_fetch_text", fake_fetch_text)
+    monkeypatch.setenv("COMPETITOR_GOVDEALS_SEO_ASSET_URLS", "https://prod-seo.govdeals.com/en/asset/17167/7167")
+
+    rows = asyncio.run(govdeals._scrape_govdeals_seo(max_pages=1))
+
+    assert len(rows) == 1
+
+
+def test_govdeals_seo_skips_failed_asset_fetches(monkeypatch):
+    async def fake_fetch_text(client, url):
+        if "/en/search" in url:
+            return "\n".join(
+                [
+                    '<a href="/en/asset/17167/7167">sold</a>',
+                    '<a href="/en/asset/228/23609">temporary failure</a>',
+                ]
+            )
+        if "/en/asset/228/23609" in url:
+            raise RuntimeError("temporary 502")
+        return SOLD_GOVDEALS_SEO_HTML
+
+    monkeypatch.setattr(govdeals, "_fetch_text", fake_fetch_text)
+    monkeypatch.setattr(govdeals, "_seo_queries", lambda: ["Ford F-150"])
+    monkeypatch.delenv("COMPETITOR_GOVDEALS_SEO_ASSET_URLS", raising=False)
+
+    rows = asyncio.run(govdeals._scrape_govdeals_seo(max_pages=1))
+
+    assert len(rows) == 1
 
 
 def test_normalize_publicsurplus_record_parses_title():
