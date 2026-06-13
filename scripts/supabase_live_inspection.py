@@ -97,6 +97,36 @@ def _count(base_url: str, service_key: str, table: str) -> int | None:
     return None
 
 
+def _opportunity_lifecycle_schema_truth(base_url: str, service_key: str) -> dict[str, Any]:
+    columns = [
+        "first_seen_at",
+        "last_seen_at",
+        "relist_count",
+        "bid_change_count",
+        "source_fingerprint",
+    ]
+    _, _, rows = _request(
+        base_url,
+        service_key,
+        "opportunities",
+        {
+            "select": "id," + ",".join(columns),
+            "order": "last_seen_at.desc",
+            "limit": "25",
+        },
+    )
+    sample_rows = rows if isinstance(rows, list) else []
+    non_null_counts = {
+        column: sum(1 for row in sample_rows if row.get(column) is not None)
+        for column in columns
+    }
+    return {
+        "columns_queryable": True,
+        "sample_count": len(sample_rows),
+        "non_null_counts": non_null_counts,
+    }
+
+
 def _latest_timestamp(base_url: str, service_key: str, table: str, candidates: list[str]) -> dict[str, Any] | None:
     for column in candidates:
         try:
@@ -897,6 +927,11 @@ def main() -> int:
         report["row_level_truth_sample"] = _safe_truth_audit(base_url, service_key)
     except Exception as exc:
         report["row_level_truth_sample_failure"] = str(exc)[:500]
+
+    try:
+        report["opportunity_lifecycle_schema_truth"] = _opportunity_lifecycle_schema_truth(base_url, service_key)
+    except Exception as exc:
+        report["opportunity_lifecycle_schema_truth_failure"] = str(exc)[:500]
 
     if args.run_id:
         try:

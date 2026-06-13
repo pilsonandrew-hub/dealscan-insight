@@ -95,6 +95,7 @@ from backend.ingest.openrouter_routing import (
     resolve_openrouter_lane_model,
 )
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
+from backend.ingest.lifecycle_memory import build_lifecycle_update
 from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
 from backend.ingest.service_config import (
@@ -3086,6 +3087,31 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
         return {}
 
 
+def _existing_lifecycle_snapshot(existing_id: str) -> dict:
+    if supabase_client is None:
+        return {}
+    try:
+        result = (
+            supabase_client.table("opportunities")
+            .select(
+                "listing_url,auction_end_date,current_bid,first_seen_at,last_seen_at,"
+                "relist_count,bid_change_count,source_fingerprint"
+            )
+            .eq("id", existing_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(result, "data", None) or []
+        return rows[0] if rows else {}
+    except Exception as lookup_err:
+        logger.warning(
+            "[INGEST] Duplicate lifecycle lookup failed for %s: %s",
+            existing_id,
+            lookup_err,
+        )
+        return {}
+
+
 _PRICING_MATURITY_RANK = {
     "": 0,
     "unknown": 0,
@@ -3394,6 +3420,34 @@ def _backfill_existing_opportunity_enrichment(existing_id: str, row: dict) -> No
             existing_id,
             update_err,
         )
+
+
+def _refresh_existing_opportunity_lifecycle(existing_id: str, row: dict) -> bool:
+    if supabase_client is None:
+        return False
+    existing = _existing_lifecycle_snapshot(existing_id)
+    update_payload = build_lifecycle_update(
+        row,
+        existing,
+        now_iso=datetime.now(timezone.utc).isoformat(),
+    )
+    if not update_payload:
+        return False
+    try:
+        supabase_client.table("opportunities").update(update_payload).eq("id", existing_id).execute()
+        logger.info(
+            "[INGEST] Refreshed lifecycle fields for duplicate opportunity %s: %s",
+            existing_id,
+            sorted(update_payload.keys()),
+        )
+        return True
+    except Exception as update_err:
+        logger.warning(
+            "[INGEST] Duplicate lifecycle refresh failed for %s: %s",
+            existing_id,
+            update_err,
+        )
+        return False
 
 
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
@@ -4041,6 +4095,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             existing_id, should_update = _check_vin_duplicate(normalized_vin, float(score))
             if existing_id:
                 _backfill_existing_opportunity_enrichment(existing_id, row)
+                _refresh_existing_opportunity_lifecycle(existing_id, row)
                 if should_update:
                     # New score is higher — update the existing record
                     try:
@@ -4085,6 +4140,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
             if existing_id:
                 _backfill_existing_opportunity_enrichment(existing_id, row)
+                _refresh_existing_opportunity_lifecycle(existing_id, row)
                 if _refresh_existing_opportunity_pricing_truth(existing_id, row):
                     _mark_save_outcome(vehicle, "duplicate_pricing_refreshed", opportunity_id=existing_id)
                 else:
@@ -4116,6 +4172,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                 if existing_id:
                     logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
                     _backfill_existing_opportunity_enrichment(existing_id, row)
+                    _refresh_existing_opportunity_lifecycle(existing_id, row)
                     if _refresh_existing_opportunity_pricing_truth(existing_id, row):
                         _mark_save_outcome(vehicle, "duplicate_pricing_refreshed", opportunity_id=existing_id)
                     else:

@@ -192,6 +192,13 @@ class _FakeUniqueViolation(psycopg2.errors.UniqueViolation):
 
 
 class SaveOpportunityFallbackTests(unittest.TestCase):
+    def _updates_with_key(self, table, key: str):
+        return [
+            (payload, filters)
+            for payload, filters in table.update_calls
+            if key in payload
+        ]
+
     def test_below_threshold_save_records_queryable_outcome(self):
         vehicle = {
             "dos_score": 49,
@@ -301,9 +308,12 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertEqual(saved_id, "existing-42")
         self.assertEqual(vehicle["_save_status"], "duplicate_existing")
         self.assertEqual(fallback_calls, [])
-        self.assertEqual(supabase._table.select_calls, [([("id", "existing-42")], 1)])
-        self.assertEqual(len(supabase._table.update_calls), 1)
-        update_payload, filters = supabase._table.update_calls[0]
+        self.assertIn(([("id", "existing-42")], 1), supabase._table.select_calls)
+        enrichment_updates = self._updates_with_key(supabase._table, "raw_data")
+        lifecycle_updates = self._updates_with_key(supabase._table, "last_seen_at")
+        self.assertEqual(len(enrichment_updates), 1)
+        self.assertEqual(len(lifecycle_updates), 1)
+        update_payload, filters = enrichment_updates[0]
         self.assertEqual(filters, [("id", "existing-42")])
         self.assertEqual(update_payload["vin"], row["vin"])
         self.assertEqual(update_payload["mileage"], row["mileage"])
@@ -401,8 +411,11 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
 
         self.assertEqual(saved_id, "existing-durango")
         self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
-        self.assertEqual(len(supabase._table.update_calls), 1)
-        update_payload, filters = supabase._table.update_calls[0]
+        enrichment_updates = self._updates_with_key(supabase._table, "raw_data")
+        lifecycle_updates = self._updates_with_key(supabase._table, "last_seen_at")
+        self.assertEqual(len(enrichment_updates), 1)
+        self.assertEqual(len(lifecycle_updates), 1)
+        update_payload, filters = enrichment_updates[0]
         self.assertEqual(filters, [("id", "existing-durango")])
         self.assertEqual(
             update_payload["raw_data"],
@@ -415,6 +428,49 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertNotIn("source_run_id", update_payload)
         self.assertNotIn("vin", update_payload)
         self.assertIn("updated_at", update_payload)
+
+    def test_vin_duplicate_records_lifecycle_bid_change_without_new_insert(self):
+        row = {
+            "listing_id": "listing-durango",
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "auction_end_date": "2026-06-20T18:00:00+00:00",
+            "title": "2020 Dodge Durango SRT",
+            "vin": "1C4SDJGJ6LC324462",
+            "current_bid": 12500,
+            "dos_score": 86.9,
+            "source_site": "govdeals",
+            "source": "govdeals",
+            "canonical_id": "canon-durango",
+        }
+        existing_row = {
+            "listing_url": "https://www.govdeals.com/asset/197/5804",
+            "auction_end_date": "2026-06-20T18:00:00+00:00",
+            "current_bid": 12000,
+            "first_seen_at": "2026-06-12T05:00:00+00:00",
+            "last_seen_at": "2026-06-12T05:00:00+00:00",
+            "relist_count": 1,
+            "bid_change_count": 2,
+            "source_fingerprint": "old-fingerprint",
+        }
+        vehicle = {"dos_score": 86.9, "title": row["title"]}
+        supabase = _DuplicateBackfillSupabase(row, "unused", existing_row)
+
+        with patch.object(ingest, "build_opportunity_row", lambda _: dict(row)), patch.object(
+            ingest, "supabase_client", supabase
+        ), patch.object(ingest, "_check_vin_duplicate", lambda *_: ("existing-durango", False)):
+            saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
+
+        self.assertEqual(saved_id, "existing-durango")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
+        lifecycle_payloads = [
+            payload
+            for payload, _filters in supabase._table.update_calls
+            if "last_seen_at" in payload
+        ]
+        self.assertEqual(len(lifecycle_payloads), 1)
+        self.assertEqual(lifecycle_payloads[0]["bid_change_count"], 3)
+        self.assertNotIn("relist_count", lifecycle_payloads[0])
+        self.assertIn("source_fingerprint", lifecycle_payloads[0])
 
     def test_vin_duplicate_upgrades_stale_poor_condition_when_new_detail_proves_non_poor(self):
         row = {
@@ -576,8 +632,11 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
 
         self.assertEqual(saved_id, "existing-durango")
         self.assertEqual(vehicle["_save_status"], "vin_dedup_pricing_refreshed")
-        self.assertEqual(len(supabase._table.update_calls), 2)
-        update_payload, filters = supabase._table.update_calls[-1]
+        pricing_updates = self._updates_with_key(supabase._table, "pricing_maturity")
+        lifecycle_updates = self._updates_with_key(supabase._table, "last_seen_at")
+        self.assertEqual(len(pricing_updates), 1)
+        self.assertEqual(len(lifecycle_updates), 1)
+        update_payload, filters = pricing_updates[0]
         self.assertEqual(filters, [("id", "existing-durango")])
         self.assertEqual(update_payload["pricing_maturity"], "market_comp")
         self.assertEqual(update_payload["pricing_source"], "retail_market_cache")
@@ -638,8 +697,11 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
 
         self.assertEqual(saved_id, "existing-durango")
         self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
-        self.assertEqual(len(supabase._table.update_calls), 1)
-        update_payload, filters = supabase._table.update_calls[0]
+        enrichment_updates = self._updates_with_key(supabase._table, "raw_data")
+        lifecycle_updates = self._updates_with_key(supabase._table, "last_seen_at")
+        self.assertEqual(len(enrichment_updates), 1)
+        self.assertEqual(len(lifecycle_updates), 1)
+        update_payload, filters = enrichment_updates[0]
         self.assertEqual(filters, [("id", "existing-durango")])
         self.assertEqual(update_payload["mileage"], row["mileage"])
         self.assertEqual(update_payload["condition_grade"], row["condition_grade"])

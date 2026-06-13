@@ -71,6 +71,10 @@ class IngestRolloutPreflightTests(unittest.TestCase):
             ("public", "opportunities", "run_id"),
             ("public", "opportunities", "processed_at"),
             ("public", "opportunities", "step_status"),
+            ("public", "opportunities", "first_seen_at"),
+            ("public", "opportunities", "last_seen_at"),
+            ("public", "opportunities", "relist_count"),
+            ("public", "opportunities", "bid_change_count"),
         ]
 
         class _Cursor:
@@ -104,7 +108,7 @@ class IngestRolloutPreflightTests(unittest.TestCase):
             errors,
         )
         self.assertIn(
-            "missing required columns in public.opportunities: is_duplicate",
+            "missing required columns in public.opportunities: is_duplicate, source_fingerprint",
             errors,
         )
         self.assertIn("public.ingest_delivery_log: ok", notes)

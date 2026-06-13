@@ -55,6 +55,11 @@ def test_build_opportunity_row_preserves_core_mapping_and_defaults():
     assert row["bid_ceiling_pct"] == 0.88
     assert row["min_margin_target"] == 1500
     assert row["processed_at"] == "2026-05-17T12:00:00+00:00"
+    assert row["first_seen_at"] == "2026-05-17T12:00:00+00:00"
+    assert row["last_seen_at"] == "2026-05-17T12:00:00+00:00"
+    assert row["relist_count"] == 0
+    assert row["bid_change_count"] == 0
+    assert row["source_fingerprint"]
     assert row["raw_data"] is vehicle
 
 

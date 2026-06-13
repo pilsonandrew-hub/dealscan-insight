@@ -50,9 +50,14 @@ REQUIRED_TABLE_COLUMNS = {
         "updated_at",
     },
     ("public", "opportunities"): {
+        "bid_change_count",
+        "first_seen_at",
         "is_duplicate",
+        "last_seen_at",
         "processed_at",
+        "relist_count",
         "run_id",
+        "source_fingerprint",
         "step_status",
     },
 }
