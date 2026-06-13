@@ -18,6 +18,10 @@ from backend.business_rules.gates import (
     min_margin_for_tier,
 )
 from backend.ingest.transport import calc_transport_cost
+from backend.ingest.competitor_pricing import (
+    COMPETITOR_COMP_MIN_COUNT,
+    compute_divergence,
+)
 
 try:
     from backend.ingest.condition import score_condition as _score_condition
@@ -665,6 +669,27 @@ def _retail_comp_wholesale_estimate(
     return round(retail_value / 1.35, 2)
 
 
+def _competitor_comp_wholesale_estimate(
+    competitor_comp_price: Optional[float],
+    competitor_comp_count: Optional[int],
+) -> Optional[float]:
+    """Actual median sold price usable as the ceiling basis.
+
+    Competitor auction sale prices are already wholesale-equivalent, so (unlike
+    retail comps) they are used directly as MMR. Requires at least
+    ``COMPETITOR_COMP_MIN_COUNT`` real comps so a single outlier sale cannot
+    move the ceiling.
+    """
+    value = _coerce_float(competitor_comp_price)
+    try:
+        count = int(competitor_comp_count or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if value and value > 0 and count >= COMPETITOR_COMP_MIN_COUNT:
+        return round(value, 2)
+    return None
+
+
 def _normalized_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
@@ -827,6 +852,13 @@ def score_deal(
     retail_comp_confidence: Optional[float] = None,
     pricing_source: Optional[str] = None,
     pricing_updated_at=None,
+    competitor_comp_price: Optional[float] = None,
+    competitor_comp_low: Optional[float] = None,
+    competitor_comp_high: Optional[float] = None,
+    competitor_comp_count: int = 0,
+    competitor_comp_date_start=None,
+    competitor_comp_date_end=None,
+    competitor_comp_sources: Optional[list] = None,
     manheim_mmr_mid: Optional[float] = None,
     manheim_mmr_low: Optional[float] = None,
     manheim_mmr_high: Optional[float] = None,
@@ -857,8 +889,28 @@ def score_deal(
         retail_comp_count,
         retail_comp_confidence,
     )
+    competitor_comp_wholesale_estimate = _competitor_comp_wholesale_estimate(
+        competitor_comp_price,
+        competitor_comp_count,
+    )
     live_manheim_mmr_mid = manheim_mmr_mid if manheim_source_status == "live" else None
-    mmr = live_manheim_mmr_mid or market_comp_wholesale_estimate or mmr_ca or 0
+    proxy_mmr_estimate = _coerce_float(mmr_ca)
+    # Pricing basis priority: live Manheim > actual competitor sold comps (>=5)
+    # > retail comps > model-proxy MMR. Real sold comps override the proxy so
+    # the ceiling reflects what the market actually pays.
+    mmr = (
+        live_manheim_mmr_mid
+        or competitor_comp_wholesale_estimate
+        or market_comp_wholesale_estimate
+        or mmr_ca
+        or 0
+    )
+    competitor_comp_used = bool(
+        competitor_comp_wholesale_estimate and live_manheim_mmr_mid is None
+    )
+    competitor_divergence = compute_divergence(
+        proxy_mmr_estimate, competitor_comp_wholesale_estimate
+    )
     bid_value = _coerce_float(bid)
     vehicle_tier = determine_vehicle_tier(year, mileage)
 
@@ -1145,14 +1197,25 @@ def score_deal(
 
     if manheim_source_status == "live":
         pricing_maturity = "live_market"
+        pricing_basis = "live_manheim"
+    elif competitor_comp_used:
+        pricing_maturity = "market_comp"
+        pricing_basis = "competitor_sales"
     elif _has_usable_retail_comp_pricing(
         retail_comp_price_estimate,
         retail_comp_count,
         retail_comp_confidence,
     ):
         pricing_maturity = "market_comp"
+        pricing_basis = "retail_comp"
     else:
         pricing_maturity = "proxy"
+        pricing_basis = "model_proxy" if (proxy_mmr_estimate and proxy_mmr_estimate > 0) else "none"
+    pricing_source_effective = (
+        "competitor_sales"
+        if competitor_comp_used
+        else pricing_source or mmr_lookup_basis or "mmr_proxy"
+    )
 
     auction_stage_hours_remaining = _auction_stage_hours_remaining(auction_end)
 
@@ -1278,6 +1341,11 @@ def score_deal(
         or _strong_structural
     )
 
+    extra_fallback_flags: list[str] = []
+    if rust_state_rejected:
+        extra_fallback_flags.append("high_rust_state_rejected")
+    if competitor_divergence.get("divergence_flag"):
+        extra_fallback_flags.append("proxy_actual_divergence")
     score_provenance = _build_score_provenance(
         lane=vehicle_tier,
         bid=bid_value,
@@ -1289,7 +1357,7 @@ def score_deal(
         source_site=source_site,
         year=year,
         mileage=mileage,
-        fallback_flags=["high_rust_state_rejected"] if rust_state_rejected else [],
+        fallback_flags=extra_fallback_flags,
     )
 
     return {
@@ -1316,8 +1384,20 @@ def score_deal(
         "retail_comp_high": retail_comp_high,
         "retail_comp_count": retail_comp_count or 0,
         "retail_comp_confidence": retail_comp_confidence,
-        "pricing_source": pricing_source or mmr_lookup_basis or "mmr_proxy",
+        "pricing_source": pricing_source_effective,
         "pricing_maturity": pricing_maturity,
+        "pricing_basis": pricing_basis,
+        "competitor_comp_price": competitor_comp_price,
+        "competitor_comp_low": competitor_comp_low,
+        "competitor_comp_high": competitor_comp_high,
+        "competitor_comp_count": competitor_comp_count or 0,
+        "competitor_comp_date_start": competitor_comp_date_start,
+        "competitor_comp_date_end": competitor_comp_date_end,
+        "competitor_comp_sources": competitor_comp_sources or [],
+        "competitor_comp_used": competitor_comp_used,
+        "proxy_mmr_estimate": proxy_mmr_estimate,
+        "proxy_actual_divergence_pct": competitor_divergence.get("divergence_pct"),
+        "proxy_actual_divergence_flag": competitor_divergence.get("divergence_flag", False),
         "pricing_updated_at": pricing_updated_at,
         "pricing_trust_blocked": pricing_trust_blocked,
         "pricing_trust_reason": "pricing_maturity_proxy" if pricing_trust_blocked else None,

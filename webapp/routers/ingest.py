@@ -14,7 +14,7 @@ Fixes applied (2026-03-11):
 - Telegram hot deal alerts wired
 - Dataset ID format validated before fetch
 """
-from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks, Query
 from fastapi.responses import JSONResponse
 from typing import Any, Optional
 import hmac
@@ -1866,6 +1866,38 @@ def get_supabase_client():
     return supabase_client
 
 
+@router.get("/competitor-comps")
+async def competitor_comps(
+    make: str = Query(..., description="Vehicle make, e.g. Ford"),
+    model: str = Query(..., description="Vehicle model, e.g. F-150"),
+    year: Optional[int] = Query(None, description="Target model year"),
+    mileage: Optional[float] = Query(None, description="Target odometer reading"),
+):
+    """Return actual-market comp pricing from competitor_sales for a target vehicle.
+
+    Looks up comparable sold auction listings (same make/model, +/-2 years,
+    +/-25k miles) and returns the median sale price, comp count, low/high band,
+    and the date range the comps span. ``enough_comps`` indicates whether there
+    are at least the minimum number of comps required to drive ceiling pricing.
+    """
+    from backend.ingest.competitor_pricing import (
+        COMPETITOR_COMP_MIN_COUNT,
+        get_competitor_comps,
+        competitor_comp_is_usable,
+    )
+
+    result = get_competitor_comps(
+        year=year,
+        make=make,
+        model=model,
+        mileage=mileage,
+        supabase_client=get_supabase_client(),
+    )
+    result["min_comps_required"] = COMPETITOR_COMP_MIN_COUNT
+    result["enough_comps"] = competitor_comp_is_usable(result)
+    return JSONResponse(content=result)
+
+
 @router.post("/opportunities/{opportunity_id}/pass")
 async def pass_opportunity(
     opportunity_id: str,
@@ -2223,6 +2255,7 @@ def score_vehicle(vehicle: dict) -> dict:
         from backend.ingest.score import score_deal
         from backend.ingest.manheim_market import get_manheim_market_data
         from backend.ingest.retail_comps import get_retail_comps, retail_comp_is_usable
+        from backend.ingest.competitor_pricing import get_competitor_comps
 
         bid = vehicle.get("current_bid", 0)
         state = vehicle.get("state", "")
@@ -2275,6 +2308,14 @@ def score_vehicle(vehicle: dict) -> dict:
         if actor_retail_comp_result and not retail_comp_is_usable(retail_comp_result):
             retail_comp_result = actor_retail_comp_result
 
+        competitor_comp_result = get_competitor_comps(
+            year=year,
+            make=make,
+            model=model,
+            mileage=mileage,
+            supabase_client=supabase_client,
+        )
+
         result = score_deal(
             bid=bid,
             mmr_ca=mmr,
@@ -2295,6 +2336,13 @@ def score_vehicle(vehicle: dict) -> dict:
             retail_comp_confidence=retail_comp_result.get("retail_comp_confidence"),
             pricing_source=retail_comp_result.get("pricing_source"),
             pricing_updated_at=retail_comp_result.get("pricing_updated_at"),
+            competitor_comp_price=competitor_comp_result.get("competitor_comp_price"),
+            competitor_comp_low=competitor_comp_result.get("competitor_comp_low"),
+            competitor_comp_high=competitor_comp_result.get("competitor_comp_high"),
+            competitor_comp_count=competitor_comp_result.get("competitor_comp_count"),
+            competitor_comp_date_start=competitor_comp_result.get("competitor_comp_date_start"),
+            competitor_comp_date_end=competitor_comp_result.get("competitor_comp_date_end"),
+            competitor_comp_sources=competitor_comp_result.get("competitor_comp_sources"),
             manheim_mmr_mid=manheim_result.get("manheim_mmr_mid"),
             manheim_mmr_low=manheim_result.get("manheim_mmr_low"),
             manheim_mmr_high=manheim_result.get("manheim_mmr_high"),
