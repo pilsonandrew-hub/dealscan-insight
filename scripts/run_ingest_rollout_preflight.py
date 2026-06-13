@@ -60,6 +60,38 @@ REQUIRED_TABLE_COLUMNS = {
         "source_fingerprint",
         "step_status",
     },
+    ("public", "scrape_runs"): {
+        "actor_id",
+        "completed_at",
+        "dataset_id",
+        "error_message",
+        "evaluated_count",
+        "item_count",
+        "parse_event_count",
+        "run_id",
+        "saved_count",
+        "skipped_count",
+        "source_name",
+        "started_at",
+        "status",
+    },
+    ("public", "parse_events"): {
+        "created_at",
+        "event_type",
+        "item_index",
+        "listing_id",
+        "reason",
+        "run_id",
+        "source_name",
+        "status",
+    },
+    ("public", "source_health_daily"): {
+        "failed_runs",
+        "observed_date",
+        "processed_runs",
+        "source_name",
+        "total_runs",
+    },
 }
 DEPLOY_SHA_ENV_KEYS = (
     "RAILWAY_GIT_COMMIT_SHA",
@@ -232,7 +264,10 @@ def inspect_ingest_schema(dsn: str) -> tuple[list[str], list[str]]:
                 where (table_schema, table_name) in (
                   ('public', 'webhook_log'),
                   ('public', 'ingest_delivery_log'),
-                  ('public', 'opportunities')
+                  ('public', 'opportunities'),
+                  ('public', 'scrape_runs'),
+                  ('public', 'parse_events'),
+                  ('public', 'source_health_daily')
                 )
                 """
             )

@@ -111,6 +111,9 @@ class IngestRolloutPreflightTests(unittest.TestCase):
             "missing required columns in public.opportunities: is_duplicate, source_fingerprint",
             errors,
         )
+        self.assertIn("missing required table: public.scrape_runs", errors)
+        self.assertIn("missing required table: public.parse_events", errors)
+        self.assertIn("missing required table: public.source_health_daily", errors)
         self.assertIn("public.ingest_delivery_log: ok", notes)
 
     def test_validate_webhook_proof_artifact_requires_matching_runtime_posture(self):
