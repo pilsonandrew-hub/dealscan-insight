@@ -152,6 +152,84 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
     assert "2021 Mercedes-Benz G-Class" not in str(report)
 
 
+def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monkeypatch):
+    columns = {
+        "ingest_delivery_log": {"run_id", "listing_id", "channel", "status", "created_at", "updated_at"},
+        "webhook_log": {"run_id", "received_at", "processing_status", "item_count", "actor_id"},
+        "opportunities": {
+            "id",
+            "listing_id",
+            "run_id",
+            "source_run_id",
+            "source_site",
+            "step_status",
+            "vin",
+            "mileage",
+            "photo_count",
+            "created_at",
+        },
+        "market_scout_runs": {"run_id", "source_name"},
+        "sold_comp_candidates": {"id", "run_id", "source_name"},
+        "sold_comp_reviews": {"candidate_id", "review_status"},
+        "verified_sold_comps": {"candidate_id", "source_name"},
+        "scrape_runs": {"run_id", "source_name", "status", "item_count", "evaluated_count", "saved_count", "skipped_count", "failed_count", "parse_event_count", "started_at", "completed_at"},
+        "parse_events": {"run_id", "source_name", "event_type", "status", "reason", "created_at"},
+    }
+    rows = {
+        "ingest_delivery_log": [
+            {"run_id": "run-photo", "listing_id": "listing-a", "channel": "db_save", "status": "vin_dedup_lifecycle_refreshed", "created_at": "2026-06-13T00:00:01Z"},
+            {"run_id": "run-photo", "listing_id": "listing-b", "channel": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:02Z"},
+        ],
+        "webhook_log": [{"run_id": "run-photo", "received_at": "2026-06-13T00:00:00Z", "processing_status": "processed", "item_count": 2}],
+        "opportunities": [
+            {"id": "old-a", "listing_id": "listing-a", "source_site": "proxibid", "photo_count": 1, "step_status": "complete"},
+            {"id": "old-b", "listing_id": "listing-b", "source_site": "proxibid", "photo_count": 4, "step_status": "complete"},
+        ],
+        "market_scout_runs": [],
+        "sold_comp_candidates": [],
+        "sold_comp_reviews": [],
+        "verified_sold_comps": [],
+        "scrape_runs": [{"run_id": "run-photo", "source_name": "proxibid", "status": "processed", "item_count": 2, "evaluated_count": 2, "saved_count": 0, "skipped_count": 0, "failed_count": 0, "parse_event_count": 2}],
+        "parse_events": [
+            {"run_id": "run-photo", "source_name": "proxibid", "event_type": "db_save", "status": "vin_dedup_lifecycle_refreshed", "created_at": "2026-06-13T00:00:01Z"},
+            {"run_id": "run-photo", "source_name": "proxibid", "event_type": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:02Z"},
+        ],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    requests = []
+
+    def fake_request(_base_url, _service_key, table, params, **_kwargs):
+        requests.append((table, dict(params)))
+        table_rows = list(rows[table])
+        if table == "opportunities":
+            if params.get("run_id") or params.get("source_run_id"):
+                table_rows = []
+            elif params.get("listing_id") == "in.(listing-a,listing-b)":
+                table_rows = rows[table]
+        selected = [column for column in str(params.get("select") or "").split(",") if column]
+        if selected:
+            table_rows = [
+                {column: row[column] for column in selected if column in row}
+                for row in table_rows
+            ]
+        return 200, {}, table_rows
+
+    monkeypatch.setattr(inspection, "_request", fake_request)
+
+    report = inspection._run_id_truth_audit("https://example.supabase.co", "service-key", "run-photo")
+
+    assert report["opportunities"]["row_count"] == 2
+    assert report["opportunities"]["photo_count_known_rows"] == 2
+    assert report["opportunities"]["positive_photo_count_rows"] == 2
+    assert report["opportunities"]["max_photo_count"] == 4
+    assert report["opportunities"]["average_photo_count"] == 2.5
+    opportunity_requests = [params for table, params in requests if table == "opportunities"]
+    assert any(params.get("listing_id") == "in.(listing-a,listing-b)" for params in opportunity_requests)
+    assert "listing_url" not in str(report)
+    assert "raw_data" not in str(report)
+
+
 def test_run_id_truth_audit_surfaces_comp_ledger_read_failures(monkeypatch):
     columns = {
         "ingest_delivery_log": {"run_id", "status"},
