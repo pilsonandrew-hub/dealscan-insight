@@ -211,6 +211,26 @@ def _photo_count(row: dict[str, Any]) -> int | None:
     return max(parsed, 0)
 
 
+def _raw_photo_evidence_count(row: dict[str, Any]) -> int:
+    raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
+    for key in ("photos", "photo_urls"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            count = len([item for item in value if item])
+            if count:
+                return count
+        if isinstance(value, tuple):
+            count = len([item for item in value if item])
+            if count:
+                return count
+        if isinstance(value, str) and value.strip():
+            return 1
+    for key in ("photo_url", "image_url", "imageUrl"):
+        if raw.get(key):
+            return 1
+    return 0
+
+
 def _recent_rows(base_url: str, service_key: str, table: str, select: str, order_column: str, limit: int) -> list[dict[str, Any]]:
     _, _, rows = _request(
         base_url,
@@ -521,6 +541,8 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
     vin_present = 0
     mileage_present = 0
     photo_counts: list[int] = []
+    raw_photo_evidence_rows = 0
+    suppressed_raw_photo_evidence_rows = 0
     for row in rows:
         source_counts[str(row.get("source_site") or row.get("source") or "unknown")[:80]] += 1
         step_counts[str(row.get("step_status") or row.get("status") or "unknown")[:80]] += 1
@@ -532,12 +554,19 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
         photo_count = _photo_count(row)
         if photo_count is not None:
             photo_counts.append(photo_count)
+        raw_photo_count = _raw_photo_evidence_count(row)
+        if raw_photo_count > 0:
+            raw_photo_evidence_rows += 1
+            if (photo_count or 0) <= 0:
+                suppressed_raw_photo_evidence_rows += 1
     return {
         "row_count": len(rows),
         "source_counts": dict(source_counts.most_common(20)),
         "step_status_counts": dict(step_counts.most_common(20)),
         "vin_present_rows": vin_present,
         "mileage_present_rows": mileage_present,
+        "raw_photo_evidence_rows": raw_photo_evidence_rows,
+        "suppressed_raw_photo_evidence_rows": suppressed_raw_photo_evidence_rows,
         "photo_count_known_rows": len(photo_counts),
         "zero_photo_count_rows": sum(1 for count in photo_counts if count == 0),
         "positive_photo_count_rows": sum(1 for count in photo_counts if count > 0),
@@ -777,6 +806,10 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         for row in active_rows
         if (photo_count := _photo_count(row)) is not None
     ]
+    raw_photo_evidence_rows = [
+        row for row in active_rows
+        if _raw_photo_evidence_count(row) > 0
+    ]
     return {
         "sample_count": len(active_rows),
         "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
@@ -789,6 +822,11 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
         "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
         "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
+        "raw_photo_evidence_count": len(raw_photo_evidence_rows),
+        "suppressed_raw_photo_evidence_count": sum(
+            1 for row in raw_photo_evidence_rows
+            if (_photo_count(row) or 0) <= 0
+        ),
     }
 
 
@@ -1107,7 +1145,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
         "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
         "condition_grade", "risk_flags", "listing_url", "url",
-        "photo_count",
+        "photo_count", "raw_data",
     ]
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"
