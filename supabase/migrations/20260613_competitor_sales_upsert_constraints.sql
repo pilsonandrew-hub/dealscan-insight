@@ -91,6 +91,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_competitor_sales_source_url_upsert
 DROP INDEX IF EXISTS public.idx_competitor_sales_source_listing;
 DROP INDEX IF EXISTS public.idx_competitor_sales_source_url;
 
+DROP POLICY IF EXISTS "Service role can delete competitor_sales" ON public.competitor_sales;
+CREATE POLICY "Service role can delete competitor_sales"
+  ON public.competitor_sales FOR DELETE
+  USING (auth.role() = 'service_role');
+
 CREATE OR REPLACE FUNCTION public.reconcile_competitor_sale_url_only_duplicate(row_payload jsonb)
 RETURNS SETOF public.competitor_sales
 LANGUAGE plpgsql

@@ -10,8 +10,15 @@ def _all_competitor_sales_sql() -> str:
     return "\n".join(chunks)
 
 
+def _competitor_sales_upsert_constraints_sql() -> str:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "supabase" / "migrations" / "20260613_competitor_sales_upsert_constraints.sql"
+    return path.read_text(encoding="utf-8").lower()
+
+
 def test_competitor_sales_url_upsert_conflict_target_has_non_partial_unique_index():
     sql = _all_competitor_sales_sql()
+    upsert_sql = _competitor_sales_upsert_constraints_sql()
 
     assert "begin;" in sql
     assert "commit;" in sql
@@ -24,6 +31,10 @@ def test_competitor_sales_url_upsert_conflict_target_has_non_partial_unique_inde
     assert 'create policy "service role can delete competitor_sales"' in sql
     assert "on public.competitor_sales for delete" in sql
     assert "using (auth.role() = 'service_role')" in sql
+    assert 'create policy "service role can delete competitor_sales"' in upsert_sql
+    assert upsert_sql.index('create policy "service role can delete competitor_sales"') < upsert_sql.index(
+        "create or replace function public.reconcile_competitor_sale_url_only_duplicate"
+    )
 
     duplicate_cleanup = re.search(
         r"partition\s+by\s+source,\s*listing_url[\s\S]+"
