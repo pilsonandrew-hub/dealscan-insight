@@ -537,6 +537,41 @@ def test_seller_recovery_audit_reports_governed_bidder_depth_when_queryable():
     assert "bidder_depth" not in report["summary"]["unavailable_dimensions"]
 
 
+def test_seller_recovery_audit_reports_source_mirror_bidder_depth_when_opportunities_lack_it():
+    report = inspection._summarize_seller_recovery_audit(
+        opportunity_rows=[
+            {
+                "is_active": True,
+                "source_site": "hibid",
+                "year": 2024,
+                "make": "Ford",
+                "model": "F-150",
+                "pricing_maturity": "proxy",
+                "photo_count": 1,
+                "bidder_count": None,
+            }
+        ],
+        source_listing_rows=[
+            {
+                "source_site": "hibid",
+                "source": "hibid",
+                "bidder_count": 6,
+                "created_at": "2026-06-13T14:00:00Z",
+            }
+        ],
+        source_health_rows=[{"source_name": "hibid"}],
+        delivery_rows=[],
+        parse_event_rows=[],
+    )
+
+    assert report["listing_quality"]["bidder_count_known_count"] == 0
+    assert report["source_listing_quality"]["bidder_count_known_count"] == 1
+    assert report["source_listing_quality"]["average_bidder_count"] == 6.0
+    assert report["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
+    assert report["unsupported_dimensions"]["bidder_depth"]["evidence_surface"] == "source_mirror"
+    assert "bidder_depth" not in report["summary"]["unavailable_dimensions"]
+
+
 def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypatch):
     columns = {
         "opportunities": {

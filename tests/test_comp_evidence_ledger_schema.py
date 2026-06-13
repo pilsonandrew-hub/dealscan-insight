@@ -134,3 +134,12 @@ def test_bidder_count_migration_adds_nullable_governed_bidder_depth_and_backfill
     assert "raw_data->>'bid_count'" in sql
     assert "raw_data->>'bidcount'" in sql
     assert "opportunities.bidder_count is null" in sql
+
+
+def test_sonar_listing_bidder_count_migration_adds_governed_source_mirror_evidence():
+    sql = (MIGRATION_DIR / "20260613_sonar_listing_bidder_count.sql").read_text().lower()
+
+    assert "alter table public.sonar_listings" in sql
+    assert "add column if not exists bidder_count integer" in sql
+    assert "sonar_listings_bidder_count_nonnegative" in sql
+    assert "check (bidder_count is null or bidder_count >= 0)" in sql

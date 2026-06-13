@@ -382,6 +382,22 @@ def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _source_listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    known_bidder_counts = [
+        bidder_count
+        for row in rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
+    return {
+        "sample_count": len(rows),
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
+        "source_counts": _status_counts(rows, "source_site") or _status_counts(rows, "source"),
+    }
+
+
 def build_seller_recovery_audit() -> dict[str, Any]:
     sections: dict[str, dict[str, Any]] = {}
     sections["source_health"], source_health_rows = _safe_section_rows(
@@ -408,8 +424,16 @@ def build_seller_recovery_audit() -> dict[str, Any]:
         order=("updated_at", True),
         limit=500,
     )
+    sections["source_listings"], source_listing_rows = _safe_section_rows(
+        "sonar_listings",
+        "*",
+        order=("created_at", True),
+        limit=500,
+    )
 
     candidates = _seller_recovery_candidates(opportunity_rows)
+    opportunity_bidder_available = any(_bidder_count(row) is not None for row in opportunity_rows)
+    source_bidder_available = any(_bidder_count(row) is not None for row in source_listing_rows)
     source_health = [
         {
             "source_name": str(row.get("source_name") or "unknown")[:80],
@@ -427,11 +451,20 @@ def build_seller_recovery_audit() -> dict[str, Any]:
     ]
     unsupported_dimensions = {
         "bidder_depth": {
-            "status": "available" if any(_bidder_count(row) is not None for row in opportunity_rows) else "unavailable",
+            "status": "available" if opportunity_bidder_available or source_bidder_available else "unavailable",
+            "evidence_surface": (
+                "opportunities"
+                if opportunity_bidder_available
+                else "source_mirror"
+                if source_bidder_available
+                else None
+            ),
             "reason": (
                 "Governed opportunity bidder_count evidence is present on sampled rows."
-                if any(_bidder_count(row) is not None for row in opportunity_rows)
-                else "No governed bidder-count evidence is currently present across sampled active source rows."
+                if opportunity_bidder_available
+                else "Governed source mirror bidder_count evidence is present on sampled rows."
+                if source_bidder_available
+                else "No governed bidder-count evidence is currently present across sampled opportunity or source mirror rows."
             ),
         },
         "photo_count": {
@@ -461,6 +494,7 @@ def build_seller_recovery_audit() -> dict[str, Any]:
         "sections": sections,
         "source_health": source_health,
         "listing_quality": _listing_quality_summary(opportunity_rows),
+        "source_listing_quality": _source_listing_quality_summary(source_listing_rows),
         "delivery_status_counts": _status_counts(delivery_rows, "status"),
         "delivery_reason_counts": _seller_recovery_reason_counts(delivery_rows),
         "parse_event_status_counts": _status_counts(parse_event_rows, "status"),
