@@ -2053,6 +2053,17 @@ def normalize_apify_vehicle(
             "auction_fee",
             "auctionfee",
         )
+        bidder_count = _extract_numeric_key(
+            "bidder_count",
+            "bid_count",
+            "bidCount",
+            "bids_count",
+            "bidsCount",
+            "number_of_bids",
+            "numberOfBids",
+            "num_bids",
+            "numBids",
+        )
 
         item_run_id = (
             item.get("source_run_id")
@@ -2097,6 +2108,7 @@ def normalize_apify_vehicle(
             "buyer_premium": buyer_premium,
             "doc_fee": doc_fee,
             "auction_fees": auction_fees,
+            "bidder_count": int(bidder_count) if bidder_count is not None else None,
             "mileage": mileage,
             "description": description,
             "detail_text": detail_text,
@@ -3323,7 +3335,7 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
     try:
         result = (
             supabase_client.table("opportunities")
-            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id,photo_count")
+            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id,photo_count,bidder_count")
             .eq("id", existing_id)
             .limit(1)
             .execute()
@@ -3659,6 +3671,20 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
         current_photo_count = 0
     if incoming_photo_count > current_photo_count:
         update["photo_count"] = incoming_photo_count
+    incoming_bidder_count = row.get("bidder_count")
+    current_bidder_count = existing.get("bidder_count")
+    try:
+        incoming_bidder_count = int(incoming_bidder_count)
+    except (TypeError, ValueError):
+        incoming_bidder_count = None
+    try:
+        current_bidder_count = int(current_bidder_count)
+    except (TypeError, ValueError):
+        current_bidder_count = None
+    if incoming_bidder_count is not None and (
+        current_bidder_count is None or incoming_bidder_count > current_bidder_count
+    ):
+        update["bidder_count"] = incoming_bidder_count
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
     return update

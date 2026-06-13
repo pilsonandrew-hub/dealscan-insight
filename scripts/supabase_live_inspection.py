@@ -211,6 +211,15 @@ def _photo_count(row: dict[str, Any]) -> int | None:
     return max(parsed, 0)
 
 
+def _bidder_count(row: dict[str, Any]) -> int | None:
+    if "bidder_count" not in row:
+        return None
+    parsed = _coerce_int(row.get("bidder_count"))
+    if parsed is None:
+        return None
+    return max(parsed, 0)
+
+
 def _raw_photo_evidence_count(row: dict[str, Any]) -> int:
     raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
     for key in ("photos", "photo_urls"):
@@ -806,6 +815,11 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         for row in active_rows
         if (photo_count := _photo_count(row)) is not None
     ]
+    known_bidder_counts = [
+        bidder_count
+        for row in active_rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
     raw_photo_evidence_rows = [
         row for row in active_rows
         if _raw_photo_evidence_count(row) > 0
@@ -822,6 +836,10 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
         "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
         "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
         "raw_photo_evidence_count": len(raw_photo_evidence_rows),
         "suppressed_raw_photo_evidence_count": sum(
             1 for row in raw_photo_evidence_rows
@@ -876,8 +894,12 @@ def _summarize_seller_recovery_audit(
     source_names = {row.get("source_name") for row in source_health_rows if row.get("source_name")}
     unsupported_dimensions = {
         "bidder_depth": {
-            "status": "unavailable",
-            "reason": "No governed bidder-count field is currently written across active source rows.",
+            "status": "available" if any(_bidder_count(row) is not None for row in opportunity_rows) else "unavailable",
+            "reason": (
+                "Governed opportunity bidder_count evidence is present on sampled rows."
+                if any(_bidder_count(row) is not None for row in opportunity_rows)
+                else "No governed bidder-count evidence is currently present across sampled active source rows."
+            ),
         },
         "photo_count": {
             "status": "available" if _has_column(opportunity_rows, "photo_count") else "unavailable",
@@ -1145,7 +1167,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
         "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
         "condition_grade", "risk_flags", "listing_url", "url",
-        "photo_count", "raw_data",
+        "photo_count", "bidder_count", "raw_data",
     ]
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"

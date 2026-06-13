@@ -123,3 +123,14 @@ def test_photo_count_empty_array_backfill_falls_through_to_single_image_evidence
     assert "where opportunities.id = photo_evidence.id" in sql
     assert "photo_evidence.raw_photo_count > opportunities.photo_count" in sql
     assert "where photo_count = 0" not in sql
+
+
+def test_bidder_count_migration_adds_nullable_governed_bidder_depth_and_backfill():
+    sql = (MIGRATION_DIR / "20260613_opportunity_bidder_count.sql").read_text().lower()
+
+    assert "add column if not exists bidder_count integer" in sql
+    assert "opportunities_bidder_count_nonnegative" in sql
+    assert "check (bidder_count is null or bidder_count >= 0)" in sql
+    assert "raw_data->>'bid_count'" in sql
+    assert "raw_data->>'bidcount'" in sql
+    assert "opportunities.bidder_count is null" in sql

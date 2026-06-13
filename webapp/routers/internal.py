@@ -138,6 +138,16 @@ def _photo_count(row: dict[str, Any]) -> Optional[int]:
     return max(parsed, 0)
 
 
+def _bidder_count(row: dict[str, Any]) -> Optional[int]:
+    if "bidder_count" not in row:
+        return None
+    try:
+        parsed = int(float(row.get("bidder_count")))
+    except (TypeError, ValueError):
+        return None
+    return max(parsed, 0)
+
+
 def _parse_optional_datetime(value: Any) -> Optional[datetime]:
     if not value:
         return None
@@ -347,6 +357,11 @@ def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in active_rows
         if (photo_count := _photo_count(row)) is not None
     ]
+    known_bidder_counts = [
+        bidder_count
+        for row in active_rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
     return {
         "sample_count": len(active_rows),
         "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
@@ -359,6 +374,10 @@ def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
         "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
         "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
         "source_counts": _status_counts(active_rows, "source_site"),
     }
 
@@ -408,8 +427,12 @@ def build_seller_recovery_audit() -> dict[str, Any]:
     ]
     unsupported_dimensions = {
         "bidder_depth": {
-            "status": "unavailable",
-            "reason": "No governed bidder-count field is currently written across active source rows.",
+            "status": "available" if any(_bidder_count(row) is not None for row in opportunity_rows) else "unavailable",
+            "reason": (
+                "Governed opportunity bidder_count evidence is present on sampled rows."
+                if any(_bidder_count(row) is not None for row in opportunity_rows)
+                else "No governed bidder-count evidence is currently present across sampled active source rows."
+            ),
         },
         "photo_count": {
             "status": "available" if _has_column(opportunity_rows, "photo_count") else "unavailable",
