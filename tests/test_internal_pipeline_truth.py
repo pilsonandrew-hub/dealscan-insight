@@ -109,6 +109,14 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
                 "bidder_count": 9,
             },
         ],
+        "sonar_listings": [
+            {
+                "source_site": "hibid",
+                "source": "hibid",
+                "bidder_count": 12,
+                "created_at": "2026-06-13T14:00:00Z",
+            }
+        ],
     }))
 
     result = internal.build_seller_recovery_audit()
@@ -130,6 +138,8 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
     assert result["listing_quality"]["zero_bidder_count"] == 0
     assert result["listing_quality"]["thin_bidder_count"] == 0
     assert result["listing_quality"]["average_bidder_count"] == 9.0
+    assert result["source_listing_quality"]["bidder_count_known_count"] == 1
+    assert result["source_listing_quality"]["average_bidder_count"] == 12.0
     assert result["delivery_status_counts"] == {"skipped_margin": 1, "skipped_gate": 1}
     assert result["parse_event_status_counts"] == {"skipped_margin": 1, "saved": 1}
     assert result["parse_event_type_counts"] == {"db_save": 2}

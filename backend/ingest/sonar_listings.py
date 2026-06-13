@@ -5,6 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 
+def _bidder_count(vehicle: dict[str, Any]) -> int | None:
+    value = vehicle.get("bidder_count")
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
 def build_sonar_listing_row(vehicle: dict[str, Any]) -> dict[str, Any]:
     return {
         "listing_id": vehicle.get("listing_id"),
@@ -28,4 +37,5 @@ def build_sonar_listing_row(vehicle: dict[str, Any]) -> dict[str, Any]:
         "vin": vehicle.get("vin"),
         "source_site": vehicle.get("source_site") or vehicle.get("source"),
         "dos_score": vehicle.get("dos_score"),
+        "bidder_count": _bidder_count(vehicle),
     }
