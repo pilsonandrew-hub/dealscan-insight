@@ -286,6 +286,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             "raw_data": {"detail_enriched": True, "vin": "1HGCM82633A004352", "mileage": 32100},
             "source_run_id": "run-123",
             "run_id": "run-123",
+            "photo_count": 4,
         }
         vehicle = {"dos_score": 80, "title": row["title"]}
         supabase = _DuplicateBackfillSupabase(
@@ -320,6 +321,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
         self.assertEqual(update_payload["condition_grade"], row["condition_grade"])
         self.assertEqual(update_payload["raw_data"], row["raw_data"])
         self.assertEqual(update_payload["source_run_id"], row["source_run_id"])
+        self.assertEqual(update_payload["photo_count"], row["photo_count"])
         self.assertIn("updated_at", update_payload)
 
     def test_duplicate_recovery_merges_missing_raw_data_without_overwriting_existing_enrichment_fields(self):

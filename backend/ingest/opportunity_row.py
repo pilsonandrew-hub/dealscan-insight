@@ -51,6 +51,23 @@ def _resolve_buyer_premium(score_result: dict[str, Any], current_bid: float) -> 
     return buyer_premium, buyer_premium_pct
 
 
+def _resolve_photo_count(vehicle: dict[str, Any]) -> int:
+    photos = vehicle.get("photos")
+    if photos is None:
+        photos = vehicle.get("photo_urls")
+
+    if isinstance(photos, list):
+        return len([photo for photo in photos if photo])
+    if isinstance(photos, tuple):
+        return len([photo for photo in photos if photo])
+    if isinstance(photos, str) and photos.strip():
+        return 1
+
+    if vehicle.get("photo_url") or vehicle.get("image_url"):
+        return 1
+    return 0
+
+
 def build_opportunity_row(
     vehicle: dict[str, Any],
     *,
@@ -153,6 +170,7 @@ def build_opportunity_row(
         "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
+        "photo_count": _resolve_photo_count(vehicle),
         "designated_lane": designated_lane,
         "dos_premium": score_result.get("dos_premium"),
         "dos_standard": score_result.get("dos_standard"),

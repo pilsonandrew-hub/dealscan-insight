@@ -94,3 +94,29 @@ def test_build_opportunity_row_prefers_projected_buyer_premium_amount():
     })
 
     assert row["buyer_premium"] == 125.55
+
+
+def test_build_opportunity_row_records_governed_photo_count():
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photos": ["https://example.test/1.jpg", "https://example.test/2.jpg"],
+    })["photo_count"] == 2
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photo_url": "https://example.test/1.jpg",
+    })["photo_count"] == 1
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "image_url": "https://example.test/1.jpg",
+    })["photo_count"] == 1
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photos": [],
+    })["photo_count"] == 0
