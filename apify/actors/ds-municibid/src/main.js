@@ -24,6 +24,8 @@ const BASE = 'https://municibid.com';
 const STANDARD_MAX_MODEL_AGE_YEARS = 10;
 const STANDARD_MAX_MILEAGE = 100000;
 const STANDARD_MAX_MILES_PER_YEAR = 18000;
+const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
+const PREMIUM_MAX_MILEAGE = 50000;
 
 // Passenger vehicle categories only (no buses, motorcycles, heavy trucks)
 const CATEGORY_URLS = [
@@ -45,8 +47,13 @@ function failsDealerScopeAgeMileageGate(year, mileage, currentYear = new Date().
     const age = currentYear - year;
     if (age > STANDARD_MAX_MODEL_AGE_YEARS || age < 0) return true;
     if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    if (mileage > STANDARD_MAX_MILEAGE) return true;
     const ageYears = Math.max(1, age);
-    return mileage > STANDARD_MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+    // Premium lane (<= PREMIUM_MAX_MODEL_AGE_YEARS old AND <= PREMIUM_MAX_MILEAGE) is exempt from
+    // the standard-lane miles/year cap, mirroring backend determine_vehicle_tier. Without this,
+    // late-model high-mileage fleet vehicles are silently dropped before scoring.
+    if (age <= PREMIUM_MAX_MODEL_AGE_YEARS && mileage <= PREMIUM_MAX_MILEAGE) return false;
+    return mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 const US_STATES = new Set([
     'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',

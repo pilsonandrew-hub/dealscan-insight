@@ -8,6 +8,8 @@ const CURRENT_YEAR = new Date().getFullYear();
 const DEFAULT_MIN_YEAR = CURRENT_YEAR - 10;
 const DEFAULT_MAX_MILEAGE = 100000;
 const STANDARD_MAX_MILES_PER_YEAR = 18000;
+const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
+const PREMIUM_MAX_MILEAGE = 50000;
 
 const HIGH_RUST_STATES = new Set([
     'OH', 'MI', 'PA', 'NY', 'WI', 'MN', 'IL', 'IN', 'MO', 'IA',
@@ -182,8 +184,13 @@ function failsDealerScopeAgeMileageGate(year, mileage, minYear, maxMileage) {
     const numericMileage = Number(mileage);
     if (!numericYear || numericYear < minYear) return true;
     if (!numericMileage || numericMileage <= 0) return false;
+    if (numericMileage > maxMileage) return true;
     const ageYears = Math.max(1, CURRENT_YEAR - numericYear);
-    return numericMileage > maxMileage || numericMileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+    // Premium lane (<= PREMIUM_MAX_MODEL_AGE_YEARS old AND <= PREMIUM_MAX_MILEAGE) is exempt from
+    // the standard-lane miles/year cap, mirroring backend determine_vehicle_tier. Without this,
+    // late-model high-mileage fleet vehicles are silently dropped before scoring.
+    if (ageYears <= PREMIUM_MAX_MODEL_AGE_YEARS && numericMileage <= PREMIUM_MAX_MILEAGE) return false;
+    return numericMileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 
 function classifyPurpleWaveLot(row, options = {}) {

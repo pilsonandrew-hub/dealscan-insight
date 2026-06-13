@@ -52,6 +52,8 @@ const DETAIL_PAGE_TIMEOUT_MS = 12000;
 const STANDARD_MAX_MODEL_AGE_YEARS = 10;
 const STANDARD_MAX_MILEAGE = 100000;
 const STANDARD_MAX_MILES_PER_YEAR = 18000;
+const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
+const PREMIUM_MAX_MILEAGE = 50000;
 
 // Standard 17-char VIN pattern (no I, O, Q)
 const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/i;
@@ -258,6 +260,10 @@ function failsDealerScopeAgeMileageGate(item) {
     const mileage = parseMileageValue(item.meterCount ?? item.meter_count ?? item.mileage ?? 0);
     if (mileage <= 0) return false;
     if (mileage > STANDARD_MAX_MILEAGE) return true;
+    // Premium lane (<= PREMIUM_MAX_MODEL_AGE_YEARS old AND <= PREMIUM_MAX_MILEAGE) is exempt from
+    // the standard-lane miles/year cap, mirroring backend determine_vehicle_tier. Without this,
+    // late-model high-mileage fleet vehicles are silently dropped before scoring.
+    if (ageYears <= PREMIUM_MAX_MODEL_AGE_YEARS && mileage <= PREMIUM_MAX_MILEAGE) return false;
     return mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 

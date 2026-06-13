@@ -227,13 +227,17 @@ def test_active_public_source_actors_do_not_embed_premium_only_age_mileage_gates
         Path('apify/actors/ds-equipmentfacts/src/main.js'),
         Path('apify/actors/ds-purplewave/src/main.js'),
     ]
+    # Forbid premium-only bounds used as the PRIMARY prefilter gate. The governed
+    # standard lane (10yr / 100k / 18k-per-year) is the outer prefilter; premium bounds
+    # are only allowed as a namespaced exemption (PREMIUM_MAX_*), never as bare gate
+    # constants or hardcoded comparisons.
     forbidden_fragments = [
         'CURRENT_YEAR - 4',
         'getFullYear() - 4',
-        'MAX_MODEL_AGE_YEARS = 4',
+        'const MAX_MODEL_AGE_YEARS = 4',
         'MAX_ALLOWED_MILEAGE = 50000',
         'DEFAULT_MAX_MILEAGE = 50000',
-        'MAX_MILEAGE = 50000',
+        'const MAX_MILEAGE = 50000',
         'maxMileage = 50000',
         'mileage > 50000',
         'mileage_over_50k',

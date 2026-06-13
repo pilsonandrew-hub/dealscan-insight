@@ -336,6 +336,8 @@ function enrichListingFromDetail(listing, detail) {
 const currentYear = new Date().getFullYear();
 const defaultMinYear = currentYear - 10;
 const STANDARD_MAX_MILES_PER_YEAR = 18000;
+const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
+const PREMIUM_MAX_MILEAGE = 50000;
 
 const searchQuery = input.searchQuery || "";
 
@@ -357,8 +359,13 @@ const seenIds = new Set();
 function failsDealerScopeAgeMileageGate(year, mileage) {
     if (!year || year < minYear) return true;
     if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    if (mileage > maxMileage) return true;
     const ageYears = Math.max(1, currentYear - Number(year));
-    return mileage > maxMileage || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+    // Premium lane (<= PREMIUM_MAX_MODEL_AGE_YEARS old AND <= PREMIUM_MAX_MILEAGE) is exempt from
+    // the standard-lane miles/year cap, mirroring backend determine_vehicle_tier. Without this,
+    // late-model high-mileage fleet vehicles are silently dropped before scoring.
+    if (ageYears <= PREMIUM_MAX_MODEL_AGE_YEARS && mileage <= PREMIUM_MAX_MILEAGE) return false;
+    return mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 const allListings = [];
 const excludedMissingRequiredSamples = [];
