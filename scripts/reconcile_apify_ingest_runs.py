@@ -36,7 +36,13 @@ SUPABASE_URL_KEYS = ("SUPABASE_URL", "VITE_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY_KEYS = ("SUPABASE_SERVICE_ROLE_KEY",)
 DB_SAVE_INSERT_STATUSES = {"saved_supabase", "saved_direct_pg"}
 DB_SAVE_CANDIDATE_STATUSES = {"candidate_already_reviewed", "candidate_staged"}
-DB_SAVE_EXISTING_STATUSES = {"duplicate_existing", "vin_dedup_skipped", "vin_dedup_updated"}
+DB_SAVE_EXISTING_STATUSES = {
+    "duplicate_existing",
+    "duplicate_lifecycle_refreshed",
+    "vin_dedup_skipped",
+    "vin_dedup_lifecycle_refreshed",
+    "vin_dedup_updated",
+}
 DB_SAVE_SKIPPED_STATUSES = {
     "below_save_threshold",
     "skipped_bronze",

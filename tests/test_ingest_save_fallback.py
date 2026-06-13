@@ -306,7 +306,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
 
         self.assertEqual(saved_id, "existing-42")
-        self.assertEqual(vehicle["_save_status"], "duplicate_existing")
+        self.assertEqual(vehicle["_save_status"], "duplicate_lifecycle_refreshed")
         self.assertEqual(fallback_calls, [])
         self.assertIn(([("id", "existing-42")], 1), supabase._table.select_calls)
         enrichment_updates = self._updates_with_key(supabase._table, "raw_data")
@@ -410,7 +410,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
 
         self.assertEqual(saved_id, "existing-durango")
-        self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_lifecycle_refreshed")
         enrichment_updates = self._updates_with_key(supabase._table, "raw_data")
         lifecycle_updates = self._updates_with_key(supabase._table, "last_seen_at")
         self.assertEqual(len(enrichment_updates), 1)
@@ -461,7 +461,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
 
         self.assertEqual(saved_id, "existing-durango")
-        self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_lifecycle_refreshed")
         lifecycle_payloads = [
             payload
             for payload, _filters in supabase._table.update_calls
@@ -696,7 +696,7 @@ class SaveOpportunityFallbackTests(unittest.TestCase):
             saved_id = asyncio.run(ingest.save_opportunity_to_supabase(vehicle))
 
         self.assertEqual(saved_id, "existing-durango")
-        self.assertEqual(vehicle["_save_status"], "vin_dedup_skipped")
+        self.assertEqual(vehicle["_save_status"], "vin_dedup_lifecycle_refreshed")
         enrichment_updates = self._updates_with_key(supabase._table, "raw_data")
         lifecycle_updates = self._updates_with_key(supabase._table, "last_seen_at")
         self.assertEqual(len(enrichment_updates), 1)
