@@ -167,6 +167,7 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
             "mileage",
             "photo_count",
             "created_at",
+            "raw_data",
         },
         "market_scout_runs": {"run_id", "source_name"},
         "sold_comp_candidates": {"id", "run_id", "source_name"},
@@ -179,20 +180,23 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
         "ingest_delivery_log": [
             {"run_id": "run-photo", "listing_id": "listing-a", "channel": "db_save", "status": "vin_dedup_lifecycle_refreshed", "created_at": "2026-06-13T00:00:01Z"},
             {"run_id": "run-photo", "listing_id": "listing-b", "channel": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:02Z"},
+            {"run_id": "run-photo", "listing_id": "listing-c", "channel": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:03Z"},
         ],
         "webhook_log": [{"run_id": "run-photo", "received_at": "2026-06-13T00:00:00Z", "processing_status": "processed", "item_count": 2}],
         "opportunities": [
-            {"id": "old-a", "listing_id": "listing-a", "source_site": "proxibid", "photo_count": 1, "step_status": "complete"},
-            {"id": "old-b", "listing_id": "listing-b", "source_site": "proxibid", "photo_count": 4, "step_status": "complete"},
+            {"id": "old-a", "listing_id": "listing-a", "source_site": "proxibid", "photo_count": 1, "step_status": "complete", "raw_data": {"photo_url": "https://example.test/a.jpg"}},
+            {"id": "old-b", "listing_id": "listing-b", "source_site": "proxibid", "photo_count": 4, "step_status": "complete", "raw_data": {"photos": ["https://example.test/b-1.jpg", "https://example.test/b-2.jpg"]}},
+            {"id": "old-c", "listing_id": "listing-c", "source_site": "proxibid", "photo_count": 0, "step_status": "complete", "raw_data": {"image_url": "https://example.test/c.jpg"}},
         ],
         "market_scout_runs": [],
         "sold_comp_candidates": [],
         "sold_comp_reviews": [],
         "verified_sold_comps": [],
-        "scrape_runs": [{"run_id": "run-photo", "source_name": "proxibid", "status": "processed", "item_count": 2, "evaluated_count": 2, "saved_count": 0, "skipped_count": 0, "failed_count": 0, "parse_event_count": 2}],
+        "scrape_runs": [{"run_id": "run-photo", "source_name": "proxibid", "status": "processed", "item_count": 3, "evaluated_count": 3, "saved_count": 0, "skipped_count": 0, "failed_count": 0, "parse_event_count": 3}],
         "parse_events": [
             {"run_id": "run-photo", "source_name": "proxibid", "event_type": "db_save", "status": "vin_dedup_lifecycle_refreshed", "created_at": "2026-06-13T00:00:01Z"},
             {"run_id": "run-photo", "source_name": "proxibid", "event_type": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:02Z"},
+            {"run_id": "run-photo", "source_name": "proxibid", "event_type": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:03Z"},
         ],
     }
 
@@ -205,7 +209,7 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
         if table == "opportunities":
             if params.get("run_id") or params.get("source_run_id"):
                 table_rows = []
-            elif params.get("listing_id") == "in.(listing-a,listing-b)":
+            elif params.get("listing_id") == "in.(listing-a,listing-b,listing-c)":
                 table_rows = rows[table]
         selected = [column for column in str(params.get("select") or "").split(",") if column]
         if selected:
@@ -219,13 +223,15 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
 
     report = inspection._run_id_truth_audit("https://example.supabase.co", "service-key", "run-photo")
 
-    assert report["opportunities"]["row_count"] == 2
-    assert report["opportunities"]["photo_count_known_rows"] == 2
+    assert report["opportunities"]["row_count"] == 3
+    assert report["opportunities"]["photo_count_known_rows"] == 3
     assert report["opportunities"]["positive_photo_count_rows"] == 2
+    assert report["opportunities"]["raw_photo_evidence_rows"] == 3
+    assert report["opportunities"]["suppressed_raw_photo_evidence_rows"] == 1
     assert report["opportunities"]["max_photo_count"] == 4
-    assert report["opportunities"]["average_photo_count"] == 2.5
+    assert report["opportunities"]["average_photo_count"] == 1.67
     opportunity_requests = [params for table, params in requests if table == "opportunities"]
-    assert any(params.get("listing_id") == "in.(listing-a,listing-b)" for params in opportunity_requests)
+    assert any(params.get("listing_id") == "in.(listing-a,listing-b,listing-c)" for params in opportunity_requests)
     assert "listing_url" not in str(report)
     assert "raw_data" not in str(report)
 
@@ -524,7 +530,11 @@ def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypa
                 "risk_flags": ["missing_photos"],
                 "photo_count": 0,
                 "listing_url": "https://example.test/private",
-                "raw_data": {"description": "private raw text", "vin": "1FTFW1E50PFA00000"},
+                "raw_data": {
+                    "description": "private raw text",
+                    "vin": "1FTFW1E50PFA00000",
+                    "image_url": "https://example.test/private-image.jpg",
+                },
             },
         ],
         "alert_log": [],
@@ -580,6 +590,8 @@ def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypa
     assert report["seller_recovery_audit"]["listing_quality"]["missing_mileage_count"] == 1
     assert report["seller_recovery_audit"]["listing_quality"]["photo_count_known_count"] == 1
     assert report["seller_recovery_audit"]["listing_quality"]["zero_photo_count"] == 1
+    assert report["seller_recovery_audit"]["listing_quality"]["raw_photo_evidence_count"] == 1
+    assert report["seller_recovery_audit"]["listing_quality"]["suppressed_raw_photo_evidence_count"] == 1
     assert report["seller_recovery_audit"]["unsupported_dimensions"]["photo_count"]["status"] == "available"
     assert "photo_count" not in report["seller_recovery_audit"]["summary"]["unavailable_dimensions"]
     assert report["seller_recovery_audit"]["value_leak_candidates"][0]["recovery_reasons"] == [
