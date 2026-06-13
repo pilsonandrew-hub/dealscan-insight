@@ -1146,6 +1146,24 @@ def test_normalize_apify_vehicle_promotes_single_image_url_to_photo_evidence():
     assert normalized["photos"] == ["https://cdn.jjkane.example/items/1612463.jpg"]
 
 
+def test_normalize_apify_vehicle_preserves_bidder_count_evidence():
+    item = {
+        "title": "2024 Ford F-150",
+        "year": 2024,
+        "make": "Ford",
+        "model": "F-150",
+        "state": "CA",
+        "current_bid": 12000,
+        "listing_url": "https://hibid.example/lot/1",
+        "source_site": "hibid",
+        "bid_count": "8",
+    }
+
+    normalized = normalize_apify_vehicle(item, run_id="hibid-bidder-run")
+
+    assert normalized["bidder_count"] == 8
+
+
 def test_normalize_apify_vehicle_preserves_jjkane_marketcheck_pricing_evidence():
     item = {
         "title": "2022 Ford F150 4x4 Police Responder",

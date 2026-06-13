@@ -127,3 +127,28 @@ def test_build_opportunity_row_records_governed_photo_count():
         "source_site": "govdeals",
         "photos": [],
     })["photo_count"] == 0
+
+
+def test_build_opportunity_row_records_governed_bidder_count_only_when_known():
+    assert _build({
+        "listing_url": "u",
+        "source_site": "hibid",
+        "bid_count": 7,
+    })["bidder_count"] == 7
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "hibid",
+        "bidCount": "3",
+    })["bidder_count"] == 3
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "hibid",
+        "bid_count": "",
+    })["bidder_count"] is None
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+    })["bidder_count"] is None

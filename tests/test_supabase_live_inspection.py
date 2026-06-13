@@ -288,6 +288,7 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
             "auction_end_date",
             "risk_flags",
             "photo_count",
+            "bidder_count",
             "listing_url",
             "raw_data",
         },
@@ -468,6 +469,61 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
     assert "private-listing" not in str(report)
     assert "1FTFW1E50PFA00000" not in str(report)
     assert "Sensitive listing title" not in str(report)
+
+
+def test_seller_recovery_audit_reports_governed_bidder_depth_when_queryable():
+    rows = [
+        {
+            "is_active": True,
+            "source_site": "hibid",
+            "year": 2024,
+            "make": "Ford",
+            "model": "F-150",
+            "dos_score": 84,
+            "gross_margin": 5000,
+            "bid_headroom": 1200,
+            "pricing_maturity": "market_comp",
+            "vin": "1FTFW1E50PFA00000",
+            "mileage": 15000,
+            "condition_grade": "Good",
+            "auction_end_date": "2026-06-20T00:00:00Z",
+            "risk_flags": [],
+            "photo_count": 4,
+            "bidder_count": 11,
+        },
+        {
+            "is_active": True,
+            "source_site": "publicsurplus",
+            "year": 2023,
+            "make": "Toyota",
+            "model": "Camry",
+            "dos_score": 81,
+            "gross_margin": 4200,
+            "bid_headroom": 900,
+            "pricing_maturity": "market_comp",
+            "vin": "1HGCM82633A004352",
+            "mileage": 18000,
+            "condition_grade": "Good",
+            "auction_end_date": "2026-06-20T00:00:00Z",
+            "risk_flags": [],
+            "photo_count": 2,
+            "bidder_count": None,
+        },
+    ]
+
+    report = inspection._summarize_seller_recovery_audit(
+        opportunity_rows=rows,
+        source_health_rows=[{"source_name": "hibid"}],
+        delivery_rows=[],
+        parse_event_rows=[],
+    )
+
+    assert report["listing_quality"]["bidder_count_known_count"] == 1
+    assert report["listing_quality"]["zero_bidder_count"] == 0
+    assert report["listing_quality"]["thin_bidder_count"] == 0
+    assert report["listing_quality"]["average_bidder_count"] == 11.0
+    assert report["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
+    assert "bidder_depth" not in report["summary"]["unavailable_dimensions"]
 
 
 def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypatch):

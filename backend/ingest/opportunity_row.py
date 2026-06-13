@@ -72,6 +72,29 @@ def _resolve_photo_count(vehicle: dict[str, Any]) -> int:
     return 0
 
 
+def _resolve_bidder_count(vehicle: dict[str, Any]) -> int | None:
+    for key in (
+        "bidder_count",
+        "bid_count",
+        "bidCount",
+        "bids_count",
+        "bidsCount",
+        "number_of_bids",
+        "numberOfBids",
+        "num_bids",
+        "numBids",
+    ):
+        value = vehicle.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError):
+            continue
+        return max(parsed, 0)
+    return None
+
+
 def build_opportunity_row(
     vehicle: dict[str, Any],
     *,
@@ -175,6 +198,7 @@ def build_opportunity_row(
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
         "photo_count": _resolve_photo_count(vehicle),
+        "bidder_count": _resolve_bidder_count(vehicle),
         "designated_lane": designated_lane,
         "dos_premium": score_result.get("dos_premium"),
         "dos_standard": score_result.get("dos_standard"),
