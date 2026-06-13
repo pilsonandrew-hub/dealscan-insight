@@ -183,9 +183,13 @@ def _normalize_alert_type(value: Optional[str]) -> str:
 
 def _alert_type_satisfies(current_alert_type: Optional[str], prior_alert_type: Optional[str]) -> bool:
     current = _normalize_alert_type(current_alert_type)
-    prior = _normalize_alert_type(prior_alert_type)
+    prior = _normalize_alert_type(prior_alert_type) or "hot"
     if not current:
         return bool(prior)
+    if current == "platinum":
+        return prior == "platinum"
+    if current == "hot":
+        return prior in {"hot", "platinum"}
     return prior == current
 
 
@@ -201,7 +205,6 @@ def _alert_delivery_exists_for_opportunity(
             supabase_client.table("alert_log")
             .select("id,alert_type,delivery_state")
             .eq("opportunity_id", opportunity_id)
-            .limit(1)
             .execute()
         )
         for row in alert_log_result.data or []:
@@ -212,7 +215,8 @@ def _alert_delivery_exists_for_opportunity(
                 return True
     except Exception as exc:
         logger.warning("[ALERT_RECOVERY] alert_log lookup failed for opportunity_id=%s: %s", opportunity_id, exc)
-    if desired_alert_type:
+    desired = _normalize_alert_type(desired_alert_type)
+    if desired and desired != "hot":
         return False
     try:
         delivery_result = (

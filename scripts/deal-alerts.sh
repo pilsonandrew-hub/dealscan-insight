@@ -23,6 +23,7 @@ import datetime
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
@@ -35,6 +36,7 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 HOT_DEAL_MIN_SCORE = float(os.environ.get("HOT_DEAL_MIN_SCORE", "80"))
 PLATINUM_MIN_ROI_DAY = float(os.environ.get("PLATINUM_MIN_ROI_DAY", "75"))
 ALERT_LIMIT = int(os.environ.get("ALERT_LIMIT", "10"))
+CANDIDATE_LIMIT = max(ALERT_LIMIT * 2, 10)
 ALERT_MIN_TRUST_SCORE = float(os.environ.get("ALERT_MIN_TRUST_SCORE", "0.25"))
 ALERT_MIN_CONFIDENCE = float(os.environ.get("ALERT_MIN_CONFIDENCE", "55"))
 ALERT_MIN_BID_HEADROOM = float(os.environ.get("ALERT_MIN_BID_HEADROOM", "0"))
@@ -56,6 +58,15 @@ def supabase_get(path):
     )
     with urllib.request.urlopen(req) as r:
         return json.loads(r.read())
+
+
+def fetch_raw_data_by_id(opportunity_ids):
+    ids = [str(opportunity_id) for opportunity_id in opportunity_ids if opportunity_id]
+    if not ids:
+        return {}
+    encoded_ids = ",".join(urllib.parse.quote(opportunity_id, safe="") for opportunity_id in ids)
+    rows = supabase_get(f"opportunities?select=id,raw_data&id=in.({encoded_ids})")
+    return {row.get("id"): row.get("raw_data") for row in rows if row.get("id")}
 
 
 def supabase_post(table, row):
@@ -84,6 +95,18 @@ def normalize_alert_type(value):
     return normalized
 
 
+def alert_type_satisfies(current_alert_type, prior_alert_type):
+    current = normalize_alert_type(current_alert_type)
+    prior = normalize_alert_type(prior_alert_type) or "hot"
+    if not current:
+        return bool(prior)
+    if current == "platinum":
+        return prior == "platinum"
+    if current == "hot":
+        return prior in {"hot", "platinum"}
+    return prior == current
+
+
 def send_telegram(text):
     payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}).encode()
     req = urllib.request.Request(
@@ -109,14 +132,25 @@ except Exception:
 
 deals = supabase_get(
     "opportunities?select=id,listing_id,run_id,source_site,title,year,make,model,state,current_bid,dos_score,listing_url,image_url,"
-    "investment_grade,roi_per_day,bid_headroom,max_bid,processed_at,pricing_maturity,pricing_source,"
+    "investment_grade,roi_per_day,estimated_days_to_sale,bid_headroom,max_bid,processed_at,pricing_maturity,pricing_source,"
     "current_bid_trust_score,mmr_confidence_proxy,acquisition_price_basis,acquisition_basis_source,"
     "projected_total_cost,expected_close_bid,expected_close_source,gross_margin,mmr_lookup_basis,"
-    "retail_comp_count,retail_comp_confidence"
+    "retail_comp_count,retail_comp_confidence,vin,mileage,condition_grade,vehicle_tier"
     "&is_active=eq.true"
     f"&or=(dos_score.gte.{HOT_DEAL_MIN_SCORE},investment_grade.eq.Gold,investment_grade.eq.Platinum)"
-    f"&order=dos_score.desc&limit={max(ALERT_LIMIT * 3, 20)}"
+    f"&order=dos_score.desc&limit={CANDIDATE_LIMIT}"
 )
+
+raw_data_needed_ids = []
+for deal in deals:
+    preliminary_gate = evaluate_alert_gate(deal, thresholds=THRESHOLDS)
+    if "condition_unverified" in preliminary_gate.get("blocking_reasons", []):
+        raw_data_needed_ids.append(deal.get("id"))
+raw_data_by_id = fetch_raw_data_by_id(raw_data_needed_ids)
+for deal in deals:
+    raw_data = raw_data_by_id.get(deal.get("id"))
+    if raw_data is not None:
+        deal["raw_data"] = raw_data
 
 seen_ids = set()
 new_alerts = []
@@ -132,7 +166,7 @@ for deal in deals:
         blocked_candidates.append(deal)
         continue
     alert_type = normalize_alert_type(gate.get("alert_type")) or "hot"
-    if alert_type in alerted_types_by_id.get(deal_id, set()):
+    if any(alert_type_satisfies(alert_type, prior) for prior in alerted_types_by_id.get(deal_id, set())):
         continue
     deal["_alert_type"] = gate["alert_type"]
     new_alerts.append(deal)
