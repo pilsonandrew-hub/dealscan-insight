@@ -119,4 +119,11 @@ def test_build_opportunity_row_records_governed_photo_count():
         "listing_url": "u",
         "source_site": "govdeals",
         "photos": [],
+        "image_url": "https://example.test/1.jpg",
+    })["photo_count"] == 1
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photos": [],
     })["photo_count"] == 0
