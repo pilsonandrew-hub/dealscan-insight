@@ -113,6 +113,7 @@ deals = supabase_get(
     "current_bid_trust_score,mmr_confidence_proxy,acquisition_price_basis,acquisition_basis_source,"
     "projected_total_cost,expected_close_bid,expected_close_source,gross_margin,mmr_lookup_basis,"
     "retail_comp_count,retail_comp_confidence"
+    "&is_active=eq.true"
     f"&or=(dos_score.gte.{HOT_DEAL_MIN_SCORE},investment_grade.eq.Gold,investment_grade.eq.Platinum)"
     f"&order=dos_score.desc&limit={max(ALERT_LIMIT * 3, 20)}"
 )
