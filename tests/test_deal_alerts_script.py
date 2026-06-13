@@ -38,10 +38,20 @@ def test_active_deal_alert_runner_selects_alert_gate_evidence_fields():
 def test_active_deal_alert_runner_fetches_raw_data_only_after_preliminary_gate():
     text = SCRIPT.read_text()
 
-    assert "CANDIDATE_LIMIT = max(ALERT_LIMIT * 2, 10)" in text
+    assert "CANDIDATE_LIMIT = max(ALERT_LIMIT * 3, 20)" in text
     assert "limit={CANDIDATE_LIMIT}" in text
     assert "fetch_raw_data_by_id(raw_data_needed_ids)" in text
     assert "opportunities?select=id,raw_data&id=in." in text
+    assert '"condition_evidence_missing"' in text
+    assert '"condition_unverified"' not in text
+
+
+def test_active_deal_alert_runner_fails_closed_when_receipts_cannot_load():
+    text = SCRIPT.read_text()
+
+    assert "failed to load prior alert receipts" in text
+    assert "refusing to send duplicate-prone alerts" in text
+    assert "raise" in text
 
 
 def test_active_deal_alert_runner_uses_tier_satisfaction_not_exact_membership():
