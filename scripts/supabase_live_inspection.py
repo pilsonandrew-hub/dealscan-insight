@@ -717,6 +717,119 @@ def _summarize_source_health_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _seller_recovery_candidate_reasons(row: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if not row.get("vin"):
+        reasons.append("missing_vin")
+    if row.get("mileage") in (None, "", 0):
+        reasons.append("missing_mileage")
+    if not (row.get("auction_end_date") or row.get("auction_end") or row.get("auction_end_time")):
+        reasons.append("missing_auction_end")
+    if str(row.get("condition_grade") or "").strip().lower() in {"", "unknown", "poor"}:
+        reasons.append("condition_unverified")
+    if str(row.get("pricing_maturity") or "").strip().lower() == "proxy":
+        reasons.append("proxy_pricing")
+    risk_flags = {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}
+    if "missing_photos" in risk_flags:
+        reasons.append("missing_photos_flag")
+    return reasons
+
+
+def _first_positive_number(row: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = _coerce_float(row.get(key))
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    active_rows = [row for row in rows if row.get("is_active") is not False]
+    return {
+        "sample_count": len(active_rows),
+        "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
+        "missing_mileage_count": sum(1 for row in active_rows if row.get("mileage") in (None, "", 0)),
+        "missing_auction_end_count": sum(1 for row in active_rows if not (row.get("auction_end_date") or row.get("auction_end") or row.get("auction_end_time"))),
+        "condition_unverified_count": sum(1 for row in active_rows if str(row.get("condition_grade") or "").strip().lower() in {"", "unknown", "poor"}),
+        "proxy_pricing_count": sum(1 for row in active_rows if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"),
+        "missing_photos_flag_count": sum(1 for row in active_rows if "missing_photos" in {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}),
+    }
+
+
+def _seller_recovery_candidates_from_opportunities(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("is_active") is False:
+            continue
+        gross_margin = _first_positive_number(row, "gross_margin", "potential_profit", "margin")
+        bid_headroom = _first_positive_number(row, "bid_headroom")
+        if gross_margin is None and bid_headroom is None:
+            continue
+        reasons = _seller_recovery_candidate_reasons(row)
+        if not reasons:
+            continue
+        score = _coerce_float(row.get("dos_score") if row.get("dos_score") is not None else row.get("score"))
+        candidates.append({
+            "source_site": str(row.get("source_site") or row.get("source") or "unknown")[:80],
+            "year": _coerce_int(row.get("year")),
+            "make": str(row.get("make") or "")[:80],
+            "model": str(row.get("model") or "")[:80],
+            "dos_score": round(score, 2) if score is not None else None,
+            "gross_margin": round(gross_margin, 2) if gross_margin is not None else None,
+            "bid_headroom": round(bid_headroom, 2) if bid_headroom is not None else None,
+            "pricing_maturity": str(row.get("pricing_maturity") or "unknown")[:80],
+            "recovery_reasons": reasons,
+        })
+    candidates.sort(
+        key=lambda item: (
+            float(item["gross_margin"] or 0),
+            float(item["bid_headroom"] or 0),
+            float(item["dos_score"] or 0),
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
+
+
+def _summarize_seller_recovery_audit(
+    *,
+    opportunity_rows: list[dict[str, Any]],
+    source_health_rows: list[dict[str, Any]],
+    delivery_rows: list[dict[str, Any]],
+    parse_event_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    candidates = _seller_recovery_candidates_from_opportunities(opportunity_rows)
+    source_names = {row.get("source_name") for row in source_health_rows if row.get("source_name")}
+    unsupported_dimensions = {
+        "bidder_depth": {
+            "status": "unavailable",
+            "reason": "No governed bidder-count field is currently written across active source rows.",
+        },
+        "photo_count": {
+            "status": "unavailable",
+            "reason": "Current normalized opportunity rows only prove missing_photos as a risk flag, not a reliable photo count.",
+        },
+    }
+    return {
+        "status": "ok",
+        "summary": {
+            "source_count": len(source_names),
+            "candidate_count": len(candidates),
+            "unavailable_dimensions": [
+                name for name, details in unsupported_dimensions.items()
+                if details.get("status") == "unavailable"
+            ],
+        },
+        "listing_quality": _summarize_listing_quality_for_seller_recovery(opportunity_rows),
+        "delivery_status_counts": _summarize_recent_delivery_truth(delivery_rows).get("status_counts", {}),
+        "parse_event_status_counts": _summarize_parse_event_rows(parse_event_rows).get("status_counts", {}),
+        "parse_event_type_counts": _summarize_parse_event_rows(parse_event_rows).get("event_type_counts", {}),
+        "value_leak_candidates": candidates,
+        "unsupported_dimensions": unsupported_dimensions,
+        "truth_boundary": "Sanitized aggregate seller recovery proof. Does not print VINs, listing URLs, descriptions, raw payloads, user data, or tokens.",
+    }
+
+
 def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[str, Any]:
     delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
     delivery_select = ",".join([
@@ -922,10 +1035,11 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
 
 def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
     desired_opportunity_columns = [
-        "created_at", "updated_at", "source_site", "source", "state", "year",
+        "created_at", "updated_at", "source_site", "source", "state", "year", "make", "model",
         "dos_score", "score", "current_bid", "estimated_sale_price", "potential_profit",
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
-        "status", "is_active", "max_bid", "listing_url", "url",
+        "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
+        "condition_grade", "risk_flags", "listing_url", "url",
     ]
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"
@@ -1058,6 +1172,38 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         source_health_report = _summarize_source_health_rows(source_health_rows)
     except Exception as exc:
         source_health_report = {"failure": str(exc)[:500]}
+        source_health_rows = []
+
+    parse_event_rows: list[dict[str, Any]] = []
+    try:
+        parse_columns = _available_columns(base_url, service_key, "parse_events")
+        parse_select = ",".join([
+            col for col in [
+                "source_name",
+                "event_type",
+                "status",
+                "reason",
+                "created_at",
+            ]
+            if col in parse_columns
+        ]) or "created_at"
+        parse_event_rows = _recent_rows(
+            base_url,
+            service_key,
+            "parse_events",
+            parse_select,
+            "created_at" if "created_at" in parse_columns else parse_select.split(",", 1)[0],
+            500,
+        )
+    except Exception:
+        parse_event_rows = []
+
+    seller_recovery_audit = _summarize_seller_recovery_audit(
+        opportunity_rows=recent_opportunities,
+        source_health_rows=source_health_rows,
+        delivery_rows=delivery_rows,
+        parse_event_rows=parse_event_rows,
+    )
 
     return {
         "recent_opportunities": _summarize_recent_opportunity_truth(recent_opportunities),
@@ -1078,6 +1224,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         ),
         "post_close_outcome_requests": post_close_report,
         "source_health_daily": source_health_report,
+        "seller_recovery_audit": seller_recovery_audit,
         "truth_boundary": "Samples only sanitized aggregate fields from recent rows. Does not print VINs, titles, URLs, user data, tokens, or raw listing payloads.",
     }
 

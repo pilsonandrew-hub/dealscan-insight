@@ -234,6 +234,189 @@ def _status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(counter.most_common(20))
 
 
+def _safe_section_rows(
+    table: str,
+    select: str,
+    *,
+    order: Optional[tuple[str, bool]] = None,
+    limit: int = 200,
+    filters: Optional[list[tuple[str, str, Any]]] = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        rows = _safe_rows(table, select, order=order, limit=limit, filters=filters)
+        return {"status": "ok", "row_count": len(rows)}, rows
+    except Exception as exc:
+        logger.warning("[SELLER_RECOVERY_AUDIT] section unavailable table=%s: %s", table, exc)
+        return {"status": "unavailable", "reason": str(exc)[:160], "row_count": None}, []
+
+
+def _seller_recovery_reason_counts(rows: list[dict[str, Any]], key: str = "error_message") -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for row in rows:
+        value = str(row.get(key) or row.get("reason") or "").strip()
+        if value:
+            counter[value[:120]] += 1
+    return dict(counter.most_common(20))
+
+
+def _first_number(row: dict[str, Any], *keys: str) -> Optional[float]:
+    for key in keys:
+        parsed = _as_positive_float(row.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _candidate_recovery_reasons(row: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if not row.get("vin"):
+        reasons.append("missing_vin")
+    if row.get("mileage") in (None, "", 0):
+        reasons.append("missing_mileage")
+    if not (row.get("auction_end_date") or row.get("auction_end") or row.get("auction_end_time")):
+        reasons.append("missing_auction_end")
+    if str(row.get("condition_grade") or "").strip().lower() in {"", "unknown", "poor"}:
+        reasons.append("condition_unverified")
+    if str(row.get("pricing_maturity") or "").strip().lower() == "proxy":
+        reasons.append("proxy_pricing")
+    risk_flags = {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}
+    if "missing_photos" in risk_flags:
+        reasons.append("missing_photos_flag")
+    return reasons
+
+
+def _seller_recovery_candidates(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("is_active") is False:
+            continue
+        gross_margin = _first_number(row, "gross_margin", "potential_profit", "margin")
+        bid_headroom = _first_number(row, "bid_headroom")
+        if gross_margin is None and bid_headroom is None:
+            continue
+        reasons = _candidate_recovery_reasons(row)
+        if not reasons:
+            continue
+        score = _numeric_score(row)
+        candidates.append({
+            "id": str(row.get("id") or "")[:80],
+            "source_site": str(row.get("source_site") or row.get("source") or "unknown")[:80],
+            "year": _as_int(row.get("year")) if row.get("year") is not None else None,
+            "make": str(row.get("make") or "")[:80],
+            "model": str(row.get("model") or "")[:80],
+            "dos_score": round(score, 2) if score is not None else None,
+            "gross_margin": round(gross_margin, 2) if gross_margin is not None else None,
+            "bid_headroom": round(bid_headroom, 2) if bid_headroom is not None else None,
+            "pricing_maturity": str(row.get("pricing_maturity") or "unknown")[:80],
+            "recovery_reasons": reasons,
+        })
+    candidates.sort(
+        key=lambda item: (
+            float(item["gross_margin"] or 0),
+            float(item["bid_headroom"] or 0),
+            float(item["dos_score"] or 0),
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
+
+
+def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    active_rows = [row for row in rows if row.get("is_active") is not False]
+    return {
+        "sample_count": len(active_rows),
+        "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
+        "missing_mileage_count": sum(1 for row in active_rows if row.get("mileage") in (None, "", 0)),
+        "missing_auction_end_count": sum(1 for row in active_rows if not (row.get("auction_end_date") or row.get("auction_end") or row.get("auction_end_time"))),
+        "condition_unverified_count": sum(1 for row in active_rows if str(row.get("condition_grade") or "").strip().lower() in {"", "unknown", "poor"}),
+        "proxy_pricing_count": sum(1 for row in active_rows if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"),
+        "missing_photos_flag_count": sum(1 for row in active_rows if "missing_photos" in {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}),
+        "source_counts": _status_counts(active_rows, "source_site"),
+    }
+
+
+def build_seller_recovery_audit() -> dict[str, Any]:
+    sections: dict[str, dict[str, Any]] = {}
+    sections["source_health"], source_health_rows = _safe_section_rows(
+        "source_health_daily",
+        "source_name,observed_date,total_runs,processed_runs,failed_runs,item_count,saved_count,skipped_count,parse_event_count,latest_started_at",
+        order=("observed_date", True),
+        limit=200,
+    )
+    sections["deliveries"], delivery_rows = _safe_section_rows(
+        "ingest_delivery_log",
+        "source_site,source,status,error_message,created_at",
+        order=("created_at", True),
+        limit=500,
+    )
+    sections["parse_events"], parse_event_rows = _safe_section_rows(
+        "parse_events",
+        "source_name,event_type,status,reason,created_at",
+        order=("created_at", True),
+        limit=500,
+    )
+    sections["opportunities"], opportunity_rows = _safe_section_rows(
+        "opportunities",
+        "id,is_active,source_site,year,make,model,dos_score,score,gross_margin,potential_profit,bid_headroom,pricing_maturity,vin,mileage,condition_grade,auction_end_date,auction_end,auction_end_time,risk_flags",
+        order=("updated_at", True),
+        limit=500,
+    )
+
+    candidates = _seller_recovery_candidates(opportunity_rows)
+    source_health = [
+        {
+            "source_name": str(row.get("source_name") or "unknown")[:80],
+            "observed_date": row.get("observed_date"),
+            "total_runs": _as_int(row.get("total_runs")),
+            "processed_runs": _as_int(row.get("processed_runs")),
+            "failed_runs": _as_int(row.get("failed_runs")),
+            "item_count": _as_int(row.get("item_count")),
+            "saved_count": _as_int(row.get("saved_count")),
+            "skipped_count": _as_int(row.get("skipped_count")),
+            "parse_event_count": _as_int(row.get("parse_event_count")),
+            "latest_started_at": row.get("latest_started_at"),
+        }
+        for row in source_health_rows[:50]
+    ]
+    unsupported_dimensions = {
+        "bidder_depth": {
+            "status": "unavailable",
+            "reason": "No governed bidder-count field is currently written across active source rows.",
+        },
+        "photo_count": {
+            "status": "unavailable",
+            "reason": "Current normalized opportunity rows only prove missing_photos as a risk flag, not a reliable photo count.",
+        },
+    }
+    status = "degraded" if sections["opportunities"]["status"] != "ok" else "ok"
+    unavailable_dimensions = [
+        name
+        for name, details in unsupported_dimensions.items()
+        if details.get("status") == "unavailable"
+    ]
+    return {
+        "generated_at": _now_iso(),
+        "status": status,
+        "scope": "internal_seller_recovery_audit",
+        "summary": {
+            "source_count": len({row.get("source_name") for row in source_health_rows if row.get("source_name")}),
+            "candidate_count": len(candidates),
+            "unavailable_dimensions": unavailable_dimensions,
+        },
+        "sections": sections,
+        "source_health": source_health,
+        "listing_quality": _listing_quality_summary(opportunity_rows),
+        "delivery_status_counts": _status_counts(delivery_rows, "status"),
+        "delivery_reason_counts": _seller_recovery_reason_counts(delivery_rows),
+        "parse_event_status_counts": _status_counts(parse_event_rows, "status"),
+        "parse_event_type_counts": _status_counts(parse_event_rows, "event_type"),
+        "parse_event_reason_counts": _seller_recovery_reason_counts(parse_event_rows, "reason"),
+        "value_leak_candidates": candidates,
+        "unsupported_dimensions": unsupported_dimensions,
+        "truth_boundary": "Internal aggregate audit. Does not print VINs, listing URLs, descriptions, raw payloads, user data, or tokens.",
+    }
+
+
 def _numeric_score(row: dict[str, Any]) -> Optional[float]:
     score = row.get("dos_score") if row.get("dos_score") is not None else row.get("score")
     try:
@@ -746,6 +929,13 @@ def pipeline_truth(x_internal_secret: Optional[str] = Header(None, alias="X-Inte
     """Return aggregate-only pipeline truth for governed internal operators."""
     verify_internal_secret(x_internal_secret)
     return build_pipeline_truth()
+
+
+@router.get("/seller-recovery-audit", include_in_schema=False)
+def seller_recovery_audit(x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret")) -> dict[str, Any]:
+    """Return sanitized seller-side listing recovery diagnostics."""
+    verify_internal_secret(x_internal_secret)
+    return build_seller_recovery_audit()
 
 
 @router.get("/opportunity-condition-proof/{opportunity_id}", include_in_schema=False)

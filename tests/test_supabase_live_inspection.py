@@ -192,8 +192,19 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
             "dos_score",
             "current_bid",
             "gross_margin",
+            "bid_headroom",
+            "pricing_maturity",
             "status",
+            "is_active",
+            "make",
+            "model",
+            "mileage",
+            "vin",
+            "condition_grade",
+            "auction_end_date",
+            "risk_flags",
             "listing_url",
+            "raw_data",
         },
         "alert_log": {"created_at", "status", "delivery_status", "channel"},
         "webhook_log": {"created_at", "received_at", "processing_status"},
@@ -339,6 +350,10 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
     assert report["source_health_daily"]["total_runs"] == 3
     assert report["source_health_daily"]["failed_runs"] == 1
     assert report["source_health_daily"]["parse_event_count"] == 14
+    assert report["seller_recovery_audit"]["status"] == "ok"
+    assert report["seller_recovery_audit"]["summary"]["candidate_count"] == 0
+    assert report["seller_recovery_audit"]["unsupported_dimensions"]["bidder_depth"]["status"] == "unavailable"
+    assert report["seller_recovery_audit"]["unsupported_dimensions"]["photo_count"]["status"] == "unavailable"
     assert report["recent_deliveries"]["status_counts"] == {"skipped_margin": 2, "skipped_gate": 1}
     assert report["recent_deliveries"]["source_status_counts"] == [
         {"source": "govdeals", "status": "skipped_gate", "count": 1},
@@ -368,6 +383,132 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
     assert "private-listing" not in str(report)
     assert "1FTFW1E50PFA00000" not in str(report)
     assert "Sensitive listing title" not in str(report)
+
+
+def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "source_site",
+            "year",
+            "make",
+            "model",
+            "dos_score",
+            "gross_margin",
+            "bid_headroom",
+            "pricing_maturity",
+            "is_active",
+            "vin",
+            "mileage",
+            "condition_grade",
+            "auction_end_date",
+            "risk_flags",
+            "listing_url",
+            "raw_data",
+        },
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at", "listing_url", "vin"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {
+            "observed_date",
+            "source_name",
+            "total_runs",
+            "processed_runs",
+            "failed_runs",
+            "item_count",
+            "saved_count",
+            "skipped_count",
+            "parse_event_count",
+            "latest_started_at",
+        },
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at", "metadata"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2026-06-13T02:00:00Z",
+                "source_site": "govdeals",
+                "year": 2023,
+                "make": "Ford",
+                "model": "F-150",
+                "dos_score": 82,
+                "gross_margin": 6200,
+                "bid_headroom": 2400,
+                "pricing_maturity": "proxy",
+                "is_active": True,
+                "vin": None,
+                "mileage": None,
+                "condition_grade": "Unknown",
+                "auction_end_date": None,
+                "risk_flags": ["missing_photos"],
+                "listing_url": "https://example.test/private",
+                "raw_data": {"description": "private raw text", "vin": "1FTFW1E50PFA00000"},
+            },
+        ],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [
+            {
+                "source_site": "govdeals",
+                "status": "skipped_margin",
+                "error_message": "margin_below_floor",
+                "created_at": "2026-06-13T02:00:00Z",
+                "listing_url": "https://example.test/private",
+                "vin": "1FTFW1E50PFA00000",
+            },
+        ],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [
+            {
+                "observed_date": "2026-06-13",
+                "source_name": "govdeals",
+                "total_runs": 1,
+                "processed_runs": 1,
+                "failed_runs": 0,
+                "item_count": 6,
+                "saved_count": 1,
+                "skipped_count": 4,
+                "parse_event_count": 5,
+                "latest_started_at": "2026-06-13T02:00:00Z",
+            },
+        ],
+        "parse_events": [
+            {
+                "source_name": "govdeals",
+                "event_type": "db_save",
+                "status": "skipped_margin",
+                "reason": "margin_below_floor",
+                "created_at": "2026-06-13T02:00:01Z",
+                "metadata": {"vin": "1FTFW1E50PFA00000", "listing_url": "https://example.test/private"},
+            }
+        ],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    report = inspection._safe_truth_audit("https://example.supabase.co", "service-key")
+
+    assert report["seller_recovery_audit"]["summary"]["candidate_count"] == 1
+    assert report["seller_recovery_audit"]["listing_quality"]["missing_vin_count"] == 1
+    assert report["seller_recovery_audit"]["listing_quality"]["missing_mileage_count"] == 1
+    assert report["seller_recovery_audit"]["value_leak_candidates"][0]["recovery_reasons"] == [
+        "missing_vin",
+        "missing_mileage",
+        "missing_auction_end",
+        "condition_unverified",
+        "proxy_pricing",
+        "missing_photos_flag",
+    ]
+    serialized = str(report)
+    assert "1FTFW1E50PFA00000" not in serialized
+    assert "https://example.test/private" not in serialized
+    assert "private raw text" not in serialized
 
 
 def test_safe_truth_audit_attributes_recent_deliveries_from_webhook_run_lineage(monkeypatch):
