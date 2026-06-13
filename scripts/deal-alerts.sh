@@ -23,9 +23,11 @@ import datetime
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 
 from backend.ingest.alert_gating import AlertThresholds, evaluate_alert_gate
+from backend.ingest.listing_identity import compute_listing_id
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SERVICE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -34,6 +36,7 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 HOT_DEAL_MIN_SCORE = float(os.environ.get("HOT_DEAL_MIN_SCORE", "80"))
 PLATINUM_MIN_ROI_DAY = float(os.environ.get("PLATINUM_MIN_ROI_DAY", "75"))
 ALERT_LIMIT = int(os.environ.get("ALERT_LIMIT", "10"))
+CANDIDATE_LIMIT = max(ALERT_LIMIT * 3, 20)
 ALERT_MIN_TRUST_SCORE = float(os.environ.get("ALERT_MIN_TRUST_SCORE", "0.25"))
 ALERT_MIN_CONFIDENCE = float(os.environ.get("ALERT_MIN_CONFIDENCE", "55"))
 ALERT_MIN_BID_HEADROOM = float(os.environ.get("ALERT_MIN_BID_HEADROOM", "0"))
@@ -57,6 +60,15 @@ def supabase_get(path):
         return json.loads(r.read())
 
 
+def fetch_raw_data_by_id(opportunity_ids):
+    ids = [str(opportunity_id) for opportunity_id in opportunity_ids if opportunity_id]
+    if not ids:
+        return {}
+    encoded_ids = ",".join(urllib.parse.quote(opportunity_id, safe="") for opportunity_id in ids)
+    rows = supabase_get(f"opportunities?select=id,raw_data&id=in.({encoded_ids})")
+    return {row.get("id"): row.get("raw_data") for row in rows if row.get("id")}
+
+
 def supabase_post(table, row):
     payload = json.dumps(row).encode()
     req = urllib.request.Request(
@@ -74,6 +86,27 @@ def supabase_post(table, row):
         return r.status
 
 
+def normalize_alert_type(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {"hot", "hot_deal"}:
+        return "hot"
+    if normalized == "platinum":
+        return "platinum"
+    return normalized
+
+
+def alert_type_satisfies(current_alert_type, prior_alert_type):
+    current = normalize_alert_type(current_alert_type)
+    prior = normalize_alert_type(prior_alert_type) or "hot"
+    if not current:
+        return bool(prior)
+    if current == "platinum":
+        return prior == "platinum"
+    if current == "hot":
+        return prior in {"hot", "platinum"}
+    return prior == current
+
+
 def send_telegram(text):
     payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}).encode()
     req = urllib.request.Request(
@@ -86,35 +119,56 @@ def send_telegram(text):
         return json.loads(r.read())
 
 
-alerted_ids = set()
+alerted_types_by_id = {}
 try:
-    logs = supabase_get("alert_log?select=opportunity_id&channel=eq.telegram")
-    alerted_ids = {r["opportunity_id"] for r in logs if r.get("opportunity_id")}
+    logs = supabase_get("alert_log?select=opportunity_id,alert_type,delivery_state&channel=eq.telegram")
+    for row in logs:
+        opportunity_id = row.get("opportunity_id")
+        if not opportunity_id or str(row.get("delivery_state") or "sent").lower() == "failed":
+            continue
+        alerted_types_by_id.setdefault(opportunity_id, set()).add(normalize_alert_type(row.get("alert_type")))
 except Exception:
-    pass
+    print("Error: failed to load prior alert receipts; refusing to send duplicate-prone alerts.", file=sys.stderr)
+    raise
 
 deals = supabase_get(
-    "opportunities?select=id,title,year,make,model,state,current_bid,dos_score,listing_url,image_url,"
-    "investment_grade,roi_per_day,bid_headroom,max_bid,processed_at,pricing_maturity,pricing_source,"
+    "opportunities?select=id,listing_id,run_id,source_site,title,year,make,model,state,current_bid,dos_score,listing_url,image_url,"
+    "investment_grade,roi_per_day,estimated_days_to_sale,bid_headroom,max_bid,processed_at,pricing_maturity,pricing_source,"
     "current_bid_trust_score,mmr_confidence_proxy,acquisition_price_basis,acquisition_basis_source,"
     "projected_total_cost,expected_close_bid,expected_close_source,gross_margin,mmr_lookup_basis,"
-    "retail_comp_count,retail_comp_confidence"
+    "retail_comp_count,retail_comp_confidence,vin,mileage,condition_grade,vehicle_tier"
+    "&is_active=eq.true"
     f"&or=(dos_score.gte.{HOT_DEAL_MIN_SCORE},investment_grade.eq.Gold,investment_grade.eq.Platinum)"
-    f"&order=dos_score.desc&limit={max(ALERT_LIMIT * 3, 20)}"
+    f"&order=dos_score.desc&limit={CANDIDATE_LIMIT}"
 )
+
+raw_data_needed_ids = []
+for deal in deals:
+    preliminary_gate = evaluate_alert_gate(deal, thresholds=THRESHOLDS)
+    preliminary_blockers = set(preliminary_gate.get("blocking_reasons", []))
+    if "condition_evidence_missing" in preliminary_blockers:
+        raw_data_needed_ids.append(deal.get("id"))
+raw_data_by_id = fetch_raw_data_by_id(raw_data_needed_ids)
+for deal in deals:
+    raw_data = raw_data_by_id.get(deal.get("id"))
+    if raw_data is not None:
+        deal["raw_data"] = raw_data
 
 seen_ids = set()
 new_alerts = []
 blocked_candidates = []
 for deal in deals:
     deal_id = deal.get("id")
-    if not deal_id or deal_id in alerted_ids or deal_id in seen_ids:
+    if not deal_id or deal_id in seen_ids:
         continue
     seen_ids.add(deal_id)
     gate = evaluate_alert_gate(deal, thresholds=THRESHOLDS)
     deal["_alert_gate"] = gate
     if not gate["eligible"]:
         blocked_candidates.append(deal)
+        continue
+    alert_type = normalize_alert_type(gate.get("alert_type")) or "hot"
+    if any(alert_type_satisfies(alert_type, prior) for prior in alerted_types_by_id.get(deal_id, set())):
         continue
     deal["_alert_type"] = gate["alert_type"]
     new_alerts.append(deal)
@@ -214,16 +268,30 @@ for deal in new_alerts:
         )
 
     try:
-        send_telegram(msg)
+        telegram_result = send_telegram(msg)
+        message_id = str((telegram_result.get("result") or {}).get("message_id") or f"tg-{deal['id'][:8]}")
         print(f"  ✅ Alerted ({alert_type}): {title} | Score:{dos}")
         supabase_post("alert_log", {
             "opportunity_id": deal["id"],
             "channel": "telegram",
+            "alert_type": "platinum" if alert_type == "platinum" else "hot",
             "vehicle_title": title[:200],
             "dos_score": dos,
-            "message_id": f"tg-{deal['id'][:8]}",
+            "message_id": message_id,
             "delivery_state": "sent",
             "sent_at": datetime.datetime.utcnow().isoformat()
+        })
+        listing_id = deal.get("listing_id") or compute_listing_id(deal.get("source_site") or "", deal.get("listing_url") or "")
+        supabase_post("ingest_delivery_log", {
+            "run_id": f"active-alerts-{alert_type}-{datetime.datetime.utcnow().strftime('%Y%m%d%H')}",
+            "listing_id": listing_id or deal["id"],
+            "listing_url": deal.get("listing_url"),
+            "opportunity_id": deal["id"],
+            "channel": "telegram_alert",
+            "status": "sent",
+            "external_id": message_id,
+            "created_at": datetime.datetime.utcnow().isoformat(),
+            "updated_at": datetime.datetime.utcnow().isoformat()
         })
     except Exception as e:
         print(f"  ❌ Failed to alert {title}: {e}")

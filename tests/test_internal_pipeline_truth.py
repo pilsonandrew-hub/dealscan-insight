@@ -19,6 +19,243 @@ def test_internal_secret_accepts(monkeypatch):
     internal.verify_internal_secret("internal-secret")
 
 
+def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "source_health_daily": [
+            {
+                "source_name": "govdeals",
+                "observed_date": "2026-06-13",
+                "total_runs": 2,
+                "processed_runs": 1,
+                "failed_runs": 1,
+                "item_count": 20,
+                "saved_count": 4,
+                "skipped_count": 12,
+                "parse_event_count": 16,
+                "latest_started_at": "2026-06-13T01:00:00Z",
+            }
+        ],
+        "ingest_delivery_log": [
+            {
+                "source_site": "govdeals",
+                "status": "skipped_margin",
+                "error_message": "margin_below_floor",
+                "listing_url": "https://example.test/private",
+                "vin": "1FTFW1E50PFA00000",
+                "created_at": "2026-06-13T01:00:01Z",
+            },
+            {
+                "source_site": "govdeals",
+                "status": "skipped_gate",
+                "error_message": "age_or_mileage_exceeded",
+                "created_at": "2026-06-13T01:00:02Z",
+            },
+        ],
+        "parse_events": [
+            {
+                "source_name": "govdeals",
+                "event_type": "db_save",
+                "status": "skipped_margin",
+                "reason": "margin_below_floor",
+                "metadata": {"listing_url": "https://example.test/private", "vin": "1FTFW1E50PFA00000"},
+                "created_at": "2026-06-13T01:00:01Z",
+            },
+            {
+                "source_name": "govdeals",
+                "event_type": "db_save",
+                "status": "saved",
+                "created_at": "2026-06-13T01:00:02Z",
+            },
+        ],
+        "opportunities": [
+            {
+                "id": "recoverable-1",
+                "is_active": True,
+                "source_site": "govdeals",
+                "year": 2023,
+                "make": "Ford",
+                "model": "F-150",
+                "dos_score": 82,
+                "gross_margin": 6200,
+                "bid_headroom": 2400,
+                "pricing_maturity": "proxy",
+                "vin": None,
+                "mileage": None,
+                "condition_grade": "Unknown",
+                "auction_end_date": None,
+                "risk_flags": ["missing_photos"],
+                "photo_count": 0,
+                "bidder_count": None,
+                "listing_url": "https://example.test/private",
+                "raw_data": {"description": "private text", "vin": "1FTFW1E50PFA00000"},
+            },
+            {
+                "id": "not-recoverable",
+                "is_active": True,
+                "source_site": "govdeals",
+                "year": 2025,
+                "make": "Honda",
+                "model": "Accord",
+                "dos_score": 90,
+                "gross_margin": 5000,
+                "bid_headroom": 2000,
+                "pricing_maturity": "market_comp",
+                "vin": "1HGCM82633A004352",
+                "mileage": 12000,
+                "condition_grade": "Good",
+                "auction_end_date": "2026-06-20T00:00:00Z",
+                "risk_flags": [],
+                "photo_count": 5,
+                "bidder_count": 9,
+            },
+        ],
+        "sonar_listings": [
+            {
+                "source_site": "hibid",
+                "source": "hibid",
+                "bidder_count": 12,
+                "created_at": "2026-06-13T14:00:00Z",
+            }
+        ],
+    }))
+
+    result = internal.build_seller_recovery_audit()
+
+    assert result["status"] == "ok"
+    assert result["scope"] == "internal_seller_recovery_audit"
+    assert result["summary"]["source_count"] == 1
+    assert result["summary"]["candidate_count"] == 1
+    assert result["source_health"][0]["source_name"] == "govdeals"
+    assert result["source_health"][0]["failed_runs"] == 1
+    assert result["listing_quality"]["missing_vin_count"] == 1
+    assert result["listing_quality"]["missing_mileage_count"] == 1
+    assert result["listing_quality"]["missing_auction_end_count"] == 1
+    assert result["listing_quality"]["proxy_pricing_count"] == 1
+    assert result["listing_quality"]["photo_count_known_count"] == 2
+    assert result["listing_quality"]["zero_photo_count"] == 1
+    assert result["listing_quality"]["low_photo_count_count"] == 1
+    assert result["listing_quality"]["bidder_count_known_count"] == 1
+    assert result["listing_quality"]["zero_bidder_count"] == 0
+    assert result["listing_quality"]["thin_bidder_count"] == 0
+    assert result["listing_quality"]["average_bidder_count"] == 9.0
+    assert result["source_listing_quality"]["bidder_count_known_count"] == 1
+    assert result["source_listing_quality"]["average_bidder_count"] == 12.0
+    assert result["delivery_status_counts"] == {"skipped_margin": 1, "skipped_gate": 1}
+    assert result["parse_event_status_counts"] == {"skipped_margin": 1, "saved": 1}
+    assert result["parse_event_type_counts"] == {"db_save": 2}
+    assert result["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
+    assert result["unsupported_dimensions"]["photo_count"]["status"] == "available"
+    assert "bidder_depth" not in result["summary"]["unavailable_dimensions"]
+    assert "photo_count" not in result["summary"]["unavailable_dimensions"]
+    assert result["value_leak_candidates"] == [
+        {
+            "id": "recoverable-1",
+            "source_site": "govdeals",
+            "year": 2023,
+            "make": "Ford",
+            "model": "F-150",
+            "dos_score": 82.0,
+            "gross_margin": 6200.0,
+            "bid_headroom": 2400.0,
+            "pricing_maturity": "proxy",
+            "recovery_reasons": [
+                "missing_vin",
+                "missing_mileage",
+                "missing_auction_end",
+                "condition_unverified",
+                "proxy_pricing",
+                "missing_photos_flag",
+                "zero_photo_count",
+            ],
+        }
+    ]
+    serialized = str(result)
+    assert "1FTFW1E50PFA00000" not in serialized
+    assert "https://example.test/private" not in serialized
+    assert "private text" not in serialized
+
+
+def test_seller_recovery_audit_degrades_when_opportunities_unreadable(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "source_health_daily": [],
+        "ingest_delivery_log": [],
+        "parse_events": [],
+        "opportunities": None,
+    }))
+
+    result = internal.build_seller_recovery_audit()
+
+    assert result["status"] == "degraded"
+    assert result["sections"]["opportunities"]["status"] == "unavailable"
+    assert result["summary"]["candidate_count"] == 0
+
+
+def test_seller_recovery_audit_does_not_select_non_schema_delivery_or_opportunity_fields(monkeypatch):
+    class SchemaStrictQuery(_Query):
+        def __init__(self, table, rows):
+            super().__init__(rows)
+            self.table = table
+
+        def select(self, columns, **_kwargs):
+            selected = {column.strip() for column in str(columns).split(",") if column.strip()}
+            if self.table == "ingest_delivery_log":
+                assert "source_site" not in selected
+                assert "source" not in selected
+            if self.table == "opportunities":
+                assert columns == "*"
+            return self
+
+    class SchemaStrictSupabase:
+        def table(self, name):
+            rows = {
+                "source_health_daily": [],
+                "ingest_delivery_log": [{"status": "skipped_margin", "error_message": "margin_below_floor"}],
+                "parse_events": [],
+                "opportunities": [
+                    {
+                        "id": "recoverable-1",
+                        "is_active": True,
+                        "source_site": "govdeals",
+                        "year": 2023,
+                        "make": "Ford",
+                        "model": "F-150",
+                        "dos_score": 82,
+                        "gross_margin": 6200,
+                        "bid_headroom": 2400,
+                        "pricing_maturity": "proxy",
+                        "vin": None,
+                        "mileage": None,
+                        "condition_grade": "Unknown",
+                    }
+                ],
+            }[name]
+            return SchemaStrictQuery(name, rows)
+
+    monkeypatch.setattr(internal, "supabase_client", SchemaStrictSupabase())
+
+    result = internal.build_seller_recovery_audit()
+
+    assert result["status"] == "ok"
+    assert result["summary"]["candidate_count"] == 1
+
+
+def test_seller_recovery_audit_route_requires_internal_secret(monkeypatch):
+    monkeypatch.setenv("INTERNAL_API_SECRET", "internal-secret")
+    try:
+        internal.seller_recovery_audit(None)
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:
+        raise AssertionError("missing internal secret should reject seller recovery audit")
+
+
+def test_seller_recovery_audit_route_returns_builder_result(monkeypatch):
+    monkeypatch.setenv("INTERNAL_API_SECRET", "internal-secret")
+    monkeypatch.setattr(internal, "build_seller_recovery_audit", lambda: {"status": "ok"})
+
+    assert internal.seller_recovery_audit("internal-secret") == {"status": "ok"}
+
+
 class _Query:
     def __init__(self, rows, count=None):
         self.rows = rows

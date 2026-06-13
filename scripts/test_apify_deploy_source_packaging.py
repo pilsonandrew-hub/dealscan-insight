@@ -24,3 +24,35 @@ def test_apify_deploy_uploads_all_first_level_src_js_modules() -> None:
     # Historical failure mode: runtime_budget.js was imported by main_api.js but
     # omitted by a fixed allow-list, causing Apify runtime ERR_MODULE_NOT_FOUND.
     assert 'for extra in ["src/main_api.js", "src/utils.js", "src/helpers.js"]' not in workflow
+
+
+def test_apify_deploy_fails_closed_on_apify_api_errors() -> None:
+    workflow = WORKFLOW.read_text()
+
+    assert "raise RuntimeError(f\"Apify API {method} {path} failed" in workflow
+    assert "return {}" not in workflow
+    assert "raise RuntimeError(f\"Upload failed for {actor_dir}" in workflow
+    assert "raise RuntimeError(f\"Build trigger failed for {actor_dir}" in workflow
+    assert 'build_id = build.get("data", {}).get("id")' in workflow
+    assert 'build_id = build.get("data", {}).get("id", "?")' not in workflow
+    assert "failures = []" in workflow
+    assert "failures.append(failure)" in workflow
+    assert "Apify actor deployment failed for {len(failures)} actor(s)" in workflow
+    assert "Deploy complete" in workflow
+
+
+def test_apify_deploy_does_not_keep_dead_main_js_read() -> None:
+    workflow = WORKFLOW.read_text()
+
+    assert "main_js = open" not in workflow
+
+
+def test_apify_deploy_waits_for_each_build_before_next_actor() -> None:
+    workflow = WORKFLOW.read_text()
+
+    assert "import json, os, subprocess, sys, time, urllib.request, ssl" in workflow
+    assert "def wait_for_terminal_build(actor_dir, build_id):" in workflow
+    assert 'terminal = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}' in workflow
+    assert 'api("GET", f"/actor-builds/{build_id}")' in workflow
+    assert "time.sleep(10)" in workflow
+    assert "wait_for_terminal_build(actor_dir, build_id)" in workflow

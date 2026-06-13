@@ -34,7 +34,7 @@ jobs:
       - name: Deploy changed actors
         run: |
           python3 << 'PYEOF'
-          import json, os, subprocess, sys, urllib.request, ssl
+          import json, os, subprocess, sys, time, urllib.request, ssl
           from pathlib import Path
 
           TOKEN = os.environ["APIFY_TOKEN"]
@@ -71,8 +71,28 @@ jobs:
                   resp = urllib.request.urlopen(req, context=ctx)
                   return json.loads(resp.read())
               except urllib.error.HTTPError as e:
-                  print(f"HTTP {e.code}: {e.read().decode()[:200]}")
-                  return {}
+                  error_body = e.read().decode(errors="replace")[:500]
+                  raise RuntimeError(f"Apify API {method} {path} failed with HTTP {e.code}: {error_body}") from e
+
+          def wait_for_terminal_build(actor_dir, build_id):
+              terminal = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
+              last_status = None
+              for _ in range(90):
+                  build = api("GET", f"/actor-builds/{build_id}")
+                  status = build.get("data", build).get("status")
+                  if status != last_status:
+                      print(json.dumps({
+                          "actor": actor_dir,
+                          "build_id": build_id,
+                          "build_status": status,
+                      }, sort_keys=True))
+                      last_status = status
+                  if status in terminal:
+                      if status != "SUCCEEDED":
+                          raise RuntimeError(f"Build {build_id} for {actor_dir} ended with {status}")
+                      return build
+                  time.sleep(10)
+              raise RuntimeError(f"Timed out waiting for build {build_id} for {actor_dir}")
 
           # NOTE: When manually triggering deploys, always use JS-safe comments:
           # echo "// deploy $(date)" >> apify/actors/ds-xxx/src/main.js
@@ -94,6 +114,8 @@ jobs:
 
           print(f"Changed actors: {changed}")
 
+          failures = []
+
           for actor_dir in changed:
               actor_id = ACTOR_MAP.get(actor_dir)
               if not actor_id:
@@ -105,53 +127,64 @@ jobs:
                   print(f"⚠️  Directory {src_dir} not found — skipping")
                   continue
 
-              # Get version number
-              actor_data = api("GET", f"/acts/{actor_id}")
-              versions = actor_data.get("data", {}).get("versions", [])
-              if not versions:
-                  print(f"⚠️  No versions for {actor_id} — skipping")
-                  continue
-              version = versions[-1]["versionNumber"]
-
-              print(f"🚀 Deploying {actor_dir} → {actor_id} v{version}")
-
-              # Read source files
-              main_js = open(f"{src_dir}/src/main.js").read()
               try:
-                  pkg = open(f"{src_dir}/package.json").read()
-              except:
-                  pkg = '{"name":"actor","version":"1.0.0","type":"module","scripts":{"start":"node src/main.js"},"dependencies":{"apify":"^3.0.0","crawlee":"^3.0.0"}}'
-              try:
-                  dockerfile = open(f"{src_dir}/Dockerfile").read()
-              except:
-                  dockerfile = "FROM apify/actor-node-playwright-chrome:20\nCOPY package*.json ./\nRUN npm install --only=prod\nCOPY . ./"
+                  # Get version number
+                  actor_data = api("GET", f"/acts/{actor_id}")
+                  versions = actor_data.get("data", {}).get("versions", [])
+                  if not versions:
+                      raise RuntimeError(f"No versions for {actor_id}")
+                  version = versions[-1]["versionNumber"]
 
-              # Include all first-level JS modules under src/. Actors may import helper
-              # modules; omitting one can make an Apify build pass but runtime fail.
-              source_files = [
-                  {"name": "package.json", "format": "TEXT", "content": pkg},
-                  {"name": "Dockerfile", "format": "TEXT", "content": dockerfile},
-              ]
-              for src_file in sorted(Path(src_dir, "src").glob("*.js")):
-                  actor_source_name = f"src/{src_file.name}"
-                  source_files.append({"name": actor_source_name, "format": "TEXT", "content": src_file.read_text()})
-                  print(f"  + included {actor_source_name}")
-              for actor_meta_file in sorted(Path(src_dir, ".actor").glob("*.json")):
-                  actor_source_name = f".actor/{actor_meta_file.name}"
-                  source_files.append({"name": actor_source_name, "format": "TEXT", "content": actor_meta_file.read_text()})
-                  print(f"  + included {actor_source_name}")
+                  print(f"🚀 Deploying {actor_dir} → {actor_id} v{version}")
 
-              # Upload source
-              result = api("PUT", f"/acts/{actor_id}/versions/{version}", {"sourceFiles": source_files})
-              if "error" in result:
-                  print(f"❌ Upload failed: {result}")
-                  continue
-              print(f"✅ Source uploaded")
+                  # Read source files
+                  try:
+                      pkg = open(f"{src_dir}/package.json").read()
+                  except:
+                      pkg = '{"name":"actor","version":"1.0.0","type":"module","scripts":{"start":"node src/main.js"},"dependencies":{"apify":"^3.0.0","crawlee":"^3.0.0"}}'
+                  try:
+                      dockerfile = open(f"{src_dir}/Dockerfile").read()
+                  except:
+                      dockerfile = "FROM apify/actor-node-playwright-chrome:20\nCOPY package*.json ./\nRUN npm install --only=prod\nCOPY . ./"
 
-              # Trigger rebuild
-              build = api("POST", f"/acts/{actor_id}/builds?version={version}&tag=latest&useCache=false&betaPackages=false")
-              build_id = build.get("data", {}).get("id", "?")
-              print(f"🔨 Build triggered: {build_id}")
+                  # Include all first-level JS modules under src/. Actors may import helper
+                  # modules; omitting one can make an Apify build pass but runtime fail.
+                  source_files = [
+                      {"name": "package.json", "format": "TEXT", "content": pkg},
+                      {"name": "Dockerfile", "format": "TEXT", "content": dockerfile},
+                  ]
+                  for src_file in sorted(Path(src_dir, "src").glob("*.js")):
+                      actor_source_name = f"src/{src_file.name}"
+                      source_files.append({"name": actor_source_name, "format": "TEXT", "content": src_file.read_text()})
+                      print(f"  + included {actor_source_name}")
+                  for actor_meta_file in sorted(Path(src_dir, ".actor").glob("*.json")):
+                      actor_source_name = f".actor/{actor_meta_file.name}"
+                      source_files.append({"name": actor_source_name, "format": "TEXT", "content": actor_meta_file.read_text()})
+                      print(f"  + included {actor_source_name}")
+
+                  # Upload source
+                  result = api("PUT", f"/acts/{actor_id}/versions/{version}", {"sourceFiles": source_files})
+                  if "error" in result:
+                      raise RuntimeError(f"Upload failed for {actor_dir}: {result}")
+                  print(f"✅ Source uploaded")
+
+                  # Trigger rebuild
+                  build = api("POST", f"/acts/{actor_id}/builds?version={version}&tag=latest&useCache=false&betaPackages=false")
+                  build_id = build.get("data", {}).get("id")
+                  if not build_id:
+                      raise RuntimeError(f"Build trigger failed for {actor_dir}: {build}")
+                  print(f"🔨 Build triggered: {build_id}")
+                  wait_for_terminal_build(actor_dir, build_id)
+              except Exception as exc:
+                  failure = f"{actor_dir}: {exc}"
+                  failures.append(failure)
+                  print(f"❌ Deploy failed for {failure}")
+
+          if failures:
+              print("Deploy failed for one or more actors:")
+              for failure in failures:
+                  print(f" - {failure}")
+              raise RuntimeError(f"Apify actor deployment failed for {len(failures)} actor(s)")
 
           print("Deploy complete")
           PYEOF

@@ -55,6 +55,11 @@ def test_build_opportunity_row_preserves_core_mapping_and_defaults():
     assert row["bid_ceiling_pct"] == 0.88
     assert row["min_margin_target"] == 1500
     assert row["processed_at"] == "2026-05-17T12:00:00+00:00"
+    assert row["first_seen_at"] == "2026-05-17T12:00:00+00:00"
+    assert row["last_seen_at"] == "2026-05-17T12:00:00+00:00"
+    assert row["relist_count"] == 0
+    assert row["bid_change_count"] == 0
+    assert row["source_fingerprint"]
     assert row["raw_data"] is vehicle
 
 
@@ -89,3 +94,61 @@ def test_build_opportunity_row_prefers_projected_buyer_premium_amount():
     })
 
     assert row["buyer_premium"] == 125.55
+
+
+def test_build_opportunity_row_records_governed_photo_count():
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photos": ["https://example.test/1.jpg", "https://example.test/2.jpg"],
+    })["photo_count"] == 2
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photo_url": "https://example.test/1.jpg",
+    })["photo_count"] == 1
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "image_url": "https://example.test/1.jpg",
+    })["photo_count"] == 1
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photos": [],
+        "image_url": "https://example.test/1.jpg",
+    })["photo_count"] == 1
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+        "photos": [],
+    })["photo_count"] == 0
+
+
+def test_build_opportunity_row_records_governed_bidder_count_only_when_known():
+    assert _build({
+        "listing_url": "u",
+        "source_site": "hibid",
+        "bid_count": 7,
+    })["bidder_count"] == 7
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "hibid",
+        "bidCount": "3",
+    })["bidder_count"] == 3
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "hibid",
+        "bid_count": "",
+    })["bidder_count"] is None
+
+    assert _build({
+        "listing_url": "u",
+        "source_site": "govdeals",
+    })["bidder_count"] is None

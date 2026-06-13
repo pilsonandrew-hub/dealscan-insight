@@ -107,3 +107,39 @@ def test_post_close_outcome_requests_are_separate_from_comp_evidence_ledger():
     assert "outcome_status" in sql
     assert "source_site, source_listing_id" in sql
     assert "sold_comp_candidates" in sql
+
+
+def test_photo_count_empty_array_backfill_falls_through_to_single_image_evidence():
+    sql = (
+        MIGRATION_DIR / "20260613_backfill_opportunity_photo_count_empty_arrays.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    assert "greatest(" in sql
+    assert "jsonb_array_elements_text(raw_data->'photos')" in sql
+    assert "jsonb_array_elements_text(raw_data->'photo_urls')" in sql
+    assert "raw_data->>'photo_url'" in sql
+    assert "raw_data->>'image_url'" in sql
+    assert "raw_data->>'imageurl'" in sql
+    assert "where opportunities.id = photo_evidence.id" in sql
+    assert "photo_evidence.raw_photo_count > opportunities.photo_count" in sql
+    assert "where photo_count = 0" not in sql
+
+
+def test_bidder_count_migration_adds_nullable_governed_bidder_depth_and_backfill():
+    sql = (MIGRATION_DIR / "20260613_opportunity_bidder_count.sql").read_text().lower()
+
+    assert "add column if not exists bidder_count integer" in sql
+    assert "opportunities_bidder_count_nonnegative" in sql
+    assert "check (bidder_count is null or bidder_count >= 0)" in sql
+    assert "raw_data->>'bid_count'" in sql
+    assert "raw_data->>'bidcount'" in sql
+    assert "opportunities.bidder_count is null" in sql
+
+
+def test_sonar_listing_bidder_count_migration_adds_governed_source_mirror_evidence():
+    sql = (MIGRATION_DIR / "20260613_sonar_listing_bidder_count.sql").read_text().lower()
+
+    assert "alter table public.sonar_listings" in sql
+    assert "add column if not exists bidder_count integer" in sql
+    assert "sonar_listings_bidder_count_nonnegative" in sql
+    assert "check (bidder_count is null or bidder_count >= 0)" in sql

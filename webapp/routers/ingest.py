@@ -94,7 +94,13 @@ from backend.ingest.openrouter_routing import (
     normalize_openrouter_route_value,
     resolve_openrouter_lane_model,
 )
+from backend.ingest.observability import (
+    record_parse_event,
+    upsert_scrape_run_completion,
+    upsert_scrape_run_start,
+)
 from backend.ingest.opportunity_row import build_opportunity_row as _build_opportunity_row
+from backend.ingest.lifecycle_memory import build_lifecycle_update
 from backend.ingest.raw_item_identity import raw_item_identity
 from backend.ingest.save_outcome import mark_save_outcome
 from backend.ingest.service_config import (
@@ -166,22 +172,52 @@ def _alert_thresholds():
     return build_alert_thresholds(os.environ, log=logger)
 
 
-def _alert_delivery_exists_for_opportunity(opportunity_id: Optional[str]) -> bool:
-    """Return True when a prior sent alert receipt exists for an opportunity."""
+def _normalize_alert_type(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"hot_deal", "hot"}:
+        return "hot"
+    if normalized == "platinum":
+        return "platinum"
+    return normalized
+
+
+def _alert_type_satisfies(current_alert_type: Optional[str], prior_alert_type: Optional[str]) -> bool:
+    current = _normalize_alert_type(current_alert_type)
+    prior = _normalize_alert_type(prior_alert_type) or "hot"
+    if not current:
+        return bool(prior)
+    if current == "platinum":
+        return prior == "platinum"
+    if current == "hot":
+        return prior in {"hot", "platinum"}
+    return prior == current
+
+
+def _alert_delivery_exists_for_opportunity(
+    opportunity_id: Optional[str],
+    desired_alert_type: Optional[str] = None,
+) -> bool:
+    """Return True when a prior sent alert receipt satisfies the current alert tier."""
     if not opportunity_id or supabase_client is None:
         return False
     try:
         alert_log_result = (
             supabase_client.table("alert_log")
-            .select("id")
+            .select("id,alert_type,delivery_state")
             .eq("opportunity_id", opportunity_id)
-            .limit(1)
             .execute()
         )
-        if alert_log_result.data:
-            return True
+        for row in alert_log_result.data or []:
+            delivery_state = str(row.get("delivery_state") or "sent").lower()
+            if delivery_state == "failed":
+                continue
+            if _alert_type_satisfies(desired_alert_type, row.get("alert_type")):
+                return True
     except Exception as exc:
         logger.warning("[ALERT_RECOVERY] alert_log lookup failed for opportunity_id=%s: %s", opportunity_id, exc)
+    desired = _normalize_alert_type(desired_alert_type)
+    if desired and desired != "hot":
+        return False
     try:
         delivery_result = (
             supabase_client.table("ingest_delivery_log")
@@ -201,19 +237,22 @@ def _should_evaluate_alert_delivery(
     save_status: str,
     is_existing_listing: bool,
     opportunity_id: Optional[str],
+    desired_alert_type: Optional[str] = None,
 ) -> bool:
     inserted_statuses = {"saved_supabase", "saved_direct_pg"}
     existing_statuses = {
         "duplicate_existing",
+        "duplicate_lifecycle_refreshed",
         "duplicate_pricing_refreshed",
         "vin_dedup_skipped",
+        "vin_dedup_lifecycle_refreshed",
         "vin_dedup_updated",
         "vin_dedup_pricing_refreshed",
     }
     if save_status in inserted_statuses and not is_existing_listing:
         return True
     if save_status in existing_statuses and is_existing_listing and opportunity_id:
-        return not _alert_delivery_exists_for_opportunity(opportunity_id)
+        return not _alert_delivery_exists_for_opportunity(opportunity_id, desired_alert_type)
     return False
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
@@ -773,6 +812,10 @@ async def _process_webhook_items(
     webhook_log_id: Any,
 ) -> None:
     """Background task: fetch Apify dataset and process all items."""
+    source_name = (
+        _canonical_source_site(metadata.get("source") or metadata.get("actor_id"))
+        or str(metadata.get("source") or metadata.get("actor_id") or "unknown")
+    )
     try:
         if supabase_client is not None:
             try:
@@ -820,6 +863,14 @@ async def _process_webhook_items(
 
         if not dataset_id:
             logger.warning("[INGEST] dataset_id missing after all lookups — marking error")
+            upsert_scrape_run_completion(
+                supabase_client,
+                run_id=apify_run_id,
+                source_name=source_name,
+                status="error",
+                item_count=metadata["item_count"],
+                error_message="dataset_id_missing",
+            )
             update_webhook_log(
                 webhook_log_id,
                 "error",
@@ -832,6 +883,14 @@ async def _process_webhook_items(
 
         if not re.match(r'^[a-zA-Z0-9_-]{5,50}$', dataset_id):
             logger.warning(f"[INGEST] Suspicious dataset_id rejected: {dataset_id}")
+            upsert_scrape_run_completion(
+                supabase_client,
+                run_id=apify_run_id,
+                source_name=source_name,
+                status="error",
+                item_count=metadata["item_count"],
+                error_message="invalid_dataset_id",
+            )
             update_webhook_log(
                 webhook_log_id,
                 "error",
@@ -844,6 +903,14 @@ async def _process_webhook_items(
         import httpx
         apify_token = _apify_api_token()
         try:
+            upsert_scrape_run_start(
+                supabase_client,
+                run_id=apify_run_id,
+                source_name=source_name,
+                actor_id=metadata.get("actor_id"),
+                dataset_id=dataset_id,
+                item_count=metadata["item_count"],
+            )
             async with httpx.AsyncClient(timeout=300.0) as client:
                 resp = await client.get(
                     f"https://api.apify.com/v2/datasets/{dataset_id}/items",
@@ -854,6 +921,14 @@ async def _process_webhook_items(
                 items = resp.json()
         except Exception as e:
             logger.error(f"[INGEST] Failed to fetch Apify dataset {dataset_id}: {e}")
+            upsert_scrape_run_completion(
+                supabase_client,
+                run_id=apify_run_id,
+                source_name=source_name,
+                status="error",
+                item_count=metadata["item_count"],
+                error_message=f"fetch_failed: {e}",
+            )
             update_webhook_log(
                 webhook_log_id,
                 "error",
@@ -864,11 +939,19 @@ async def _process_webhook_items(
             return
 
         if not isinstance(items, list):
+            upsert_scrape_run_completion(
+                supabase_client,
+                run_id=apify_run_id,
+                source_name=source_name,
+                status="error",
+                item_count=metadata["item_count"],
+                error_message="dataset_items_not_list",
+            )
             update_webhook_log(
                 webhook_log_id,
-                "processed",
+                "error",
                 item_count=metadata["item_count"],
-                error_message=merge_audit_error_message(None, audit_fallbacks(audit_state)),
+                error_message=merge_audit_error_message("dataset_items_not_list", audit_fallbacks(audit_state)),
                 require_durable=True,
                 audit_state=audit_state,
             )
@@ -888,6 +971,32 @@ async def _process_webhook_items(
         save_outcomes: dict[str, int] = {}
         duplicate_count = 0
         notion_sync_count = 0
+        parse_event_count = 0
+
+        def _record_parse_event(
+            *,
+            event_type: str,
+            status: str,
+            item_index: Optional[int] = None,
+            listing_id: Optional[str] = None,
+            reason: Optional[str] = None,
+            error_message: Optional[str] = None,
+            metadata_payload: Optional[dict] = None,
+        ) -> None:
+            nonlocal parse_event_count
+            if record_parse_event(
+                supabase_client,
+                run_id=apify_run_id,
+                source_name=source_name,
+                event_type=event_type,
+                status=status,
+                item_index=item_index,
+                listing_id=listing_id,
+                reason=reason,
+                error_message=error_message,
+                metadata=metadata_payload,
+            ):
+                parse_event_count += 1
 
         logger.info(
             "[INGEST_RUN] start | run_id=%s | dataset_id=%s | items=%s",
@@ -965,6 +1074,14 @@ async def _process_webhook_items(
                 logger.info("[INGEST] Skipping source quality proof record from sold-comp staging")
                 skipped += 1
                 increment_reason_counter(skip_reasons, "source_quality_proof_record")
+                proof_listing_id, _ = _raw_item_identity(item, apify_run_id, item_index)
+                _record_parse_event(
+                    event_type="source_quality_proof",
+                    status="skipped_proof",
+                    item_index=item_index,
+                    listing_id=proof_listing_id,
+                    reason="source_quality_proof_record",
+                )
                 _record_pre_save_skip(
                     item=item,
                     run_id=apify_run_id,
@@ -992,6 +1109,14 @@ async def _process_webhook_items(
                     ) or "candidate_staged"
                     processed += 1
                     increment_reason_counter(save_outcomes, staging_status)
+                    _record_parse_event(
+                        event_type="sold_comp",
+                        status=staging_status,
+                        item_index=item_index,
+                        listing_id=vehicle.get("listing_id"),
+                        reason=None if staging_status == "candidate_staged" else staging_status,
+                        metadata_payload={"source_site": vehicle.get("source_site")},
+                    )
                     if staging_status == "candidate_staged":
                         logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
                     else:
@@ -1011,6 +1136,15 @@ async def _process_webhook_items(
                     logger.warning(f"[SOLD_COMP] Candidate staging failed: {exc}")
                     failed_save_count += 1
                     increment_reason_counter(skip_reasons, "candidate_staging_failed")
+                    _record_parse_event(
+                        event_type="sold_comp",
+                        status="failed",
+                        item_index=item_index,
+                        listing_id=vehicle.get("listing_id"),
+                        reason="candidate_staging_failed",
+                        error_message=str(exc),
+                        metadata_payload={"source_site": vehicle.get("source_site")},
+                    )
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1035,10 +1169,27 @@ async def _process_webhook_items(
                 logger.warning(f"[INGEST] item {item_index} normalize error: {norm_err}")
                 skipped += 1
                 increment_reason_counter(skip_reasons, "normalize_exception")
+                raw_listing_id, _ = _raw_item_identity(item, apify_run_id, item_index)
+                _record_parse_event(
+                    event_type="normalize",
+                    status="skipped_norm",
+                    item_index=item_index,
+                    listing_id=raw_listing_id,
+                    reason="normalize_exception",
+                    error_message=str(norm_err),
+                )
                 continue
             if vehicle is None:
                 skipped += 1
                 increment_reason_counter(skip_reasons, "normalize_rejected")
+                raw_listing_id, _ = _raw_item_identity(item, apify_run_id, item_index)
+                _record_parse_event(
+                    event_type="normalize",
+                    status="skipped_norm",
+                    item_index=item_index,
+                    listing_id=raw_listing_id,
+                    reason="normalize_rejected",
+                )
                 _record_pre_save_skip(
                     item=item,
                     run_id=apify_run_id,
@@ -1063,6 +1214,14 @@ async def _process_webhook_items(
                     ) or "candidate_staged"
                     processed += 1
                     increment_reason_counter(save_outcomes, staging_status)
+                    _record_parse_event(
+                        event_type="sold_comp",
+                        status=staging_status,
+                        item_index=item_index,
+                        listing_id=vehicle.get("listing_id"),
+                        reason=None if staging_status == "candidate_staged" else staging_status,
+                        metadata_payload={"source_site": vehicle.get("source_site")},
+                    )
                     if staging_status == "candidate_staged":
                         logger.info("[SOLD_COMP] Candidate staged: %s", vehicle.get("listing_url"))
                     else:
@@ -1082,6 +1241,15 @@ async def _process_webhook_items(
                     logger.warning(f"[SOLD_COMP] Candidate staging failed: {exc}")
                     failed_save_count += 1
                     increment_reason_counter(skip_reasons, "candidate_staging_failed")
+                    _record_parse_event(
+                        event_type="sold_comp",
+                        status="failed",
+                        item_index=item_index,
+                        listing_id=vehicle.get("listing_id"),
+                        reason="candidate_staging_failed",
+                        error_message=str(exc),
+                        metadata_payload={"source_site": vehicle.get("source_site")},
+                    )
                     _record_delivery_log(
                         run_id=vehicle.get("run_id") or apify_run_id,
                         listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1104,6 +1272,14 @@ async def _process_webhook_items(
                 logger.info(f"[GATE] Rejected — {gate_result['reason']}: {vehicle.get('title','?')[:60]}")
                 skipped += 1
                 increment_reason_counter(skip_reasons, f"gate:{gate_result['reason']}")
+                _record_parse_event(
+                    event_type="gate",
+                    status="skipped_gate",
+                    item_index=item_index,
+                    listing_id=vehicle.get("listing_id"),
+                    reason=str(gate_result["reason"]),
+                    metadata_payload={"source_site": vehicle.get("source_site")},
+                )
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1127,6 +1303,15 @@ async def _process_webhook_items(
                 )
                 skipped += 1
                 increment_reason_counter(skip_reasons, "score_exception")
+                _record_parse_event(
+                    event_type="score",
+                    status="skipped_score",
+                    item_index=item_index,
+                    listing_id=vehicle.get("listing_id"),
+                    reason="score_exception",
+                    error_message=str(score_err),
+                    metadata_payload={"source_site": vehicle.get("source_site")},
+                )
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1156,6 +1341,14 @@ async def _process_webhook_items(
                 )
                 skipped += 1
                 increment_reason_counter(skip_reasons, f"ceiling:{pricing_reason}")
+                _record_parse_event(
+                    event_type="pricing_ceiling",
+                    status="skipped_ceiling",
+                    item_index=item_index,
+                    listing_id=vehicle.get("listing_id"),
+                    reason=str(pricing_reason),
+                    metadata_payload={"source_site": vehicle.get("source_site")},
+                )
                 _bid = score_result.get("current_bid") or vehicle.get("current_bid") or 0
                 _max_bid = score_result.get("max_bid") or 0
                 _mmr = score_result.get("mmr_estimated") or 0
@@ -1190,6 +1383,14 @@ async def _process_webhook_items(
                 )
                 skipped += 1
                 increment_reason_counter(skip_reasons, "margin_below_floor")
+                _record_parse_event(
+                    event_type="margin_floor",
+                    status="skipped_margin",
+                    item_index=item_index,
+                    listing_id=vehicle.get("listing_id"),
+                    reason="margin_below_floor",
+                    metadata_payload={"source_site": vehicle.get("source_site")},
+                )
                 margin_reason = _format_margin_below_floor_reason(score_result, vehicle)
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
@@ -1213,6 +1414,14 @@ async def _process_webhook_items(
                 increment_reason_counter(
                     skip_reasons,
                     f"ceiling:{score_result.get('ceiling_reason') or 'unknown'}",
+                )
+                _record_parse_event(
+                    event_type="pricing_ceiling",
+                    status="skipped_ceiling",
+                    item_index=item_index,
+                    listing_id=vehicle.get("listing_id"),
+                    reason=str(score_result.get("ceiling_reason") or "unknown"),
+                    metadata_payload={"source_site": vehicle.get("source_site")},
                 )
                 _ceiling_reason = score_result.get("ceiling_reason") or "ceiling_reject"
                 _bid = score_result.get("current_bid") or vehicle.get("current_bid") or 0
@@ -1245,6 +1454,15 @@ async def _process_webhook_items(
                     logger.error("[DEDUP] lookup failed; skipping item %s: %s", vehicle.get("title", "?"), dedup_err)
                     skipped += 1
                     increment_reason_counter(skip_reasons, "dedup_exception")
+                    _record_parse_event(
+                        event_type="dedup",
+                        status="skipped_dedup",
+                        item_index=item_index,
+                        listing_id=vehicle.get("listing_id"),
+                        reason="dedup_exception",
+                        error_message=str(dedup_err),
+                        metadata_payload={"source_site": vehicle.get("source_site")},
+                    )
                     continue
             is_dup = dedup["is_duplicate"]
             if is_dup:
@@ -1260,6 +1478,18 @@ async def _process_webhook_items(
                 failed_save_count += 1
                 increment_reason_counter(skip_reasons, "save_exception")
                 increment_reason_counter(save_outcomes, "save_exception")
+                _record_parse_event(
+                    event_type="db_save",
+                    status="save_exception",
+                    item_index=item_index,
+                    listing_id=vehicle.get("listing_id"),
+                    reason="save_exception",
+                    error_message=str(exc),
+                    metadata_payload={
+                        "dos_score": vehicle.get("dos_score"),
+                        "source_site": vehicle.get("source_site"),
+                    },
+                )
                 _record_delivery_log(
                     run_id=vehicle.get("run_id") or apify_run_id,
                     listing_id=vehicle.get("listing_id") or _compute_listing_id(vehicle.get("source_site") or "", vehicle.get("listing_url") or ""),
@@ -1276,6 +1506,18 @@ async def _process_webhook_items(
                 _mirror_vehicle_to_sonar(vehicle, saved_opportunity_id=saved_opportunity_id)
             save_status = vehicle.get("_save_status", "unknown")
             increment_reason_counter(save_outcomes, save_status)
+            _record_parse_event(
+                event_type="db_save",
+                status=save_status,
+                item_index=item_index,
+                listing_id=vehicle.get("listing_id"),
+                reason=None if save_status in {"saved_supabase", "saved_direct_pg"} else save_status,
+                metadata_payload={
+                    "dos_score": vehicle.get("dos_score"),
+                    "source_site": vehicle.get("source_site"),
+                    "investment_grade": (vehicle.get("score_breakdown") or {}).get("investment_grade"),
+                },
+            )
             if saved_opportunity_id:
                 vehicle["opportunity_id"] = saved_opportunity_id
 
@@ -1308,17 +1550,21 @@ async def _process_webhook_items(
             }
             existing_success = save_status in {
                 "duplicate_existing",
+                "duplicate_lifecycle_refreshed",
                 "duplicate_pricing_refreshed",
                 "vin_dedup_skipped",
+                "vin_dedup_lifecycle_refreshed",
                 "vin_dedup_updated",
                 "vin_dedup_pricing_refreshed",
             }
             save_succeeded = inserted_success or existing_success
             is_existing_listing = save_status in {
                 "duplicate_existing",
+                "duplicate_lifecycle_refreshed",
                 "duplicate_pricing_refreshed",
                 "duplicate_unresolved",
                 "vin_dedup_skipped",
+                "vin_dedup_lifecycle_refreshed",
                 "vin_dedup_updated",
                 "vin_dedup_pricing_refreshed",
             } or is_dup
@@ -1347,8 +1593,13 @@ async def _process_webhook_items(
                 + f" | save={save_status}"
             )
 
-            if _should_evaluate_alert_delivery(save_status, is_existing_listing, saved_opportunity_id):
-                alert_gate = _alert_gate_for_vehicle(vehicle)
+            alert_gate = _alert_gate_for_vehicle(vehicle)
+            if _should_evaluate_alert_delivery(
+                save_status,
+                is_existing_listing,
+                saved_opportunity_id,
+                alert_gate.get("alert_type"),
+            ):
                 if alert_gate.get("eligible"):
                     logger.info(
                         "[ALERT_GATE] eligible | %s | %s",
@@ -1426,9 +1677,37 @@ async def _process_webhook_items(
         )
         combined_message = summary_message if not detail_message else f"{summary_message}; {detail_message}"
 
+        completion_status = "processed" if failed_save_count == 0 and sonar_write_fail_count == 0 else "error"
+        upsert_scrape_run_completion(
+            supabase_client,
+            run_id=apify_run_id,
+            source_name=source_name,
+            status=completion_status,
+            item_count=dataset_item_count,
+            evaluated_count=evaluated,
+            saved_count=saved_count,
+            existing_count=(
+                save_outcomes.get("duplicate_existing", 0)
+                + save_outcomes.get("duplicate_lifecycle_refreshed", 0)
+                + save_outcomes.get("duplicate_pricing_refreshed", 0)
+                + save_outcomes.get("vin_dedup_skipped", 0)
+                + save_outcomes.get("vin_dedup_lifecycle_refreshed", 0)
+                + save_outcomes.get("vin_dedup_updated", 0)
+                + save_outcomes.get("vin_dedup_pricing_refreshed", 0)
+            ),
+            skipped_count=skipped,
+            failed_count=failed_save_count + sonar_write_fail_count,
+            duplicate_count=duplicate_count,
+            hot_deal_count=len(hot_deals),
+            alert_blocked_count=alert_blocked_count,
+            parse_event_count=parse_event_count,
+            skip_reasons=skip_reasons,
+            save_outcomes=save_outcomes,
+            error_message=combined_message if completion_status == "error" else None,
+        )
         update_webhook_log(
             webhook_log_id,
-            "processed" if failed_save_count == 0 and sonar_write_fail_count == 0 else "error",
+            completion_status,
             item_count=dataset_item_count,
             error_message=merge_audit_error_message(
                 combined_message,
@@ -1441,6 +1720,14 @@ async def _process_webhook_items(
         logger.error("[INGEST_AUDIT] run_id=%s %s", apify_run_id, e)
     except Exception as e:
         logger.error("[INGEST] Background processing failed for run_id=%s: %s", apify_run_id, e)
+        upsert_scrape_run_completion(
+            supabase_client,
+            run_id=apify_run_id,
+            source_name=source_name,
+            status="error",
+            item_count=metadata.get("item_count") or 0,
+            error_message=str(e),
+        )
         if webhook_log_id:
             try:
                 update_webhook_log(
@@ -1776,11 +2063,13 @@ def normalize_apify_vehicle(
         listing_url = item.get("url") or item.get("listing_url") or ""
 
         # Photo: parseforge uses imageUrl or photos[]
-        photos = item.get("photos", [])
+        photos = item.get("photos") or []
         photo_url = (
             item.get("image_url") or item.get("photo_url") or
             item.get("imageUrl") or (photos[0] if photos else "")
         )
+        if photo_url and not photos:
+            photos = [photo_url]
 
         # Agency: parseforge uses seller
         agency = item.get("seller") or item.get("agency_name") or ""
@@ -1832,6 +2121,17 @@ def normalize_apify_vehicle(
             "auction_fee",
             "auctionfee",
         )
+        bidder_count = _extract_numeric_key(
+            "bidder_count",
+            "bid_count",
+            "bidCount",
+            "bids_count",
+            "bidsCount",
+            "number_of_bids",
+            "numberOfBids",
+            "num_bids",
+            "numBids",
+        )
 
         item_run_id = (
             item.get("source_run_id")
@@ -1876,6 +2176,7 @@ def normalize_apify_vehicle(
             "buyer_premium": buyer_premium,
             "doc_fee": doc_fee,
             "auction_fees": auction_fees,
+            "bidder_count": int(bidder_count) if bidder_count is not None else None,
             "mileage": mileage,
             "description": description,
             "detail_text": detail_text,
@@ -2352,6 +2653,26 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         return None
 
     opp_id = deal.get("opportunity_id")
+    alert_gate = _alert_gate_for_vehicle(deal)
+    desired_alert_type = alert_gate.get("alert_type")
+    if not alert_gate.get("eligible"):
+        blocking_reasons = alert_gate.get("blocking_reasons") or ["unknown"]
+        logger.info(
+            "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
+            alert_gate.get("summary"),
+            ",".join(blocking_reasons),
+            deal.get("title", "?")[:80],
+        )
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="skipped_gate",
+            error_message=",".join(str(reason) for reason in blocking_reasons),
+        )
+        return None
 
     # 6-hour suppression check
     if supabase_client is not None and opp_id:
@@ -2359,12 +2680,16 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             alert_suppression_cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
             recent = (
                 supabase_client.table("alert_log")
-                .select("id")
+                .select("id,alert_type,delivery_state")
                 .eq("opportunity_id", opp_id)
                 .gte("sent_at", alert_suppression_cutoff)
                 .execute()
             )
-            if recent.data:
+            if any(
+                str(row.get("delivery_state") or "sent").lower() != "failed"
+                and _alert_type_satisfies(desired_alert_type, row.get("alert_type"))
+                for row in (recent.data or [])
+            ):
                 logger.info("[ALERT SUPPRESSED] already alerted within 6hrs")
                 _record_delivery_log(
                     run_id=run_id,
@@ -2403,25 +2728,6 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         import httpx
 
         callback_id = opp_id or "unknown"
-        alert_gate = _alert_gate_for_vehicle(deal)
-        if not alert_gate.get("eligible"):
-            blocking_reasons = alert_gate.get("blocking_reasons") or ["unknown"]
-            logger.info(
-                "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
-                alert_gate.get("summary"),
-                ",".join(blocking_reasons),
-                deal.get("title", "?")[:80],
-            )
-            _record_delivery_log(
-                run_id=run_id,
-                listing_id=listing_id,
-                listing_url=listing_url,
-                opportunity_id=deal.get("opportunity_id"),
-                channel="telegram_alert",
-                status="skipped_gate",
-                error_message=",".join(str(reason) for reason in blocking_reasons),
-            )
-            return None
         score_breakdown = deal.get("score_breakdown", {})
         investment_grade = score_breakdown.get("investment_grade") or "Watch"
         is_platinum = alert_gate.get("alert_type") == "platinum"
@@ -2516,12 +2822,15 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
 
     alert_key = vehicle.get("opportunity_id") or vehicle.get("listing_url") or vehicle.get("title") or "unknown"
     alert_id = hashlib.sha256(f"{vehicle.get('run_id', '')}:{alert_key}".encode()).hexdigest()[:64]
+    alert_gate = vehicle.get("alert_gate") if isinstance(vehicle.get("alert_gate"), dict) else {}
+    alert_type = _normalize_alert_type(alert_gate.get("alert_type")) or "hot"
     row = {
         "opportunity_id": vehicle.get("opportunity_id"),
         "run_id": vehicle.get("run_id"),
         "alert_id": alert_id,
         "message_id": message_id,
         "channel": "telegram",
+        "alert_type": "platinum" if alert_type == "platinum" else "hot",
         "delivery_state": "sent",
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "dos_score": vehicle.get("score_breakdown", {}).get("dos_score", vehicle.get("dos_score", 0)),
@@ -3118,7 +3427,7 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
     try:
         result = (
             supabase_client.table("opportunities")
-            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id")
+            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id,photo_count,bidder_count")
             .eq("id", existing_id)
             .limit(1)
             .execute()
@@ -3128,6 +3437,31 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
     except Exception as lookup_err:
         logger.warning(
             "[INGEST] Duplicate enrichment lookup failed for %s: %s",
+            existing_id,
+            lookup_err,
+        )
+        return {}
+
+
+def _existing_lifecycle_snapshot(existing_id: str) -> dict:
+    if supabase_client is None:
+        return {}
+    try:
+        result = (
+            supabase_client.table("opportunities")
+            .select(
+                "listing_url,auction_end_date,current_bid,first_seen_at,last_seen_at,"
+                "relist_count,bid_change_count,source_fingerprint"
+            )
+            .eq("id", existing_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(result, "data", None) or []
+        return rows[0] if rows else {}
+    except Exception as lookup_err:
+        logger.warning(
+            "[INGEST] Duplicate lifecycle lookup failed for %s: %s",
             existing_id,
             lookup_err,
         )
@@ -3417,6 +3751,32 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
                 update["raw_data"] = merged_raw
     if _should_backfill_condition_grade(row, existing):
         update["condition_grade"] = row.get("condition_grade")
+    incoming_photo_count = row.get("photo_count")
+    current_photo_count = existing.get("photo_count")
+    try:
+        incoming_photo_count = int(incoming_photo_count)
+    except (TypeError, ValueError):
+        incoming_photo_count = 0
+    try:
+        current_photo_count = int(current_photo_count)
+    except (TypeError, ValueError):
+        current_photo_count = 0
+    if incoming_photo_count > current_photo_count:
+        update["photo_count"] = incoming_photo_count
+    incoming_bidder_count = row.get("bidder_count")
+    current_bidder_count = existing.get("bidder_count")
+    try:
+        incoming_bidder_count = int(incoming_bidder_count)
+    except (TypeError, ValueError):
+        incoming_bidder_count = None
+    try:
+        current_bidder_count = int(current_bidder_count)
+    except (TypeError, ValueError):
+        current_bidder_count = None
+    if incoming_bidder_count is not None and (
+        current_bidder_count is None or incoming_bidder_count > current_bidder_count
+    ):
+        update["bidder_count"] = incoming_bidder_count
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
     return update
@@ -3442,6 +3802,34 @@ def _backfill_existing_opportunity_enrichment(existing_id: str, row: dict) -> No
             existing_id,
             update_err,
         )
+
+
+def _refresh_existing_opportunity_lifecycle(existing_id: str, row: dict) -> bool:
+    if supabase_client is None:
+        return False
+    existing = _existing_lifecycle_snapshot(existing_id)
+    update_payload = build_lifecycle_update(
+        row,
+        existing,
+        now_iso=datetime.now(timezone.utc).isoformat(),
+    )
+    if not update_payload:
+        return False
+    try:
+        supabase_client.table("opportunities").update(update_payload).eq("id", existing_id).execute()
+        logger.info(
+            "[INGEST] Refreshed lifecycle fields for duplicate opportunity %s: %s",
+            existing_id,
+            sorted(update_payload.keys()),
+        )
+        return True
+    except Exception as update_err:
+        logger.warning(
+            "[INGEST] Duplicate lifecycle refresh failed for %s: %s",
+            existing_id,
+            update_err,
+        )
+        return False
 
 
 def _lookup_existing_opportunity_id(listing_url: str, listing_id: str) -> Optional[str]:
@@ -4089,6 +4477,7 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             existing_id, should_update = _check_vin_duplicate(normalized_vin, float(score))
             if existing_id:
                 _backfill_existing_opportunity_enrichment(existing_id, row)
+                lifecycle_refreshed = _refresh_existing_opportunity_lifecycle(existing_id, row)
                 if should_update:
                     # New score is higher — update the existing record
                     try:
@@ -4115,6 +4504,8 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                     )
                     if _refresh_existing_opportunity_pricing_truth(existing_id, row):
                         _mark_save_outcome(vehicle, "vin_dedup_pricing_refreshed", opportunity_id=existing_id)
+                    elif lifecycle_refreshed:
+                        _mark_save_outcome(vehicle, "vin_dedup_lifecycle_refreshed", opportunity_id=existing_id)
                     else:
                         _mark_save_outcome(vehicle, "vin_dedup_skipped", opportunity_id=existing_id)
                     return existing_id
@@ -4133,8 +4524,11 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
             existing_id = _lookup_existing_opportunity_id(row["listing_url"], row["listing_id"])
             if existing_id:
                 _backfill_existing_opportunity_enrichment(existing_id, row)
+                lifecycle_refreshed = _refresh_existing_opportunity_lifecycle(existing_id, row)
                 if _refresh_existing_opportunity_pricing_truth(existing_id, row):
                     _mark_save_outcome(vehicle, "duplicate_pricing_refreshed", opportunity_id=existing_id)
+                elif lifecycle_refreshed:
+                    _mark_save_outcome(vehicle, "duplicate_lifecycle_refreshed", opportunity_id=existing_id)
                 else:
                     _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                 return existing_id
@@ -4164,8 +4558,11 @@ async def save_opportunity_to_supabase(vehicle: dict) -> Optional[str]:
                 if existing_id:
                     logger.info("[INGEST] Duplicate existing listing recovered for '%s'", title)
                     _backfill_existing_opportunity_enrichment(existing_id, row)
+                    lifecycle_refreshed = _refresh_existing_opportunity_lifecycle(existing_id, row)
                     if _refresh_existing_opportunity_pricing_truth(existing_id, row):
                         _mark_save_outcome(vehicle, "duplicate_pricing_refreshed", opportunity_id=existing_id)
+                    elif lifecycle_refreshed:
+                        _mark_save_outcome(vehicle, "duplicate_lifecycle_refreshed", opportunity_id=existing_id)
                     else:
                         _mark_save_outcome(vehicle, "duplicate_existing", opportunity_id=existing_id)
                     return existing_id

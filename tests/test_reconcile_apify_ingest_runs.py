@@ -235,13 +235,22 @@ class ReconcileApifyIngestRunsTests(unittest.TestCase):
         self.assertIn("partial_db_save_ledger", likely_cause)
         self.assertIn("not every source item", likely_cause)
 
-    def test_classify_run_treats_vin_dedup_as_existing_success(self):
+    def test_classify_run_treats_duplicate_refreshes_as_existing_success(self):
         issues = reconcile.classify_run(
             run_id="run-vin-dedup",
             apify_run={"run_id": "run-vin-dedup", "status": "SUCCEEDED", "item_count": 2},
             webhook={"latest_status": "degraded", "latest_error": "failed:1"},
             opportunities=None,
-            delivery={"channels": {"db_save": {"statuses": {"vin_dedup_skipped": 2}}}},
+            delivery={
+                "channels": {
+                    "db_save": {
+                        "statuses": {
+                            "vin_dedup_lifecycle_refreshed": 1,
+                            "duplicate_lifecycle_refreshed": 1,
+                        }
+                    }
+                }
+            },
             now_utc=datetime.now(timezone.utc),
             pending_grace_minutes=30,
         )

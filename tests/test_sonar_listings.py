@@ -22,6 +22,7 @@ def test_build_sonar_listing_row_preserves_no_filter_mapping_and_fallbacks():
         "title_status": "clean",
         "vin": "VIN123",
         "dos_score": 82.5,
+        "bidder_count": "7",
     }
 
     row = build_sonar_listing_row(vehicle)
@@ -33,6 +34,7 @@ def test_build_sonar_listing_row_preserves_no_filter_mapping_and_fallbacks():
     assert row["photo_url"] == "https://example.com/photo.jpg"
     assert row["agency_name"] == "City of Irvine"
     assert row["dos_score"] == 82.5
+    assert row["bidder_count"] == 7
 
 
 def test_build_sonar_listing_row_uses_normalized_auction_end_time_fallback():
@@ -47,3 +49,8 @@ def test_build_sonar_listing_row_uses_normalized_auction_end_time_fallback():
 
 def test_build_sonar_listing_row_defaults_current_bid_to_zero():
     assert build_sonar_listing_row({"source": "GSA"})["current_bid"] == 0.0
+
+
+def test_build_sonar_listing_row_omits_unknown_bidder_count():
+    assert build_sonar_listing_row({"source": "HiBid", "bidder_count": ""})["bidder_count"] is None
+    assert build_sonar_listing_row({"source": "HiBid", "bidder_count": -1})["bidder_count"] is None

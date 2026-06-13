@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from backend.business_rules.gates import bid_ceiling_pct_for_tier, min_margin_for_tier
+from backend.ingest.lifecycle_memory import build_initial_lifecycle_fields
 
 
 def _resolve_buyer_premium(score_result: dict[str, Any], current_bid: float) -> tuple[float, float]:
@@ -50,6 +51,50 @@ def _resolve_buyer_premium(score_result: dict[str, Any], current_bid: float) -> 
     return buyer_premium, buyer_premium_pct
 
 
+def _resolve_photo_count(vehicle: dict[str, Any]) -> int:
+    photos = vehicle.get("photos")
+    if photos is None:
+        photos = vehicle.get("photo_urls")
+
+    if isinstance(photos, list):
+        count = len([photo for photo in photos if photo])
+        if count:
+            return count
+    if isinstance(photos, tuple):
+        count = len([photo for photo in photos if photo])
+        if count:
+            return count
+    if isinstance(photos, str) and photos.strip():
+        return 1
+
+    if vehicle.get("photo_url") or vehicle.get("image_url"):
+        return 1
+    return 0
+
+
+def _resolve_bidder_count(vehicle: dict[str, Any]) -> int | None:
+    for key in (
+        "bidder_count",
+        "bid_count",
+        "bidCount",
+        "bids_count",
+        "bidsCount",
+        "number_of_bids",
+        "numberOfBids",
+        "num_bids",
+        "numBids",
+    ):
+        value = vehicle.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError):
+            continue
+        return max(parsed, 0)
+    return None
+
+
 def build_opportunity_row(
     vehicle: dict[str, Any],
     *,
@@ -88,7 +133,8 @@ def build_opportunity_row(
     if min_margin_target is None:
         min_margin_target = min_margin_for_tier(vehicle_tier)
     now = now_utc or (lambda: datetime.now(timezone.utc))
-    return {
+    now_iso = now().isoformat()
+    row = {
         "listing_id": compute_listing_id(source_site, vehicle.get("listing_url") or ""),
         "listing_url": vehicle.get("listing_url", ""),
         "source": source_site,
@@ -151,6 +197,8 @@ def build_opportunity_row(
         "condition_grade": condition_grade,
         "auction_end_date": vehicle.get("auction_end_time"),
         "image_url": vehicle.get("photo_url"),
+        "photo_count": _resolve_photo_count(vehicle),
+        "bidder_count": _resolve_bidder_count(vehicle),
         "designated_lane": designated_lane,
         "dos_premium": score_result.get("dos_premium"),
         "dos_standard": score_result.get("dos_standard"),
@@ -168,5 +216,7 @@ def build_opportunity_row(
         "source_run_id": vehicle.get("source_run_id"),
         "pipeline_step": "saved",
         "step_status": "complete",
-        "processed_at": vehicle.get("processed_at") or now().isoformat(),
+        "processed_at": vehicle.get("processed_at") or now_iso,
     }
+    row.update(build_initial_lifecycle_fields(row, now_iso=now_iso))
+    return row

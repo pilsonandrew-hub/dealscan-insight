@@ -35,6 +35,8 @@ const GRAPHQL_URL = `${BASE_URL}/graphql`;
 const DEFAULT_MIN_YEAR = new Date().getFullYear() - 10;
 const DEFAULT_MAX_MILEAGE = 100000;
 const STANDARD_MAX_MILES_PER_YEAR = 18000;
+const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
+const PREMIUM_MAX_MILEAGE = 50000;
 
 // --- Canadian province codes to reject ---
 const CANADIAN_PROVINCES = new Set([
@@ -273,9 +275,14 @@ function failsDealerScopeAgeMileageGate(year, mileage) {
     if (!year) return false;
     if (year < EFFECTIVE_MIN_YEAR) return true;
     if (mileage === null || mileage === undefined || mileage <= 0) return false;
+    if (mileage > EFFECTIVE_MAX_MILEAGE) return true;
     const currentYear = new Date().getFullYear();
     const ageYears = Math.max(1, currentYear - Number(year));
-    return mileage > EFFECTIVE_MAX_MILEAGE || mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
+    // Premium lane (<= PREMIUM_MAX_MODEL_AGE_YEARS old AND <= PREMIUM_MAX_MILEAGE) is exempt from
+    // the standard-lane miles/year cap, mirroring backend determine_vehicle_tier. Without this,
+    // late-model high-mileage fleet vehicles are silently dropped before scoring.
+    if (ageYears <= PREMIUM_MAX_MODEL_AGE_YEARS && mileage <= PREMIUM_MAX_MILEAGE) return false;
+    return mileage / ageYears > STANDARD_MAX_MILES_PER_YEAR;
 }
 
 function passesFilters(listing, log) {
