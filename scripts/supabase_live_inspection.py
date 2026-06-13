@@ -35,6 +35,18 @@ TABLES = {
         "timestamp_candidates": ["created_at", "updated_at", "delivered_at"],
         "status_candidates": ["status", "channel", "delivery_status"],
     },
+    "scrape_runs": {
+        "timestamp_candidates": ["started_at", "completed_at", "created_at", "updated_at"],
+        "status_candidates": ["status", "source_name"],
+    },
+    "parse_events": {
+        "timestamp_candidates": ["created_at"],
+        "status_candidates": ["status", "event_type", "source_name"],
+    },
+    "source_health_daily": {
+        "timestamp_candidates": ["observed_date", "latest_started_at", "latest_completed_at"],
+        "status_candidates": ["source_name"],
+    },
     "post_close_outcome_requests": {
         "timestamp_candidates": ["created_at", "updated_at", "last_checked_at", "next_check_at"],
         "status_candidates": ["outcome_status", "referral_source", "source_site"],
@@ -84,7 +96,7 @@ def _count(base_url: str, service_key: str, table: str) -> int | None:
         base_url,
         service_key,
         table,
-        {"select": "id", "limit": "1"},
+        {"select": "*", "limit": "1"},
         count=True,
     )
     if status >= 400:
@@ -425,6 +437,71 @@ def _summarize_run_webhook_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _summarize_scrape_run_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    latest_started_at = None
+    latest_completed_at = None
+    totals = {
+        "item_count": 0,
+        "evaluated_count": 0,
+        "saved_count": 0,
+        "skipped_count": 0,
+        "failed_count": 0,
+        "parse_event_count": 0,
+    }
+    for row in rows:
+        source_counts[str(row.get("source_name") or "unknown")[:80]] += 1
+        status_counts[str(row.get("status") or "unknown")[:80]] += 1
+        for column in totals:
+            totals[column] += _coerce_int(row.get(column)) or 0
+        started_at = row.get("started_at")
+        completed_at = row.get("completed_at")
+        if started_at and (latest_started_at is None or str(started_at) > str(latest_started_at)):
+            latest_started_at = started_at
+        if completed_at and (latest_completed_at is None or str(completed_at) > str(latest_completed_at)):
+            latest_completed_at = completed_at
+    return {
+        "row_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "status_counts": dict(status_counts.most_common(20)),
+        "total_item_count": totals["item_count"],
+        "total_evaluated_count": totals["evaluated_count"],
+        "total_saved_count": totals["saved_count"],
+        "total_skipped_count": totals["skipped_count"],
+        "total_failed_count": totals["failed_count"],
+        "total_parse_event_count": totals["parse_event_count"],
+        "latest_started_at": latest_started_at,
+        "latest_completed_at": latest_completed_at,
+    }
+
+
+def _summarize_parse_event_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    event_type_counts: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+    latest_created_at = None
+    for row in rows:
+        source_counts[str(row.get("source_name") or "unknown")[:80]] += 1
+        event_type_counts[str(row.get("event_type") or "unknown")[:80]] += 1
+        status_counts[str(row.get("status") or "unknown")[:80]] += 1
+        reason = row.get("reason")
+        if reason:
+            reason_counts[str(reason)[:160]] += 1
+        created_at = row.get("created_at")
+        if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
+            latest_created_at = created_at
+    return {
+        "row_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "event_type_counts": dict(event_type_counts.most_common(20)),
+        "status_counts": dict(status_counts.most_common(20)),
+        "reason_counts": dict(reason_counts.most_common(20)),
+        "latest_created_at": latest_created_at,
+    }
+
+
 def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     source_counts: Counter[str] = Counter()
     step_counts: Counter[str] = Counter()
@@ -608,6 +685,38 @@ def _summarize_post_close_outcome_rows(rows: list[dict[str, Any]]) -> dict[str, 
     }
 
 
+def _summarize_source_health_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: Counter[str] = Counter()
+    latest_observed_date = None
+    latest_started_at = None
+    totals = {
+        "total_runs": 0,
+        "processed_runs": 0,
+        "failed_runs": 0,
+        "item_count": 0,
+        "saved_count": 0,
+        "skipped_count": 0,
+        "parse_event_count": 0,
+    }
+    for row in rows:
+        source_counts[str(row.get("source_name") or "unknown")[:80]] += 1
+        for column in totals:
+            totals[column] += _coerce_int(row.get(column)) or 0
+        observed_date = row.get("observed_date")
+        started_at = row.get("latest_started_at")
+        if observed_date and (latest_observed_date is None or str(observed_date) > str(latest_observed_date)):
+            latest_observed_date = observed_date
+        if started_at and (latest_started_at is None or str(started_at) > str(latest_started_at)):
+            latest_started_at = started_at
+    return {
+        "sample_count": len(rows),
+        "source_counts": dict(source_counts.most_common(20)),
+        "latest_observed_date": latest_observed_date,
+        "latest_started_at": latest_started_at,
+        **totals,
+    }
+
+
 def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[str, Any]:
     delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
     delivery_select = ",".join([
@@ -632,6 +741,52 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         "webhook_log",
         {"select": webhook_select, "run_id": f"eq.{run_id}", "order": "received_at.asc", "limit": "50"},
     )
+
+    scrape_run_report: dict[str, Any]
+    try:
+        scrape_columns = _available_columns(base_url, service_key, "scrape_runs")
+        scrape_select = ",".join([
+            col for col in [
+                "run_id",
+                "source_name",
+                "status",
+                "item_count",
+                "evaluated_count",
+                "saved_count",
+                "skipped_count",
+                "failed_count",
+                "parse_event_count",
+                "started_at",
+                "completed_at",
+            ]
+            if col in scrape_columns
+        ]) or "run_id"
+        _, _, rows = _request(
+            base_url,
+            service_key,
+            "scrape_runs",
+            {"select": scrape_select, "run_id": f"eq.{run_id}", "order": "started_at.asc", "limit": "50"},
+        )
+        scrape_run_report = _summarize_scrape_run_rows(rows if isinstance(rows, list) else [])
+    except Exception as exc:
+        scrape_run_report = {"row_count": None, "failure": str(exc)[:500]}
+
+    parse_event_report: dict[str, Any]
+    try:
+        parse_columns = _available_columns(base_url, service_key, "parse_events")
+        parse_select = ",".join([
+            col for col in ["run_id", "source_name", "event_type", "status", "reason", "created_at"]
+            if col in parse_columns
+        ]) or "run_id"
+        _, _, rows = _request(
+            base_url,
+            service_key,
+            "parse_events",
+            {"select": parse_select, "run_id": f"eq.{run_id}", "order": "created_at.asc", "limit": "500"},
+        )
+        parse_event_report = _summarize_parse_event_rows(rows if isinstance(rows, list) else [])
+    except Exception as exc:
+        parse_event_report = {"row_count": None, "failure": str(exc)[:500]}
 
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([
@@ -752,6 +907,8 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
 
     return {
         "run_id": run_id,
+        "scrape_runs": scrape_run_report,
+        "parse_events": parse_event_report,
         "delivery_log": _summarize_run_delivery_rows(delivery_rows if isinstance(delivery_rows, list) else []),
         "webhook_log": _summarize_run_webhook_rows(webhook_rows if isinstance(webhook_rows, list) else []),
         "opportunities": _summarize_run_opportunity_rows(list(opportunity_by_id.values())),
@@ -871,6 +1028,37 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
     except Exception as exc:
         post_close_report = {"failure": str(exc)[:500]}
 
+    source_health_report: dict[str, Any]
+    try:
+        source_health_columns = _available_columns(base_url, service_key, "source_health_daily")
+        source_health_select = ",".join([
+            col for col in [
+                "observed_date",
+                "source_name",
+                "total_runs",
+                "processed_runs",
+                "failed_runs",
+                "item_count",
+                "saved_count",
+                "skipped_count",
+                "parse_event_count",
+                "latest_started_at",
+            ]
+            if col in source_health_columns
+        ]) or "observed_date"
+        source_health_order = "observed_date" if "observed_date" in source_health_columns else source_health_select.split(",", 1)[0]
+        source_health_rows = _recent_rows(
+            base_url,
+            service_key,
+            "source_health_daily",
+            source_health_select,
+            source_health_order,
+            200,
+        )
+        source_health_report = _summarize_source_health_rows(source_health_rows)
+    except Exception as exc:
+        source_health_report = {"failure": str(exc)[:500]}
+
     return {
         "recent_opportunities": _summarize_recent_opportunity_truth(recent_opportunities),
         "recent_alerts": {
@@ -889,6 +1077,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
             _source_by_run_from_webhooks(webhook_rows),
         ),
         "post_close_outcome_requests": post_close_report,
+        "source_health_daily": source_health_report,
         "truth_boundary": "Samples only sanitized aggregate fields from recent rows. Does not print VINs, titles, URLs, user data, tokens, or raw listing payloads.",
     }
 

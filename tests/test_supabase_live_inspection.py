@@ -1,6 +1,20 @@
 from scripts import supabase_live_inspection as inspection
 
 
+def test_count_does_not_assume_tables_have_id_column(monkeypatch):
+    requests = []
+
+    def fake_request(_base_url, _service_key, table, params, **kwargs):
+        requests.append((table, dict(params), dict(kwargs)))
+        return 200, {"Content-Range": "0-0/2"}, [{"source_name": "allsurplus"}]
+
+    monkeypatch.setattr(inspection, "_request", fake_request)
+
+    assert inspection._count("https://example.supabase.co", "service-key", "source_health_daily") == 2
+    assert requests[0][1]["select"] == "*"
+    assert requests[0][2]["count"] is True
+
+
 def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatch):
     columns = {
         "ingest_delivery_log": {"run_id", "listing_id", "channel", "status", "error_message", "created_at", "updated_at"},
@@ -10,6 +24,8 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
         "sold_comp_candidates": {"id", "run_id", "source_name", "source_listing_id", "channel", "candidate_status", "rejection_reason", "created_at", "updated_at"},
         "sold_comp_reviews": {"candidate_id", "review_status", "reviewer", "reviewer_version", "created_at", "updated_at"},
         "verified_sold_comps": {"candidate_id", "source_name", "channel", "created_at", "updated_at"},
+        "scrape_runs": {"run_id", "source_name", "status", "item_count", "evaluated_count", "saved_count", "skipped_count", "failed_count", "parse_event_count", "started_at", "completed_at"},
+        "parse_events": {"run_id", "source_name", "event_type", "status", "reason", "created_at"},
     }
     rows = {
         "ingest_delivery_log": [
@@ -71,6 +87,25 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
             {"candidate_id": "candidate-1", "source_name": "govdeals-sold", "channel": "gov"},
             {"candidate_id": "candidate-3", "source_name": "publicsurplus-sold", "channel": "surplus"},
         ],
+        "scrape_runs": [
+            {
+                "run_id": "run-1",
+                "source_name": "all-surplus",
+                "status": "processed",
+                "item_count": 5,
+                "evaluated_count": 4,
+                "saved_count": 0,
+                "skipped_count": 1,
+                "failed_count": 0,
+                "parse_event_count": 5,
+                "started_at": "2026-06-03T00:00:00Z",
+                "completed_at": "2026-06-03T00:00:05Z",
+            }
+        ],
+        "parse_events": [
+            {"run_id": "run-1", "source_name": "all-surplus", "event_type": "db_save", "status": "vin_dedup_lifecycle_refreshed", "created_at": "2026-06-03T00:00:01Z"},
+            {"run_id": "run-1", "source_name": "all-surplus", "event_type": "gate", "status": "skipped_gate", "reason": "age_or_mileage_exceeded", "created_at": "2026-06-03T00:00:02Z"},
+        ],
     }
 
     monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
@@ -92,6 +127,13 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
 
     report = inspection._run_id_truth_audit("https://example.supabase.co", "service-key", "run-1")
 
+    assert report["scrape_runs"]["row_count"] == 1
+    assert report["scrape_runs"]["status_counts"] == {"processed": 1}
+    assert report["scrape_runs"]["total_item_count"] == 5
+    assert report["scrape_runs"]["total_parse_event_count"] == 5
+    assert report["parse_events"]["row_count"] == 2
+    assert report["parse_events"]["event_type_counts"] == {"db_save": 1, "gate": 1}
+    assert report["parse_events"]["status_counts"] == {"vin_dedup_lifecycle_refreshed": 1, "skipped_gate": 1}
     assert report["market_scout_runs"]["row_count"] == 1
     assert report["market_scout_runs"]["source_counts"] == {"govdeals-sold": 1}
     assert report["sold_comp_candidates"]["row_count"] == 3
@@ -179,6 +221,18 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
             "vin",
             "metadata",
         },
+        "source_health_daily": {
+            "observed_date",
+            "source_name",
+            "total_runs",
+            "processed_runs",
+            "failed_runs",
+            "item_count",
+            "saved_count",
+            "skipped_count",
+            "parse_event_count",
+            "latest_started_at",
+        },
     }
     rows = {
         "opportunities": [],
@@ -240,6 +294,32 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
                 "created_at": "2026-06-03T19:02:00Z",
             },
         ],
+        "source_health_daily": [
+            {
+                "observed_date": "2026-06-03",
+                "source_name": "govdeals",
+                "total_runs": 2,
+                "processed_runs": 1,
+                "failed_runs": 1,
+                "item_count": 12,
+                "saved_count": 3,
+                "skipped_count": 8,
+                "parse_event_count": 11,
+                "latest_started_at": "2026-06-03T19:03:00Z",
+            },
+            {
+                "observed_date": "2026-06-03",
+                "source_name": "publicsurplus",
+                "total_runs": 1,
+                "processed_runs": 1,
+                "failed_runs": 0,
+                "item_count": 4,
+                "saved_count": 1,
+                "skipped_count": 2,
+                "parse_event_count": 3,
+                "latest_started_at": "2026-06-03T19:02:00Z",
+            },
+        ],
     }
 
     monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
@@ -254,6 +334,11 @@ def test_safe_truth_audit_includes_sanitized_post_close_queue_aggregates(monkeyp
     assert report["post_close_outcome_requests"]["sample_count"] == 3
     assert report["recent_deliveries"]["sample_count"] == 3
     assert report["recent_deliveries"]["source_counts"] == {"govdeals": 2, "publicsurplus": 1}
+    assert report["source_health_daily"]["sample_count"] == 2
+    assert report["source_health_daily"]["source_counts"] == {"govdeals": 1, "publicsurplus": 1}
+    assert report["source_health_daily"]["total_runs"] == 3
+    assert report["source_health_daily"]["failed_runs"] == 1
+    assert report["source_health_daily"]["parse_event_count"] == 14
     assert report["recent_deliveries"]["status_counts"] == {"skipped_margin": 2, "skipped_gate": 1}
     assert report["recent_deliveries"]["source_status_counts"] == [
         {"source": "govdeals", "status": "skipped_gate", "count": 1},
