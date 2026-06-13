@@ -52,6 +52,7 @@ class _FakeCompetitorSalesTable:
     def __init__(self, failures=None, existing_by_url=None):
         self.calls = []
         self.select_calls = []
+        self.delete_calls = []
         self._failures = list(failures or [])
         self._existing_by_url = existing_by_url or {}
         self._mode = None
@@ -68,7 +69,17 @@ class _FakeCompetitorSalesTable:
         self.select_calls.append({"columns": columns, "filters": self._filters})
         return self
 
+    def delete(self):
+        self._mode = "delete"
+        self._filters = {}
+        self.delete_calls.append({"filters": self._filters})
+        return self
+
     def eq(self, column, value):
+        self._filters[column] = value
+        return self
+
+    def is_(self, column, value):
         self._filters[column] = value
         return self
 
@@ -81,6 +92,8 @@ class _FakeCompetitorSalesTable:
             key = (self._filters.get("source"), self._filters.get("listing_url"))
             row = self._existing_by_url.get(key)
             return type("Resp", (), {"data": [row] if row else []})()
+        if self._mode == "delete":
+            return type("Resp", (), {"data": [{"deleted": True}]})()
         if self._failures:
             failure = self._failures.pop(0)
             if failure is not None:
@@ -158,7 +171,7 @@ def test_write_competitor_sales_retries_only_url_conflicting_id_backed_rows():
     assert client.sales_table.calls[1]["payload"][0]["source_listing_id"] == "17000"
     assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
     assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
-    assert client.sales_table.calls[3]["options"]["on_conflict"] == "source,listing_url"
+    assert client.sales_table.calls[3]["options"]["on_conflict"] == "source,source_listing_id"
     assert client.sales_table.calls[3]["payload"][0]["source_listing_id"] == "17167"
 
 
@@ -235,7 +248,53 @@ def test_write_competitor_sales_url_fallback_can_claim_url_only_existing_row():
     assert write_competitor_sales(rows, client) == 1
 
     assert len(client.sales_table.calls) == 3
-    assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,listing_url"
+    assert client.sales_table.delete_calls[0]["filters"] == {
+        "source": "govdeals",
+        "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+        "source_listing_id": "null",
+    }
+    assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
+    assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
+
+
+def test_write_competitor_sales_deletes_url_only_duplicate_then_retries_listing_id():
+    client = _FakeSupabaseClient(
+        failures=[
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+            RuntimeError(
+                'duplicate key value violates unique constraint '
+                '"idx_competitor_sales_source_url_upsert"'
+            ),
+            None,
+        ],
+        existing_by_url={
+            ("govdeals", "https://www.govdeals.com/en/asset/17167/7167"): {
+                "source_listing_id": None
+            }
+        },
+    )
+    rows = [
+        {
+            "source": "govdeals",
+            "source_listing_id": "17167",
+            "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+            "sale_price": 3074,
+        },
+    ]
+
+    assert write_competitor_sales(rows, client) == 1
+
+    assert len(client.sales_table.delete_calls) == 1
+    assert client.sales_table.delete_calls[0]["filters"] == {
+        "source": "govdeals",
+        "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
+        "source_listing_id": "null",
+    }
+    assert len(client.sales_table.calls) == 3
+    assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
     assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
 
 

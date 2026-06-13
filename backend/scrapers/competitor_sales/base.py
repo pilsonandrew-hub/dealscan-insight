@@ -238,12 +238,22 @@ def _existing_source_listing_id_for_url(row: Dict[str, Any], supabase_client: An
     return True, str(existing_id).strip() if existing_id else None
 
 
-def _url_fallback_is_identity_safe(row: Dict[str, Any], supabase_client: Any) -> bool:
-    lookup_ok, existing_id = _existing_source_listing_id_for_url(row, supabase_client)
-    if not lookup_ok:
+def _delete_url_only_duplicate(row: Dict[str, Any], supabase_client: Any) -> bool:
+    try:
+        supabase_client.table("competitor_sales").delete().eq(
+            "source",
+            row.get("source"),
+        ).eq(
+            "listing_url",
+            row.get("listing_url"),
+        ).is_(
+            "source_listing_id",
+            "null",
+        ).execute()
+    except Exception as exc:  # pragma: no cover - network/db path
+        logger.error("[competitor_sales] could not delete url-only duplicate: %s", exc)
         return False
-    row_id = str(row.get("source_listing_id") or "").strip()
-    return existing_id in (None, "", row_id)
+    return True
 
 
 def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> int:
@@ -291,12 +301,33 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
                         if not _is_competitor_sales_url_conflict(row_exc):
                             logger.error("[competitor_sales] row upsert by listing id failed: %s", row_exc)
                             continue
-                        if not _url_fallback_is_identity_safe(row, supabase_client):
+                        lookup_ok, existing_id = _existing_source_listing_id_for_url(row, supabase_client)
+                        if not lookup_ok:
+                            continue
+                        row_id = str(row.get("source_listing_id") or "").strip()
+                        if existing_id not in (None, "", row_id):
                             logger.error(
                                 "[competitor_sales] refusing url fallback for %s because listing_url is tied to another source_listing_id",
                                 row.get("listing_url"),
                             )
                             continue
+                        if not existing_id and row_id:
+                            if not _delete_url_only_duplicate(row, supabase_client):
+                                continue
+                            try:
+                                resp = (
+                                    supabase_client.table("competitor_sales")
+                                    .upsert([row], on_conflict="source,source_listing_id", ignore_duplicates=False)
+                                    .execute()
+                                )
+                                written += len(resp.data) if resp.data else 0
+                                continue
+                            except Exception as retry_exc:  # pragma: no cover - network/db path
+                                logger.error(
+                                    "[competitor_sales] row upsert by listing id after url-only cleanup failed: %s",
+                                    retry_exc,
+                                )
+                                continue
                         try:
                             resp = (
                                 supabase_client.table("competitor_sales")
