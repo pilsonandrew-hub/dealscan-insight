@@ -87,8 +87,7 @@ async def scrape_govdeals_sold(max_pages: Optional[int] = None) -> List[Dict[str
         try:
             api_key, headers = await govdeals_sold.capture_api_key(page)
             if not api_key:
-                logger.error("[%s] failed to capture API key", SOURCE)
-                return rows
+                raise RuntimeError(f"{SOURCE} failed to capture completed-auction API key")
             lots = await govdeals_sold.fetch_completed_auctions(api_key, headers)
             logger.info("[%s] fetched %d completed lots", SOURCE, len(lots))
             for lot in lots:

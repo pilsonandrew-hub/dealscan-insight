@@ -89,6 +89,8 @@ async def _run() -> Dict[str, Any]:
             continue
 
         written = 0
+        if not dry_run and not rows:
+            summary["errors"].append(f"{source}: scraped 0 rows")
         if not dry_run and rows:
             written = write_competitor_sales(rows, client)
             if written <= 0:
