@@ -54,13 +54,19 @@ def build_telegram_reply_markup(callback_id: Any) -> dict[str, list[list[dict[st
 def build_telegram_alert_message(deal: dict[str, Any], listing_url: str, *, alert_gate: dict[str, Any] | None = None) -> str:
     """Build the HTML Telegram alert body preserving legacy message semantics."""
     score_breakdown = deal.get("score_breakdown", {}) if isinstance(deal.get("score_breakdown"), dict) else {}
-    investment_grade = score_breakdown.get("investment_grade") or "Watch"
-    roi_per_day = float(score_breakdown.get("roi_per_day") or 0)
-    headroom = float(score_breakdown.get("bid_headroom") or 0)
     alert_gate = alert_gate if isinstance(alert_gate, dict) else deal.get("alert_gate")
     alert_gate = alert_gate if isinstance(alert_gate, dict) else {}
     is_platinum = alert_gate.get("alert_type") == "platinum"
     gate_signals = alert_gate.get("signals", {}) if isinstance(alert_gate.get("signals"), dict) else {}
+    investment_grade = (
+        score_breakdown.get("investment_grade")
+        or gate_signals.get("investment_grade")
+        or deal.get("investment_grade")
+        or "Watch"
+    )
+    roi_per_day = float(score_breakdown.get("roi_per_day") or gate_signals.get("roi_per_day") or deal.get("roi_per_day") or 0)
+    headroom = float(score_breakdown.get("bid_headroom") or gate_signals.get("bid_headroom") or deal.get("bid_headroom") or 0)
+    max_bid = float(score_breakdown.get("max_bid") or gate_signals.get("max_bid") or deal.get("max_bid") or 0)
 
     pricing_maturity = gate_signals.get("pricing_maturity") or score_breakdown.get("pricing_maturity") or "unknown"
     pricing_source = gate_signals.get("pricing_source") or score_breakdown.get("pricing_source") or "unknown"
@@ -94,7 +100,7 @@ def build_telegram_alert_message(deal: dict[str, Any], listing_url: str, *, aler
             f"{telegram_html_escape(deal.get('year'))} {telegram_html_escape(deal.get('make'))} {telegram_html_escape(deal.get('model'))}\n"
             f"Grade: <b>{telegram_html_escape(investment_grade)}</b> | Score: <b>{score}</b>\n"
             f"ROI/Day: ${roi_per_day:,.0f} | Headroom: ${headroom:,.0f}\n"
-            f"Bid: ${deal.get('current_bid', 0):,.0f} | Max Bid: ${score_breakdown.get('max_bid', 0):,.0f}\n"
+            f"Bid: ${deal.get('current_bid', 0):,.0f} | Max Bid: ${max_bid:,.0f}\n"
             f"Pricing: {telegram_html_escape(pricing_maturity)} via {telegram_html_escape(pricing_source)} | Trust: {telegram_html_escape(trust_score if trust_score is not None else 'n/a')} | Conf: {telegram_html_escape(confidence if confidence is not None else 'n/a')}\n"
             f"Expected Close: {telegram_html_escape(expected_close_source)}\n"
             f"Basis: {telegram_html_escape(acquisition_basis_source)}\n"

@@ -177,9 +177,9 @@ for deal in new_alerts:
         )
 
     if alert_type == "platinum":
-        roi_day = float(deal.get("roi_per_day") or 0)
-        headroom = float(deal.get("bid_headroom") or 0)
-        max_bid = float(deal.get("max_bid") or 0)
+        roi_day = float(signals.get("roi_per_day") or deal.get("roi_per_day") or 0)
+        headroom = float(signals.get("bid_headroom") or deal.get("bid_headroom") or 0)
+        max_bid = float(signals.get("max_bid") or deal.get("max_bid") or 0)
         msg = (
             f"💎 <b>PLATINUM ALERT</b>\n\n"
             f"<b>{title}</b>\n"
