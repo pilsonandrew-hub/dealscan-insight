@@ -138,6 +138,16 @@ def _photo_count(row: dict[str, Any]) -> Optional[int]:
     return max(parsed, 0)
 
 
+def _bidder_count(row: dict[str, Any]) -> Optional[int]:
+    if "bidder_count" not in row:
+        return None
+    try:
+        parsed = int(float(row.get("bidder_count")))
+    except (TypeError, ValueError):
+        return None
+    return max(parsed, 0)
+
+
 def _parse_optional_datetime(value: Any) -> Optional[datetime]:
     if not value:
         return None
@@ -347,6 +357,11 @@ def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in active_rows
         if (photo_count := _photo_count(row)) is not None
     ]
+    known_bidder_counts = [
+        bidder_count
+        for row in active_rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
     return {
         "sample_count": len(active_rows),
         "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
@@ -359,7 +374,27 @@ def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
         "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
         "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
         "source_counts": _status_counts(active_rows, "source_site"),
+    }
+
+
+def _source_listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    known_bidder_counts = [
+        bidder_count
+        for row in rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
+    return {
+        "sample_count": len(rows),
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
+        "source_counts": _status_counts(rows, "source_site") or _status_counts(rows, "source"),
     }
 
 
@@ -389,8 +424,16 @@ def build_seller_recovery_audit() -> dict[str, Any]:
         order=("updated_at", True),
         limit=500,
     )
+    sections["source_listings"], source_listing_rows = _safe_section_rows(
+        "sonar_listings",
+        "*",
+        order=("created_at", True),
+        limit=500,
+    )
 
     candidates = _seller_recovery_candidates(opportunity_rows)
+    opportunity_bidder_available = any(_bidder_count(row) is not None for row in opportunity_rows)
+    source_bidder_available = any(_bidder_count(row) is not None for row in source_listing_rows)
     source_health = [
         {
             "source_name": str(row.get("source_name") or "unknown")[:80],
@@ -408,8 +451,21 @@ def build_seller_recovery_audit() -> dict[str, Any]:
     ]
     unsupported_dimensions = {
         "bidder_depth": {
-            "status": "unavailable",
-            "reason": "No governed bidder-count field is currently written across active source rows.",
+            "status": "available" if opportunity_bidder_available or source_bidder_available else "unavailable",
+            "evidence_surface": (
+                "opportunities"
+                if opportunity_bidder_available
+                else "source_mirror"
+                if source_bidder_available
+                else None
+            ),
+            "reason": (
+                "Governed opportunity bidder_count evidence is present on sampled rows."
+                if opportunity_bidder_available
+                else "Governed source mirror bidder_count evidence is present on sampled rows."
+                if source_bidder_available
+                else "No governed bidder-count evidence is currently present across sampled opportunity or source mirror rows."
+            ),
         },
         "photo_count": {
             "status": "available" if _has_column(opportunity_rows, "photo_count") else "unavailable",
@@ -438,6 +494,7 @@ def build_seller_recovery_audit() -> dict[str, Any]:
         "sections": sections,
         "source_health": source_health,
         "listing_quality": _listing_quality_summary(opportunity_rows),
+        "source_listing_quality": _source_listing_quality_summary(source_listing_rows),
         "delivery_status_counts": _status_counts(delivery_rows, "status"),
         "delivery_reason_counts": _seller_recovery_reason_counts(delivery_rows),
         "parse_event_status_counts": _status_counts(parse_event_rows, "status"),

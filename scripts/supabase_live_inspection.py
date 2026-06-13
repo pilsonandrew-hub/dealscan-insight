@@ -211,6 +211,15 @@ def _photo_count(row: dict[str, Any]) -> int | None:
     return max(parsed, 0)
 
 
+def _bidder_count(row: dict[str, Any]) -> int | None:
+    if "bidder_count" not in row:
+        return None
+    parsed = _coerce_int(row.get("bidder_count"))
+    if parsed is None:
+        return None
+    return max(parsed, 0)
+
+
 def _raw_photo_evidence_count(row: dict[str, Any]) -> int:
     raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
     for key in ("photos", "photo_urls"):
@@ -322,6 +331,8 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     channel_counts: Counter[str] = Counter()
     reason_counts: Counter[str] = Counter()
     listing_ids: set[str] = set()
+    opportunity_ids: set[str] = set()
+    rows_with_opportunity_id = 0
     latest_created_at = None
     latest_updated_at = None
     for row in rows:
@@ -335,6 +346,10 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         listing_id = row.get("listing_id")
         if listing_id:
             listing_ids.add(str(listing_id))
+        opportunity_id = row.get("opportunity_id")
+        if opportunity_id:
+            rows_with_opportunity_id += 1
+            opportunity_ids.add(str(opportunity_id))
         created_at = row.get("created_at")
         updated_at = row.get("updated_at")
         if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
@@ -344,6 +359,8 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "row_count": len(rows),
         "distinct_listing_ids": len(listing_ids),
+        "rows_with_opportunity_id": rows_with_opportunity_id,
+        "distinct_opportunity_ids": len(opportunity_ids),
         "status_counts": dict(status_counts.most_common(20)),
         "channel_counts": dict(channel_counts.most_common(20)),
         "sanitized_error_counts": dict(reason_counts.most_common(20)),
@@ -541,6 +558,7 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
     vin_present = 0
     mileage_present = 0
     photo_counts: list[int] = []
+    bidder_counts: list[int] = []
     raw_photo_evidence_rows = 0
     suppressed_raw_photo_evidence_rows = 0
     for row in rows:
@@ -554,6 +572,9 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
         photo_count = _photo_count(row)
         if photo_count is not None:
             photo_counts.append(photo_count)
+        bidder_count = _bidder_count(row)
+        if bidder_count is not None:
+            bidder_counts.append(bidder_count)
         raw_photo_count = _raw_photo_evidence_count(row)
         if raw_photo_count > 0:
             raw_photo_evidence_rows += 1
@@ -572,6 +593,11 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
         "positive_photo_count_rows": sum(1 for count in photo_counts if count > 0),
         "max_photo_count": max(photo_counts) if photo_counts else None,
         "average_photo_count": round(sum(photo_counts) / len(photo_counts), 2) if photo_counts else None,
+        "bidder_count_known_rows": len(bidder_counts),
+        "zero_bidder_count_rows": sum(1 for count in bidder_counts if count == 0),
+        "positive_bidder_count_rows": sum(1 for count in bidder_counts if count > 0),
+        "max_bidder_count": max(bidder_counts) if bidder_counts else None,
+        "average_bidder_count": round(sum(bidder_counts) / len(bidder_counts), 2) if bidder_counts else None,
     }
 
 
@@ -806,6 +832,11 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         for row in active_rows
         if (photo_count := _photo_count(row)) is not None
     ]
+    known_bidder_counts = [
+        bidder_count
+        for row in active_rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
     raw_photo_evidence_rows = [
         row for row in active_rows
         if _raw_photo_evidence_count(row) > 0
@@ -822,11 +853,34 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
         "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
         "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
         "raw_photo_evidence_count": len(raw_photo_evidence_rows),
         "suppressed_raw_photo_evidence_count": sum(
             1 for row in raw_photo_evidence_rows
             if (_photo_count(row) or 0) <= 0
         ),
+    }
+
+
+def _summarize_source_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    known_bidder_counts = [
+        bidder_count
+        for row in rows
+        if (bidder_count := _bidder_count(row)) is not None
+    ]
+    source_counts: Counter[str] = Counter()
+    for row in rows:
+        source_counts[str(row.get("source_site") or row.get("source") or "unknown")[:80]] += 1
+    return {
+        "sample_count": len(rows),
+        "bidder_count_known_count": len(known_bidder_counts),
+        "zero_bidder_count": sum(1 for count in known_bidder_counts if count == 0),
+        "thin_bidder_count": sum(1 for count in known_bidder_counts if count < 3),
+        "average_bidder_count": round(sum(known_bidder_counts) / len(known_bidder_counts), 2) if known_bidder_counts else None,
+        "source_counts": dict(source_counts.most_common(20)),
     }
 
 
@@ -868,16 +922,33 @@ def _seller_recovery_candidates_from_opportunities(rows: list[dict[str, Any]], *
 def _summarize_seller_recovery_audit(
     *,
     opportunity_rows: list[dict[str, Any]],
+    source_listing_rows: list[dict[str, Any]] | None = None,
     source_health_rows: list[dict[str, Any]],
     delivery_rows: list[dict[str, Any]],
     parse_event_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    source_listing_rows = source_listing_rows or []
     candidates = _seller_recovery_candidates_from_opportunities(opportunity_rows)
     source_names = {row.get("source_name") for row in source_health_rows if row.get("source_name")}
+    opportunity_bidder_available = any(_bidder_count(row) is not None for row in opportunity_rows)
+    source_bidder_available = any(_bidder_count(row) is not None for row in source_listing_rows)
     unsupported_dimensions = {
         "bidder_depth": {
-            "status": "unavailable",
-            "reason": "No governed bidder-count field is currently written across active source rows.",
+            "status": "available" if opportunity_bidder_available or source_bidder_available else "unavailable",
+            "evidence_surface": (
+                "opportunities"
+                if opportunity_bidder_available
+                else "source_mirror"
+                if source_bidder_available
+                else None
+            ),
+            "reason": (
+                "Governed opportunity bidder_count evidence is present on sampled rows."
+                if opportunity_bidder_available
+                else "Governed source mirror bidder_count evidence is present on sampled rows."
+                if source_bidder_available
+                else "No governed bidder-count evidence is currently present across sampled opportunity or source mirror rows."
+            ),
         },
         "photo_count": {
             "status": "available" if _has_column(opportunity_rows, "photo_count") else "unavailable",
@@ -899,6 +970,7 @@ def _summarize_seller_recovery_audit(
             ],
         },
         "listing_quality": _summarize_listing_quality_for_seller_recovery(opportunity_rows),
+        "source_listing_quality": _summarize_source_listing_quality_for_seller_recovery(source_listing_rows),
         "delivery_status_counts": _summarize_recent_delivery_truth(delivery_rows).get("status_counts", {}),
         "parse_event_status_counts": _summarize_parse_event_rows(parse_event_rows).get("status_counts", {}),
         "parse_event_type_counts": _summarize_parse_event_rows(parse_event_rows).get("event_type_counts", {}),
@@ -911,7 +983,16 @@ def _summarize_seller_recovery_audit(
 def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[str, Any]:
     delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
     delivery_select = ",".join([
-        col for col in ["run_id", "listing_id", "channel", "status", "error_message", "created_at", "updated_at"]
+        col for col in [
+            "run_id",
+            "listing_id",
+            "opportunity_id",
+            "channel",
+            "status",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
         if col in delivery_columns
     ]) or "run_id,status"
     _, _, delivery_rows = _request(
@@ -993,6 +1074,7 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
             "vin",
             "mileage",
             "photo_count",
+            "bidder_count",
             "created_at",
             "processed_at",
             "raw_data",
@@ -1008,6 +1090,18 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         str(row.get("listing_id"))
         for row in delivery_rows if isinstance(row, dict) and row.get("listing_id")
     })
+    delivery_opportunity_ids = sorted({
+        str(row.get("opportunity_id"))
+        for row in delivery_rows if isinstance(row, dict) and row.get("opportunity_id")
+    })
+    if "id" in opportunity_columns and delivery_opportunity_ids:
+        for start in range(0, len(delivery_opportunity_ids), 100):
+            opportunity_id_chunk = delivery_opportunity_ids[start:start + 100]
+            opportunity_filters.append({
+                "select": opportunity_select,
+                "id": f"in.({','.join(opportunity_id_chunk)})",
+                "limit": "200",
+            })
     if "listing_id" in opportunity_columns and delivery_listing_ids:
         for start in range(0, len(delivery_listing_ids), 100):
             listing_id_chunk = delivery_listing_ids[start:start + 100]
@@ -1145,11 +1239,35 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
         "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
         "condition_grade", "risk_flags", "listing_url", "url",
-        "photo_count", "raw_data",
+        "photo_count", "bidder_count", "raw_data",
     ]
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"
     recent_opportunities = _recent_rows(base_url, service_key, "opportunities", opportunity_select, "created_at", 200)
+
+    source_listing_rows: list[dict[str, Any]] = []
+    try:
+        source_listing_columns = _available_columns(base_url, service_key, "sonar_listings")
+        source_listing_select = ",".join([
+            col for col in [
+                "created_at",
+                "source_site",
+                "source",
+                "bidder_count",
+            ]
+            if col in source_listing_columns
+        ]) or "created_at"
+        source_listing_order = "created_at" if "created_at" in source_listing_columns else source_listing_select.split(",", 1)[0]
+        source_listing_rows = _recent_rows(
+            base_url,
+            service_key,
+            "sonar_listings",
+            source_listing_select,
+            source_listing_order,
+            200,
+        )
+    except Exception:
+        source_listing_rows = []
 
     alert_columns = _available_columns(base_url, service_key, "alert_log")
     alert_order = "created_at" if "created_at" in alert_columns else "sent_at"
@@ -1306,6 +1424,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
 
     seller_recovery_audit = _summarize_seller_recovery_audit(
         opportunity_rows=recent_opportunities,
+        source_listing_rows=source_listing_rows,
         source_health_rows=source_health_rows,
         delivery_rows=delivery_rows,
         parse_event_rows=parse_event_rows,

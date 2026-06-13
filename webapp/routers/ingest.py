@@ -172,22 +172,52 @@ def _alert_thresholds():
     return build_alert_thresholds(os.environ, log=logger)
 
 
-def _alert_delivery_exists_for_opportunity(opportunity_id: Optional[str]) -> bool:
-    """Return True when a prior sent alert receipt exists for an opportunity."""
+def _normalize_alert_type(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"hot_deal", "hot"}:
+        return "hot"
+    if normalized == "platinum":
+        return "platinum"
+    return normalized
+
+
+def _alert_type_satisfies(current_alert_type: Optional[str], prior_alert_type: Optional[str]) -> bool:
+    current = _normalize_alert_type(current_alert_type)
+    prior = _normalize_alert_type(prior_alert_type) or "hot"
+    if not current:
+        return bool(prior)
+    if current == "platinum":
+        return prior == "platinum"
+    if current == "hot":
+        return prior in {"hot", "platinum"}
+    return prior == current
+
+
+def _alert_delivery_exists_for_opportunity(
+    opportunity_id: Optional[str],
+    desired_alert_type: Optional[str] = None,
+) -> bool:
+    """Return True when a prior sent alert receipt satisfies the current alert tier."""
     if not opportunity_id or supabase_client is None:
         return False
     try:
         alert_log_result = (
             supabase_client.table("alert_log")
-            .select("id")
+            .select("id,alert_type,delivery_state")
             .eq("opportunity_id", opportunity_id)
-            .limit(1)
             .execute()
         )
-        if alert_log_result.data:
-            return True
+        for row in alert_log_result.data or []:
+            delivery_state = str(row.get("delivery_state") or "sent").lower()
+            if delivery_state == "failed":
+                continue
+            if _alert_type_satisfies(desired_alert_type, row.get("alert_type")):
+                return True
     except Exception as exc:
         logger.warning("[ALERT_RECOVERY] alert_log lookup failed for opportunity_id=%s: %s", opportunity_id, exc)
+    desired = _normalize_alert_type(desired_alert_type)
+    if desired and desired != "hot":
+        return False
     try:
         delivery_result = (
             supabase_client.table("ingest_delivery_log")
@@ -207,6 +237,7 @@ def _should_evaluate_alert_delivery(
     save_status: str,
     is_existing_listing: bool,
     opportunity_id: Optional[str],
+    desired_alert_type: Optional[str] = None,
 ) -> bool:
     inserted_statuses = {"saved_supabase", "saved_direct_pg"}
     existing_statuses = {
@@ -221,7 +252,7 @@ def _should_evaluate_alert_delivery(
     if save_status in inserted_statuses and not is_existing_listing:
         return True
     if save_status in existing_statuses and is_existing_listing and opportunity_id:
-        return not _alert_delivery_exists_for_opportunity(opportunity_id)
+        return not _alert_delivery_exists_for_opportunity(opportunity_id, desired_alert_type)
     return False
 
 WEBHOOK_SECRET = os.getenv("APIFY_WEBHOOK_SECRET", "").strip()
@@ -1562,8 +1593,13 @@ async def _process_webhook_items(
                 + f" | save={save_status}"
             )
 
-            if _should_evaluate_alert_delivery(save_status, is_existing_listing, saved_opportunity_id):
-                alert_gate = _alert_gate_for_vehicle(vehicle)
+            alert_gate = _alert_gate_for_vehicle(vehicle)
+            if _should_evaluate_alert_delivery(
+                save_status,
+                is_existing_listing,
+                saved_opportunity_id,
+                alert_gate.get("alert_type"),
+            ):
                 if alert_gate.get("eligible"):
                     logger.info(
                         "[ALERT_GATE] eligible | %s | %s",
@@ -2053,6 +2089,17 @@ def normalize_apify_vehicle(
             "auction_fee",
             "auctionfee",
         )
+        bidder_count = _extract_numeric_key(
+            "bidder_count",
+            "bid_count",
+            "bidCount",
+            "bids_count",
+            "bidsCount",
+            "number_of_bids",
+            "numberOfBids",
+            "num_bids",
+            "numBids",
+        )
 
         item_run_id = (
             item.get("source_run_id")
@@ -2097,6 +2144,7 @@ def normalize_apify_vehicle(
             "buyer_premium": buyer_premium,
             "doc_fee": doc_fee,
             "auction_fees": auction_fees,
+            "bidder_count": int(bidder_count) if bidder_count is not None else None,
             "mileage": mileage,
             "description": description,
             "detail_text": detail_text,
@@ -2557,6 +2605,26 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         return None
 
     opp_id = deal.get("opportunity_id")
+    alert_gate = _alert_gate_for_vehicle(deal)
+    desired_alert_type = alert_gate.get("alert_type")
+    if not alert_gate.get("eligible"):
+        blocking_reasons = alert_gate.get("blocking_reasons") or ["unknown"]
+        logger.info(
+            "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
+            alert_gate.get("summary"),
+            ",".join(blocking_reasons),
+            deal.get("title", "?")[:80],
+        )
+        _record_delivery_log(
+            run_id=run_id,
+            listing_id=listing_id,
+            listing_url=listing_url,
+            opportunity_id=deal.get("opportunity_id"),
+            channel="telegram_alert",
+            status="skipped_gate",
+            error_message=",".join(str(reason) for reason in blocking_reasons),
+        )
+        return None
 
     # 6-hour suppression check
     if supabase_client is not None and opp_id:
@@ -2564,12 +2632,16 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
             alert_suppression_cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
             recent = (
                 supabase_client.table("alert_log")
-                .select("id")
+                .select("id,alert_type,delivery_state")
                 .eq("opportunity_id", opp_id)
                 .gte("sent_at", alert_suppression_cutoff)
                 .execute()
             )
-            if recent.data:
+            if any(
+                str(row.get("delivery_state") or "sent").lower() != "failed"
+                and _alert_type_satisfies(desired_alert_type, row.get("alert_type"))
+                for row in (recent.data or [])
+            ):
                 logger.info("[ALERT SUPPRESSED] already alerted within 6hrs")
                 _record_delivery_log(
                     run_id=run_id,
@@ -2608,25 +2680,6 @@ async def send_telegram_alert(deal: dict) -> Optional[str]:
         import httpx
 
         callback_id = opp_id or "unknown"
-        alert_gate = _alert_gate_for_vehicle(deal)
-        if not alert_gate.get("eligible"):
-            blocking_reasons = alert_gate.get("blocking_reasons") or ["unknown"]
-            logger.info(
-                "[ALERT_GATE] send skipped | %s | reasons=%s | %s",
-                alert_gate.get("summary"),
-                ",".join(blocking_reasons),
-                deal.get("title", "?")[:80],
-            )
-            _record_delivery_log(
-                run_id=run_id,
-                listing_id=listing_id,
-                listing_url=listing_url,
-                opportunity_id=deal.get("opportunity_id"),
-                channel="telegram_alert",
-                status="skipped_gate",
-                error_message=",".join(str(reason) for reason in blocking_reasons),
-            )
-            return None
         score_breakdown = deal.get("score_breakdown", {})
         investment_grade = score_breakdown.get("investment_grade") or "Watch"
         is_platinum = alert_gate.get("alert_type") == "platinum"
@@ -2721,12 +2774,15 @@ async def insert_alert_log(vehicle: dict, message_id: str) -> bool:
 
     alert_key = vehicle.get("opportunity_id") or vehicle.get("listing_url") or vehicle.get("title") or "unknown"
     alert_id = hashlib.sha256(f"{vehicle.get('run_id', '')}:{alert_key}".encode()).hexdigest()[:64]
+    alert_gate = vehicle.get("alert_gate") if isinstance(vehicle.get("alert_gate"), dict) else {}
+    alert_type = _normalize_alert_type(alert_gate.get("alert_type")) or "hot"
     row = {
         "opportunity_id": vehicle.get("opportunity_id"),
         "run_id": vehicle.get("run_id"),
         "alert_id": alert_id,
         "message_id": message_id,
         "channel": "telegram",
+        "alert_type": "platinum" if alert_type == "platinum" else "hot",
         "delivery_state": "sent",
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "dos_score": vehicle.get("score_breakdown", {}).get("dos_score", vehicle.get("dos_score", 0)),
@@ -3323,7 +3379,7 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
     try:
         result = (
             supabase_client.table("opportunities")
-            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id,photo_count")
+            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id,photo_count,bidder_count")
             .eq("id", existing_id)
             .limit(1)
             .execute()
@@ -3659,6 +3715,20 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
         current_photo_count = 0
     if incoming_photo_count > current_photo_count:
         update["photo_count"] = incoming_photo_count
+    incoming_bidder_count = row.get("bidder_count")
+    current_bidder_count = existing.get("bidder_count")
+    try:
+        incoming_bidder_count = int(incoming_bidder_count)
+    except (TypeError, ValueError):
+        incoming_bidder_count = None
+    try:
+        current_bidder_count = int(current_bidder_count)
+    except (TypeError, ValueError):
+        current_bidder_count = None
+    if incoming_bidder_count is not None and (
+        current_bidder_count is None or incoming_bidder_count > current_bidder_count
+    ):
+        update["bidder_count"] = incoming_bidder_count
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
     return update

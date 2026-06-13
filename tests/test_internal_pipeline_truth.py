@@ -85,6 +85,7 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
                 "auction_end_date": None,
                 "risk_flags": ["missing_photos"],
                 "photo_count": 0,
+                "bidder_count": None,
                 "listing_url": "https://example.test/private",
                 "raw_data": {"description": "private text", "vin": "1FTFW1E50PFA00000"},
             },
@@ -105,7 +106,16 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
                 "auction_end_date": "2026-06-20T00:00:00Z",
                 "risk_flags": [],
                 "photo_count": 5,
+                "bidder_count": 9,
             },
+        ],
+        "sonar_listings": [
+            {
+                "source_site": "hibid",
+                "source": "hibid",
+                "bidder_count": 12,
+                "created_at": "2026-06-13T14:00:00Z",
+            }
         ],
     }))
 
@@ -124,11 +134,18 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
     assert result["listing_quality"]["photo_count_known_count"] == 2
     assert result["listing_quality"]["zero_photo_count"] == 1
     assert result["listing_quality"]["low_photo_count_count"] == 1
+    assert result["listing_quality"]["bidder_count_known_count"] == 1
+    assert result["listing_quality"]["zero_bidder_count"] == 0
+    assert result["listing_quality"]["thin_bidder_count"] == 0
+    assert result["listing_quality"]["average_bidder_count"] == 9.0
+    assert result["source_listing_quality"]["bidder_count_known_count"] == 1
+    assert result["source_listing_quality"]["average_bidder_count"] == 12.0
     assert result["delivery_status_counts"] == {"skipped_margin": 1, "skipped_gate": 1}
     assert result["parse_event_status_counts"] == {"skipped_margin": 1, "saved": 1}
     assert result["parse_event_type_counts"] == {"db_save": 2}
-    assert result["unsupported_dimensions"]["bidder_depth"]["status"] == "unavailable"
+    assert result["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
     assert result["unsupported_dimensions"]["photo_count"]["status"] == "available"
+    assert "bidder_depth" not in result["summary"]["unavailable_dimensions"]
     assert "photo_count" not in result["summary"]["unavailable_dimensions"]
     assert result["value_leak_candidates"] == [
         {

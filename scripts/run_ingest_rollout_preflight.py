@@ -49,7 +49,15 @@ REQUIRED_TABLE_COLUMNS = {
         "status",
         "updated_at",
     },
+    ("public", "alert_log"): {
+        "alert_type",
+        "channel",
+        "delivery_state",
+        "opportunity_id",
+        "sent_at",
+    },
     ("public", "opportunities"): {
+        "bidder_count",
         "bid_change_count",
         "first_seen_at",
         "is_duplicate",
@@ -265,6 +273,7 @@ def inspect_ingest_schema(dsn: str) -> tuple[list[str], list[str]]:
                 where (table_schema, table_name) in (
                   ('public', 'webhook_log'),
                   ('public', 'ingest_delivery_log'),
+                  ('public', 'alert_log'),
                   ('public', 'opportunities'),
                   ('public', 'scrape_runs'),
                   ('public', 'parse_events'),

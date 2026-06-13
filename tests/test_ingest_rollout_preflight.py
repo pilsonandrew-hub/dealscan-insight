@@ -108,9 +108,10 @@ class IngestRolloutPreflightTests(unittest.TestCase):
             errors,
         )
         self.assertIn(
-            "missing required columns in public.opportunities: is_duplicate, photo_count, source_fingerprint",
+            "missing required columns in public.opportunities: bidder_count, is_duplicate, photo_count, source_fingerprint",
             errors,
         )
+        self.assertIn("missing required table: public.alert_log", errors)
         self.assertIn("missing required table: public.scrape_runs", errors)
         self.assertIn("missing required table: public.parse_events", errors)
         self.assertIn("missing required table: public.source_health_daily", errors)
