@@ -57,9 +57,13 @@ def _resolve_photo_count(vehicle: dict[str, Any]) -> int:
         photos = vehicle.get("photo_urls")
 
     if isinstance(photos, list):
-        return len([photo for photo in photos if photo])
+        count = len([photo for photo in photos if photo])
+        if count:
+            return count
     if isinstance(photos, tuple):
-        return len([photo for photo in photos if photo])
+        count = len([photo for photo in photos if photo])
+        if count:
+            return count
     if isinstance(photos, str) and photos.strip():
         return 1
 

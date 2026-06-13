@@ -1995,11 +1995,13 @@ def normalize_apify_vehicle(
         listing_url = item.get("url") or item.get("listing_url") or ""
 
         # Photo: parseforge uses imageUrl or photos[]
-        photos = item.get("photos", [])
+        photos = item.get("photos") or []
         photo_url = (
             item.get("image_url") or item.get("photo_url") or
             item.get("imageUrl") or (photos[0] if photos else "")
         )
+        if photo_url and not photos:
+            photos = [photo_url]
 
         # Agency: parseforge uses seller
         agency = item.get("seller") or item.get("agency_name") or ""
