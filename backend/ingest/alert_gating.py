@@ -13,6 +13,7 @@ from backend.business_rules.constants import (
     PLATINUM_MIN_ROI_PER_DAY,
     PRICING_MATURITY_ALERT_ALLOWED,
 )
+from backend.business_rules.gates import determine_vehicle_tier
 from backend.business_rules.pricing import pricing_allows_hot_alert
 
 ALERT_ALLOWED_PRICING_MATURITIES = PRICING_MATURITY_ALERT_ALLOWED
@@ -147,6 +148,110 @@ def has_source_condition_evidence(record: Mapping[str, Any]) -> bool:
     return False
 
 
+def _pick_vehicle_tier(record: Mapping[str, Any], breakdown: Mapping[str, Any]) -> str:
+    for value in (
+        record.get("vehicle_tier"),
+        breakdown.get("vehicle_tier"),
+        record.get("designated_lane"),
+        breakdown.get("designated_lane"),
+    ):
+        tier = str(value or "").strip().lower()
+        if tier and tier != "unassigned":
+            return tier
+    return determine_vehicle_tier(record.get("year"), record.get("mileage"))
+
+
+def _estimate_days_to_sale_for_alert(
+    *,
+    vehicle_tier: str,
+    score: float,
+    pricing_maturity: str,
+    retail_comp_count: Optional[float],
+    retail_comp_confidence: Optional[float],
+    auction_stage_hours_remaining: Optional[float],
+) -> Optional[int]:
+    if vehicle_tier == "rejected" or score <= 0:
+        return None
+
+    days = 45.0
+    if score >= 90:
+        days -= 16.0
+    elif score >= 80:
+        days -= 12.0
+    elif score >= 65:
+        days -= 6.0
+
+    if vehicle_tier == "premium":
+        days -= 5.0
+    elif vehicle_tier == "standard":
+        days += 4.0
+
+    if pricing_maturity == "live_market":
+        days -= 6.0
+    elif pricing_maturity == "market_comp":
+        days -= 4.0
+
+    if retail_comp_count is not None and retail_comp_count >= 3:
+        days -= 3.0
+
+    if retail_comp_confidence is not None:
+        confidence_norm = retail_comp_confidence if retail_comp_confidence <= 1 else retail_comp_confidence / 100.0
+        if confidence_norm >= 0.80:
+            days -= 2.0
+
+    if auction_stage_hours_remaining is not None and auction_stage_hours_remaining <= 72:
+        days -= 2.0
+
+    return int(round(max(7.0, min(days, 90.0))))
+
+
+def _derive_alert_roi_per_day(
+    record: Mapping[str, Any],
+    breakdown: Mapping[str, Any],
+    *,
+    score: float,
+    pricing_maturity: str,
+    vehicle_tier: str,
+    retail_comp_count: Optional[float],
+    retail_comp_confidence: Optional[float],
+) -> tuple[float, Optional[int]]:
+    explicit_roi = _pick_numeric(record.get("roi_per_day"), breakdown.get("roi_per_day"))
+    explicit_days = _pick_numeric(
+        record.get("estimated_days_to_sale"),
+        breakdown.get("estimated_days_to_sale"),
+    )
+    if explicit_roi is not None:
+        return explicit_roi, int(round(explicit_days)) if explicit_days else None
+
+    auction_stage_hours_remaining = _pick_numeric(
+        record.get("auction_stage_hours_remaining"),
+        breakdown.get("auction_stage_hours_remaining"),
+    )
+    estimated_days = (
+        int(round(explicit_days))
+        if explicit_days and explicit_days > 0
+        else _estimate_days_to_sale_for_alert(
+            vehicle_tier=vehicle_tier,
+            score=score,
+            pricing_maturity=pricing_maturity,
+            retail_comp_count=retail_comp_count,
+            retail_comp_confidence=retail_comp_confidence,
+            auction_stage_hours_remaining=auction_stage_hours_remaining,
+        )
+    )
+    gross_margin = _pick_numeric(
+        record.get("gross_margin"),
+        breakdown.get("gross_margin"),
+        record.get("margin"),
+        breakdown.get("margin"),
+        record.get("wholesale_margin"),
+        breakdown.get("wholesale_margin"),
+    )
+    if not estimated_days or not gross_margin or gross_margin <= 0:
+        return 0.0, estimated_days
+    return round(gross_margin / estimated_days, 2), estimated_days
+
+
 def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
     breakdown = _score_breakdown(record)
     pricing_maturity = _pick_text(record.get("pricing_maturity"), breakdown.get("pricing_maturity")) or "unknown"
@@ -157,19 +262,34 @@ def collect_alert_signals(record: Mapping[str, Any]) -> dict[str, Any]:
         breakdown.get("expected_close_source"),
     ) or "unknown"
     confidence, confidence_invalid = _pick_confidence(record, breakdown)
+    score = _pick_numeric(record.get("dos_score"), record.get("score"), breakdown.get("dos_score"), breakdown.get("score")) or 0.0
+    retail_comp_count = _pick_numeric(record.get("retail_comp_count"), breakdown.get("retail_comp_count"))
+    retail_comp_confidence = _pick_numeric(
+        record.get("retail_comp_confidence"),
+        breakdown.get("retail_comp_confidence"),
+    )
+    vehicle_tier = _pick_vehicle_tier(record, breakdown)
+    roi_per_day, estimated_days_to_sale = _derive_alert_roi_per_day(
+        record,
+        breakdown,
+        score=score,
+        pricing_maturity=pricing_maturity,
+        vehicle_tier=vehicle_tier,
+        retail_comp_count=retail_comp_count,
+        retail_comp_confidence=retail_comp_confidence,
+    )
 
     return {
-        "score": _pick_numeric(record.get("dos_score"), record.get("score"), breakdown.get("dos_score"), breakdown.get("score")) or 0.0,
+        "score": score,
         "investment_grade": investment_grade,
-        "roi_per_day": _pick_numeric(record.get("roi_per_day"), breakdown.get("roi_per_day")) or 0.0,
+        "roi_per_day": roi_per_day,
+        "estimated_days_to_sale": estimated_days_to_sale,
         "bid_headroom": _pick_numeric(record.get("bid_headroom"), breakdown.get("bid_headroom")) or 0.0,
         "pricing_maturity": pricing_maturity,
         "pricing_source": pricing_source,
-        "retail_comp_count": _pick_numeric(record.get("retail_comp_count"), breakdown.get("retail_comp_count")),
-        "retail_comp_confidence": _pick_numeric(
-            record.get("retail_comp_confidence"),
-            breakdown.get("retail_comp_confidence"),
-        ),
+        "vehicle_tier": vehicle_tier,
+        "retail_comp_count": retail_comp_count,
+        "retail_comp_confidence": retail_comp_confidence,
         "current_bid_trust_score": _pick_numeric(
             record.get("current_bid_trust_score"),
             breakdown.get("current_bid_trust_score"),

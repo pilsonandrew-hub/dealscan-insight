@@ -271,6 +271,27 @@ def test_alert_gate_allows_valid_high_confidence_record_with_otherwise_strong_si
     assert gate["blocking_reasons"] == []
 
 
+def test_alert_gate_derives_roi_day_for_legacy_platinum_market_comp_rows():
+    legacy_record = _otherwise_alert_eligible_record(
+        dos_score=84.2,
+        investment_grade="Platinum",
+        roi_per_day=None,
+        estimated_days_to_sale=None,
+        gross_margin=18000,
+        margin=18000,
+        vehicle_tier="premium",
+        auction_stage_hours_remaining=48,
+    )
+
+    gate = evaluate_alert_gate(legacy_record, thresholds=AlertThresholds())
+
+    assert gate["eligible"] is True
+    assert gate["alert_type"] == "platinum"
+    assert gate["blocking_reasons"] == []
+    assert gate["signals"]["roi_per_day"] >= AlertThresholds().platinum_min_roi_day
+    assert gate["signals"]["estimated_days_to_sale"] is not None
+
+
 def test_alert_gate_blocks_good_condition_grade_without_source_condition_evidence():
     gate = evaluate_alert_gate(
         _otherwise_alert_eligible_record(raw_data={}),

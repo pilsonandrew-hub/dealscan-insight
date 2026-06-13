@@ -98,6 +98,42 @@ def test_build_platinum_telegram_alert_message_includes_roi_and_headroom():
     assert "Retail evidence: count=5, conf=0.82" in text
 
 
+def test_build_platinum_telegram_alert_message_uses_gate_derived_roi_when_score_breakdown_is_legacy():
+    deal = {
+        "opportunity_id": "opp_legacy",
+        "year": 2025,
+        "make": "Ford",
+        "model": "Explorer",
+        "state": "CA",
+        "current_bid": 12000,
+        "dos_score": 84.2,
+        "investment_grade": "Platinum",
+        "bid_headroom": 2500,
+        "max_bid": 18000,
+    }
+    alert_gate = {
+        "eligible": True,
+        "alert_type": "platinum",
+        "signals": {
+            "investment_grade": "Platinum",
+            "roi_per_day": 947.37,
+            "bid_headroom": 2500,
+            "max_bid": 18000,
+            "pricing_maturity": "market_comp",
+            "pricing_source": "market_comps",
+            "expected_close_source": "retail_comp_projection",
+            "acquisition_basis_source": "expected_close",
+        },
+    }
+
+    text = build_telegram_alert_message(deal, "https://example.com/asset/legacy", alert_gate=alert_gate)
+
+    assert "<b>PLATINUM ALERT</b>" in text
+    assert "Grade: <b>Platinum</b>" in text
+    assert "ROI/Day: $947 | Headroom: $2,500" in text
+    assert "Max Bid: $18,000" in text
+
+
 def test_redact_telegram_bot_token_removes_token_from_url():
     redacted = redact_telegram_bot_token(
         "https://api.telegram.org/bot1234567890:ABCdef_ghi-JKLmnopQRSTuvwxYZ/sendMessage"
