@@ -33,6 +33,7 @@ def test_build_row_requires_positive_price_and_identity():
     assert row["state"] == "TX"
     assert row["vehicle_class"] == "f-150"
     assert row["currency"] == "USD"
+    assert row["updated_at"]
 
 
 def test_extract_vin_and_state_helpers():

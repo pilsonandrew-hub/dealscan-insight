@@ -181,6 +181,7 @@ def build_competitor_sale_row(
     if not make_clean and not model_clean and not vin:
         return None
 
+    scraped_at = datetime.now(timezone.utc).isoformat()
     row: Dict[str, Any] = {
         "source": (source or "").strip().lower(),
         "source_listing_id": (str(source_listing_id).strip() if source_listing_id else None),
@@ -199,7 +200,8 @@ def build_competitor_sale_row(
         "location": (location or "").strip() or None,
         "state": normalize_state(location, state),
         "raw_payload": raw or {},
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "scraped_at": scraped_at,
+        "updated_at": scraped_at,
     }
     return row
 
