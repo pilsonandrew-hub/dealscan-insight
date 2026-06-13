@@ -21,6 +21,9 @@ def test_competitor_sales_url_upsert_conflict_target_has_non_partial_unique_inde
     assert "rows between unbounded preceding and unbounded following" in sql
     assert "create or replace function public.reconcile_competitor_sale_url_only_duplicate(row_payload jsonb)" in sql
     assert "grant execute on function public.reconcile_competitor_sale_url_only_duplicate(jsonb) to service_role" in sql
+    assert 'create policy "service role can delete competitor_sales"' in sql
+    assert "on public.competitor_sales for delete" in sql
+    assert "using (auth.role() = 'service_role')" in sql
 
     duplicate_cleanup = re.search(
         r"partition\s+by\s+source,\s*listing_url[\s\S]+"
