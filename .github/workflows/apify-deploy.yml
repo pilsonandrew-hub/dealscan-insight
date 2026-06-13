@@ -34,7 +34,7 @@ jobs:
       - name: Deploy changed actors
         run: |
           python3 << 'PYEOF'
-          import json, os, subprocess, sys, urllib.request, ssl
+          import json, os, subprocess, sys, time, urllib.request, ssl
           from pathlib import Path
 
           TOKEN = os.environ["APIFY_TOKEN"]
@@ -73,6 +73,26 @@ jobs:
               except urllib.error.HTTPError as e:
                   error_body = e.read().decode(errors="replace")[:500]
                   raise RuntimeError(f"Apify API {method} {path} failed with HTTP {e.code}: {error_body}") from e
+
+          def wait_for_terminal_build(actor_dir, build_id):
+              terminal = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
+              last_status = None
+              for _ in range(90):
+                  build = api("GET", f"/actor-builds/{build_id}")
+                  status = build.get("data", build).get("status")
+                  if status != last_status:
+                      print(json.dumps({
+                          "actor": actor_dir,
+                          "build_id": build_id,
+                          "build_status": status,
+                      }, sort_keys=True))
+                      last_status = status
+                  if status in terminal:
+                      if status != "SUCCEEDED":
+                          raise RuntimeError(f"Build {build_id} for {actor_dir} ended with {status}")
+                      return build
+                  time.sleep(10)
+              raise RuntimeError(f"Timed out waiting for build {build_id} for {actor_dir}")
 
           # NOTE: When manually triggering deploys, always use JS-safe comments:
           # echo "// deploy $(date)" >> apify/actors/ds-xxx/src/main.js
@@ -154,6 +174,7 @@ jobs:
                   if not build_id:
                       raise RuntimeError(f"Build trigger failed for {actor_dir}: {build}")
                   print(f"🔨 Build triggered: {build_id}")
+                  wait_for_terminal_build(actor_dir, build_id)
               except Exception as exc:
                   failure = f"{actor_dir}: {exc}"
                   failures.append(failure)

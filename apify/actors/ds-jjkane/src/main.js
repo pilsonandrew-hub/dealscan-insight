@@ -730,3 +730,5 @@ if (effectiveWebhookUrl && datasetItemCount > 0) {
 console.log(`[JJKANE COMPLETE] Found: ${totalFound} | Passed: ${totalPassed} | Marketcheck priced: ${totalMarketcheck}`);
 
 await Actor.exit();
+
+// deploy retry after sequential build gating 2026-06-13
