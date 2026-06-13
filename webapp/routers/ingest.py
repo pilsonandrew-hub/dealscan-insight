@@ -3321,7 +3321,7 @@ def _existing_enrichment_snapshot(existing_id: str) -> dict:
     try:
         result = (
             supabase_client.table("opportunities")
-            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id")
+            .select("vin,mileage,condition_grade,raw_data,source_run_id,run_id,photo_count")
             .eq("id", existing_id)
             .limit(1)
             .execute()
@@ -3645,6 +3645,18 @@ def _duplicate_enrichment_update(row: dict, existing: Optional[dict] = None) -> 
                 update["raw_data"] = merged_raw
     if _should_backfill_condition_grade(row, existing):
         update["condition_grade"] = row.get("condition_grade")
+    incoming_photo_count = row.get("photo_count")
+    current_photo_count = existing.get("photo_count")
+    try:
+        incoming_photo_count = int(incoming_photo_count)
+    except (TypeError, ValueError):
+        incoming_photo_count = 0
+    try:
+        current_photo_count = int(current_photo_count)
+    except (TypeError, ValueError):
+        current_photo_count = 0
+    if incoming_photo_count > current_photo_count:
+        update["photo_count"] = incoming_photo_count
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
     return update

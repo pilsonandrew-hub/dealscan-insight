@@ -198,6 +198,19 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
+def _has_column(rows: list[dict[str, Any]], column: str) -> bool:
+    return any(column in row for row in rows)
+
+
+def _photo_count(row: dict[str, Any]) -> int | None:
+    if "photo_count" not in row:
+        return None
+    parsed = _coerce_int(row.get("photo_count"))
+    if parsed is None:
+        return None
+    return max(parsed, 0)
+
+
 def _recent_rows(base_url: str, service_key: str, table: str, select: str, order_column: str, limit: int) -> list[dict[str, Any]]:
     _, _, rows = _request(
         base_url,
@@ -732,6 +745,11 @@ def _seller_recovery_candidate_reasons(row: dict[str, Any]) -> list[str]:
     risk_flags = {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}
     if "missing_photos" in risk_flags:
         reasons.append("missing_photos_flag")
+    photo_count = _photo_count(row)
+    if photo_count == 0:
+        reasons.append("zero_photo_count")
+    elif photo_count is not None and photo_count < 3:
+        reasons.append("low_photo_count")
     return reasons
 
 
@@ -745,6 +763,11 @@ def _first_positive_number(row: dict[str, Any], *keys: str) -> float | None:
 
 def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -> dict[str, Any]:
     active_rows = [row for row in rows if row.get("is_active") is not False]
+    known_photo_counts = [
+        photo_count
+        for row in active_rows
+        if (photo_count := _photo_count(row)) is not None
+    ]
     return {
         "sample_count": len(active_rows),
         "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
@@ -753,6 +776,10 @@ def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -
         "condition_unverified_count": sum(1 for row in active_rows if str(row.get("condition_grade") or "").strip().lower() in {"", "unknown", "poor"}),
         "proxy_pricing_count": sum(1 for row in active_rows if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"),
         "missing_photos_flag_count": sum(1 for row in active_rows if "missing_photos" in {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}),
+        "photo_count_known_count": len(known_photo_counts),
+        "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
+        "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
+        "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
     }
 
 
@@ -806,8 +833,12 @@ def _summarize_seller_recovery_audit(
             "reason": "No governed bidder-count field is currently written across active source rows.",
         },
         "photo_count": {
-            "status": "unavailable",
-            "reason": "Current normalized opportunity rows only prove missing_photos as a risk flag, not a reliable photo count.",
+            "status": "available" if _has_column(opportunity_rows, "photo_count") else "unavailable",
+            "reason": (
+                "Governed opportunity photo_count field is queryable on sampled rows."
+                if _has_column(opportunity_rows, "photo_count")
+                else "Current normalized opportunity rows only prove missing_photos as a risk flag, not a reliable photo count."
+            ),
         },
     }
     return {
@@ -1040,6 +1071,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
         "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
         "condition_grade", "risk_flags", "listing_url", "url",
+        "photo_count",
     ]
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"

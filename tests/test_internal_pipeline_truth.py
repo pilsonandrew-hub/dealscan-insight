@@ -84,6 +84,7 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
                 "condition_grade": "Unknown",
                 "auction_end_date": None,
                 "risk_flags": ["missing_photos"],
+                "photo_count": 0,
                 "listing_url": "https://example.test/private",
                 "raw_data": {"description": "private text", "vin": "1FTFW1E50PFA00000"},
             },
@@ -103,6 +104,7 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
                 "condition_grade": "Good",
                 "auction_end_date": "2026-06-20T00:00:00Z",
                 "risk_flags": [],
+                "photo_count": 5,
             },
         ],
     }))
@@ -119,11 +121,15 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
     assert result["listing_quality"]["missing_mileage_count"] == 1
     assert result["listing_quality"]["missing_auction_end_count"] == 1
     assert result["listing_quality"]["proxy_pricing_count"] == 1
+    assert result["listing_quality"]["photo_count_known_count"] == 2
+    assert result["listing_quality"]["zero_photo_count"] == 1
+    assert result["listing_quality"]["low_photo_count_count"] == 1
     assert result["delivery_status_counts"] == {"skipped_margin": 1, "skipped_gate": 1}
     assert result["parse_event_status_counts"] == {"skipped_margin": 1, "saved": 1}
     assert result["parse_event_type_counts"] == {"db_save": 2}
     assert result["unsupported_dimensions"]["bidder_depth"]["status"] == "unavailable"
-    assert result["unsupported_dimensions"]["photo_count"]["status"] == "unavailable"
+    assert result["unsupported_dimensions"]["photo_count"]["status"] == "available"
+    assert "photo_count" not in result["summary"]["unavailable_dimensions"]
     assert result["value_leak_candidates"] == [
         {
             "id": "recoverable-1",
@@ -142,6 +148,7 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
                 "condition_unverified",
                 "proxy_pricing",
                 "missing_photos_flag",
+                "zero_photo_count",
             ],
         }
     ]

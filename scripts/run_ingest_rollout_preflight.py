@@ -54,6 +54,7 @@ REQUIRED_TABLE_COLUMNS = {
         "first_seen_at",
         "is_duplicate",
         "last_seen_at",
+        "photo_count",
         "processed_at",
         "relist_count",
         "run_id",

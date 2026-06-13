@@ -124,6 +124,20 @@ def _as_int(value: Any) -> int:
         return 0
 
 
+def _has_column(rows: list[dict[str, Any]], column: str) -> bool:
+    return any(column in row for row in rows)
+
+
+def _photo_count(row: dict[str, Any]) -> Optional[int]:
+    if "photo_count" not in row:
+        return None
+    try:
+        parsed = int(float(row.get("photo_count")))
+    except (TypeError, ValueError):
+        return None
+    return max(parsed, 0)
+
+
 def _parse_optional_datetime(value: Any) -> Optional[datetime]:
     if not value:
         return None
@@ -282,6 +296,11 @@ def _candidate_recovery_reasons(row: dict[str, Any]) -> list[str]:
     risk_flags = {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}
     if "missing_photos" in risk_flags:
         reasons.append("missing_photos_flag")
+    photo_count = _photo_count(row)
+    if photo_count == 0:
+        reasons.append("zero_photo_count")
+    elif photo_count is not None and photo_count < 3:
+        reasons.append("low_photo_count")
     return reasons
 
 
@@ -323,6 +342,11 @@ def _seller_recovery_candidates(rows: list[dict[str, Any]], *, limit: int = 20) 
 
 def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     active_rows = [row for row in rows if row.get("is_active") is not False]
+    known_photo_counts = [
+        photo_count
+        for row in active_rows
+        if (photo_count := _photo_count(row)) is not None
+    ]
     return {
         "sample_count": len(active_rows),
         "missing_vin_count": sum(1 for row in active_rows if not row.get("vin")),
@@ -331,6 +355,10 @@ def _listing_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "condition_unverified_count": sum(1 for row in active_rows if str(row.get("condition_grade") or "").strip().lower() in {"", "unknown", "poor"}),
         "proxy_pricing_count": sum(1 for row in active_rows if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"),
         "missing_photos_flag_count": sum(1 for row in active_rows if "missing_photos" in {str(flag).strip().lower() for flag in (row.get("risk_flags") or [])}),
+        "photo_count_known_count": len(known_photo_counts),
+        "zero_photo_count": sum(1 for count in known_photo_counts if count == 0),
+        "low_photo_count_count": sum(1 for count in known_photo_counts if count < 3),
+        "average_photo_count": round(sum(known_photo_counts) / len(known_photo_counts), 2) if known_photo_counts else None,
         "source_counts": _status_counts(active_rows, "source_site"),
     }
 
@@ -384,8 +412,12 @@ def build_seller_recovery_audit() -> dict[str, Any]:
             "reason": "No governed bidder-count field is currently written across active source rows.",
         },
         "photo_count": {
-            "status": "unavailable",
-            "reason": "Current normalized opportunity rows only prove missing_photos as a risk flag, not a reliable photo count.",
+            "status": "available" if _has_column(opportunity_rows, "photo_count") else "unavailable",
+            "reason": (
+                "Governed opportunity photo_count field is queryable on sampled rows."
+                if _has_column(opportunity_rows, "photo_count")
+                else "Current normalized opportunity rows only prove missing_photos as a risk flag, not a reliable photo count."
+            ),
         },
     }
     status = "degraded" if sections["opportunities"]["status"] != "ok" else "ok"
