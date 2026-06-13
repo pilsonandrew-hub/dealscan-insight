@@ -520,6 +520,7 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
     step_counts: Counter[str] = Counter()
     vin_present = 0
     mileage_present = 0
+    photo_counts: list[int] = []
     for row in rows:
         source_counts[str(row.get("source_site") or row.get("source") or "unknown")[:80]] += 1
         step_counts[str(row.get("step_status") or row.get("status") or "unknown")[:80]] += 1
@@ -528,12 +529,20 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
             vin_present += 1
         if _coerce_float(row.get("mileage") if row.get("mileage") is not None else raw.get("mileage")) is not None:
             mileage_present += 1
+        photo_count = _photo_count(row)
+        if photo_count is not None:
+            photo_counts.append(photo_count)
     return {
         "row_count": len(rows),
         "source_counts": dict(source_counts.most_common(20)),
         "step_status_counts": dict(step_counts.most_common(20)),
         "vin_present_rows": vin_present,
         "mileage_present_rows": mileage_present,
+        "photo_count_known_rows": len(photo_counts),
+        "zero_photo_count_rows": sum(1 for count in photo_counts if count == 0),
+        "positive_photo_count_rows": sum(1 for count in photo_counts if count > 0),
+        "max_photo_count": max(photo_counts) if photo_counts else None,
+        "average_photo_count": round(sum(photo_counts) / len(photo_counts), 2) if photo_counts else None,
     }
 
 
@@ -934,7 +943,22 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
 
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([
-        col for col in ["id", "run_id", "source_run_id", "source_site", "source", "step_status", "status", "vin", "mileage", "created_at", "processed_at", "raw_data"]
+        col for col in [
+            "id",
+            "listing_id",
+            "run_id",
+            "source_run_id",
+            "source_site",
+            "source",
+            "step_status",
+            "status",
+            "vin",
+            "mileage",
+            "photo_count",
+            "created_at",
+            "processed_at",
+            "raw_data",
+        ]
         if col in opportunity_columns
     ]) or "id"
     opportunity_filters = []
@@ -942,6 +966,18 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         opportunity_filters.append({"select": opportunity_select, "run_id": f"eq.{run_id}", "limit": "200"})
     if "source_run_id" in opportunity_columns:
         opportunity_filters.append({"select": opportunity_select, "source_run_id": f"eq.{run_id}", "limit": "200"})
+    delivery_listing_ids = sorted({
+        str(row.get("listing_id"))
+        for row in delivery_rows if isinstance(row, dict) and row.get("listing_id")
+    })
+    if "listing_id" in opportunity_columns and delivery_listing_ids:
+        for start in range(0, len(delivery_listing_ids), 100):
+            listing_id_chunk = delivery_listing_ids[start:start + 100]
+            opportunity_filters.append({
+                "select": opportunity_select,
+                "listing_id": f"in.({','.join(listing_id_chunk)})",
+                "limit": "200",
+            })
     opportunity_by_id: dict[str, dict[str, Any]] = {}
     for params in opportunity_filters:
         _, _, rows = _request(base_url, service_key, "opportunities", params)
