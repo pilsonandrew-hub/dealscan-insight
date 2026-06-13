@@ -238,22 +238,18 @@ def _existing_source_listing_id_for_url(row: Dict[str, Any], supabase_client: An
     return True, str(existing_id).strip() if existing_id else None
 
 
-def _delete_url_only_duplicate(row: Dict[str, Any], supabase_client: Any) -> bool:
+def _reconcile_url_only_duplicate(row: Dict[str, Any], supabase_client: Any) -> int:
     try:
-        supabase_client.table("competitor_sales").delete().eq(
-            "source",
-            row.get("source"),
-        ).eq(
-            "listing_url",
-            row.get("listing_url"),
-        ).is_(
-            "source_listing_id",
-            "null",
-        ).execute()
+        resp = (
+            supabase_client.rpc(
+                "reconcile_competitor_sale_url_only_duplicate",
+                {"row_payload": row},
+            ).execute()
+        )
     except Exception as exc:  # pragma: no cover - network/db path
-        logger.error("[competitor_sales] could not delete url-only duplicate: %s", exc)
-        return False
-    return True
+        logger.error("[competitor_sales] could not atomically reconcile url-only duplicate: %s", exc)
+        return 0
+    return len(resp.data) if resp.data else 0
 
 
 def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> int:
@@ -312,22 +308,8 @@ def write_competitor_sales(rows: List[Dict[str, Any]], supabase_client: Any) -> 
                             )
                             continue
                         if not existing_id and row_id:
-                            if not _delete_url_only_duplicate(row, supabase_client):
-                                continue
-                            try:
-                                resp = (
-                                    supabase_client.table("competitor_sales")
-                                    .upsert([row], on_conflict="source,source_listing_id", ignore_duplicates=False)
-                                    .execute()
-                                )
-                                written += len(resp.data) if resp.data else 0
-                                continue
-                            except Exception as retry_exc:  # pragma: no cover - network/db path
-                                logger.error(
-                                    "[competitor_sales] row upsert by listing id after url-only cleanup failed: %s",
-                                    retry_exc,
-                                )
-                                continue
+                            written += _reconcile_url_only_duplicate(row, supabase_client)
+                            continue
                         try:
                             resp = (
                                 supabase_client.table("competitor_sales")

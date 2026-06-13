@@ -101,16 +101,37 @@ class _FakeCompetitorSalesTable:
         return type("Resp", (), {"data": self.calls[-1]["payload"]})()
 
 
+class _FakeRpcCall:
+    def __init__(self, client, name, params):
+        self._client = client
+        self._name = name
+        self._params = params
+
+    def execute(self):
+        self._client.rpc_calls.append({"name": self._name, "params": self._params})
+        if self._client.rpc_failures:
+            failure = self._client.rpc_failures.pop(0)
+            if failure is not None:
+                raise failure
+        row = self._params["row_payload"]
+        return type("Resp", (), {"data": [row]})()
+
+
 class _FakeSupabaseClient:
-    def __init__(self, failures=None, existing_by_url=None):
+    def __init__(self, failures=None, existing_by_url=None, rpc_failures=None):
         self.sales_table = _FakeCompetitorSalesTable(
             failures=failures,
             existing_by_url=existing_by_url,
         )
+        self.rpc_calls = []
+        self.rpc_failures = list(rpc_failures or [])
 
     def table(self, name):
         assert name == "competitor_sales"
         return self.sales_table
+
+    def rpc(self, name, params):
+        return _FakeRpcCall(self, name, params)
 
 
 def test_write_competitor_sales_uses_listing_id_conflict_when_available():
@@ -164,15 +185,19 @@ def test_write_competitor_sales_retries_only_url_conflicting_id_backed_rows():
 
     assert write_competitor_sales(rows, client) == 2
 
-    assert len(client.sales_table.calls) == 4
+    assert len(client.sales_table.calls) == 3
     assert client.sales_table.calls[0]["options"]["on_conflict"] == "source,source_listing_id"
     assert [r["source_listing_id"] for r in client.sales_table.calls[0]["payload"]] == ["17000", "17167"]
     assert client.sales_table.calls[1]["options"]["on_conflict"] == "source,source_listing_id"
     assert client.sales_table.calls[1]["payload"][0]["source_listing_id"] == "17000"
     assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
     assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
-    assert client.sales_table.calls[3]["options"]["on_conflict"] == "source,source_listing_id"
-    assert client.sales_table.calls[3]["payload"][0]["source_listing_id"] == "17167"
+    assert client.rpc_calls == [
+        {
+            "name": "reconcile_competitor_sale_url_only_duplicate",
+            "params": {"row_payload": rows[1]},
+        }
+    ]
 
 
 def test_write_competitor_sales_does_not_overwrite_conflicting_existing_listing_id():
@@ -218,7 +243,7 @@ def test_write_competitor_sales_does_not_overwrite_conflicting_existing_listing_
     ]
 
 
-def test_write_competitor_sales_url_fallback_can_claim_url_only_existing_row():
+def test_write_competitor_sales_uses_atomic_reconcile_for_url_only_existing_row():
     client = _FakeSupabaseClient(
         failures=[
             RuntimeError(
@@ -247,17 +272,17 @@ def test_write_competitor_sales_url_fallback_can_claim_url_only_existing_row():
 
     assert write_competitor_sales(rows, client) == 1
 
-    assert len(client.sales_table.calls) == 3
-    assert client.sales_table.delete_calls[0]["filters"] == {
-        "source": "govdeals",
-        "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
-        "source_listing_id": "null",
-    }
-    assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
-    assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
+    assert len(client.sales_table.calls) == 2
+    assert client.sales_table.delete_calls == []
+    assert client.rpc_calls == [
+        {
+            "name": "reconcile_competitor_sale_url_only_duplicate",
+            "params": {"row_payload": rows[0]},
+        }
+    ]
 
 
-def test_write_competitor_sales_deletes_url_only_duplicate_then_retries_listing_id():
+def test_write_competitor_sales_keeps_existing_url_row_when_atomic_reconcile_fails():
     client = _FakeSupabaseClient(
         failures=[
             RuntimeError(
@@ -275,6 +300,7 @@ def test_write_competitor_sales_deletes_url_only_duplicate_then_retries_listing_
                 "source_listing_id": None
             }
         },
+        rpc_failures=[RuntimeError("rpc unavailable")],
     )
     rows = [
         {
@@ -285,17 +311,15 @@ def test_write_competitor_sales_deletes_url_only_duplicate_then_retries_listing_
         },
     ]
 
-    assert write_competitor_sales(rows, client) == 1
+    assert write_competitor_sales(rows, client) == 0
 
-    assert len(client.sales_table.delete_calls) == 1
-    assert client.sales_table.delete_calls[0]["filters"] == {
-        "source": "govdeals",
-        "listing_url": "https://www.govdeals.com/en/asset/17167/7167",
-        "source_listing_id": "null",
-    }
-    assert len(client.sales_table.calls) == 3
-    assert client.sales_table.calls[2]["options"]["on_conflict"] == "source,source_listing_id"
-    assert client.sales_table.calls[2]["payload"][0]["source_listing_id"] == "17167"
+    assert client.sales_table.delete_calls == []
+    assert client.rpc_calls == [
+        {
+            "name": "reconcile_competitor_sale_url_only_duplicate",
+            "params": {"row_payload": rows[0]},
+        }
+    ]
 
 
 def test_write_competitor_sales_retries_url_only_rows_individually_after_batch_failure():
