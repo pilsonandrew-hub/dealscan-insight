@@ -235,6 +235,8 @@ function isVehicle(desc = '') {
 
 // DC location fix — "Dist. of Columbia" doesn't match standard state names
 const DC_PATTERN = /dist.*columbia|washington.*d\.?c\.?/i;
+const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
+const PREMIUM_MAX_MILEAGE = 50000;
 
 function isMileageOverLimit(mileage, maxMileage) {
     return mileage !== null && mileage !== undefined && maxMileage > 0 && mileage > maxMileage;
@@ -248,6 +250,10 @@ function isAgeOverLimit(year, maxAgeYears, now = new Date()) {
 function isMilesPerYearOverLimit(year, mileage, maxMilesPerYear = 18000, now = new Date()) {
     if (!year || mileage === null || mileage === undefined || mileage <= 0) return false;
     const ageYears = Math.max(1, now.getFullYear() - Number(year));
+    // Premium lane (<= PREMIUM_MAX_MODEL_AGE_YEARS old AND <= PREMIUM_MAX_MILEAGE) is exempt from
+    // the standard-lane miles/year cap, mirroring backend determine_vehicle_tier. Without this,
+    // late-model high-mileage fleet vehicles are silently dropped before scoring.
+    if (ageYears <= PREMIUM_MAX_MODEL_AGE_YEARS && mileage <= PREMIUM_MAX_MILEAGE) return false;
     return mileage / ageYears > maxMilesPerYear;
 }
 
