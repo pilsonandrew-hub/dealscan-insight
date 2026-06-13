@@ -651,7 +651,7 @@ def build_pipeline_truth() -> dict[str, Any]:
 
     opp_rows = _safe_rows(
         "opportunities",
-        "id,is_active,dos_score,score,title,year,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,estimated_days_to_sale,gross_margin,margin,wholesale_margin,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid,auction_stage_hours_remaining,vehicle_tier,designated_lane,raw_data",
+        "id,is_active,dos_score,score,title,year,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,estimated_days_to_sale,gross_margin,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid,auction_stage_hours_remaining,vehicle_tier,designated_lane,raw_data",
         order=("created_at", True),
         limit=1000,
     )
