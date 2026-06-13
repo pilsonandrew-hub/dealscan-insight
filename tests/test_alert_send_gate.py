@@ -220,6 +220,94 @@ def test_send_telegram_alert_does_not_suppress_platinum_upgrade_after_prior_hot_
     assert any(row["channel"] == "telegram_alert" and row["status"] == "sent" for row in recorded)
 
 
+def test_alert_type_suppression_treats_platinum_as_hot_superset(monkeypatch):
+    ingest = _ingest_module(monkeypatch)
+
+    assert ingest._alert_type_satisfies("hot", "platinum") is True
+    assert ingest._alert_type_satisfies("platinum", "hot") is False
+    assert ingest._alert_type_satisfies("hot", None) is True
+    assert ingest._alert_type_satisfies("platinum", None) is False
+
+
+def test_alert_delivery_lookup_scans_all_alert_log_receipts(monkeypatch):
+    ingest = _ingest_module(monkeypatch)
+
+    class Query:
+        def __init__(self):
+            self.limit_value = None
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, value):
+            self.limit_value = value
+            return self
+
+        def execute(self):
+            rows = [
+                {"id": "failed-platinum", "alert_type": "platinum", "delivery_state": "failed"},
+                {"id": "old-hot", "alert_type": "hot", "delivery_state": "sent"},
+                {"id": "sent-platinum", "alert_type": "platinum", "delivery_state": "sent"},
+            ]
+            if self.limit_value is not None:
+                rows = rows[: self.limit_value]
+            return types.SimpleNamespace(data=rows)
+
+    class FakeSupabase:
+        def table(self, name):
+            assert name == "alert_log"
+            return Query()
+
+    monkeypatch.setattr(ingest, "supabase_client", FakeSupabase())
+
+    assert ingest._alert_delivery_exists_for_opportunity("opp-issue-5", "platinum") is True
+
+
+def test_alert_delivery_lookup_uses_untyped_delivery_log_for_hot_legacy_fallback(monkeypatch):
+    ingest = _ingest_module(monkeypatch)
+    queried_tables = []
+
+    class AlertLogQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return types.SimpleNamespace(data=[])
+
+    class DeliveryLogQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return types.SimpleNamespace(data=[{"id": "delivery-only", "status": "sent"}])
+
+    class FakeSupabase:
+        def table(self, name):
+            queried_tables.append(name)
+            if name == "alert_log":
+                return AlertLogQuery()
+            if name == "ingest_delivery_log":
+                return DeliveryLogQuery()
+            raise AssertionError(name)
+
+    monkeypatch.setattr(ingest, "supabase_client", FakeSupabase())
+
+    assert ingest._alert_delivery_exists_for_opportunity("opp-issue-5", "hot") is True
+    assert queried_tables == ["alert_log", "ingest_delivery_log"]
+
+
 def test_insert_alert_log_persists_current_alert_type(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
