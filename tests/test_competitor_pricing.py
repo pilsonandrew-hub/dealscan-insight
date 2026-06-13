@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -66,6 +67,24 @@ def test_summarize_comps_filters_out_of_window_year_and_mileage():
     summary = summarize_comps(rows, year=2022, mileage=40000)
     assert summary["competitor_comp_count"] == 1
     assert summary["competitor_comp_price"] == 20000.0
+
+
+def test_summarize_comps_filters_stale_sales_by_max_age():
+    rows = [
+        _row(20000, end="2026-05-01T00:00:00Z"),
+        _row(21000, end="2026-04-01T00:00:00Z"),
+        _row(22000, end="2026-03-01T00:00:00Z"),
+        _row(99000, end="2024-01-01T00:00:00Z"),
+    ]
+    summary = summarize_comps(
+        rows,
+        year=2022,
+        mileage=40000,
+        now=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    assert summary["competitor_comp_count"] == 3
+    assert summary["competitor_comp_price"] == 21000.0
 
 
 def test_summarize_comps_keeps_rows_with_missing_mileage():

@@ -36,6 +36,19 @@ def test_competitor_comps_override_proxy_when_enough_comps():
     assert result["mmr_estimated"] == 24000
 
 
+def test_competitor_comps_set_legacy_pricing_source_truthfully():
+    result = score_deal(
+        mmr_ca=20000,
+        mmr_lookup_basis="model_proxy",
+        competitor_comp_price=24000,
+        competitor_comp_count=8,
+        **BASE,
+    )
+
+    assert result["pricing_basis"] == "competitor_sales"
+    assert result["pricing_source"] == "competitor_sales"
+
+
 def test_competitor_comps_ignored_when_below_min_count():
     result = score_deal(
         mmr_ca=20000,

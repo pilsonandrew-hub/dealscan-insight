@@ -65,7 +65,18 @@ async def _run() -> Dict[str, Any]:
     sources = _selected_sources()
     client = None if dry_run else _make_client()
 
-    summary: Dict[str, Any] = {"dry_run": dry_run, "sources": {}, "total_scraped": 0, "total_written": 0}
+    summary: Dict[str, Any] = {
+        "dry_run": dry_run,
+        "sources": {},
+        "total_scraped": 0,
+        "total_written": 0,
+        "errors": [],
+    }
+    if not sources:
+        summary["errors"].append("no_valid_sources_selected")
+        return summary
+    if not dry_run and client is None:
+        summary["errors"].append("supabase_client_unavailable")
 
     for source in sources:
         scraper = SCRAPERS[source]
@@ -74,11 +85,14 @@ async def _run() -> Dict[str, Any]:
         except Exception as exc:
             logger.error("[%s] scrape failed: %s", source, exc)
             summary["sources"][source] = {"scraped": 0, "written": 0, "error": str(exc)}
+            summary["errors"].append(f"{source}: scrape failed: {exc}")
             continue
 
         written = 0
         if not dry_run and rows:
             written = write_competitor_sales(rows, client)
+            if written <= 0:
+                summary["errors"].append(f"{source}: scraped {len(rows)} rows but wrote 0")
 
         summary["sources"][source] = {"scraped": len(rows), "written": written}
         summary["total_scraped"] += len(rows)
@@ -91,7 +105,7 @@ async def _run() -> Dict[str, Any]:
 def main() -> int:
     summary = asyncio.run(_run())
     print(json.dumps(summary, indent=2, default=str))
-    return 0
+    return 1 if summary.get("errors") else 0
 
 
 if __name__ == "__main__":

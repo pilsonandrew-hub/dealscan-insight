@@ -1211,6 +1211,11 @@ def score_deal(
     else:
         pricing_maturity = "proxy"
         pricing_basis = "model_proxy" if (proxy_mmr_estimate and proxy_mmr_estimate > 0) else "none"
+    pricing_source_effective = (
+        "competitor_sales"
+        if competitor_comp_used
+        else pricing_source or mmr_lookup_basis or "mmr_proxy"
+    )
 
     auction_stage_hours_remaining = _auction_stage_hours_remaining(auction_end)
 
@@ -1379,7 +1384,7 @@ def score_deal(
         "retail_comp_high": retail_comp_high,
         "retail_comp_count": retail_comp_count or 0,
         "retail_comp_confidence": retail_comp_confidence,
-        "pricing_source": pricing_source or mmr_lookup_basis or "mmr_proxy",
+        "pricing_source": pricing_source_effective,
         "pricing_maturity": pricing_maturity,
         "pricing_basis": pricing_basis,
         "competitor_comp_price": competitor_comp_price,

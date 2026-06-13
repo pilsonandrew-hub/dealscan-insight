@@ -154,6 +154,7 @@ def summarize_comps(
     vehicle_class: Optional[str] = None,
     year_window: int = COMPETITOR_COMP_YEAR_WINDOW,
     mileage_window: int = COMPETITOR_COMP_MILEAGE_WINDOW,
+    max_age_days: int = COMPETITOR_COMP_MAX_AGE_DAYS,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Reduce raw competitor_sales rows to a comp summary.
@@ -186,11 +187,15 @@ def summarize_comps(
             if abs(row_mileage - target_mileage) > mileage_window:
                 continue
 
+        sale_dt = _parse_dt(row.get("auction_end_date")) or _parse_dt(row.get("scraped_at"))
+        if sale_dt and max_age_days > 0:
+            if (now - sale_dt).days > max_age_days:
+                continue
+
         prices.append(sale_price)
         source = str(row.get("source") or "").strip().lower()
         if source:
             sources.append(source)
-        sale_dt = _parse_dt(row.get("auction_end_date")) or _parse_dt(row.get("scraped_at"))
         if sale_dt:
             dates.append(sale_dt)
 
