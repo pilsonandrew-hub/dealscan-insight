@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from backend.business_rules.gates import bid_ceiling_pct_for_tier, min_margin_for_tier
+from backend.ingest.lifecycle_memory import build_initial_lifecycle_fields
 
 
 def _resolve_buyer_premium(score_result: dict[str, Any], current_bid: float) -> tuple[float, float]:
@@ -88,7 +89,8 @@ def build_opportunity_row(
     if min_margin_target is None:
         min_margin_target = min_margin_for_tier(vehicle_tier)
     now = now_utc or (lambda: datetime.now(timezone.utc))
-    return {
+    now_iso = now().isoformat()
+    row = {
         "listing_id": compute_listing_id(source_site, vehicle.get("listing_url") or ""),
         "listing_url": vehicle.get("listing_url", ""),
         "source": source_site,
@@ -168,5 +170,7 @@ def build_opportunity_row(
         "source_run_id": vehicle.get("source_run_id"),
         "pipeline_step": "saved",
         "step_status": "complete",
-        "processed_at": vehicle.get("processed_at") or now().isoformat(),
+        "processed_at": vehicle.get("processed_at") or now_iso,
     }
+    row.update(build_initial_lifecycle_fields(row, now_iso=now_iso))
+    return row
