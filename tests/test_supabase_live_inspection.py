@@ -152,9 +152,9 @@ def test_run_id_truth_audit_includes_sanitized_comp_ledger_aggregates(monkeypatc
     assert "2021 Mercedes-Benz G-Class" not in str(report)
 
 
-def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monkeypatch):
+def test_run_id_truth_audit_proves_media_and_bidder_counts_for_linked_rows(monkeypatch):
     columns = {
-        "ingest_delivery_log": {"run_id", "listing_id", "channel", "status", "created_at", "updated_at"},
+        "ingest_delivery_log": {"run_id", "listing_id", "opportunity_id", "channel", "status", "created_at", "updated_at"},
         "webhook_log": {"run_id", "received_at", "processing_status", "item_count", "actor_id"},
         "opportunities": {
             "id",
@@ -166,6 +166,7 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
             "vin",
             "mileage",
             "photo_count",
+            "bidder_count",
             "created_at",
             "raw_data",
         },
@@ -180,13 +181,13 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
         "ingest_delivery_log": [
             {"run_id": "run-photo", "listing_id": "listing-a", "channel": "db_save", "status": "vin_dedup_lifecycle_refreshed", "created_at": "2026-06-13T00:00:01Z"},
             {"run_id": "run-photo", "listing_id": "listing-b", "channel": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:02Z"},
-            {"run_id": "run-photo", "listing_id": "listing-c", "channel": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:03Z"},
+            {"run_id": "run-photo", "listing_id": "listing-c", "opportunity_id": "old-c", "channel": "db_save", "status": "duplicate_lifecycle_refreshed", "created_at": "2026-06-13T00:00:03Z"},
         ],
         "webhook_log": [{"run_id": "run-photo", "received_at": "2026-06-13T00:00:00Z", "processing_status": "processed", "item_count": 2}],
         "opportunities": [
-            {"id": "old-a", "listing_id": "listing-a", "source_site": "proxibid", "photo_count": 1, "step_status": "complete", "raw_data": {"photo_url": "https://example.test/a.jpg"}},
-            {"id": "old-b", "listing_id": "listing-b", "source_site": "proxibid", "photo_count": 4, "step_status": "complete", "raw_data": {"photos": ["https://example.test/b-1.jpg", "https://example.test/b-2.jpg"]}},
-            {"id": "old-c", "listing_id": "listing-c", "source_site": "proxibid", "photo_count": 0, "step_status": "complete", "raw_data": {"image_url": "https://example.test/c.jpg"}},
+            {"id": "old-a", "listing_id": "listing-a", "source_site": "proxibid", "photo_count": 1, "bidder_count": 5, "step_status": "complete", "raw_data": {"photo_url": "https://example.test/a.jpg"}},
+            {"id": "old-b", "listing_id": "listing-b", "source_site": "proxibid", "photo_count": 4, "bidder_count": 0, "step_status": "complete", "raw_data": {"photos": ["https://example.test/b-1.jpg", "https://example.test/b-2.jpg"]}},
+            {"id": "old-c", "listing_id": "listing-c", "source_site": "proxibid", "photo_count": 0, "bidder_count": 9, "step_status": "complete", "raw_data": {"image_url": "https://example.test/c.jpg"}},
         ],
         "market_scout_runs": [],
         "sold_comp_candidates": [],
@@ -211,6 +212,8 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
                 table_rows = []
             elif params.get("listing_id") == "in.(listing-a,listing-b,listing-c)":
                 table_rows = rows[table]
+            elif params.get("id") == "in.(old-c)":
+                table_rows = [rows[table][2]]
         selected = [column for column in str(params.get("select") or "").split(",") if column]
         if selected:
             table_rows = [
@@ -230,8 +233,16 @@ def test_run_id_truth_audit_proves_photo_count_for_duplicate_refreshed_rows(monk
     assert report["opportunities"]["suppressed_raw_photo_evidence_rows"] == 1
     assert report["opportunities"]["max_photo_count"] == 4
     assert report["opportunities"]["average_photo_count"] == 1.67
+    assert report["opportunities"]["bidder_count_known_rows"] == 3
+    assert report["opportunities"]["zero_bidder_count_rows"] == 1
+    assert report["opportunities"]["positive_bidder_count_rows"] == 2
+    assert report["opportunities"]["max_bidder_count"] == 9
+    assert report["opportunities"]["average_bidder_count"] == 4.67
+    assert report["delivery_log"]["rows_with_opportunity_id"] == 1
+    assert report["delivery_log"]["distinct_opportunity_ids"] == 1
     opportunity_requests = [params for table, params in requests if table == "opportunities"]
     assert any(params.get("listing_id") == "in.(listing-a,listing-b,listing-c)" for params in opportunity_requests)
+    assert any(params.get("id") == "in.(old-c)" for params in opportunity_requests)
     assert "listing_url" not in str(report)
     assert "raw_data" not in str(report)
 

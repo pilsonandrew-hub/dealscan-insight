@@ -331,6 +331,8 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     channel_counts: Counter[str] = Counter()
     reason_counts: Counter[str] = Counter()
     listing_ids: set[str] = set()
+    opportunity_ids: set[str] = set()
+    rows_with_opportunity_id = 0
     latest_created_at = None
     latest_updated_at = None
     for row in rows:
@@ -344,6 +346,10 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         listing_id = row.get("listing_id")
         if listing_id:
             listing_ids.add(str(listing_id))
+        opportunity_id = row.get("opportunity_id")
+        if opportunity_id:
+            rows_with_opportunity_id += 1
+            opportunity_ids.add(str(opportunity_id))
         created_at = row.get("created_at")
         updated_at = row.get("updated_at")
         if created_at and (latest_created_at is None or str(created_at) > str(latest_created_at)):
@@ -353,6 +359,8 @@ def _summarize_run_delivery_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "row_count": len(rows),
         "distinct_listing_ids": len(listing_ids),
+        "rows_with_opportunity_id": rows_with_opportunity_id,
+        "distinct_opportunity_ids": len(opportunity_ids),
         "status_counts": dict(status_counts.most_common(20)),
         "channel_counts": dict(channel_counts.most_common(20)),
         "sanitized_error_counts": dict(reason_counts.most_common(20)),
@@ -550,6 +558,7 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
     vin_present = 0
     mileage_present = 0
     photo_counts: list[int] = []
+    bidder_counts: list[int] = []
     raw_photo_evidence_rows = 0
     suppressed_raw_photo_evidence_rows = 0
     for row in rows:
@@ -563,6 +572,9 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
         photo_count = _photo_count(row)
         if photo_count is not None:
             photo_counts.append(photo_count)
+        bidder_count = _bidder_count(row)
+        if bidder_count is not None:
+            bidder_counts.append(bidder_count)
         raw_photo_count = _raw_photo_evidence_count(row)
         if raw_photo_count > 0:
             raw_photo_evidence_rows += 1
@@ -581,6 +593,11 @@ def _summarize_run_opportunity_rows(rows: list[dict[str, Any]]) -> dict[str, Any
         "positive_photo_count_rows": sum(1 for count in photo_counts if count > 0),
         "max_photo_count": max(photo_counts) if photo_counts else None,
         "average_photo_count": round(sum(photo_counts) / len(photo_counts), 2) if photo_counts else None,
+        "bidder_count_known_rows": len(bidder_counts),
+        "zero_bidder_count_rows": sum(1 for count in bidder_counts if count == 0),
+        "positive_bidder_count_rows": sum(1 for count in bidder_counts if count > 0),
+        "max_bidder_count": max(bidder_counts) if bidder_counts else None,
+        "average_bidder_count": round(sum(bidder_counts) / len(bidder_counts), 2) if bidder_counts else None,
     }
 
 
@@ -933,7 +950,16 @@ def _summarize_seller_recovery_audit(
 def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[str, Any]:
     delivery_columns = _available_columns(base_url, service_key, "ingest_delivery_log")
     delivery_select = ",".join([
-        col for col in ["run_id", "listing_id", "channel", "status", "error_message", "created_at", "updated_at"]
+        col for col in [
+            "run_id",
+            "listing_id",
+            "opportunity_id",
+            "channel",
+            "status",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
         if col in delivery_columns
     ]) or "run_id,status"
     _, _, delivery_rows = _request(
@@ -1015,6 +1041,7 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
             "vin",
             "mileage",
             "photo_count",
+            "bidder_count",
             "created_at",
             "processed_at",
             "raw_data",
@@ -1030,6 +1057,18 @@ def _run_id_truth_audit(base_url: str, service_key: str, run_id: str) -> dict[st
         str(row.get("listing_id"))
         for row in delivery_rows if isinstance(row, dict) and row.get("listing_id")
     })
+    delivery_opportunity_ids = sorted({
+        str(row.get("opportunity_id"))
+        for row in delivery_rows if isinstance(row, dict) and row.get("opportunity_id")
+    })
+    if "id" in opportunity_columns and delivery_opportunity_ids:
+        for start in range(0, len(delivery_opportunity_ids), 100):
+            opportunity_id_chunk = delivery_opportunity_ids[start:start + 100]
+            opportunity_filters.append({
+                "select": opportunity_select,
+                "id": f"in.({','.join(opportunity_id_chunk)})",
+                "limit": "200",
+            })
     if "listing_id" in opportunity_columns and delivery_listing_ids:
         for start in range(0, len(delivery_listing_ids), 100):
             listing_id_chunk = delivery_listing_ids[start:start + 100]
