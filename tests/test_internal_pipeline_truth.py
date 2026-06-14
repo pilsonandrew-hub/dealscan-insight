@@ -587,6 +587,129 @@ def test_pipeline_truth_returns_aggregate_only(monkeypatch):
     }
 
 
+def test_pipeline_truth_reports_market_data_quality_degraded_for_proxy_heavy_sample(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "proxy-high-score",
+                "is_active": True,
+                "dos_score": 86,
+                "score": 86,
+                "source_site": "govdeals",
+                "pricing_maturity": "proxy",
+                "pricing_source": "mmr_proxy",
+                "pricing_updated_at": "2026-06-13T01:00:00+00:00",
+                "manheim_source_status": "fallback",
+                "manheim_updated_at": None,
+                "retail_comp_count": 0,
+                "retail_comp_confidence": None,
+                "mmr_confidence_proxy": 78,
+                "mileage": 25000,
+                "year": 2025,
+                "vin": "1FMUK8DH5SGA77978",
+                "condition_grade": "Good",
+                "investment_grade": "Rejected",
+            },
+            {
+                "id": "market-comp",
+                "is_active": True,
+                "dos_score": 72,
+                "score": 72,
+                "source_site": "govdeals",
+                "pricing_maturity": "market_comp",
+                "pricing_source": "retail_comp",
+                "pricing_updated_at": "2026-06-13T02:00:00+00:00",
+                "manheim_source_status": "unavailable",
+                "retail_comp_count": 3,
+                "retail_comp_confidence": 0.72,
+                "mmr_confidence_proxy": 88,
+                "mileage": 21000,
+                "year": 2024,
+                "vin": "1HGCM82633A004352",
+                "condition_grade": "Good",
+                "investment_grade": "Gold",
+            },
+        ],
+        "webhook_log": [],
+        "alert_log": [],
+        "ingest_delivery_log": [],
+        "dealer_sales": [],
+        "market_prices": [],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    quality = result["market_data_quality"]
+    assert quality["status"] == "degraded"
+    assert quality["active_sample_size"] == 2
+    assert quality["high_score_sample_size"] == 1
+    assert quality["pricing_maturity_counts"] == {"proxy": 1, "market_comp": 1}
+    assert quality["high_score_pricing_maturity_counts"] == {"proxy": 1}
+    assert quality["manheim_source_status_counts"] == {"fallback": 1, "unavailable": 1}
+    assert quality["proxy_share"] == 0.5
+    assert quality["high_score_proxy_share"] == 1.0
+    assert quality["fallback_share"] == 0.5
+    assert quality["latest_pricing_updated_at"] == "2026-06-13T02:00:00+00:00"
+    assert "proxy_pricing_share_above_threshold" in quality["degraded_reasons"]
+    assert "high_score_proxy_pricing_present" in quality["degraded_reasons"]
+    assert "truth_boundary" in quality
+
+
+def test_pipeline_truth_reports_market_data_quality_healthy_for_fresh_non_proxy_sample(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "live-market",
+                "is_active": True,
+                "dos_score": 82,
+                "score": 82,
+                "source_site": "proxibid",
+                "pricing_maturity": "live_market",
+                "pricing_source": "live_manheim",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "live",
+                "manheim_updated_at": "2099-01-01T00:00:00+00:00",
+                "retail_comp_count": 3,
+                "retail_comp_confidence": 0.91,
+                "mmr_confidence_proxy": 94,
+                "mileage": 18000,
+                "year": 2025,
+                "vin": "1FMUK8DH5SGA77978",
+                "condition_grade": "Good",
+                "investment_grade": "Platinum",
+            },
+        ],
+        "webhook_log": [],
+        "alert_log": [],
+        "ingest_delivery_log": [],
+        "dealer_sales": [
+            {"id": "sale-1", "sale_price": 22000, "sale_date": "2099-01-01T00:00:00+00:00"},
+            {"id": "sale-2", "sale_price": 23000, "sale_date": "2099-01-02T00:00:00+00:00"},
+        ],
+        "market_prices": [
+            {
+                "id": "market-1",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+        ],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    quality = result["market_data_quality"]
+    assert quality["status"] == "healthy"
+    assert quality["proxy_share"] == 0.0
+    assert quality["high_score_proxy_share"] == 0.0
+    assert quality["freshness"]["status"] == "fresh"
+    assert quality["degraded_reasons"] == []
+    assert quality["unavailable_dimensions"] == []
+
+
 def test_pipeline_truth_uses_same_score_resolution_for_buckets_and_dos80(monkeypatch):
     monkeypatch.setattr(
         internal,
