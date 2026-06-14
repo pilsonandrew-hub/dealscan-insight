@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/internal", tags=["internal"])
 MID_DEAL_SCORE_THRESHOLD = 65.0
+MARKET_DATA_PROXY_SHARE_DEGRADED_THRESHOLD = 0.25
+MARKET_DATA_FRESHNESS_THRESHOLD_HOURS = 24.0
+MARKET_DATA_MIN_RETAIL_COMP_COUNT = 2
 
 
 def _internal_secret() -> str:
@@ -750,6 +753,148 @@ def _numeric_score(row: dict[str, Any]) -> Optional[float]:
         return None
 
 
+def _round_share(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+def _latest_datetime(rows: list[dict[str, Any]], keys: list[str]) -> tuple[Optional[str], Optional[datetime]]:
+    latest_raw: Optional[str] = None
+    latest_dt: Optional[datetime] = None
+    for row in rows:
+        for key in keys:
+            parsed = _parse_optional_datetime(row.get(key))
+            if parsed and (latest_dt is None or parsed > latest_dt):
+                latest_dt = parsed
+                latest_raw = str(row.get(key))
+    return latest_raw, latest_dt
+
+
+def _market_data_quality(
+    rows: list[dict[str, Any]],
+    pricing_substrate: dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> dict[str, Any]:
+    now = now or datetime.now(timezone.utc)
+    active_rows = [row for row in rows if row.get("is_active") is True]
+    high_score_rows = [
+        row for row in active_rows
+        if (_numeric_score(row) or 0.0) >= HOT_DEAL_ALERT_THRESHOLD
+    ]
+
+    unavailable_dimensions: list[str] = []
+    if active_rows and all("pricing_maturity" not in row for row in active_rows):
+        unavailable_dimensions.append("pricing_maturity")
+    if active_rows and all("manheim_source_status" not in row for row in active_rows):
+        unavailable_dimensions.append("manheim_source_status")
+    if active_rows and all(
+        "pricing_updated_at" not in row and "manheim_updated_at" not in row
+        for row in active_rows
+    ):
+        unavailable_dimensions.append("pricing_freshness")
+
+    pricing_counts = _status_counts(active_rows, "pricing_maturity")
+    high_score_pricing_counts = _status_counts(high_score_rows, "pricing_maturity")
+    manheim_counts = _status_counts(active_rows, "manheim_source_status")
+
+    active_count = len(active_rows)
+    high_score_count = len(high_score_rows)
+    proxy_count = sum(
+        1 for row in active_rows
+        if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"
+    )
+    high_score_proxy_count = sum(
+        1 for row in high_score_rows
+        if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"
+    )
+    fallback_count = sum(
+        1 for row in active_rows
+        if str(row.get("manheim_source_status") or "").strip().lower() == "fallback"
+    )
+    live_count = sum(
+        1 for row in active_rows
+        if str(row.get("manheim_source_status") or "").strip().lower() == "live"
+    )
+
+    latest_raw, latest_dt = _latest_datetime(active_rows, ["pricing_updated_at", "manheim_updated_at"])
+    latest_age_hours = round((now - latest_dt).total_seconds() / 3600.0, 2) if latest_dt else None
+    freshness_status = (
+        "fresh"
+        if latest_age_hours is not None and latest_age_hours <= MARKET_DATA_FRESHNESS_THRESHOLD_HOURS
+        else "stale"
+    )
+
+    degraded_reasons: list[str] = []
+    if not active_rows:
+        degraded_reasons.append("no_active_pricing_sample")
+    if unavailable_dimensions:
+        degraded_reasons.append("pricing_fields_missing")
+    if _round_share(proxy_count, active_count) > MARKET_DATA_PROXY_SHARE_DEGRADED_THRESHOLD:
+        degraded_reasons.append("proxy_pricing_share_above_threshold")
+    if high_score_proxy_count > 0:
+        degraded_reasons.append("high_score_proxy_pricing_present")
+    if freshness_status == "stale":
+        degraded_reasons.append("pricing_evidence_stale")
+    non_live_rows = [
+        row for row in active_rows
+        if str(row.get("pricing_maturity") or "").lower() != "live_market"
+    ]
+    if non_live_rows and all(
+        (_as_int(row.get("retail_comp_count")) or 0) < MARKET_DATA_MIN_RETAIL_COMP_COUNT
+        for row in non_live_rows
+    ):
+        degraded_reasons.append("retail_comps_sparse")
+    if active_rows and live_count == 0 and "manheim_source_status" not in unavailable_dimensions:
+        degraded_reasons.append("manheim_live_share_below_threshold")
+    if (
+        pricing_substrate.get("market_prices_table") == "present"
+        and int(pricing_substrate.get("market_prices_usable_rows") or 0) == 0
+    ):
+        degraded_reasons.append("market_prices_unusable")
+    if (
+        pricing_substrate.get("dealer_sales_table") == "present"
+        and int(pricing_substrate.get("dealer_sales_usable_rows") or 0) < 2
+    ):
+        degraded_reasons.append("dealer_sales_sparse")
+
+    if unavailable_dimensions:
+        status = "unknown"
+    elif not active_rows:
+        status = "unavailable"
+    elif degraded_reasons:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "sample_size": len(rows),
+        "active_sample_size": active_count,
+        "high_score_sample_size": high_score_count,
+        "pricing_maturity_counts": pricing_counts,
+        "high_score_pricing_maturity_counts": high_score_pricing_counts,
+        "manheim_source_status_counts": manheim_counts,
+        "fallback_share": _round_share(fallback_count, active_count),
+        "proxy_share": _round_share(proxy_count, active_count),
+        "high_score_proxy_share": _round_share(high_score_proxy_count, high_score_count),
+        "live_share": _round_share(live_count, active_count),
+        "latest_pricing_updated_at": latest_raw,
+        "latest_pricing_age_hours": latest_age_hours,
+        "freshness": {
+            "status": freshness_status,
+            "threshold_hours": MARKET_DATA_FRESHNESS_THRESHOLD_HOURS,
+        },
+        "degraded_reasons": sorted(set(degraded_reasons)),
+        "unavailable_dimensions": unavailable_dimensions,
+        "truth_boundary": (
+            "Sanitized aggregate pricing-evidence quality from persisted rows; does not prove "
+            "external provider uptime unless provider status is stored on sampled rows."
+        ),
+    }
+
+
 def _dos_score_bucket(score: Optional[float]) -> str:
     if score is None:
         return "missing"
@@ -1159,7 +1304,7 @@ def build_pipeline_truth() -> dict[str, Any]:
 
     opp_rows = _safe_rows(
         "opportunities",
-        "id,is_active,dos_score,score,title,year,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,estimated_days_to_sale,gross_margin,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid,auction_stage_hours_remaining,vehicle_tier,designated_lane,raw_data",
+        "id,is_active,dos_score,score,title,year,mileage,pricing_maturity,condition_grade,vin,source_site,created_at,auction_end_date,investment_grade,roi_per_day,estimated_days_to_sale,gross_margin,bid_headroom,current_bid_trust_score,mmr_confidence_proxy,manheim_confidence,retail_comp_confidence,pricing_source,pricing_updated_at,expected_close_source,retail_comp_count,acquisition_price_basis,acquisition_basis_source,projected_total_cost,total_cost,mmr_lookup_basis,max_bid,expected_close_bid,auction_stage_hours_remaining,vehicle_tier,designated_lane,manheim_source_status,manheim_updated_at,raw_data",
         order=("created_at", True),
         limit=1000,
     )
@@ -1170,6 +1315,7 @@ def build_pipeline_truth() -> dict[str, Any]:
     ]
     active_dos80_gate_breakdown = _alert_gate_breakdown(active_dos80)
     active_dos80_condition_storage_gap_rows = _condition_storage_gap_rows(active_dos80)
+    market_data_quality = _market_data_quality(opp_rows, pricing_substrate)
 
     webhook_rows = _safe_rows(
         "webhook_log",
@@ -1232,6 +1378,7 @@ def build_pipeline_truth() -> dict[str, Any]:
             "latest": webhook_rows[:10],
         },
         "pricing_substrate": pricing_substrate,
+        "market_data_quality": market_data_quality,
         "alerts": {
             "runtime": _alerts_runtime_status(),
             "total": alerts_total,
