@@ -119,6 +119,43 @@ def build_queue_record(group: dict[str, Any], *, proof_run_id: str, head_sha: st
     }
 
 
+def sync_queue_records(
+    records: list[dict[str, Any]],
+    *,
+    repo: QueueRepository,
+    apply: bool,
+    confirmation: str,
+    actor: str = "local",
+) -> dict[str, int]:
+    if apply and confirmation != APPLY_CONFIRMATION:
+        raise ValueError(f"queue sync requires confirmation={APPLY_CONFIRMATION}")
+
+    summary = {"would_insert": 0, "would_update": 0, "inserted": 0, "updated": 0}
+    for record in records:
+        existing = repo.get_by_group_key(record["group_key"])
+        if not apply:
+            summary["would_update" if existing else "would_insert"] += 1
+            continue
+
+        saved = repo.upsert_request(record)
+        event_type = "updated" if existing else "inserted"
+        summary[event_type] += 1
+        repo.insert_event(
+            {
+                "request_id": saved["id"],
+                "event_type": event_type,
+                "previous_queue_status": (existing or {}).get("queue_status"),
+                "next_queue_status": saved["queue_status"],
+                "actor": actor,
+                "reason": record["recommended_action"],
+                "proof_run_id": record.get("latest_proof_run_id"),
+                "head_sha": record.get("latest_proof_head_sha"),
+                "metadata": {"group_key": record["group_key"], "status": record["status"]},
+            }
+        )
+    return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-json", help="JSON file of grouped pricing recovery rows.")

@@ -72,3 +72,66 @@ def test_build_queue_record_rejects_unknown_statuses():
             head_sha="sha",
             now=NOW,
         )
+
+
+class FakeQueueRepository:
+    def __init__(self, existing=None):
+        self.existing = existing or {}
+        self.upserts = []
+        self.events = []
+
+    def get_by_group_key(self, group_key):
+        return self.existing.get(group_key)
+
+    def upsert_request(self, record):
+        row = {"id": self.existing.get(record["group_key"], {}).get("id", "req-1"), **record}
+        self.upserts.append(row)
+        self.existing[record["group_key"]] = row
+        return row
+
+    def insert_event(self, event):
+        self.events.append(event)
+
+
+def test_sync_dry_run_does_not_write():
+    repo = FakeQueueRepository()
+    records = [
+        queue.build_queue_record(recovery_group(), proof_run_id="run", head_sha="sha", now=NOW)
+    ]
+
+    summary = queue.sync_queue_records(records, repo=repo, apply=False, confirmation="")
+
+    assert summary["would_insert"] == 1
+    assert repo.upserts == []
+    assert repo.events == []
+
+
+def test_sync_apply_requires_confirmation():
+    repo = FakeQueueRepository()
+    records = [
+        queue.build_queue_record(recovery_group(), proof_run_id="run", head_sha="sha", now=NOW)
+    ]
+
+    with pytest.raises(ValueError, match="requires confirmation"):
+        queue.sync_queue_records(records, repo=repo, apply=True, confirmation="wrong")
+
+
+def test_sync_apply_writes_insert_event():
+    repo = FakeQueueRepository()
+    records = [
+        queue.build_queue_record(recovery_group(), proof_run_id="run", head_sha="sha", now=NOW)
+    ]
+
+    summary = queue.sync_queue_records(
+        records,
+        repo=repo,
+        apply=True,
+        confirmation=queue.APPLY_CONFIRMATION,
+        actor="github-actions",
+    )
+
+    assert summary["inserted"] == 1
+    assert repo.upserts[0]["group_key"] == "2020|ford|escape|sc|gsaauctions,proxibid"
+    assert repo.events[0]["event_type"] == "inserted"
+    assert repo.events[0]["next_queue_status"] == "open"
+    assert repo.events[0]["actor"] == "github-actions"
