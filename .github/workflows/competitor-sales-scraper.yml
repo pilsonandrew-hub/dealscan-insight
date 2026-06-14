@@ -34,6 +34,9 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  SCHEDULED_COMPETITOR_SCRAPER_SOURCES: govdeals
+  SCHEDULED_COMPETITOR_SCRAPER_MAX_PAGES: "1"
+  SCHEDULED_COMPETITOR_GOVDEALS_SEO_ASSET_URLS: https://prod-seo.govdeals.com/en/asset/17167/7167
 
 jobs:
   competitor-sales-scraper:
@@ -63,4 +66,10 @@ jobs:
           COMPETITOR_SCRAPER_DRY_RUN: ${{ inputs.dry_run || 'false' }}
           COMPETITOR_GOVDEALS_SEO_ASSET_URLS: ${{ inputs.govdeals_seo_asset_urls || '' }}
         run: |
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            COMPETITOR_SCRAPER_SOURCES="${SCHEDULED_COMPETITOR_SCRAPER_SOURCES}"
+            COMPETITOR_SCRAPER_MAX_PAGES="${SCHEDULED_COMPETITOR_SCRAPER_MAX_PAGES}"
+            COMPETITOR_GOVDEALS_SEO_ASSET_URLS="${SCHEDULED_COMPETITOR_GOVDEALS_SEO_ASSET_URLS}"
+            export COMPETITOR_SCRAPER_SOURCES COMPETITOR_SCRAPER_MAX_PAGES COMPETITOR_GOVDEALS_SEO_ASSET_URLS
+          fi
           python scripts/run_competitor_sales_scraper.py
