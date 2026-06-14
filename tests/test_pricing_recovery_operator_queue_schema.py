@@ -34,3 +34,17 @@ def test_pricing_recovery_queue_schema_has_status_constraints_and_audit_indexes(
     assert "notify pgrst, 'reload schema'" in sql
     assert "create or replace function public.set_pricing_recovery_requests_updated_at()" in sql
     assert "before update on public.pricing_recovery_requests" in sql
+
+
+def test_pricing_recovery_queue_schema_locks_tables_to_service_role():
+    sql = MIGRATION.read_text().lower()
+
+    assert "alter table public.pricing_recovery_requests enable row level security" in sql
+    assert "alter table public.pricing_recovery_request_events enable row level security" in sql
+    assert "create policy service_role_all_pricing_recovery_requests" in sql
+    assert "on public.pricing_recovery_requests" in sql
+    assert "create policy service_role_all_pricing_recovery_request_events" in sql
+    assert "on public.pricing_recovery_request_events" in sql
+    assert sql.count("to service_role") >= 2
+    assert sql.count("using (true)") >= 2
+    assert sql.count("with check (true)") >= 2

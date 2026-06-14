@@ -56,6 +56,29 @@ create index if not exists idx_pricing_recovery_requests_status
 create index if not exists idx_pricing_recovery_request_events_request_id
   on public.pricing_recovery_request_events(request_id);
 
+alter table public.pricing_recovery_requests enable row level security;
+alter table public.pricing_recovery_request_events enable row level security;
+
+drop policy if exists service_role_all_pricing_recovery_requests
+  on public.pricing_recovery_requests;
+
+create policy service_role_all_pricing_recovery_requests
+  on public.pricing_recovery_requests
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists service_role_all_pricing_recovery_request_events
+  on public.pricing_recovery_request_events;
+
+create policy service_role_all_pricing_recovery_request_events
+  on public.pricing_recovery_request_events
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
 create or replace function public.set_pricing_recovery_requests_updated_at()
 returns trigger
 language plpgsql
