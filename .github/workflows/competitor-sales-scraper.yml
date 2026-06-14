@@ -28,6 +28,14 @@ on:
         description: "Optional newline/comma-separated GovDeals SEO asset URLs for sold-page fallback proof"
         required: false
         default: ""
+      use_scheduled_defaults:
+        description: "Run the same source/max-page/asset URL defaults used by scheduled runs."
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read
@@ -65,8 +73,9 @@ jobs:
           COMPETITOR_SCRAPER_MAX_PAGES: ${{ inputs.max_pages || '10' }}
           COMPETITOR_SCRAPER_DRY_RUN: ${{ inputs.dry_run || 'false' }}
           COMPETITOR_GOVDEALS_SEO_ASSET_URLS: ${{ inputs.govdeals_seo_asset_urls || '' }}
+          COMPETITOR_SCRAPER_USE_SCHEDULED_DEFAULTS: ${{ inputs.use_scheduled_defaults || 'false' }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ] || [ "${COMPETITOR_SCRAPER_USE_SCHEDULED_DEFAULTS}" = "true" ]; then
             COMPETITOR_SCRAPER_SOURCES="${SCHEDULED_COMPETITOR_SCRAPER_SOURCES}"
             COMPETITOR_SCRAPER_MAX_PAGES="${SCHEDULED_COMPETITOR_SCRAPER_MAX_PAGES}"
             COMPETITOR_GOVDEALS_SEO_ASSET_URLS="${SCHEDULED_COMPETITOR_GOVDEALS_SEO_ASSET_URLS}"

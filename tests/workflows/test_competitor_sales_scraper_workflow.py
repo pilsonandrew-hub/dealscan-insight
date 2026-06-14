@@ -8,13 +8,19 @@ def test_scheduled_competitor_sales_scraper_uses_govdeals_canary():
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "schedule:" in text
+    assert "use_scheduled_defaults:" in text
+    assert "Run the same source/max-page/asset URL defaults used by scheduled runs." in text
     assert "SCHEDULED_COMPETITOR_SCRAPER_SOURCES: govdeals" in text
     assert "SCHEDULED_COMPETITOR_SCRAPER_MAX_PAGES: \"1\"" in text
     assert (
         "SCHEDULED_COMPETITOR_GOVDEALS_SEO_ASSET_URLS: "
         "https://prod-seo.govdeals.com/en/asset/17167/7167"
     ) in text
-    assert 'if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then' in text
+    assert (
+        'if [ "${GITHUB_EVENT_NAME}" = "schedule" ] || '
+        '[ "${COMPETITOR_SCRAPER_USE_SCHEDULED_DEFAULTS}" = "true" ]; then'
+    ) in text
+    assert "COMPETITOR_SCRAPER_USE_SCHEDULED_DEFAULTS: ${{ inputs.use_scheduled_defaults || 'false' }}" in text
     assert 'COMPETITOR_SCRAPER_SOURCES="${SCHEDULED_COMPETITOR_SCRAPER_SOURCES}"' in text
     assert (
         'COMPETITOR_GOVDEALS_SEO_ASSET_URLS="${SCHEDULED_COMPETITOR_GOVDEALS_SEO_ASSET_URLS}"'
