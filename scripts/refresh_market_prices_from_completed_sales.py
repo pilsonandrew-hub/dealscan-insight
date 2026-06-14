@@ -11,14 +11,20 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import sys
 from datetime import datetime, timedelta, timezone
 from statistics import mean
 from typing import Any
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 DEFAULT_MIN_SAMPLE_SIZE = 5
 DEFAULT_TTL_DAYS = 14
 DEFAULT_MAX_EVIDENCE_AGE_DAYS = 365
+APPLY_CONFIRMATION = "REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES"
 
 
 def _normalize_text(value: Any) -> str:
@@ -123,6 +129,114 @@ def build_market_price_preview(
     }
 
 
+def confirm_apply(*, apply: bool, confirmation: str) -> bool:
+    if not apply:
+        return True
+    return str(confirmation or "").strip() == APPLY_CONFIRMATION
+
+
+def _normalize_rest_base_url(supabase_url: str) -> str:
+    return supabase_url.rstrip("/").removesuffix("/rest/v1")
+
+
+def _rest_json_request(method: str, url: str, service_role_key: str, payload: dict[str, Any] | None = None) -> Any:
+    data = None
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Accept": "application/json",
+    }
+    if payload is not None:
+        data = json.dumps(payload, sort_keys=True).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+        headers["Prefer"] = "return=representation"
+
+    request = urllib_request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib_request.urlopen(request, timeout=30) as response:
+            raw_payload = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase REST API error: HTTP {exc.code} {body[:300]}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"Supabase REST API unreachable: {exc}") from exc
+
+    try:
+        return json.loads(raw_payload or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Supabase REST API returned invalid JSON") from exc
+
+
+def _market_price_rest_query(preview: dict[str, Any]) -> str:
+    query = [
+        ("select", "id,year,make,model,state,avg_price,sample_size,source,source_run_id"),
+        ("year", f"eq.{preview['year']}"),
+        ("make", f"eq.{preview['make']}"),
+        ("model", f"eq.{preview['model']}"),
+        ("source", f"eq.{preview['source']}"),
+        ("source_run_id", f"eq.{preview['source_run_id']}"),
+        ("limit", "1"),
+    ]
+    state = preview.get("state")
+    if state:
+        query.append(("state", f"eq.{state}"))
+    else:
+        query.append(("state", "is.null"))
+    return urllib_parse.urlencode(query)
+
+
+def insert_market_price_preview_via_rest(
+    supabase_url: str,
+    service_role_key: str,
+    preview: dict[str, Any],
+) -> dict[str, Any]:
+    base_url = _normalize_rest_base_url(supabase_url)
+    query = _market_price_rest_query(preview)
+    existing = _rest_json_request(
+        "GET",
+        f"{base_url}/rest/v1/market_prices?{query}",
+        service_role_key,
+    )
+
+    payload = {
+        "year": preview["year"],
+        "make": preview["make"],
+        "model": preview["model"],
+        "state": preview.get("state"),
+        "avg_price": preview["avg_price"],
+        "low_price": preview["low_price"],
+        "high_price": preview["high_price"],
+        "sample_size": preview["sample_size"],
+        "source": preview["source"],
+        "source_run_id": preview["source_run_id"],
+        "source_url": None,
+        "confidence_notes": preview["confidence_notes"],
+        "metadata": preview["metadata"],
+        "last_updated": preview["last_updated"],
+        "expires_at": preview["expires_at"],
+    }
+    if existing:
+        refreshed = _rest_json_request(
+            "PATCH",
+            f"{base_url}/rest/v1/market_prices?{query}",
+            service_role_key,
+            payload,
+        )
+        if not isinstance(refreshed, list) or not refreshed:
+            raise RuntimeError("Supabase REST refresh returned no row")
+        return dict(refreshed[0])
+
+    inserted = _rest_json_request(
+        "POST",
+        f"{base_url}/rest/v1/market_prices",
+        service_role_key,
+        payload,
+    )
+    if not isinstance(inserted, list) or not inserted:
+        raise RuntimeError("Supabase REST insert returned no row")
+    return dict(inserted[0])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-json", help="JSON file containing completed-sale rows for one vehicle group.")
@@ -130,7 +244,14 @@ def main() -> int:
     parser.add_argument("--source-run-id", required=True)
     parser.add_argument("--ttl-days", type=int, default=DEFAULT_TTL_DAYS)
     parser.add_argument("--min-sample-size", type=int, default=DEFAULT_MIN_SAMPLE_SIZE)
+    parser.add_argument("--apply", action="store_true", help="Insert or refresh the preview row. Default is dry-run.")
+    parser.add_argument("--apply-via-rest", action="store_true", help="Use Supabase REST service-role API for apply.")
+    parser.add_argument("--confirmation", default="", help=f"Required when --apply: {APPLY_CONFIRMATION}")
     args = parser.parse_args()
+
+    if not confirm_apply(apply=args.apply, confirmation=args.confirmation):
+        print(f"Apply requires confirmation={APPLY_CONFIRMATION}", file=sys.stderr)
+        return 2
 
     rows: list[dict[str, Any]] = []
     if args.input_json:
@@ -146,7 +267,26 @@ def main() -> int:
         min_sample_size=args.min_sample_size,
     )
     print(json.dumps({"preview": preview}, indent=2, sort_keys=True, default=str))
-    return 0 if preview else 1
+    if not preview:
+        return 1
+    if not args.apply:
+        print("Dry-run only. Re-run with --apply after reviewing the preview.")
+        return 0
+    if not args.apply_via_rest:
+        print("--apply currently requires --apply-via-rest.", file=sys.stderr)
+        return 2
+
+    supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not supabase_url or not service_role_key:
+        print("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for --apply-via-rest.", file=sys.stderr)
+        return 2
+    applied = insert_market_price_preview_via_rest(supabase_url, service_role_key, preview)
+    print(
+        "Applied completed-sale market_prices row via Supabase REST: "
+        f"id={applied.get('id')} avg={applied.get('avg_price')} samples={applied.get('sample_size')}"
+    )
+    return 0
 
 
 if __name__ == "__main__":

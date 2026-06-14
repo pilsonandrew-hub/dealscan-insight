@@ -23,3 +23,11 @@ def test_pricing_coverage_gap_proof_defaults_to_standard_lane():
     assert 'default: "10"' in text
     assert 'default: "50000"' not in text
     assert 'default: "4"' not in text
+
+
+def test_pricing_coverage_gap_proof_can_print_grouped_output():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "grouped:" in text
+    assert "GROUPED" in text
+    assert "--grouped" in text

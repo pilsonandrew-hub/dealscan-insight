@@ -668,6 +668,11 @@ def main() -> int:
         action="store_true",
         help="Read through Supabase REST service-role API instead of direct Postgres.",
     )
+    parser.add_argument(
+        "--grouped",
+        action="store_true",
+        help="Print aggregate recovery groups instead of row-level candidates.",
+    )
     args = parser.parse_args()
 
     if args.lookback_days <= 0:
@@ -718,8 +723,14 @@ def main() -> int:
         f"lookback_days={args.lookback_days} "
         f"max_mileage={args.max_mileage} max_age_years={args.max_age_years}"
     )
-    for row in rows:
-        print(format_gap_row(row))
+    if args.grouped:
+        groups = group_recovery_rows(rows)
+        print(f"pricing_recovery_groups={len(groups)}")
+        for group in groups:
+            print(format_recovery_group(group))
+    else:
+        for row in rows:
+            print(format_gap_row(row))
     return 0
 
 

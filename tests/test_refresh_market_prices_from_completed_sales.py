@@ -118,3 +118,15 @@ def test_preview_rejects_stale_completed_sales():
         ttl_days=14,
         min_sample_size=5,
     ) is None
+
+
+def test_apply_requires_confirmation():
+    assert refresh_market_prices_from_completed_sales.confirm_apply(apply=True, confirmation="") is False
+    assert (
+        refresh_market_prices_from_completed_sales.confirm_apply(
+            apply=True,
+            confirmation="REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES",
+        )
+        is True
+    )
+    assert refresh_market_prices_from_completed_sales.confirm_apply(apply=False, confirmation="") is True
