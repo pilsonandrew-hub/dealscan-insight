@@ -156,28 +156,31 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
     assert result["unsupported_dimensions"]["photo_count"]["status"] == "available"
     assert "bidder_depth" not in result["summary"]["unavailable_dimensions"]
     assert "photo_count" not in result["summary"]["unavailable_dimensions"]
-    assert result["value_leak_candidates"] == [
-        {
-            "id": "recoverable-1",
-            "source_site": "govdeals",
-            "year": 2023,
-            "make": "Ford",
-            "model": "F-150",
-            "dos_score": 82.0,
-            "gross_margin": 6200.0,
-            "bid_headroom": 2400.0,
-            "pricing_maturity": "proxy",
-            "recovery_reasons": [
-                "missing_vin",
-                "missing_mileage",
-                "missing_auction_end",
-                "condition_unverified",
-                "proxy_pricing",
-                "missing_photos_flag",
-                "zero_photo_count",
-            ],
-        }
+    candidate = result["value_leak_candidates"][0]
+    assert candidate["id"] == "recoverable-1"
+    assert candidate["source_site"] == "govdeals"
+    assert candidate["year"] == 2023
+    assert candidate["make"] == "Ford"
+    assert candidate["model"] == "F-150"
+    assert candidate["dos_score"] == 82.0
+    assert candidate["gross_margin"] == 6200.0
+    assert candidate["bid_headroom"] == 2400.0
+    assert candidate["pricing_maturity"] == "proxy"
+    assert candidate["recovery_reasons"] == [
+        "missing_vin",
+        "missing_mileage",
+        "missing_auction_end",
+        "condition_unverified",
+        "proxy_pricing",
+        "missing_photos_flag",
+        "zero_photo_count",
     ]
+    assert 0 <= candidate["recovery_score"] <= 100
+    assert candidate["recovery_tier"] in {"high", "medium", "low"}
+    assert set(candidate["score_components"]) == {"value_gap", "listing_quality", "evidence_strength", "source_health"}
+    assert round(sum(candidate["score_components"].values()), 2) == candidate["recovery_score"]
+    assert candidate["evidence"]["photo_count_present"] is True
+    assert candidate["truth_boundary"].startswith("Internal prioritization")
     serialized = str(result)
     assert "1FTFW1E50PFA00000" not in serialized
     assert "https://example.test/private" not in serialized
