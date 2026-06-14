@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -258,6 +258,16 @@ def _market_price_row_is_usable(row: dict[str, Any], *, now: datetime) -> bool:
     )
 
 
+def _dealer_sale_row_is_usable(row: dict[str, Any], *, now: datetime) -> bool:
+    sale_date = _market_data_parse_datetime(row.get("sale_date"))
+    recent_sale_cutoff = now - timedelta(days=365)
+    return bool(
+        (_coerce_float(row.get("sale_price")) or 0) > 0
+        and sale_date
+        and sale_date >= recent_sale_cutoff
+    )
+
+
 def _summarize_market_data_pricing_substrate(
     market_price_rows: list[dict[str, Any]],
     dealer_sale_rows: list[dict[str, Any]],
@@ -272,7 +282,7 @@ def _summarize_market_data_pricing_substrate(
     )
     dealer_sales_usable_rows = sum(
         1 for row in dealer_sale_rows
-        if (_coerce_float(row.get("sale_price")) or 0) > 0 and row.get("sale_date")
+        if _dealer_sale_row_is_usable(row, now=now)
     )
     return {
         "market_prices_table": market_prices_table,
@@ -310,6 +320,11 @@ def _summarize_market_data_quality(
         for row in active_rows
     ):
         unavailable_dimensions.append("pricing_freshness")
+    if (
+        pricing_substrate.get("market_prices_table") == "unavailable"
+        or pricing_substrate.get("dealer_sales_table") == "unavailable"
+    ):
+        unavailable_dimensions.append("pricing_substrate")
 
     active_count = len(active_rows)
     high_score_count = len(high_score_rows)
@@ -349,6 +364,8 @@ def _summarize_market_data_quality(
         degraded_reasons.append("high_score_proxy_pricing_present")
     if active_rows and freshness_status == "stale":
         degraded_reasons.append("pricing_evidence_stale")
+    if "pricing_substrate" in unavailable_dimensions:
+        degraded_reasons.append("pricing_substrate_unavailable")
     non_live_rows = [
         row for row in active_rows
         if str(row.get("pricing_maturity") or "").lower() != "live_market"
@@ -1722,6 +1739,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
             200,
         )
     except Exception:
+        market_prices_table = "unavailable"
         market_price_rows = []
 
     dealer_sale_rows: list[dict[str, Any]] = []
@@ -1742,6 +1760,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
             200,
         )
     except Exception:
+        dealer_sales_table = "unavailable"
         dealer_sale_rows = []
 
     pricing_substrate = _summarize_market_data_pricing_substrate(
