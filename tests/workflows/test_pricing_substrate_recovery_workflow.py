@@ -17,4 +17,5 @@ def test_pricing_substrate_recovery_workflow_is_manual_and_confirmation_gated():
     assert "scripts/refresh_market_prices_from_completed_sales.py" in text
     assert "SUPABASE_URL: ${{ secrets.SUPABASE_URL }}" in text
     assert "SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" in text
+    assert "psycopg2-binary==2.9.9" in text
     assert "set -x" not in lower

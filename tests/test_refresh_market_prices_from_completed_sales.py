@@ -120,6 +120,41 @@ def test_preview_rejects_stale_completed_sales():
     ) is None
 
 
+def test_preview_rejects_mixed_vehicle_groups():
+    rows = [
+        {
+            "year": 2020,
+            "make": "Ford",
+            "model": "Escape",
+            "state": "SC",
+            "sale_price": price,
+            "auction_end_date": "2026-05-01T00:00:00+00:00",
+            "source": "proxibid",
+        }
+        for price in (17000, 18000, 19000, 20000, 21000)
+    ]
+    rows.append(
+        {
+            "year": 2020,
+            "make": "Ford",
+            "model": "Explorer",
+            "state": "SC",
+            "sale_price": 30000,
+            "auction_end_date": "2026-05-01T00:00:00+00:00",
+            "source": "proxibid",
+        }
+    )
+
+    assert refresh_market_prices_from_completed_sales.build_market_price_preview(
+        rows,
+        source="competitor_sales",
+        source_run_id="pricing-recovery-test",
+        now=datetime(2026, 6, 14, tzinfo=timezone.utc),
+        ttl_days=14,
+        min_sample_size=5,
+    ) is None
+
+
 def test_apply_requires_confirmation():
     assert refresh_market_prices_from_completed_sales.confirm_apply(apply=True, confirmation="") is False
     assert (

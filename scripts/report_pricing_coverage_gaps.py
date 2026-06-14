@@ -352,7 +352,7 @@ def format_gap_row(row: dict) -> str:
 
 
 def _norm_text(value: Any) -> str:
-    return str(value or "").strip().lower()
+    return " ".join(str(value or "").strip().lower().split())
 
 
 def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now_year: int) -> dict[str, Any] | None:

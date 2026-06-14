@@ -57,6 +57,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
       - name: Print aggregate pricing recovery groups
         run: |
           set -euo pipefail

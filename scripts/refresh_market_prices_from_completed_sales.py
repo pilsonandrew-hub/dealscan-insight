@@ -82,10 +82,12 @@ def build_market_price_preview(
     now_utc = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
     usable: list[tuple[dict[str, Any], float, datetime]] = []
     expected_key: tuple[int | None, str, str, str | None] | None = None
+    seen_keys: set[tuple[int | None, str, str, str | None]] = set()
     for row in rows:
         key = _row_vehicle_key(row)
         if not key[0] or not key[1] or not key[2]:
             continue
+        seen_keys.add(key)
         if expected_key is None:
             expected_key = key
         if key != expected_key:
@@ -98,7 +100,7 @@ def build_market_price_preview(
             continue
         usable.append((row, price, sale_date.astimezone(timezone.utc)))
 
-    if expected_key is None or len(usable) < min_sample_size:
+    if expected_key is None or len(seen_keys) != 1 or len(usable) < min_sample_size:
         return None
 
     prices = [price for _, price, _ in usable]
