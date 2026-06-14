@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ from report_pricing_blocked_source_candidates import (
 
 MIN_SEEDABLE_HISTORY_ROWS = 5
 MIN_COMPLETED_SALE_REFRESH_ROWS = 5
+VIN_LIKE_RE = re.compile(r"\b(?:vin\s*#?\s*)?[A-HJ-NPR-Z0-9]{17}\b", re.IGNORECASE)
 
 
 REPORT_SQL = """
@@ -212,8 +214,8 @@ def _recovery_key(row: dict) -> tuple[int | None, str, str, str | None]:
         year = None
     return (
         year,
-        _norm_text(row.get("make")),
-        _norm_text(row.get("model")),
+        _safe_display_text(row.get("make")),
+        _safe_display_text(row.get("model")),
         _norm_text(row.get("state")) or None,
     )
 
@@ -348,7 +350,7 @@ def format_gap_row(row: dict) -> str:
     return (
         "- "
         f"origin={origin} "
-        f"{row['year']} {row['make']} {row['model']} "
+        f"{row['year']} {_safe_display_text(row['make'])} {_safe_display_text(row['model'])} "
         f"state={row.get('state') or 'unknown'} source={row.get('source') or row.get('source_site')} "
         f"opportunity_active={opportunity_active} auction_active={auction_active} dos={row.get('dos_score')} "
         f"grade={row.get('investment_grade')} headroom={row.get('bid_headroom')} "
@@ -358,13 +360,16 @@ def format_gap_row(row: dict) -> str:
         f"dealer_sales={row.get('usable_dealer_sales_matches')}/{row.get('dealer_sales_matches')} "
         f"competitor_sales={row.get('usable_competitor_sales_matches')}/{row.get('competitor_sales_matches')} "
         f"history={row.get('usable_opportunity_history')}/{row.get('market_comp_opportunity_history')} "
-        f"evidence={evidence_status} "
-        f"title={row.get('title')}"
+        f"evidence={evidence_status}"
     )
 
 
 def _norm_text(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _safe_display_text(value: Any) -> str:
+    return _norm_text(VIN_LIKE_RE.sub("[redacted]", str(value or ""))).strip(" ,-")
 
 
 def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now_year: int) -> dict[str, Any] | None:
