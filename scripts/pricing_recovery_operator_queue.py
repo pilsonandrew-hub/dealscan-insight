@@ -5,10 +5,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from typing import Protocol
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import report_pricing_coverage_gaps
 
 
 RECOVERY_STATUSES = {
@@ -156,20 +168,164 @@ def sync_queue_records(
     return summary
 
 
+class DryRunQueueRepository:
+    def get_by_group_key(self, group_key: str) -> dict[str, Any] | None:
+        return None
+
+    def upsert_request(self, record: dict[str, Any]) -> dict[str, Any]:
+        return {"id": "dry-run", **record}
+
+    def insert_event(self, event: dict[str, Any]) -> None:
+        return None
+
+
+class SupabaseRestQueueRepository:
+    def __init__(self, *, supabase_url: str, service_role_key: str):
+        self.base_url = supabase_url.rstrip("/").removesuffix("/rest/v1")
+        self.service_role_key = service_role_key
+
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+        data = None
+        headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Accept": "application/json",
+        }
+        if payload is not None:
+            data = json.dumps(payload, sort_keys=True).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+            headers["Prefer"] = "return=representation"
+        request = urllib_request.Request(
+            f"{self.base_url}/rest/v1/{path}",
+            data=data,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=30) as response:
+                raw_payload = response.read().decode("utf-8")
+        except urllib_error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Supabase REST API error: HTTP {exc.code} {body[:300]}") from exc
+        except urllib_error.URLError as exc:
+            raise RuntimeError(f"Supabase REST API unreachable: {exc}") from exc
+        return json.loads(raw_payload or "[]")
+
+    def get_by_group_key(self, group_key: str) -> dict[str, Any] | None:
+        query = urllib_parse.urlencode(
+            {
+                "select": "id,group_key,queue_status",
+                "group_key": f"eq.{group_key}",
+                "limit": "1",
+            }
+        )
+        rows = self._request("GET", f"pricing_recovery_requests?{query}")
+        if not isinstance(rows, list) or not rows:
+            return None
+        return dict(rows[0])
+
+    def upsert_request(self, record: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(record)
+        rows = self._request(
+            "POST",
+            "pricing_recovery_requests?on_conflict=group_key",
+            payload,
+        )
+        if not isinstance(rows, list) or not rows:
+            raise RuntimeError("Supabase queue upsert returned no row")
+        return dict(rows[0])
+
+    def insert_event(self, event: dict[str, Any]) -> None:
+        rows = self._request("POST", "pricing_recovery_request_events", event)
+        if not isinstance(rows, list) or not rows:
+            raise RuntimeError("Supabase queue event insert returned no row")
+
+
+def records_from_live_pricing_proof(
+    *,
+    proof_run_id: str,
+    head_sha: str,
+    lookback_days: int,
+    max_mileage: int,
+    max_age_years: int,
+    limit: int,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    rest_base_url, service_role_key, _ = report_pricing_coverage_gaps.resolve_rest_config(None)
+    if not rest_base_url or not service_role_key:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live queue proof")
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        rest_base_url,
+        service_role_key,
+        lookback_days=lookback_days,
+        max_mileage=max_mileage,
+        max_age_years=max_age_years,
+        limit=limit,
+    )
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+    return [
+        build_queue_record(group, proof_run_id=proof_run_id, head_sha=head_sha, now=now)
+        for group in groups
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-json", help="JSON file of grouped pricing recovery rows.")
+    parser.add_argument("--from-live-pricing-proof", action="store_true")
+    parser.add_argument("--proof-run-id", default=os.getenv("GITHUB_RUN_ID", "local"))
+    parser.add_argument("--head-sha", default=os.getenv("GITHUB_SHA", "local"))
+    parser.add_argument("--lookback-days", type=int, default=14)
+    parser.add_argument("--max-mileage", type=int, default=100000)
+    parser.add_argument("--max-age-years", type=int, default=10)
+    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--queue-dry-run", action="store_true")
+    parser.add_argument("--queue-apply", action="store_true")
+    parser.add_argument("--confirmation", default="")
     args = parser.parse_args()
-    if not args.input_json:
-        print(json.dumps({"queue_records": 0}, sort_keys=True))
-        return 0
-    with open(args.input_json, encoding="utf-8") as handle:
-        groups = json.load(handle)
-    records = [
-        build_queue_record(group, proof_run_id="local", head_sha="local", now=datetime.now(timezone.utc))
-        for group in groups
-    ]
-    print(json.dumps({"queue_records": len(records)}, sort_keys=True))
+    now = datetime.now(timezone.utc)
+    if args.from_live_pricing_proof:
+        records = records_from_live_pricing_proof(
+            proof_run_id=args.proof_run_id,
+            head_sha=args.head_sha,
+            lookback_days=args.lookback_days,
+            max_mileage=args.max_mileage,
+            max_age_years=args.max_age_years,
+            limit=args.limit,
+            now=now,
+        )
+    elif args.input_json:
+        with open(args.input_json, encoding="utf-8") as handle:
+            groups = json.load(handle)
+        records = [
+            build_queue_record(group, proof_run_id=args.proof_run_id, head_sha=args.head_sha, now=now)
+            for group in groups
+        ]
+    else:
+        records = []
+
+    apply = bool(args.queue_apply)
+    if apply:
+        rest_base_url, service_role_key, _ = report_pricing_coverage_gaps.resolve_rest_config(None)
+        if not rest_base_url or not service_role_key:
+            print("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for queue apply", file=sys.stderr)
+            return 2
+        repo: QueueRepository = SupabaseRestQueueRepository(
+            supabase_url=rest_base_url,
+            service_role_key=service_role_key,
+        )
+    else:
+        repo = DryRunQueueRepository()
+
+    summary = sync_queue_records(
+        records,
+        repo=repo,
+        apply=apply,
+        confirmation=args.confirmation,
+        actor="github-actions" if os.getenv("GITHUB_ACTIONS") else "local",
+    )
+    print(f"pricing_recovery_queue_records={len(records)}")
+    print(f"pricing_recovery_queue_summary={json.dumps(summary, sort_keys=True)}")
     return 0
 
 

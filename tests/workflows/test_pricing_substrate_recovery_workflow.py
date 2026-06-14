@@ -25,3 +25,11 @@ def test_pricing_substrate_recovery_workflow_is_manual_and_confirmation_gated():
     assert "SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" in text
     assert "psycopg2-binary==2.9.9" in text
     assert "set -x" not in lower
+
+
+def test_pricing_substrate_recovery_prints_queue_proof_before_apply():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "Print pricing recovery operator queue proof" in text
+    assert "scripts/pricing_recovery_operator_queue.py" in text
+    assert "--queue-dry-run" in text

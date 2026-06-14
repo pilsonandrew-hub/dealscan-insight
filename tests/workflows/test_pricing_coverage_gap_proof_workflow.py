@@ -31,3 +31,13 @@ def test_pricing_coverage_gap_proof_can_print_grouped_output():
     assert "grouped:" in text
     assert "GROUPED" in text
     assert "--grouped" in text
+
+
+def test_pricing_coverage_gap_proof_supports_queue_dry_run():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "sync_queue:" in text
+    assert "SYNC_PRICING_RECOVERY_OPERATOR_QUEUE" in text
+    assert "--queue-dry-run" in text
+    assert "--queue-apply" in text
+    assert "scripts/pricing_recovery_operator_queue.py" in text

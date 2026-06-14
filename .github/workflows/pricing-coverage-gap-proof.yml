@@ -27,6 +27,19 @@ on:
         options:
           - "false"
           - "true"
+      sync_queue:
+        description: "Dry-run or sync pricing recovery operator queue"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "dry-run"
+          - "apply"
+      queue_confirmation:
+        description: "Required only when sync_queue=apply: SYNC_PRICING_RECOVERY_OPERATOR_QUEUE"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -45,6 +58,8 @@ jobs:
       MAX_AGE_YEARS: ${{ inputs.max_age_years }}
       LIMIT: ${{ inputs.limit }}
       GROUPED: ${{ inputs.grouped }}
+      SYNC_QUEUE: ${{ inputs.sync_queue }}
+      QUEUE_CONFIRMATION: ${{ inputs.queue_confirmation }}
     steps:
       - name: Set Git default branch for quiet checkout
         run: git config --global init.defaultBranch main
@@ -70,3 +85,36 @@ jobs:
             args+=(--grouped)
           fi
           python3 scripts/report_pricing_coverage_gaps.py "${args[@]}"
+
+      - name: Print pricing recovery operator queue proof
+        if: ${{ inputs.sync_queue != 'false' }}
+        run: |
+          set -euo pipefail
+          args=(
+            --from-live-pricing-proof
+            --proof-run-id "${{ github.run_id }}"
+            --head-sha "${{ github.sha }}"
+            --lookback-days "${LOOKBACK_DAYS}"
+            --max-mileage "${MAX_MILEAGE}"
+            --max-age-years "${MAX_AGE_YEARS}"
+            --limit "${LIMIT}"
+            --queue-dry-run
+          )
+          if [[ "${SYNC_QUEUE}" == "apply" ]]; then
+            if [[ "${QUEUE_CONFIRMATION}" != "SYNC_PRICING_RECOVERY_OPERATOR_QUEUE" ]]; then
+              echo "Queue sync requires confirmation=SYNC_PRICING_RECOVERY_OPERATOR_QUEUE" >&2
+              exit 2
+            fi
+            args=(
+              --from-live-pricing-proof
+              --proof-run-id "${{ github.run_id }}"
+              --head-sha "${{ github.sha }}"
+              --lookback-days "${LOOKBACK_DAYS}"
+              --max-mileage "${MAX_MILEAGE}"
+              --max-age-years "${MAX_AGE_YEARS}"
+              --limit "${LIMIT}"
+              --queue-apply
+              --confirmation "${QUEUE_CONFIRMATION}"
+            )
+          fi
+          python3 scripts/pricing_recovery_operator_queue.py "${args[@]}"

@@ -81,6 +81,19 @@ jobs:
             --limit 100 \
             --grouped
 
+      - name: Print pricing recovery operator queue proof
+        run: |
+          set -euo pipefail
+          python3 scripts/pricing_recovery_operator_queue.py \
+            --from-live-pricing-proof \
+            --proof-run-id "${{ github.run_id }}" \
+            --head-sha "${{ github.sha }}" \
+            --lookback-days 14 \
+            --max-mileage 100000 \
+            --max-age-years 10 \
+            --limit 100 \
+            --queue-dry-run
+
       - name: Preview and optionally apply completed-sale market price recovery
         run: |
           set -euo pipefail
