@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -61,6 +61,10 @@ HIGH_RUST_STATES = {
 
 DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
 GENERIC_DELIVERY_SOURCES = {"apify", "webhook", "actor", "unknown"}
+HOT_DEAL_ALERT_THRESHOLD = 80.0
+MARKET_DATA_PROXY_SHARE_DEGRADED_THRESHOLD = 0.25
+MARKET_DATA_FRESHNESS_THRESHOLD_HOURS = 24.0
+MARKET_DATA_MIN_RETAIL_COMP_COUNT = 2
 
 
 def _require_env(name: str) -> str:
@@ -196,6 +200,231 @@ def _coerce_int(value: Any) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _market_data_round_share(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+def _market_data_parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _market_data_latest_datetime(rows: list[dict[str, Any]], keys: list[str]) -> tuple[str | None, datetime | None]:
+    latest_raw: str | None = None
+    latest_dt: datetime | None = None
+    for row in rows:
+        for key in keys:
+            parsed = _market_data_parse_datetime(row.get(key))
+            if parsed and (latest_dt is None or parsed > latest_dt):
+                latest_dt = parsed
+                latest_raw = str(row.get(key))
+    return latest_raw, latest_dt
+
+
+def _market_data_status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    return dict(Counter(
+        str(row.get(key))
+        for row in rows
+        if row.get(key) is not None
+    ).most_common(20))
+
+
+def _market_data_score(row: dict[str, Any]) -> float | None:
+    score = row.get("dos_score") if row.get("dos_score") is not None else row.get("score")
+    return _coerce_float(score)
+
+
+def _market_price_row_is_usable(row: dict[str, Any], *, now: datetime) -> bool:
+    expires_at = _market_data_parse_datetime(row.get("expires_at"))
+    return bool(
+        (_coerce_float(row.get("avg_price")) or 0) > 0
+        and (_coerce_float(row.get("low_price")) or 0) > 0
+        and (_coerce_float(row.get("high_price")) or 0) > 0
+        and (_coerce_int(row.get("sample_size")) or 0) >= 2
+        and expires_at
+        and expires_at >= now
+        and row.get("source")
+    )
+
+
+def _dealer_sale_row_is_usable(row: dict[str, Any], *, now: datetime) -> bool:
+    sale_date = _market_data_parse_datetime(row.get("sale_date"))
+    recent_sale_cutoff = now - timedelta(days=365)
+    return bool(
+        (_coerce_float(row.get("sale_price")) or 0) > 0
+        and sale_date
+        and sale_date >= recent_sale_cutoff
+    )
+
+
+def _summarize_market_data_pricing_substrate(
+    market_price_rows: list[dict[str, Any]],
+    dealer_sale_rows: list[dict[str, Any]],
+    *,
+    market_prices_table: str,
+    dealer_sales_table: str,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    market_prices_usable_rows = sum(
+        1 for row in market_price_rows
+        if _market_price_row_is_usable(row, now=now)
+    )
+    dealer_sales_usable_rows = sum(
+        1 for row in dealer_sale_rows
+        if _dealer_sale_row_is_usable(row, now=now)
+    )
+    return {
+        "market_prices_table": market_prices_table,
+        "market_prices_rows": len(market_price_rows),
+        "market_prices_usable_rows": market_prices_usable_rows,
+        "dealer_sales_table": dealer_sales_table,
+        "dealer_sales_rows": len(dealer_sale_rows),
+        "dealer_sales_usable_rows": dealer_sales_usable_rows,
+        "ready_for_market_comp_pricing": bool(
+            market_prices_usable_rows > 0
+            or dealer_sales_usable_rows >= 2
+        ),
+    }
+
+
+def _summarize_market_data_quality(
+    rows: list[dict[str, Any]],
+    pricing_substrate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    pricing_substrate = pricing_substrate or {}
+    now = datetime.now(timezone.utc)
+    active_rows = [row for row in rows if row.get("is_active") is True]
+    high_score_rows = [
+        row for row in active_rows
+        if (_market_data_score(row) or 0.0) >= HOT_DEAL_ALERT_THRESHOLD
+    ]
+
+    unavailable_dimensions: list[str] = []
+    if active_rows and all("pricing_maturity" not in row for row in active_rows):
+        unavailable_dimensions.append("pricing_maturity")
+    if active_rows and all("manheim_source_status" not in row for row in active_rows):
+        unavailable_dimensions.append("manheim_source_status")
+    if active_rows and all(
+        "pricing_updated_at" not in row and "manheim_updated_at" not in row
+        for row in active_rows
+    ):
+        unavailable_dimensions.append("pricing_freshness")
+    if (
+        pricing_substrate.get("market_prices_table") == "unavailable"
+        or pricing_substrate.get("dealer_sales_table") == "unavailable"
+    ):
+        unavailable_dimensions.append("pricing_substrate")
+
+    active_count = len(active_rows)
+    high_score_count = len(high_score_rows)
+    proxy_count = sum(
+        1 for row in active_rows
+        if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"
+    )
+    high_score_proxy_count = sum(
+        1 for row in high_score_rows
+        if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"
+    )
+    fallback_count = sum(
+        1 for row in active_rows
+        if str(row.get("manheim_source_status") or "").strip().lower() == "fallback"
+    )
+    live_count = sum(
+        1 for row in active_rows
+        if str(row.get("manheim_source_status") or "").strip().lower() == "live"
+    )
+
+    latest_raw, latest_dt = _market_data_latest_datetime(active_rows, ["pricing_updated_at", "manheim_updated_at"])
+    latest_age_hours = round((now - latest_dt).total_seconds() / 3600.0, 2) if latest_dt else None
+    freshness_status = (
+        "fresh"
+        if latest_age_hours is not None and latest_age_hours <= MARKET_DATA_FRESHNESS_THRESHOLD_HOURS
+        else "stale" if active_rows else "unavailable"
+    )
+
+    degraded_reasons: list[str] = []
+    if not active_rows:
+        degraded_reasons.append("no_active_pricing_sample")
+    if unavailable_dimensions:
+        degraded_reasons.append("pricing_fields_missing")
+    if _market_data_round_share(proxy_count, active_count) > MARKET_DATA_PROXY_SHARE_DEGRADED_THRESHOLD:
+        degraded_reasons.append("proxy_pricing_share_above_threshold")
+    if high_score_proxy_count > 0:
+        degraded_reasons.append("high_score_proxy_pricing_present")
+    if active_rows and freshness_status == "stale":
+        degraded_reasons.append("pricing_evidence_stale")
+    if "pricing_substrate" in unavailable_dimensions:
+        degraded_reasons.append("pricing_substrate_unavailable")
+    non_live_rows = [
+        row for row in active_rows
+        if str(row.get("pricing_maturity") or "").lower() != "live_market"
+    ]
+    if non_live_rows and all(
+        (_coerce_int(row.get("retail_comp_count")) or 0) < MARKET_DATA_MIN_RETAIL_COMP_COUNT
+        for row in non_live_rows
+    ):
+        degraded_reasons.append("retail_comps_sparse")
+    if active_rows and live_count == 0 and "manheim_source_status" not in unavailable_dimensions:
+        degraded_reasons.append("manheim_live_share_below_threshold")
+    substrate_ready = bool(pricing_substrate.get("ready_for_market_comp_pricing"))
+    if (
+        not substrate_ready
+        and pricing_substrate.get("market_prices_table") == "present"
+        and int(pricing_substrate.get("market_prices_usable_rows") or 0) == 0
+    ):
+        degraded_reasons.append("market_prices_unusable")
+    if (
+        not substrate_ready
+        and pricing_substrate.get("dealer_sales_table") == "present"
+        and int(pricing_substrate.get("dealer_sales_usable_rows") or 0) < 2
+    ):
+        degraded_reasons.append("dealer_sales_sparse")
+
+    if unavailable_dimensions:
+        status = "unknown"
+    elif not active_rows:
+        status = "unavailable"
+    elif degraded_reasons:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "sample_size": len(rows),
+        "active_sample_size": active_count,
+        "high_score_sample_size": high_score_count,
+        "pricing_maturity_counts": _market_data_status_counts(active_rows, "pricing_maturity"),
+        "high_score_pricing_maturity_counts": _market_data_status_counts(high_score_rows, "pricing_maturity"),
+        "manheim_source_status_counts": _market_data_status_counts(active_rows, "manheim_source_status"),
+        "fallback_share": _market_data_round_share(fallback_count, active_count),
+        "proxy_share": _market_data_round_share(proxy_count, active_count),
+        "high_score_proxy_share": _market_data_round_share(high_score_proxy_count, high_score_count),
+        "live_share": _market_data_round_share(live_count, active_count),
+        "latest_pricing_updated_at": latest_raw,
+        "latest_pricing_age_hours": latest_age_hours,
+        "freshness": {
+            "status": freshness_status,
+            "threshold_hours": MARKET_DATA_FRESHNESS_THRESHOLD_HOURS,
+        },
+        "degraded_reasons": sorted(set(degraded_reasons)),
+        "unavailable_dimensions": unavailable_dimensions,
+        "truth_boundary": (
+            "Sanitized aggregate pricing-evidence quality from persisted rows; does not print "
+            "VINs, listing URLs, titles, or raw payloads."
+        ),
+    }
 
 
 def _has_column(rows: list[dict[str, Any]], column: str) -> bool:
@@ -1475,12 +1704,71 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         "dos_score", "score", "current_bid", "estimated_sale_price", "potential_profit",
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
         "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
+        "pricing_source", "pricing_updated_at", "manheim_source_status", "manheim_updated_at",
+        "retail_comp_count", "retail_comp_confidence", "mmr_confidence_proxy",
         "condition_grade", "risk_flags", "listing_url", "url",
         "photo_count", "bidder_count", "raw_data",
     ]
     opportunity_columns = _available_columns(base_url, service_key, "opportunities")
     opportunity_select = ",".join([col for col in desired_opportunity_columns if col in opportunity_columns]) or "created_at"
     recent_opportunities = _recent_rows(base_url, service_key, "opportunities", opportunity_select, "created_at", 200)
+
+    market_price_rows: list[dict[str, Any]] = []
+    market_prices_table = "missing"
+    try:
+        market_price_columns = _available_columns(base_url, service_key, "market_prices")
+        market_price_select = ",".join([
+            col for col in [
+                "id",
+                "avg_price",
+                "low_price",
+                "high_price",
+                "sample_size",
+                "expires_at",
+                "source",
+            ]
+            if col in market_price_columns
+        ]) or "id"
+        market_prices_table = "present"
+        market_price_rows = _recent_rows(
+            base_url,
+            service_key,
+            "market_prices",
+            market_price_select,
+            "expires_at" if "expires_at" in market_price_columns else market_price_select.split(",", 1)[0],
+            200,
+        )
+    except Exception:
+        market_prices_table = "unavailable"
+        market_price_rows = []
+
+    dealer_sale_rows: list[dict[str, Any]] = []
+    dealer_sales_table = "missing"
+    try:
+        dealer_sale_columns = _available_columns(base_url, service_key, "dealer_sales")
+        dealer_sale_select = ",".join([
+            col for col in ["id", "sale_price", "sale_date"]
+            if col in dealer_sale_columns
+        ]) or "id"
+        dealer_sales_table = "present"
+        dealer_sale_rows = _recent_rows(
+            base_url,
+            service_key,
+            "dealer_sales",
+            dealer_sale_select,
+            "sale_date" if "sale_date" in dealer_sale_columns else dealer_sale_select.split(",", 1)[0],
+            200,
+        )
+    except Exception:
+        dealer_sales_table = "unavailable"
+        dealer_sale_rows = []
+
+    pricing_substrate = _summarize_market_data_pricing_substrate(
+        market_price_rows,
+        dealer_sale_rows,
+        market_prices_table=market_prices_table,
+        dealer_sales_table=dealer_sales_table,
+    )
 
     source_listing_rows: list[dict[str, Any]] = []
     try:
@@ -1669,6 +1957,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
 
     return {
         "recent_opportunities": _summarize_recent_opportunity_truth(recent_opportunities),
+        "market_data_quality": _summarize_market_data_quality(recent_opportunities, pricing_substrate),
         "recent_alerts": {
             "sample_count": len(alert_rows),
             "status_counts": dict(alert_status_counts.most_common(20)),

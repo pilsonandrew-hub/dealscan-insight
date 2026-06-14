@@ -782,6 +782,415 @@ def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypa
     assert "private raw text" not in serialized
 
 
+def test_safe_truth_audit_reports_market_data_quality(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "source_site",
+            "dos_score",
+            "score",
+            "pricing_maturity",
+            "pricing_source",
+            "pricing_updated_at",
+            "manheim_source_status",
+            "manheim_updated_at",
+            "retail_comp_count",
+            "retail_comp_confidence",
+            "mmr_confidence_proxy",
+            "is_active",
+            "vin",
+            "listing_url",
+            "raw_data",
+        },
+        "sonar_listings": {"created_at", "source_site", "source", "bidder_count"},
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {
+            "observed_date",
+            "source_name",
+            "total_runs",
+            "processed_runs",
+            "failed_runs",
+            "item_count",
+            "saved_count",
+            "skipped_count",
+            "parse_event_count",
+            "latest_started_at",
+        },
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at"},
+        "market_prices": {"id", "avg_price", "low_price", "high_price", "sample_size", "expires_at", "source"},
+        "dealer_sales": {"id", "sale_price", "sale_date"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2026-06-13T02:00:00Z",
+                "source_site": "govdeals",
+                "dos_score": 88,
+                "score": 88,
+                "pricing_maturity": "proxy",
+                "pricing_source": "mmr_proxy",
+                "pricing_updated_at": "2026-06-13T02:00:00+00:00",
+                "manheim_source_status": "fallback",
+                "manheim_updated_at": None,
+                "retail_comp_count": 0,
+                "retail_comp_confidence": None,
+                "mmr_confidence_proxy": 82,
+                "is_active": True,
+                "vin": "1FTFW1E50PFA00000",
+                "listing_url": "https://example.test/private",
+                "raw_data": {"description": "private text"},
+            }
+        ],
+        "sonar_listings": [],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [],
+        "parse_events": [],
+        "market_prices": [],
+        "dealer_sales": [],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    report = inspection._safe_truth_audit("https://example.supabase.co", "service-key")
+
+    quality = report["market_data_quality"]
+    assert quality["status"] == "degraded"
+    assert quality["active_sample_size"] == 1
+    assert quality["proxy_share"] == 1.0
+    assert quality["high_score_proxy_share"] == 1.0
+    assert quality["manheim_source_status_counts"] == {"fallback": 1}
+    assert "high_score_proxy_pricing_present" in quality["degraded_reasons"]
+    assert "private" not in str(quality).lower()
+    assert "1FTFW" not in str(quality)
+
+
+def test_safe_truth_audit_market_data_quality_keeps_zero_dos_from_falling_back_to_score(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "dos_score",
+            "score",
+            "pricing_maturity",
+            "pricing_updated_at",
+            "manheim_source_status",
+            "retail_comp_count",
+            "is_active",
+        },
+        "sonar_listings": {"created_at", "source_site", "source", "bidder_count"},
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {"observed_date", "source_name", "total_runs", "processed_runs", "failed_runs", "item_count", "saved_count", "skipped_count", "parse_event_count", "latest_started_at"},
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at"},
+        "market_prices": {"id", "avg_price", "low_price", "high_price", "sample_size", "expires_at", "source"},
+        "dealer_sales": {"id", "sale_price", "sale_date"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2099-01-01T00:00:00Z",
+                "dos_score": 0,
+                "score": 88,
+                "pricing_maturity": "proxy",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "fallback",
+                "retail_comp_count": 0,
+                "is_active": True,
+            }
+        ],
+        "sonar_listings": [],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [],
+        "parse_events": [],
+        "market_prices": [],
+        "dealer_sales": [],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    quality = inspection._safe_truth_audit("https://example.supabase.co", "service-key")["market_data_quality"]
+
+    assert quality["high_score_sample_size"] == 0
+    assert quality["high_score_proxy_share"] == 0.0
+    assert "high_score_proxy_pricing_present" not in quality["degraded_reasons"]
+
+
+def test_safe_truth_audit_market_data_quality_includes_pricing_substrate_degradation(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "dos_score",
+            "score",
+            "pricing_maturity",
+            "pricing_updated_at",
+            "manheim_source_status",
+            "retail_comp_count",
+            "is_active",
+        },
+        "sonar_listings": {"created_at", "source_site", "source", "bidder_count"},
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {"observed_date", "source_name", "total_runs", "processed_runs", "failed_runs", "item_count", "saved_count", "skipped_count", "parse_event_count", "latest_started_at"},
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at"},
+        "market_prices": {"id", "avg_price", "low_price", "high_price", "sample_size", "expires_at", "source"},
+        "dealer_sales": {"id", "sale_price", "sale_date"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2099-01-01T00:00:00Z",
+                "dos_score": 82,
+                "score": 82,
+                "pricing_maturity": "live_market",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "live",
+                "retail_comp_count": 3,
+                "is_active": True,
+            }
+        ],
+        "sonar_listings": [],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [],
+        "parse_events": [],
+        "market_prices": [],
+        "dealer_sales": [{"id": "sale-1", "sale_price": 22000, "sale_date": "2099-01-01T00:00:00+00:00"}],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    quality = inspection._safe_truth_audit("https://example.supabase.co", "service-key")["market_data_quality"]
+
+    assert quality["status"] == "degraded"
+    assert "market_prices_unusable" in quality["degraded_reasons"]
+    assert "dealer_sales_sparse" in quality["degraded_reasons"]
+
+
+def test_safe_truth_audit_market_data_quality_stays_healthy_when_market_prices_are_ready(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "dos_score",
+            "score",
+            "pricing_maturity",
+            "pricing_updated_at",
+            "manheim_source_status",
+            "retail_comp_count",
+            "is_active",
+        },
+        "sonar_listings": {"created_at", "source_site", "source", "bidder_count"},
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {"observed_date", "source_name", "total_runs", "processed_runs", "failed_runs", "item_count", "saved_count", "skipped_count", "parse_event_count", "latest_started_at"},
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at"},
+        "market_prices": {"id", "avg_price", "low_price", "high_price", "sample_size", "expires_at", "source"},
+        "dealer_sales": {"id", "sale_price", "sale_date"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2099-01-01T00:00:00Z",
+                "dos_score": 82,
+                "score": 82,
+                "pricing_maturity": "live_market",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "live",
+                "retail_comp_count": 3,
+                "is_active": True,
+            }
+        ],
+        "sonar_listings": [],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [],
+        "parse_events": [],
+        "market_prices": [
+            {
+                "id": "market-1",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+        ],
+        "dealer_sales": [{"id": "sale-1", "sale_price": 22000, "sale_date": "2099-01-01T00:00:00+00:00"}],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    quality = inspection._safe_truth_audit("https://example.supabase.co", "service-key")["market_data_quality"]
+
+    assert quality["status"] == "healthy"
+    assert "dealer_sales_sparse" not in quality["degraded_reasons"]
+    assert "market_prices_unusable" not in quality["degraded_reasons"]
+
+
+def test_safe_truth_audit_market_data_quality_marks_pricing_substrate_unavailable_on_fetch_error(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "dos_score",
+            "score",
+            "pricing_maturity",
+            "pricing_updated_at",
+            "manheim_source_status",
+            "retail_comp_count",
+            "is_active",
+        },
+        "sonar_listings": {"created_at", "source_site", "source", "bidder_count"},
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {"observed_date", "source_name", "total_runs", "processed_runs", "failed_runs", "item_count", "saved_count", "skipped_count", "parse_event_count", "latest_started_at"},
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2099-01-01T00:00:00Z",
+                "dos_score": 82,
+                "score": 82,
+                "pricing_maturity": "live_market",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "live",
+                "retail_comp_count": 3,
+                "is_active": True,
+            }
+        ],
+        "sonar_listings": [],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [],
+        "parse_events": [],
+    }
+
+    def fake_columns(_base, _key, table):
+        if table in {"market_prices", "dealer_sales"}:
+            raise RuntimeError(f"{table} read failed")
+        return columns[table]
+
+    monkeypatch.setattr(inspection, "_available_columns", fake_columns)
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    quality = inspection._safe_truth_audit("https://example.supabase.co", "service-key")["market_data_quality"]
+
+    assert quality["status"] == "unknown"
+    assert "pricing_substrate" in quality["unavailable_dimensions"]
+    assert "pricing_substrate_unavailable" in quality["degraded_reasons"]
+    assert "market_prices_unusable" not in quality["degraded_reasons"]
+    assert "dealer_sales_sparse" not in quality["degraded_reasons"]
+
+
+def test_safe_truth_audit_market_data_quality_uses_recent_dealer_sales_only(monkeypatch):
+    columns = {
+        "opportunities": {
+            "created_at",
+            "dos_score",
+            "score",
+            "pricing_maturity",
+            "pricing_updated_at",
+            "manheim_source_status",
+            "retail_comp_count",
+            "is_active",
+        },
+        "sonar_listings": {"created_at", "source_site", "source", "bidder_count"},
+        "alert_log": {"created_at", "status"},
+        "webhook_log": {"created_at", "processing_status"},
+        "ingest_delivery_log": {"source_site", "status", "error_message", "created_at"},
+        "post_close_outcome_requests": {"created_at", "source_site", "outcome_status"},
+        "source_health_daily": {"observed_date", "source_name", "total_runs", "processed_runs", "failed_runs", "item_count", "saved_count", "skipped_count", "parse_event_count", "latest_started_at"},
+        "parse_events": {"source_name", "event_type", "status", "reason", "created_at"},
+        "market_prices": {"id", "avg_price", "low_price", "high_price", "sample_size", "expires_at", "source"},
+        "dealer_sales": {"id", "sale_price", "sale_date"},
+    }
+    rows = {
+        "opportunities": [
+            {
+                "created_at": "2099-01-01T00:00:00Z",
+                "dos_score": 82,
+                "score": 82,
+                "pricing_maturity": "live_market",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "live",
+                "retail_comp_count": 3,
+                "is_active": True,
+            }
+        ],
+        "sonar_listings": [],
+        "alert_log": [],
+        "webhook_log": [],
+        "ingest_delivery_log": [],
+        "post_close_outcome_requests": [],
+        "source_health_daily": [],
+        "parse_events": [],
+        "market_prices": [],
+        "dealer_sales": [
+            {"id": "old-sale-1", "sale_price": 22000, "sale_date": "2020-01-01T00:00:00+00:00"},
+            {"id": "old-sale-2", "sale_price": 23000, "sale_date": "2020-01-02T00:00:00+00:00"},
+        ],
+    }
+
+    monkeypatch.setattr(inspection, "_available_columns", lambda _base, _key, table: columns[table])
+    monkeypatch.setattr(
+        inspection,
+        "_recent_rows",
+        lambda _base, _key, table, _select, _order, _limit: rows[table],
+    )
+
+    quality = inspection._safe_truth_audit("https://example.supabase.co", "service-key")["market_data_quality"]
+
+    assert quality["status"] == "degraded"
+    assert "dealer_sales_sparse" in quality["degraded_reasons"]
+    assert "market_prices_unusable" in quality["degraded_reasons"]
+
+
 def test_safe_truth_audit_attributes_recent_deliveries_from_webhook_run_lineage(monkeypatch):
     columns = {
         "opportunities": {"created_at"},
