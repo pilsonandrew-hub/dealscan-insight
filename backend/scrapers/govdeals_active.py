@@ -55,7 +55,7 @@ def passes(lot: dict) -> bool:
         # Only allow rust belt if vehicle is <= 2 years old
         if not (year and year >= current_year - 2):
             return False
-        logger.info(f"[BYPASS] Rust state {state} allowed — vehicle is {year} (<=3yr old)")
+        logger.info(f"[BYPASS] Rust state {state} allowed — vehicle is {year} (<=2yr old)")
 
     return True
 

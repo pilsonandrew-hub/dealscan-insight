@@ -28,6 +28,7 @@ const DEFAULT_MAX_MILEAGE = 100000;
 const STANDARD_MAX_MILES_PER_YEAR = 18000;
 const PREMIUM_MAX_MODEL_AGE_YEARS = 4;
 const PREMIUM_MAX_MILEAGE = 50000;
+const RUST_STATE_NEW_VEHICLE_MIN_YEAR = CURRENT_YEAR - 2;
 
 if (!WEBHOOK_SECRET) {
     console.warn('[EQUIPMENTFACTS] WARNING: WEBHOOK_SECRET env var not set');
@@ -369,7 +370,7 @@ function passes(item) {
     const year = yearValue == null || yearValue === '' ? null : parseInt(yearValue, 10);
     const hasYear = Number.isFinite(year);
     if (!includeRustStates && HIGH_RUST_STATES.has(state) && hasYear) {
-        if (year < 2023) {
+        if (year < RUST_STATE_NEW_VEHICLE_MIN_YEAR) {
             rejectForProof(
                 'rows_excluded_rust_state',
                 'rust_state_rejected_samples',
@@ -378,7 +379,7 @@ function passes(item) {
             );
             return false;
         }
-        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
     }
     const mileageValue = item.mileage ?? item.miles ?? item.meterCount ?? null;
     const mileage = mileageValue == null || mileageValue === ''

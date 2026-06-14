@@ -17,6 +17,7 @@ from supabase.lib.client_options import ClientOptions
 from typing import Any, Optional
 from datetime import datetime, timezone
 import importlib
+import hmac
 import time
 import os
 import logging
@@ -470,8 +471,8 @@ async def get_recommendations(
 
 @router.get("/debug", tags=["rover"], include_in_schema=False)
 async def rover_debug(x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
-    internal_secret = os.getenv("INTERNAL_API_SECRET", "")
-    if not internal_secret or x_internal_secret != internal_secret:
+    internal_secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+    if not internal_secret or not x_internal_secret or not hmac.compare_digest(x_internal_secret.strip(), internal_secret):
         raise HTTPException(status_code=404, detail="Not found")
     return _rover_debug_snapshot()
 
@@ -557,15 +558,13 @@ async def track_event(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
-
-
 @router.post("/actions")
 async def record_action(
     payload: dict[str, Any],
     x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
 ):
-    if not INTERNAL_API_SECRET or x_internal_secret != INTERNAL_API_SECRET:
+    internal_secret = os.getenv("INTERNAL_API_SECRET", "").strip()
+    if not internal_secret or not x_internal_secret or not hmac.compare_digest(x_internal_secret.strip(), internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     """Record a rover action from internal callers such as Telegram callbacks."""
     opportunity_id = str(payload.get("opportunity_id") or "").strip()

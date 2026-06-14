@@ -49,7 +49,7 @@ const TARGET_STATES = new Set([
     'WA','OR','HI','ID','MT','WY','ND','SD','NE','KS','AL','LA','OK',
 ]);
 
-// High-rust states — only allow vehicles <= 3yr old
+// High-rust states — only allow vehicles <= 2yr old
 const HIGH_RUST_STATES = new Set([
     'OH','MI','PA','NY','WI','MN','IL','IN','MO','IA',
     'ND','SD','NE','KS','WV','ME','NH','VT','MA','RI',

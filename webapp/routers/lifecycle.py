@@ -1,6 +1,7 @@
 """
 Deal lifecycle management — expire and archive stale deals (DEA-13).
 """
+import hmac
 import os
 import logging
 from datetime import datetime, timedelta, timezone
@@ -62,7 +63,7 @@ def _verify_lifecycle_secret(x_internal_secret: Optional[str]) -> None:
     if not expected:
         logger.error("[LIFECYCLE_AUTH] INTERNAL_API_SECRET or LIFECYCLE_CRON_SECRET not configured")
         raise HTTPException(status_code=503, detail="Lifecycle authorization not configured")
-    if not x_internal_secret or x_internal_secret.strip() != expected:
+    if not x_internal_secret or not hmac.compare_digest(x_internal_secret.strip(), expected):
         logger.warning("[LIFECYCLE_AUTH] rejected unauthorized expire request")
         raise HTTPException(status_code=401, detail="Invalid lifecycle authorization")
 

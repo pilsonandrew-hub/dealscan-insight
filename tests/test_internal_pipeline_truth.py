@@ -1,3 +1,5 @@
+import inspect
+
 from fastapi import HTTPException
 from types import SimpleNamespace
 
@@ -17,6 +19,13 @@ def test_internal_secret_rejects_missing(monkeypatch):
 def test_internal_secret_accepts(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "internal-secret")
     internal.verify_internal_secret("internal-secret")
+
+
+def test_internal_secret_uses_constant_time_comparison():
+    source = inspect.getsource(internal.verify_internal_secret)
+
+    assert "compare_digest" in source
+    assert ".strip() != expected" not in source
 
 
 def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monkeypatch):

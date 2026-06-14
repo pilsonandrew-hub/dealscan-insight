@@ -1,7 +1,11 @@
 """Unit tests for rover scoring helpers."""
+import asyncio
+import inspect
 import os
 import unittest
 from unittest.mock import patch
+
+from fastapi import HTTPException
 
 from backend.rover.heuristic_scorer import DECAY_HALF_LIFE_MS, apply_decay, score_item
 from webapp.routers import rover
@@ -60,6 +64,29 @@ class RoverDecayTests(unittest.TestCase):
                 "redis available": "yes",
             },
         )
+
+    def test_internal_rover_routes_use_constant_time_secret_comparison(self):
+        debug_source = inspect.getsource(rover.rover_debug)
+        action_source = inspect.getsource(rover.record_action)
+
+        self.assertIn("compare_digest", debug_source)
+        self.assertIn("compare_digest", action_source)
+        self.assertNotIn("x_internal_secret != internal_secret", debug_source)
+        self.assertNotIn("x_internal_secret != INTERNAL_API_SECRET", action_source)
+
+    def test_record_action_rejects_whitespace_only_internal_secret_config(self):
+        with patch.dict(os.environ, {"INTERNAL_API_SECRET": "   "}):
+            with self.assertRaises(HTTPException) as exc:
+                asyncio.run(rover.record_action({}, x_internal_secret="   "))
+
+        self.assertEqual(exc.exception.status_code, 403)
+
+    def test_record_action_reads_internal_secret_at_request_time(self):
+        with patch.dict(os.environ, {"INTERNAL_API_SECRET": "runtime-secret"}):
+            with self.assertRaises(HTTPException) as exc:
+                asyncio.run(rover.record_action({}, x_internal_secret="runtime-secret"))
+
+        self.assertEqual(exc.exception.status_code, 400)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import hmac
 import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -37,7 +38,7 @@ def verify_internal_secret(x_internal_secret: Optional[str]) -> None:
     if not expected:
         logger.error("[INTERNAL_AUTH] INTERNAL_API_SECRET or LIFECYCLE_CRON_SECRET not configured")
         raise HTTPException(status_code=503, detail="Internal authorization not configured")
-    if not x_internal_secret or x_internal_secret.strip() != expected:
+    if not x_internal_secret or not hmac.compare_digest(x_internal_secret.strip(), expected):
         logger.warning("[INTERNAL_AUTH] rejected unauthorized internal request")
         raise HTTPException(status_code=401, detail="Invalid internal authorization")
 

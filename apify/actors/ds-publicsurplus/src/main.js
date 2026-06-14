@@ -375,7 +375,7 @@ async function pushListing(listing, sourceUrl, log) {
     if (HIGH_RUST_STATES.has(state)) {
         const currentYear = new Date().getFullYear();
         if (year && year >= currentYear - 2) {
-            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+            log.info(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
         } else {
             rowsExcludedRustState++;
             log.debug(`[SKIP] High-rust state: ${state} - ${title}`);
