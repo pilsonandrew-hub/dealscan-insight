@@ -145,11 +145,16 @@ def sync_queue_records(
     summary = {"would_insert": 0, "would_update": 0, "inserted": 0, "updated": 0}
     for record in records:
         existing = repo.get_by_group_key(record["group_key"])
+        payload = dict(record)
+        if existing:
+            for field in ("queue_status", "owner", "priority", "blocked_reason", "resolution_notes", "resolved_at"):
+                if field in existing:
+                    payload[field] = existing[field]
         if not apply:
             summary["would_update" if existing else "would_insert"] += 1
             continue
 
-        saved = repo.upsert_request(record)
+        saved = repo.upsert_request(payload)
         event_type = "updated" if existing else "inserted"
         summary[event_type] += 1
         repo.insert_event(
@@ -159,10 +164,10 @@ def sync_queue_records(
                 "previous_queue_status": (existing or {}).get("queue_status"),
                 "next_queue_status": saved["queue_status"],
                 "actor": actor,
-                "reason": record["recommended_action"],
-                "proof_run_id": record.get("latest_proof_run_id"),
-                "head_sha": record.get("latest_proof_head_sha"),
-                "metadata": {"group_key": record["group_key"], "status": record["status"]},
+                "reason": payload["recommended_action"],
+                "proof_run_id": payload.get("latest_proof_run_id"),
+                "head_sha": payload.get("latest_proof_head_sha"),
+                "metadata": {"group_key": payload["group_key"], "status": payload["status"]},
             }
         )
     return summary
@@ -184,7 +189,14 @@ class SupabaseRestQueueRepository:
         self.base_url = supabase_url.rstrip("/").removesuffix("/rest/v1")
         self.service_role_key = service_role_key
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        merge_duplicates: bool = False,
+    ) -> Any:
         data = None
         headers = {
             "apikey": self.service_role_key,
@@ -194,7 +206,10 @@ class SupabaseRestQueueRepository:
         if payload is not None:
             data = json.dumps(payload, sort_keys=True).encode("utf-8")
             headers["Content-Type"] = "application/json"
-            headers["Prefer"] = "return=representation"
+            prefer = ["return=representation"]
+            if merge_duplicates:
+                prefer.append("resolution=merge-duplicates")
+            headers["Prefer"] = ",".join(prefer)
         request = urllib_request.Request(
             f"{self.base_url}/rest/v1/{path}",
             data=data,
@@ -230,6 +245,7 @@ class SupabaseRestQueueRepository:
             "POST",
             "pricing_recovery_requests?on_conflict=group_key",
             payload,
+            merge_duplicates=True,
         )
         if not isinstance(rows, list) or not rows:
             raise RuntimeError("Supabase queue upsert returned no row")

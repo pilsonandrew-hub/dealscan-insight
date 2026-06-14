@@ -55,3 +55,5 @@ create index if not exists idx_pricing_recovery_requests_status
 
 create index if not exists idx_pricing_recovery_request_events_request_id
   on public.pricing_recovery_request_events(request_id);
+
+notify pgrst, 'reload schema';

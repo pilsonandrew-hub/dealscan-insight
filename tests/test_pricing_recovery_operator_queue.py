@@ -135,3 +135,74 @@ def test_sync_apply_writes_insert_event():
     assert repo.events[0]["event_type"] == "inserted"
     assert repo.events[0]["next_queue_status"] == "open"
     assert repo.events[0]["actor"] == "github-actions"
+
+
+def test_sync_apply_preserves_existing_operator_status():
+    existing = {
+        "2020|ford|escape|sc|gsaauctions,proxibid": {
+            "id": "req-2",
+            "group_key": "2020|ford|escape|sc|gsaauctions,proxibid",
+            "queue_status": "evidence_requested",
+            "owner": "operator-1",
+            "priority": 7,
+            "blocked_reason": None,
+            "resolution_notes": "requested completed sales",
+            "resolved_at": None,
+        }
+    }
+    repo = FakeQueueRepository(existing=existing)
+    records = [
+        queue.build_queue_record(recovery_group(), proof_run_id="run-2", head_sha="sha-2", now=NOW)
+    ]
+
+    summary = queue.sync_queue_records(
+        records,
+        repo=repo,
+        apply=True,
+        confirmation=queue.APPLY_CONFIRMATION,
+        actor="github-actions",
+    )
+
+    assert summary["updated"] == 1
+    assert repo.upserts[0]["queue_status"] == "evidence_requested"
+    assert repo.upserts[0]["owner"] == "operator-1"
+    assert repo.upserts[0]["priority"] == 7
+    assert repo.upserts[0]["resolution_notes"] == "requested completed sales"
+    assert repo.events[0]["previous_queue_status"] == "evidence_requested"
+    assert repo.events[0]["next_queue_status"] == "evidence_requested"
+
+
+def test_supabase_rest_upsert_uses_merge_duplicates_prefer(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'[{"id": "req-1", "queue_status": "open"}]'
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["method"] = request.get_method()
+        return FakeResponse()
+
+    monkeypatch.setattr(queue.urllib_request, "urlopen", fake_urlopen)
+    repo = queue.SupabaseRestQueueRepository(
+        supabase_url="https://example.supabase.co",
+        service_role_key="service-role",
+    )
+
+    row = repo.upsert_request(
+        queue.build_queue_record(recovery_group(), proof_run_id="run", head_sha="sha", now=NOW)
+    )
+
+    assert row["id"] == "req-1"
+    assert captured["method"] == "POST"
+    assert "on_conflict=group_key" in captured["url"]
+    assert "resolution=merge-duplicates" in captured["headers"]["Prefer"]
+    assert "return=representation" in captured["headers"]["Prefer"]
