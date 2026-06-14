@@ -173,12 +173,16 @@ def classify_gap(row: dict, *, min_seedable_history_rows: int = MIN_SEEDABLE_HIS
         return "covered_by_market_prices"
     if int(row.get("usable_dealer_sales_matches") or 0) >= 2:
         return "covered_by_dealer_sales"
+    if int(row.get("usable_competitor_sales_matches") or 0) >= min_seedable_history_rows:
+        return "covered_by_competitor_sales"
 
     usable_history = int(row.get("usable_opportunity_history") or 0)
     if usable_history >= min_seedable_history_rows:
         return "seedable_from_internal_history"
     if usable_history > 0:
         return "insufficient_internal_history"
+    if int(row.get("competitor_sales_matches") or 0) > 0:
+        return "insufficient_competitor_sales"
     return "blocked_no_internal_comp_evidence"
 
 

@@ -47,6 +47,26 @@ def test_classify_gap_separates_seedable_and_insufficient_history():
     assert report_pricing_coverage_gaps.classify_gap(insufficient) == "insufficient_internal_history"
 
 
+def test_classify_gap_reports_completed_sales_coverage():
+    covered = {
+        "usable_market_prices_matches": 0,
+        "usable_dealer_sales_matches": 0,
+        "usable_competitor_sales_matches": 5,
+        "competitor_sales_matches": 5,
+        "usable_opportunity_history": 0,
+    }
+    insufficient = {
+        "usable_market_prices_matches": 0,
+        "usable_dealer_sales_matches": 0,
+        "usable_competitor_sales_matches": 2,
+        "competitor_sales_matches": 2,
+        "usable_opportunity_history": 0,
+    }
+
+    assert report_pricing_coverage_gaps.classify_gap(covered) == "covered_by_competitor_sales"
+    assert report_pricing_coverage_gaps.classify_gap(insufficient) == "insufficient_competitor_sales"
+
+
 def test_classify_gap_blocks_when_no_internal_comp_evidence_exists():
     row = {
         "usable_market_prices_matches": 0,
@@ -116,6 +136,8 @@ def test_format_gap_row_includes_evidence_and_economics():
         "market_prices_matches": 0,
         "usable_dealer_sales_matches": 0,
         "dealer_sales_matches": 0,
+        "usable_competitor_sales_matches": 0,
+        "competitor_sales_matches": 0,
         "usable_opportunity_history": 0,
         "market_comp_opportunity_history": 1,
         "title": "2020 Dodge Durango SRT",
