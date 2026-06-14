@@ -184,6 +184,88 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
     assert "private text" not in serialized
 
 
+def test_seller_recovery_audit_ranks_candidates_with_bounded_scores(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "source_health_daily": [
+            {"source_name": "govdeals", "total_runs": 3, "processed_runs": 2, "failed_runs": 1, "saved_count": 4, "skipped_count": 8, "parse_event_count": 12},
+            {"source_name": "hibid", "total_runs": 1, "processed_runs": 1, "failed_runs": 0, "saved_count": 1, "skipped_count": 0, "parse_event_count": 1},
+        ],
+        "ingest_delivery_log": [
+            {"status": "skipped_margin", "error_message": "margin_below_floor", "created_at": "2026-06-13T01:00:00Z"},
+            {"status": "skipped_gate", "error_message": "condition_unverified", "created_at": "2026-06-13T01:01:00Z"},
+        ],
+        "parse_events": [
+            {"source_name": "govdeals", "event_type": "db_save", "status": "skipped_margin", "reason": "margin_below_floor"},
+            {"source_name": "govdeals", "event_type": "db_save", "status": "saved", "reason": None},
+        ],
+        "opportunities": [
+            {
+                "id": "candidate-high", "is_active": True, "source_site": "govdeals", "year": 2023,
+                "make": "Ford", "model": "F-150", "dos_score": 86, "gross_margin": 21000,
+                "bid_headroom": 17000, "pricing_maturity": "market_comp", "vin": None,
+                "mileage": None, "condition_grade": "Unknown", "auction_end_date": None,
+                "risk_flags": ["missing_photos"], "photo_count": 0, "bidder_count": None,
+                "listing_url": "https://private.example/high", "raw_data": {"vin": "SECRETVINHIGH"},
+            },
+            {
+                "id": "candidate-medium", "is_active": True, "source_site": "hibid", "year": 2024,
+                "make": "Toyota", "model": "Tacoma", "dos_score": 81, "gross_margin": 4200,
+                "bid_headroom": 900, "pricing_maturity": "proxy", "vin": "5TSECRET",
+                "mileage": 19000, "condition_grade": "Good", "auction_end_date": "2026-06-20T00:00:00Z",
+                "risk_flags": [], "photo_count": 2, "bidder_count": None,
+            },
+        ],
+        "sonar_listings": [{"source_site": "hibid", "source": "hibid", "bidder_count": 12}],
+    }))
+
+    result = internal.build_seller_recovery_audit()
+    candidates = result["value_leak_candidates"]
+
+    assert [candidate["id"] for candidate in candidates] == ["candidate-high", "candidate-medium"]
+    assert candidates[0]["recovery_score"] > candidates[1]["recovery_score"]
+    assert candidates[0]["recovery_tier"] == "high"
+    assert candidates[1]["recovery_tier"] in {"medium", "low"}
+    for candidate in candidates:
+        assert 0 <= candidate["recovery_score"] <= 100
+        assert set(candidate["score_components"]) == {"value_gap", "listing_quality", "evidence_strength", "source_health"}
+        assert round(sum(candidate["score_components"].values()), 2) == candidate["recovery_score"]
+        assert "evidence" in candidate
+        assert "truth_boundary" in candidate
+    serialized = str(result)
+    assert "SECRETVINHIGH" not in serialized
+    assert "https://private.example/high" not in serialized
+
+
+def test_seller_recovery_audit_returns_rollups_and_truth_boundaries(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "source_health_daily": [
+            {"source_name": "allsurplus", "total_runs": 2, "processed_runs": 1, "failed_runs": 1, "saved_count": 3, "skipped_count": 9, "parse_event_count": 11},
+        ],
+        "ingest_delivery_log": [
+            {"status": "skipped_margin", "error_message": "margin_below_floor"},
+            {"status": "skipped_margin", "error_message": "margin_below_floor"},
+        ],
+        "parse_events": [{"source_name": "allsurplus", "event_type": "db_save", "status": "skipped_margin", "reason": "margin_below_floor"}],
+        "opportunities": [
+            {"id": "c1", "is_active": True, "source_site": "allsurplus", "gross_margin": 9000, "bid_headroom": 7000, "dos_score": 84, "pricing_maturity": "market_comp", "vin": None, "mileage": None, "condition_grade": "Unknown", "risk_flags": ["missing_photos"], "photo_count": 0},
+            {"id": "c2", "is_active": True, "source_site": "allsurplus", "gross_margin": 6000, "bid_headroom": 3000, "dos_score": 82, "pricing_maturity": "market_comp", "vin": "known", "mileage": 24000, "condition_grade": "Good", "risk_flags": [], "photo_count": 1},
+        ],
+        "sonar_listings": [],
+    }))
+
+    result = internal.build_seller_recovery_audit()
+
+    assert result["recovery_rollups"]["reason_counts"]["missing_photos_flag"] == 1
+    assert result["recovery_rollups"]["reason_counts"]["low_photo_count"] == 1
+    assert result["recovery_rollups"]["source_counts"] == {"allsurplus": 2}
+    assert result["recovery_rollups"]["top_sources_by_score"][0]["source_site"] == "allsurplus"
+    assert result["source_health_summary"]["observed_source_count"] == 1
+    assert result["source_health_summary"]["sources_with_failed_runs"] == 1
+    assert result["source_health_summary"]["total_failed_runs"] == 1
+    assert result["truth_boundaries"]["candidate_ranking"].startswith("Internal deterministic prioritization")
+    assert "seller intent" in result["truth_boundaries"]["source_health"]
+
+
 def test_seller_recovery_audit_degrades_when_opportunities_unreadable(monkeypatch):
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "source_health_daily": [],
