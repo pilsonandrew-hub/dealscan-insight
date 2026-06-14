@@ -546,6 +546,9 @@ def test_seller_recovery_audit_reports_source_mirror_bidder_depth_when_opportuni
                 "year": 2024,
                 "make": "Ford",
                 "model": "F-150",
+                "dos_score": 84,
+                "gross_margin": 5000,
+                "bid_headroom": 1200,
                 "pricing_maturity": "proxy",
                 "photo_count": 1,
                 "bidder_count": None,
@@ -570,6 +573,64 @@ def test_seller_recovery_audit_reports_source_mirror_bidder_depth_when_opportuni
     assert report["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
     assert report["unsupported_dimensions"]["bidder_depth"]["evidence_surface"] == "source_mirror"
     assert "bidder_depth" not in report["summary"]["unavailable_dimensions"]
+    candidate = report["value_leak_candidates"][0]
+    assert candidate["evidence"]["bidder_depth_surface"] == "source_mirror"
+    assert candidate["evidence"]["source_mirror_bidder_count_present"] is True
+
+
+def test_seller_recovery_audit_does_not_apply_source_mirror_bidder_depth_cross_source():
+    report = inspection._summarize_seller_recovery_audit(
+        opportunity_rows=[
+            {
+                "is_active": True,
+                "source_site": "govdeals",
+                "year": 2024,
+                "make": "Ford",
+                "model": "F-150",
+                "dos_score": 84,
+                "gross_margin": 5000,
+                "bid_headroom": 1200,
+                "pricing_maturity": "proxy",
+                "photo_count": 1,
+                "bidder_count": None,
+            }
+        ],
+        source_listing_rows=[
+            {
+                "source_site": "hibid",
+                "source": "hibid",
+                "bidder_count": 6,
+                "created_at": "2026-06-13T14:00:00Z",
+            }
+        ],
+        source_health_rows=[{"source_name": "govdeals"}],
+        delivery_rows=[],
+        parse_event_rows=[],
+    )
+
+    assert report["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
+    candidate = report["value_leak_candidates"][0]
+    assert candidate["source_site"] == "govdeals"
+    assert candidate["evidence"]["bidder_depth_surface"] is None
+    assert candidate["evidence"]["source_mirror_bidder_count_present"] is False
+
+
+def test_seller_recovery_audit_counts_failed_sources_distinctly():
+    report = inspection._summarize_seller_recovery_audit(
+        opportunity_rows=[],
+        source_listing_rows=[],
+        source_health_rows=[
+            {"source_name": "govdeals", "failed_runs": 1},
+            {"source_name": "govdeals", "failed_runs": 2},
+            {"source_name": "hibid", "failed_runs": 0},
+        ],
+        delivery_rows=[],
+        parse_event_rows=[],
+    )
+
+    assert report["source_health_summary"]["observed_source_count"] == 2
+    assert report["source_health_summary"]["sources_with_failed_runs"] == 1
+    assert report["source_health_summary"]["total_failed_runs"] == 3
 
 
 def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypatch):
@@ -705,6 +766,16 @@ def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypa
         "missing_photos_flag",
         "zero_photo_count",
     ]
+    candidate = report["seller_recovery_audit"]["value_leak_candidates"][0]
+    assert candidate["recovery_score"] > 0
+    assert candidate["recovery_tier"] in {"high", "medium", "low"}
+    assert round(sum(candidate["score_components"].values()), 2) == candidate["recovery_score"]
+    assert candidate["evidence"]["photo_count_present"] is True
+    assert report["seller_recovery_audit"]["recovery_rollups"]["reason_counts"]["missing_photos_flag"] == 1
+    assert report["seller_recovery_audit"]["source_health_summary"]["observed_source_count"] == 1
+    assert report["seller_recovery_audit"]["truth_boundaries"]["candidate_ranking"].startswith(
+        "Internal deterministic prioritization"
+    )
     serialized = str(report)
     assert "1FTFW1E50PFA00000" not in serialized
     assert "https://example.test/private" not in serialized
