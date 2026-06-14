@@ -160,6 +160,40 @@ def test_format_gap_row_includes_evidence_and_economics():
     assert "retail_proxy=40500" in formatted
 
 
+def test_format_gap_row_does_not_print_raw_title_or_vin_like_model_text():
+    row = {
+        "year": 2020,
+        "make": "ford",
+        "model": "escape multipurpose vehicle (mpv), vin # 1fmcu0f60lub43858",
+        "state": "sc",
+        "source": "proxibid",
+        "source_site": "proxibid",
+        "is_active": True,
+        "dos_score": 72,
+        "investment_grade": "Gold",
+        "bid_headroom": 1000,
+        "current_bid": 12000,
+        "expected_close_bid": 13000,
+        "retail_asking_price_estimate": 22000,
+        "usable_market_prices_matches": 0,
+        "market_prices_matches": 0,
+        "usable_dealer_sales_matches": 0,
+        "dealer_sales_matches": 0,
+        "usable_competitor_sales_matches": 0,
+        "competitor_sales_matches": 0,
+        "usable_opportunity_history": 0,
+        "market_comp_opportunity_history": 0,
+        "title": "2020 Ford Escape VIN # 1FMCU0F60LUB43858 private auction title",
+    }
+
+    formatted = report_pricing_coverage_gaps.format_gap_row(row)
+
+    assert "title=" not in formatted
+    assert "1fmcu0f60lub43858" not in formatted.lower()
+    assert "private auction title" not in formatted
+    assert "ford escape multipurpose vehicle" in formatted
+
+
 def test_report_sql_labels_opportunity_proxy_activity_explicitly():
     assert "'opportunity_proxy' as candidate_origin" in report_pricing_coverage_gaps.REPORT_SQL
     assert "is_active as opportunity_active" in report_pricing_coverage_gaps.REPORT_SQL
@@ -518,6 +552,39 @@ def test_group_recovery_rows_blocks_when_no_evidence_and_stays_sanitized():
     assert "https://example.test/private" not in formatted
     assert "status=blocked_no_internal_comp_evidence" in formatted
     assert "action=request_completed_sales_evidence" in formatted
+
+
+def test_group_recovery_rows_redacts_vin_like_model_text_from_output():
+    rows = [
+        {
+            "candidate_origin": "delivery_pricing_skip",
+            "year": 2020,
+            "make": "Ford",
+            "model": "Escape Multipurpose Vehicle (MPV), VIN # 1FMCU0F60LUB43858",
+            "state": "SC",
+            "source": "proxibid",
+            "auction_active": True,
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_competitor_sales_matches": 0,
+            "competitor_sales_matches": 0,
+            "usable_opportunity_history": 0,
+            "market_comp_opportunity_history": 0,
+            "title": "private title",
+            "vin": "1FMCU0F60LUB43858",
+            "listing_url": "https://example.test/private",
+        }
+    ]
+
+    group = report_pricing_coverage_gaps.group_recovery_rows(rows)[0]
+    formatted = report_pricing_coverage_gaps.format_recovery_group(group)
+
+    assert "1fmcu0f60lub43858" not in formatted.lower()
+    assert "private title" not in formatted
+    assert "https://example.test/private" not in formatted
+    assert "2020 ford escape multipurpose vehicle" in formatted
 
 
 def test_group_recovery_rows_preserves_insufficient_history_threshold():
