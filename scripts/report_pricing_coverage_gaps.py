@@ -35,6 +35,7 @@ from report_pricing_blocked_source_candidates import (
 
 
 MIN_SEEDABLE_HISTORY_ROWS = 5
+MIN_COMPLETED_SALE_REFRESH_ROWS = 5
 
 
 REPORT_SQL = """
@@ -129,6 +130,22 @@ opportunity_history as (
     and lower(trim(hist.model)) = cp.model
     and coalesce(nullif(lower(trim(hist.state)), ''), '') = coalesce(cp.state, '')
   group by cp.id
+),
+competitor_sales_matches as (
+  select
+    cp.id,
+    count(cs.id)::int as competitor_sales_matches,
+    count(cs.id) filter (
+      where cs.sale_price > 0
+        and cs.auction_end_date >= timezone('utc', now()) - interval '365 days'
+    )::int as usable_competitor_sales_matches
+  from clean_proxy cp
+  left join public.competitor_sales cs
+    on cs.year = cp.year
+    and lower(trim(cs.make)) = cp.make
+    and lower(trim(cs.model)) = cp.model
+    and coalesce(nullif(lower(trim(cs.state)), ''), '') = coalesce(cp.state, '')
+  group by cp.id
 )
 select
   cp.*,
@@ -137,11 +154,14 @@ select
   dsm.dealer_sales_matches,
   dsm.usable_dealer_sales_matches,
   oh.market_comp_opportunity_history,
-  oh.usable_opportunity_history
+  oh.usable_opportunity_history,
+  csm.competitor_sales_matches,
+  csm.usable_competitor_sales_matches
 from clean_proxy cp
 join market_matches mm on mm.id = cp.id
 join dealer_sales_matches dsm on dsm.id = cp.id
 join opportunity_history oh on oh.id = cp.id
+join competitor_sales_matches csm on csm.id = cp.id
 order by cp.is_active desc, cp.processed_at desc
 limit %(limit)s
 """
@@ -152,15 +172,170 @@ def classify_gap(row: dict, *, min_seedable_history_rows: int = MIN_SEEDABLE_HIS
 
     if int(row.get("usable_market_prices_matches") or 0) > 0:
         return "covered_by_market_prices"
-    if int(row.get("usable_dealer_sales_matches") or 0) >= 2:
+    usable_dealer_sales = int(row.get("usable_dealer_sales_matches") or 0)
+    if usable_dealer_sales >= MIN_COMPLETED_SALE_REFRESH_ROWS:
         return "covered_by_dealer_sales"
+    if int(row.get("usable_competitor_sales_matches") or 0) >= min_seedable_history_rows:
+        return "covered_by_competitor_sales"
+    if usable_dealer_sales > 0:
+        return "insufficient_dealer_sales"
 
     usable_history = int(row.get("usable_opportunity_history") or 0)
     if usable_history >= min_seedable_history_rows:
         return "seedable_from_internal_history"
     if usable_history > 0:
         return "insufficient_internal_history"
+    if int(row.get("competitor_sales_matches") or 0) > 0:
+        return "insufficient_competitor_sales"
     return "blocked_no_internal_comp_evidence"
+
+
+def recommended_action_for_status(status: str) -> str:
+    return {
+        "covered_by_market_prices": "none",
+        "covered_by_dealer_sales": "refresh_market_prices_from_dealer_sales",
+        "covered_by_competitor_sales": "refresh_market_prices_from_competitor_sales",
+        "seedable_from_internal_history": "review_internal_history_for_completed_sales_evidence",
+        "insufficient_dealer_sales": "request_completed_sales_evidence",
+        "insufficient_internal_history": "wait_for_more_internal_history",
+        "insufficient_competitor_sales": "request_completed_sales_evidence",
+        "blocked_no_internal_comp_evidence": "request_completed_sales_evidence",
+        "dirty_source_row": "ignore_dirty_source_row",
+        "expired_pricing_gap": "ignore_expired_listing",
+    }.get(status, "request_completed_sales_evidence")
+
+
+def _recovery_key(row: dict) -> tuple[int | None, str, str, str | None]:
+    try:
+        year = int(row.get("year")) if row.get("year") is not None else None
+    except (TypeError, ValueError):
+        year = None
+    return (
+        year,
+        _norm_text(row.get("make")),
+        _norm_text(row.get("model")),
+        _norm_text(row.get("state")) or None,
+    )
+
+
+def _status_from_counts(evidence_counts: dict[str, int]) -> str:
+    if evidence_counts["usable_market_prices"] > 0:
+        return "covered_by_market_prices"
+    if evidence_counts["usable_dealer_sales"] >= MIN_COMPLETED_SALE_REFRESH_ROWS:
+        return "covered_by_dealer_sales"
+    if evidence_counts["usable_competitor_sales"] >= MIN_SEEDABLE_HISTORY_ROWS:
+        return "covered_by_competitor_sales"
+    if evidence_counts["usable_dealer_sales"] > 0:
+        return "insufficient_dealer_sales"
+    if evidence_counts["usable_internal_history"] >= MIN_SEEDABLE_HISTORY_ROWS:
+        return "seedable_from_internal_history"
+    if evidence_counts["usable_internal_history"] > 0:
+        return "insufficient_internal_history"
+    if evidence_counts["competitor_sales"] > 0:
+        return "insufficient_competitor_sales"
+    return "blocked_no_internal_comp_evidence"
+
+
+def group_recovery_rows(rows: list[dict]) -> list[dict]:
+    groups: dict[tuple[int | None, str, str, str | None], dict] = {}
+    for row in rows:
+        key = _recovery_key(row)
+        group = groups.setdefault(
+            key,
+            {
+                "key": {
+                    "year": key[0],
+                    "make": key[1],
+                    "model": key[2],
+                    "state": key[3],
+                },
+                "candidate_count": 0,
+                "source_counts": {},
+                "evidence_counts": {
+                    "usable_market_prices": 0,
+                    "market_prices": 0,
+                    "usable_dealer_sales": 0,
+                    "dealer_sales": 0,
+                    "usable_internal_history": 0,
+                    "internal_history": 0,
+                    "usable_competitor_sales": 0,
+                    "competitor_sales": 0,
+                },
+            },
+        )
+        group["candidate_count"] += 1
+        source = _norm_text(row.get("source") or row.get("source_site")) or "unknown"
+        group["source_counts"][source] = group["source_counts"].get(source, 0) + 1
+        evidence_counts = group["evidence_counts"]
+        evidence_counts["usable_market_prices"] = max(
+            evidence_counts["usable_market_prices"],
+            int(row.get("usable_market_prices_matches") or 0),
+        )
+        evidence_counts["market_prices"] = max(
+            evidence_counts["market_prices"],
+            int(row.get("market_prices_matches") or 0),
+        )
+        evidence_counts["usable_dealer_sales"] = max(
+            evidence_counts["usable_dealer_sales"],
+            int(row.get("usable_dealer_sales_matches") or 0),
+        )
+        evidence_counts["dealer_sales"] = max(
+            evidence_counts["dealer_sales"],
+            int(row.get("dealer_sales_matches") or 0),
+        )
+        evidence_counts["usable_internal_history"] = max(
+            evidence_counts["usable_internal_history"],
+            int(row.get("usable_opportunity_history") or 0),
+        )
+        evidence_counts["internal_history"] = max(
+            evidence_counts["internal_history"],
+            int(row.get("market_comp_opportunity_history") or 0),
+        )
+        evidence_counts["usable_competitor_sales"] = max(
+            evidence_counts["usable_competitor_sales"],
+            int(row.get("usable_competitor_sales_matches") or 0),
+        )
+        evidence_counts["competitor_sales"] = max(
+            evidence_counts["competitor_sales"],
+            int(row.get("competitor_sales_matches") or 0),
+        )
+
+    recovery_groups = []
+    for group in groups.values():
+        status = _status_from_counts(group["evidence_counts"])
+        group["status"] = status
+        group["recommended_action"] = recommended_action_for_status(status)
+        recovery_groups.append(group)
+    return sorted(
+        recovery_groups,
+        key=lambda group: (
+            -int(group["candidate_count"]),
+            group["key"]["year"] or 0,
+            group["key"]["make"],
+            group["key"]["model"],
+            group["key"]["state"] or "",
+        ),
+    )
+
+
+def format_recovery_group(group: dict) -> str:
+    key = group.get("key") or {}
+    evidence = group.get("evidence_counts") or {}
+    sources = group.get("source_counts") or {}
+    source_text = ",".join(f"{source}:{count}" for source, count in sorted(sources.items()))
+    return (
+        "- "
+        f"{key.get('year')} {key.get('make')} {key.get('model')} "
+        f"state={key.get('state') or 'unknown'} "
+        f"candidates={group.get('candidate_count', 0)} "
+        f"sources={source_text or 'none'} "
+        f"status={group.get('status')} "
+        f"action={group.get('recommended_action')} "
+        f"market={evidence.get('usable_market_prices', 0)}/{evidence.get('market_prices', 0)} "
+        f"dealer_sales={evidence.get('usable_dealer_sales', 0)}/{evidence.get('dealer_sales', 0)} "
+        f"competitor_sales={evidence.get('usable_competitor_sales', 0)}/{evidence.get('competitor_sales', 0)} "
+        f"history={evidence.get('usable_internal_history', 0)}/{evidence.get('internal_history', 0)}"
+    )
 
 
 def format_gap_row(row: dict) -> str:
@@ -181,6 +356,7 @@ def format_gap_row(row: dict) -> str:
         f"retail_proxy={row.get('retail_asking_price_estimate')} "
         f"market={row.get('usable_market_prices_matches')}/{row.get('market_prices_matches')} "
         f"dealer_sales={row.get('usable_dealer_sales_matches')}/{row.get('dealer_sales_matches')} "
+        f"competitor_sales={row.get('usable_competitor_sales_matches')}/{row.get('competitor_sales_matches')} "
         f"history={row.get('usable_opportunity_history')}/{row.get('market_comp_opportunity_history')} "
         f"evidence={evidence_status} "
         f"title={row.get('title')}"
@@ -188,7 +364,7 @@ def format_gap_row(row: dict) -> str:
 
 
 def _norm_text(value: Any) -> str:
-    return str(value or "").strip().lower()
+    return " ".join(str(value or "").strip().lower().split())
 
 
 def _clean_proxy_row(row: dict[str, Any], *, max_mileage: int, max_age_years: int, now_year: int) -> dict[str, Any] | None:
@@ -254,6 +430,27 @@ def _dealer_sales_matches(row: dict[str, Any], dealer_sales_rows: list[dict[str,
             continue
         matches += 1
         sale_date = _parse_datetime(sale.get("sale_date"))
+        if _positive_number(sale.get("sale_price")) and sale_date is not None and sale_date >= now - timedelta(days=365):
+            usable += 1
+    return matches, usable
+
+
+def _competitor_sales_matches(
+    row: dict[str, Any],
+    competitor_sales_rows: list[dict[str, Any]],
+    now: datetime,
+) -> tuple[int, int]:
+    matches = 0
+    usable = 0
+    for sale in competitor_sales_rows:
+        if int(sale.get("year") or 0) != int(row.get("year") or 0):
+            continue
+        if _norm_text(sale.get("make")) != row.get("make") or _norm_text(sale.get("model")) != row.get("model"):
+            continue
+        if (_norm_text(sale.get("state")) or None) != (row.get("state") or None):
+            continue
+        matches += 1
+        sale_date = _parse_datetime(sale.get("auction_end_date") or sale.get("sale_date"))
         if _positive_number(sale.get("sale_price")) and sale_date is not None and sale_date >= now - timedelta(days=365):
             usable += 1
     return matches, usable
@@ -481,6 +678,27 @@ def fetch_gap_rows_via_rest(
             ("sale_date", f"gte.{sales_since}"),
         ],
     )
+    candidate_years = [
+        int(row["year"])
+        for row in clean_proxy_rows
+        if row.get("year") is not None and str(row.get("year")).isdigit()
+    ]
+    competitor_sales_query = [
+        ("select", "id,year,make,model,state,sale_price,auction_end_date,source"),
+    ]
+    if candidate_years:
+        competitor_sales_query.extend(
+            [
+                ("year", f"gte.{min(candidate_years)}"),
+                ("year", f"lte.{max(candidate_years)}"),
+            ]
+        )
+    competitor_sales_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "competitor_sales",
+        competitor_sales_query,
+    )
     history_rows = _fetch_postgrest_rows(
         base_url,
         service_role_key,
@@ -497,6 +715,7 @@ def fetch_gap_rows_via_rest(
     for row in clean_proxy_rows:
         market_total, market_usable = _market_price_matches(row, market_rows, current_time)
         sales_total, sales_usable = _dealer_sales_matches(row, dealer_sales_rows, current_time)
+        competitor_total, competitor_usable = _competitor_sales_matches(row, competitor_sales_rows, current_time)
         history_total, history_usable = _opportunity_history_matches(row, history_rows)
         enriched.append(
             {
@@ -505,6 +724,8 @@ def fetch_gap_rows_via_rest(
                 "usable_market_prices_matches": market_usable,
                 "dealer_sales_matches": sales_total,
                 "usable_dealer_sales_matches": sales_usable,
+                "competitor_sales_matches": competitor_total,
+                "usable_competitor_sales_matches": competitor_usable,
                 "market_comp_opportunity_history": history_total,
                 "usable_opportunity_history": history_usable,
             }
@@ -546,6 +767,11 @@ def main() -> int:
         "--via-rest",
         action="store_true",
         help="Read through Supabase REST service-role API instead of direct Postgres.",
+    )
+    parser.add_argument(
+        "--grouped",
+        action="store_true",
+        help="Print aggregate recovery groups instead of row-level candidates.",
     )
     args = parser.parse_args()
 
@@ -597,8 +823,14 @@ def main() -> int:
         f"lookback_days={args.lookback_days} "
         f"max_mileage={args.max_mileage} max_age_years={args.max_age_years}"
     )
-    for row in rows:
-        print(format_gap_row(row))
+    if args.grouped:
+        groups = group_recovery_rows(rows)
+        print(f"pricing_recovery_groups={len(groups)}")
+        for group in groups:
+            print(format_recovery_group(group))
+    else:
+        for row in rows:
+            print(format_gap_row(row))
     return 0
 
 

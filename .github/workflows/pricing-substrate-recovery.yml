@@ -1,0 +1,117 @@
+name: Pricing Substrate Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_file:
+        description: "Optional completed-sale evidence JSON under reports/pricing-recovery-evidence-*.json"
+        required: false
+        default: ""
+      apply:
+        description: "Insert or refresh the market_prices row"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      confirmation:
+        description: "Required only when apply=true: REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES"
+        required: false
+        default: ""
+      ttl_days:
+        description: "Market price TTL in days"
+        required: true
+        default: "14"
+      min_sample_size:
+        description: "Minimum completed-sale sample size"
+        required: true
+        default: "5"
+      source:
+        description: "Trusted completed-sale source to stamp on market_prices"
+        required: true
+        default: "competitor_sales"
+        type: choice
+        options:
+          - competitor_sales
+          - dealer_sales
+      source_run_id:
+        description: "Governed evidence acquisition run id"
+        required: true
+        default: "manual-pricing-substrate-recovery"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      EVIDENCE_FILE: ${{ inputs.evidence_file }}
+      APPLY_RECOVERY: ${{ inputs.apply }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      TTL_DAYS: ${{ inputs.ttl_days }}
+      MIN_SAMPLE_SIZE: ${{ inputs.min_sample_size }}
+      SOURCE: ${{ inputs.source }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+    steps:
+      - name: Set Git default branch for quiet checkout
+        run: git config --global init.defaultBranch main
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Python runtime dependency
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir psycopg2-binary==2.9.9
+
+      - name: Print aggregate pricing recovery groups
+        run: |
+          set -euo pipefail
+          python3 scripts/report_pricing_coverage_gaps.py \
+            --via-rest \
+            --lookback-days 14 \
+            --max-mileage 100000 \
+            --max-age-years 10 \
+            --limit 100 \
+            --grouped
+
+      - name: Preview and optionally apply completed-sale market price recovery
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${EVIDENCE_FILE}" ]]; then
+            echo "No evidence_file provided; aggregate proof only."
+            exit 0
+          fi
+
+          case "${EVIDENCE_FILE}" in
+            reports/pricing-recovery-evidence-*.json) ;;
+            *)
+              echo "Evidence file must live under reports/pricing-recovery-evidence-*.json" >&2
+              exit 2
+              ;;
+          esac
+
+          args=(
+            --input-json "${EVIDENCE_FILE}"
+            --source "${SOURCE}"
+            --source-run-id "${SOURCE_RUN_ID}"
+            --ttl-days "${TTL_DAYS}"
+            --min-sample-size "${MIN_SAMPLE_SIZE}"
+          )
+
+          if [[ "${APPLY_RECOVERY}" == "true" ]]; then
+            if [[ "${CONFIRMATION}" != "REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES" ]]; then
+              echo "Apply requires confirmation=REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES" >&2
+              exit 2
+            fi
+            args+=(--apply --apply-via-rest --confirmation "${CONFIRMATION}")
+          fi
+
+          python3 scripts/refresh_market_prices_from_completed_sales.py "${args[@]}"
