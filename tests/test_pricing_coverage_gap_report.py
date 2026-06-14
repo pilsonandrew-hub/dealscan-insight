@@ -252,6 +252,8 @@ def test_fetch_gap_rows_via_rest_classifies_live_coverage_sources(monkeypatch):
             ]
         if table == "dealer_sales":
             return []
+        if table == "competitor_sales":
+            return []
         if table == "ingest_delivery_log":
             return []
         raise AssertionError(table)
@@ -313,7 +315,7 @@ def test_fetch_gap_rows_via_rest_excludes_over_age_proxy_opportunities(monkeypat
                     "processed_at": "2026-06-05T12:00:00+00:00",
                 },
             ]
-        if table in {"market_prices", "dealer_sales", "ingest_delivery_log"}:
+        if table in {"market_prices", "dealer_sales", "competitor_sales", "ingest_delivery_log"}:
             return []
         raise AssertionError(table)
 
@@ -370,6 +372,8 @@ def test_fetch_gap_rows_via_rest_includes_active_delivery_pricing_skips(monkeypa
         if table == "market_prices":
             return []
         if table == "dealer_sales":
+            return []
+        if table == "competitor_sales":
             return []
         raise AssertionError(table)
 
@@ -534,3 +538,102 @@ def test_group_recovery_rows_prefers_actionable_completed_sales_coverage():
     assert groups[0]["status"] == "covered_by_competitor_sales"
     assert groups[0]["recommended_action"] == "refresh_market_prices_from_competitor_sales"
     assert groups[0]["evidence_counts"]["usable_competitor_sales"] == 5
+
+
+def test_group_recovery_rows_does_not_double_count_shared_group_evidence():
+    rows = [
+        {
+            "year": 2021,
+            "make": "Ford",
+            "model": "Explorer",
+            "state": "AL",
+            "source": "proxibid",
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_opportunity_history": 3,
+            "market_comp_opportunity_history": 3,
+            "usable_competitor_sales_matches": 3,
+            "competitor_sales_matches": 3,
+        },
+        {
+            "year": 2021,
+            "make": "Ford",
+            "model": "Explorer",
+            "state": "AL",
+            "source": "govdeals",
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_opportunity_history": 3,
+            "market_comp_opportunity_history": 3,
+            "usable_competitor_sales_matches": 3,
+            "competitor_sales_matches": 3,
+        },
+    ]
+
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+
+    assert groups[0]["candidate_count"] == 2
+    assert groups[0]["evidence_counts"]["usable_internal_history"] == 3
+    assert groups[0]["evidence_counts"]["usable_competitor_sales"] == 3
+    assert groups[0]["status"] == "insufficient_internal_history"
+
+
+def test_fetch_gap_rows_via_rest_enriches_competitor_sales_coverage(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "opportunities":
+            return [
+                {
+                    "id": "proxy-covered-competitor-sales",
+                    "source": "proxibid",
+                    "source_site": "proxibid",
+                    "title": "2021 Ford Explorer",
+                    "year": 2021,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "AL",
+                    "mileage": 30000,
+                    "vin": "1FM5K8GCXMGA00001",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "processed_at": "2026-06-05T12:00:00+00:00",
+                }
+            ]
+        if table in {"market_prices", "dealer_sales", "ingest_delivery_log"}:
+            return []
+        if table == "competitor_sales":
+            return [
+                {
+                    "id": f"comp-{index}",
+                    "year": 2021,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "AL",
+                    "sale_price": 25000 + index,
+                    "auction_end_date": "2026-05-01T00:00:00+00:00",
+                    "source": "govdeals",
+                }
+                for index in range(5)
+            ]
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=10,
+        limit=20,
+        now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T12:00:00+00:00"),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["competitor_sales_matches"] == 5
+    assert rows[0]["usable_competitor_sales_matches"] == 5
+    assert report_pricing_coverage_gaps.group_recovery_rows(rows)[0]["status"] == "covered_by_competitor_sales"

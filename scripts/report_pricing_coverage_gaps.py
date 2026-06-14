@@ -129,6 +129,22 @@ opportunity_history as (
     and lower(trim(hist.model)) = cp.model
     and coalesce(nullif(lower(trim(hist.state)), ''), '') = coalesce(cp.state, '')
   group by cp.id
+),
+competitor_sales_matches as (
+  select
+    cp.id,
+    count(cs.id)::int as competitor_sales_matches,
+    count(cs.id) filter (
+      where cs.sale_price > 0
+        and cs.auction_end_date >= timezone('utc', now()) - interval '365 days'
+    )::int as usable_competitor_sales_matches
+  from clean_proxy cp
+  left join public.competitor_sales cs
+    on cs.year = cp.year
+    and lower(trim(cs.make)) = cp.make
+    and lower(trim(cs.model)) = cp.model
+    and coalesce(nullif(lower(trim(cs.state)), ''), '') = coalesce(cp.state, '')
+  group by cp.id
 )
 select
   cp.*,
@@ -137,11 +153,14 @@ select
   dsm.dealer_sales_matches,
   dsm.usable_dealer_sales_matches,
   oh.market_comp_opportunity_history,
-  oh.usable_opportunity_history
+  oh.usable_opportunity_history,
+  csm.competitor_sales_matches,
+  csm.usable_competitor_sales_matches
 from clean_proxy cp
 join market_matches mm on mm.id = cp.id
 join dealer_sales_matches dsm on dsm.id = cp.id
 join opportunity_history oh on oh.id = cp.id
+join competitor_sales_matches csm on csm.id = cp.id
 order by cp.is_active desc, cp.processed_at desc
 limit %(limit)s
 """
@@ -237,14 +256,38 @@ def group_recovery_rows(rows: list[dict]) -> list[dict]:
         source = _norm_text(row.get("source") or row.get("source_site")) or "unknown"
         group["source_counts"][source] = group["source_counts"].get(source, 0) + 1
         evidence_counts = group["evidence_counts"]
-        evidence_counts["usable_market_prices"] += int(row.get("usable_market_prices_matches") or 0)
-        evidence_counts["market_prices"] += int(row.get("market_prices_matches") or 0)
-        evidence_counts["usable_dealer_sales"] += int(row.get("usable_dealer_sales_matches") or 0)
-        evidence_counts["dealer_sales"] += int(row.get("dealer_sales_matches") or 0)
-        evidence_counts["usable_internal_history"] += int(row.get("usable_opportunity_history") or 0)
-        evidence_counts["internal_history"] += int(row.get("market_comp_opportunity_history") or 0)
-        evidence_counts["usable_competitor_sales"] += int(row.get("usable_competitor_sales_matches") or 0)
-        evidence_counts["competitor_sales"] += int(row.get("competitor_sales_matches") or 0)
+        evidence_counts["usable_market_prices"] = max(
+            evidence_counts["usable_market_prices"],
+            int(row.get("usable_market_prices_matches") or 0),
+        )
+        evidence_counts["market_prices"] = max(
+            evidence_counts["market_prices"],
+            int(row.get("market_prices_matches") or 0),
+        )
+        evidence_counts["usable_dealer_sales"] = max(
+            evidence_counts["usable_dealer_sales"],
+            int(row.get("usable_dealer_sales_matches") or 0),
+        )
+        evidence_counts["dealer_sales"] = max(
+            evidence_counts["dealer_sales"],
+            int(row.get("dealer_sales_matches") or 0),
+        )
+        evidence_counts["usable_internal_history"] = max(
+            evidence_counts["usable_internal_history"],
+            int(row.get("usable_opportunity_history") or 0),
+        )
+        evidence_counts["internal_history"] = max(
+            evidence_counts["internal_history"],
+            int(row.get("market_comp_opportunity_history") or 0),
+        )
+        evidence_counts["usable_competitor_sales"] = max(
+            evidence_counts["usable_competitor_sales"],
+            int(row.get("usable_competitor_sales_matches") or 0),
+        )
+        evidence_counts["competitor_sales"] = max(
+            evidence_counts["competitor_sales"],
+            int(row.get("competitor_sales_matches") or 0),
+        )
 
     recovery_groups = []
     for group in groups.values():
@@ -375,6 +418,27 @@ def _dealer_sales_matches(row: dict[str, Any], dealer_sales_rows: list[dict[str,
             continue
         matches += 1
         sale_date = _parse_datetime(sale.get("sale_date"))
+        if _positive_number(sale.get("sale_price")) and sale_date is not None and sale_date >= now - timedelta(days=365):
+            usable += 1
+    return matches, usable
+
+
+def _competitor_sales_matches(
+    row: dict[str, Any],
+    competitor_sales_rows: list[dict[str, Any]],
+    now: datetime,
+) -> tuple[int, int]:
+    matches = 0
+    usable = 0
+    for sale in competitor_sales_rows:
+        if int(sale.get("year") or 0) != int(row.get("year") or 0):
+            continue
+        if _norm_text(sale.get("make")) != row.get("make") or _norm_text(sale.get("model")) != row.get("model"):
+            continue
+        if (_norm_text(sale.get("state")) or None) != (row.get("state") or None):
+            continue
+        matches += 1
+        sale_date = _parse_datetime(sale.get("auction_end_date") or sale.get("sale_date"))
         if _positive_number(sale.get("sale_price")) and sale_date is not None and sale_date >= now - timedelta(days=365):
             usable += 1
     return matches, usable
@@ -602,6 +666,15 @@ def fetch_gap_rows_via_rest(
             ("sale_date", f"gte.{sales_since}"),
         ],
     )
+    competitor_sales_rows = _fetch_postgrest_rows(
+        base_url,
+        service_role_key,
+        "competitor_sales",
+        [
+            ("select", "id,year,make,model,state,sale_price,auction_end_date,source"),
+            ("auction_end_date", f"gte.{sales_since}"),
+        ],
+    )
     history_rows = _fetch_postgrest_rows(
         base_url,
         service_role_key,
@@ -618,6 +691,7 @@ def fetch_gap_rows_via_rest(
     for row in clean_proxy_rows:
         market_total, market_usable = _market_price_matches(row, market_rows, current_time)
         sales_total, sales_usable = _dealer_sales_matches(row, dealer_sales_rows, current_time)
+        competitor_total, competitor_usable = _competitor_sales_matches(row, competitor_sales_rows, current_time)
         history_total, history_usable = _opportunity_history_matches(row, history_rows)
         enriched.append(
             {
@@ -626,6 +700,8 @@ def fetch_gap_rows_via_rest(
                 "usable_market_prices_matches": market_usable,
                 "dealer_sales_matches": sales_total,
                 "usable_dealer_sales_matches": sales_usable,
+                "competitor_sales_matches": competitor_total,
+                "usable_competitor_sales_matches": competitor_usable,
                 "market_comp_opportunity_history": history_total,
                 "usable_opportunity_history": history_usable,
             }
