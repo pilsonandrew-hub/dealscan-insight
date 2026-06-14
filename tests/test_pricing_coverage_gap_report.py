@@ -149,6 +149,7 @@ def test_format_gap_row_includes_evidence_and_economics():
     assert "opportunity_active=True" in formatted
     assert "auction_active=None" in formatted
     assert "evidence=blocked_no_internal_comp_evidence" in formatted
+    assert "competitor_sales=0/0" in formatted
     assert "expected_close=16162.13" in formatted
     assert "retail_proxy=40500" in formatted
 
@@ -730,3 +731,46 @@ def test_fetch_gap_rows_via_rest_counts_stale_competitor_sales_as_insufficient(m
     group = report_pricing_coverage_gaps.group_recovery_rows(rows)[0]
     assert group["status"] == "insufficient_competitor_sales"
     assert group["evidence_counts"]["competitor_sales"] == 2
+
+
+def test_fetch_gap_rows_via_rest_does_not_cap_competitor_sales(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "opportunities":
+            return [
+                {
+                    "id": "proxy-competitor-sales",
+                    "source": "proxibid",
+                    "source_site": "proxibid",
+                    "title": "2021 Ford Explorer",
+                    "year": 2021,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "AL",
+                    "mileage": 30000,
+                    "vin": "1FM5K8GCXMGA00001",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "processed_at": "2026-06-05T12:00:00+00:00",
+                }
+            ]
+        if table in {"market_prices", "dealer_sales", "ingest_delivery_log"}:
+            return []
+        if table == "competitor_sales":
+            assert not any(field == "limit" for field, _ in query)
+            return []
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=10,
+        limit=20,
+        now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T12:00:00+00:00"),
+    )
+
+    assert len(rows) == 1

@@ -349,6 +349,7 @@ def format_gap_row(row: dict) -> str:
         f"retail_proxy={row.get('retail_asking_price_estimate')} "
         f"market={row.get('usable_market_prices_matches')}/{row.get('market_prices_matches')} "
         f"dealer_sales={row.get('usable_dealer_sales_matches')}/{row.get('dealer_sales_matches')} "
+        f"competitor_sales={row.get('usable_competitor_sales_matches')}/{row.get('competitor_sales_matches')} "
         f"history={row.get('usable_opportunity_history')}/{row.get('market_comp_opportunity_history')} "
         f"evidence={evidence_status} "
         f"title={row.get('title')}"
@@ -677,7 +678,6 @@ def fetch_gap_rows_via_rest(
     ]
     competitor_sales_query = [
         ("select", "id,year,make,model,state,sale_price,auction_end_date,source"),
-        ("limit", str(max(limit * 100, 1000))),
     ]
     if candidate_years:
         competitor_sales_query.extend(
