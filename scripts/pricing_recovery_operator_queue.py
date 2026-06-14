@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from typing import Protocol
 from urllib import error as urllib_error
-from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -90,11 +89,6 @@ def _validate_choice(value: str, allowed: set[str], label: str) -> str:
 
 def _safe_text(value: Any) -> str:
     return VIN_LIKE_RE.sub("[redacted]", _norm_text(value))
-
-
-def _postgrest_eq_literal(value: str) -> str:
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'eq."{escaped}"'
 
 
 def build_queue_record(group: dict[str, Any], *, proof_run_id: str, head_sha: str, now: datetime) -> dict[str, Any]:
@@ -205,6 +199,8 @@ class SupabaseRestQueueRepository:
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
+        *,
+        prefer_return: bool = True,
     ) -> Any:
         data = None
         headers = {
@@ -215,7 +211,8 @@ class SupabaseRestQueueRepository:
         if payload is not None:
             data = json.dumps(payload, sort_keys=True).encode("utf-8")
             headers["Content-Type"] = "application/json"
-            headers["Prefer"] = "return=representation"
+            if prefer_return:
+                headers["Prefer"] = "return=representation"
         request = urllib_request.Request(
             f"{self.base_url}/rest/v1/{path}",
             data=data,
@@ -230,23 +227,22 @@ class SupabaseRestQueueRepository:
             raise RuntimeError(f"Supabase REST API error: HTTP {exc.code} {body[:300]}") from exc
         except urllib_error.URLError as exc:
             raise RuntimeError(f"Supabase REST API unreachable: {exc}") from exc
-        return json.loads(raw_payload or "[]")
+        if raw_payload == "":
+            return None
+        return json.loads(raw_payload)
 
     def get_by_group_key(self, group_key: str) -> dict[str, Any] | None:
-        query = urllib_parse.urlencode(
-            {
-                "select": (
-                    "id,group_key,queue_status,owner,priority,"
-                    "blocked_reason,resolution_notes,resolved_at"
-                ),
-                "group_key": _postgrest_eq_literal(group_key),
-                "limit": "1",
-            }
+        row = self._request(
+            "POST",
+            "rpc/get_pricing_recovery_request_by_group_key",
+            {"request_group_key": group_key},
+            prefer_return=False,
         )
-        rows = self._request("GET", f"pricing_recovery_requests?{query}")
-        if not isinstance(rows, list) or not rows:
+        if row is None:
             return None
-        return dict(rows[0])
+        if not isinstance(row, dict):
+            raise RuntimeError("Supabase queue lookup RPC returned an invalid payload")
+        return dict(row)
 
     def save_request_with_event(self, record: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
         row = self._request(

@@ -97,6 +97,45 @@ create trigger trg_pricing_recovery_requests_updated_at
   for each row
   execute function public.set_pricing_recovery_requests_updated_at();
 
+create or replace function public.get_pricing_recovery_request_by_group_key(
+  request_group_key text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  saved_request jsonb;
+begin
+  if auth.role() <> 'service_role' then
+    raise exception 'get_pricing_recovery_request_by_group_key requires service_role'
+      using errcode = '42501';
+  end if;
+
+  select jsonb_build_object(
+    'id', request_rows.id,
+    'group_key', request_rows.group_key,
+    'queue_status', request_rows.queue_status,
+    'owner', request_rows.owner,
+    'priority', request_rows.priority,
+    'blocked_reason', request_rows.blocked_reason,
+    'resolution_notes', request_rows.resolution_notes,
+    'resolved_at', request_rows.resolved_at
+  )
+  into saved_request
+  from public.pricing_recovery_requests request_rows
+  where request_rows.group_key = request_group_key
+  limit 1;
+
+  if not found then
+    return null;
+  end if;
+
+  return saved_request;
+end;
+$$;
+
 create or replace function public.sync_pricing_recovery_request(
   request_payload jsonb,
   event_payload jsonb
@@ -229,5 +268,10 @@ revoke all on function public.sync_pricing_recovery_request(jsonb, jsonb)
   from public, anon, authenticated;
 
 grant execute on function public.sync_pricing_recovery_request(jsonb, jsonb) to service_role;
+
+revoke all on function public.get_pricing_recovery_request_by_group_key(text)
+  from public, anon, authenticated;
+
+grant execute on function public.get_pricing_recovery_request_by_group_key(text) to service_role;
 
 notify pgrst, 'reload schema';
