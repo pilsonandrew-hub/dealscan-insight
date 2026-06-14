@@ -61,6 +61,10 @@ HIGH_RUST_STATES = {
 
 DEPLOYMENT_PATH = Path(__file__).resolve().parent.parent / "apify" / "deployment.json"
 GENERIC_DELIVERY_SOURCES = {"apify", "webhook", "actor", "unknown"}
+HOT_DEAL_ALERT_THRESHOLD = 80.0
+MARKET_DATA_PROXY_SHARE_DEGRADED_THRESHOLD = 0.25
+MARKET_DATA_FRESHNESS_THRESHOLD_HOURS = 24.0
+MARKET_DATA_MIN_RETAIL_COMP_COUNT = 2
 
 
 def _require_env(name: str) -> str:
@@ -196,6 +200,149 @@ def _coerce_int(value: Any) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _market_data_round_share(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+def _market_data_parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _market_data_latest_datetime(rows: list[dict[str, Any]], keys: list[str]) -> tuple[str | None, datetime | None]:
+    latest_raw: str | None = None
+    latest_dt: datetime | None = None
+    for row in rows:
+        for key in keys:
+            parsed = _market_data_parse_datetime(row.get(key))
+            if parsed and (latest_dt is None or parsed > latest_dt):
+                latest_dt = parsed
+                latest_raw = str(row.get(key))
+    return latest_raw, latest_dt
+
+
+def _market_data_status_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    return dict(Counter(
+        str(row.get(key))
+        for row in rows
+        if row.get(key) is not None
+    ).most_common(20))
+
+
+def _summarize_market_data_quality(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    active_rows = [row for row in rows if row.get("is_active") is True]
+    high_score_rows = [
+        row for row in active_rows
+        if (_coerce_float(row.get("dos_score")) or _coerce_float(row.get("score")) or 0.0) >= HOT_DEAL_ALERT_THRESHOLD
+    ]
+
+    unavailable_dimensions: list[str] = []
+    if active_rows and all("pricing_maturity" not in row for row in active_rows):
+        unavailable_dimensions.append("pricing_maturity")
+    if active_rows and all("manheim_source_status" not in row for row in active_rows):
+        unavailable_dimensions.append("manheim_source_status")
+    if active_rows and all(
+        "pricing_updated_at" not in row and "manheim_updated_at" not in row
+        for row in active_rows
+    ):
+        unavailable_dimensions.append("pricing_freshness")
+
+    active_count = len(active_rows)
+    high_score_count = len(high_score_rows)
+    proxy_count = sum(
+        1 for row in active_rows
+        if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"
+    )
+    high_score_proxy_count = sum(
+        1 for row in high_score_rows
+        if str(row.get("pricing_maturity") or "").strip().lower() == "proxy"
+    )
+    fallback_count = sum(
+        1 for row in active_rows
+        if str(row.get("manheim_source_status") or "").strip().lower() == "fallback"
+    )
+    live_count = sum(
+        1 for row in active_rows
+        if str(row.get("manheim_source_status") or "").strip().lower() == "live"
+    )
+
+    latest_raw, latest_dt = _market_data_latest_datetime(active_rows, ["pricing_updated_at", "manheim_updated_at"])
+    latest_age_hours = round((now - latest_dt).total_seconds() / 3600.0, 2) if latest_dt else None
+    freshness_status = (
+        "fresh"
+        if latest_age_hours is not None and latest_age_hours <= MARKET_DATA_FRESHNESS_THRESHOLD_HOURS
+        else "stale"
+    )
+
+    degraded_reasons: list[str] = []
+    if not active_rows:
+        degraded_reasons.append("no_active_pricing_sample")
+    if unavailable_dimensions:
+        degraded_reasons.append("pricing_fields_missing")
+    if _market_data_round_share(proxy_count, active_count) > MARKET_DATA_PROXY_SHARE_DEGRADED_THRESHOLD:
+        degraded_reasons.append("proxy_pricing_share_above_threshold")
+    if high_score_proxy_count > 0:
+        degraded_reasons.append("high_score_proxy_pricing_present")
+    if freshness_status == "stale":
+        degraded_reasons.append("pricing_evidence_stale")
+    non_live_rows = [
+        row for row in active_rows
+        if str(row.get("pricing_maturity") or "").lower() != "live_market"
+    ]
+    if non_live_rows and all(
+        (_coerce_int(row.get("retail_comp_count")) or 0) < MARKET_DATA_MIN_RETAIL_COMP_COUNT
+        for row in non_live_rows
+    ):
+        degraded_reasons.append("retail_comps_sparse")
+    if active_rows and live_count == 0 and "manheim_source_status" not in unavailable_dimensions:
+        degraded_reasons.append("manheim_live_share_below_threshold")
+
+    if unavailable_dimensions:
+        status = "unknown"
+    elif not active_rows:
+        status = "unavailable"
+    elif degraded_reasons:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "sample_size": len(rows),
+        "active_sample_size": active_count,
+        "high_score_sample_size": high_score_count,
+        "pricing_maturity_counts": _market_data_status_counts(active_rows, "pricing_maturity"),
+        "high_score_pricing_maturity_counts": _market_data_status_counts(high_score_rows, "pricing_maturity"),
+        "manheim_source_status_counts": _market_data_status_counts(active_rows, "manheim_source_status"),
+        "fallback_share": _market_data_round_share(fallback_count, active_count),
+        "proxy_share": _market_data_round_share(proxy_count, active_count),
+        "high_score_proxy_share": _market_data_round_share(high_score_proxy_count, high_score_count),
+        "live_share": _market_data_round_share(live_count, active_count),
+        "latest_pricing_updated_at": latest_raw,
+        "latest_pricing_age_hours": latest_age_hours,
+        "freshness": {
+            "status": freshness_status,
+            "threshold_hours": MARKET_DATA_FRESHNESS_THRESHOLD_HOURS,
+        },
+        "degraded_reasons": sorted(set(degraded_reasons)),
+        "unavailable_dimensions": unavailable_dimensions,
+        "truth_boundary": (
+            "Sanitized aggregate pricing-evidence quality from persisted rows; does not print "
+            "VINs, listing URLs, titles, or raw payloads."
+        ),
+    }
 
 
 def _has_column(rows: list[dict[str, Any]], column: str) -> bool:
@@ -1475,6 +1622,8 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
         "dos_score", "score", "current_bid", "estimated_sale_price", "potential_profit",
         "profit_margin", "gross_margin", "roi_percentage", "auction_end", "auction_end_date",
         "status", "is_active", "max_bid", "bid_headroom", "pricing_maturity", "vin", "mileage",
+        "pricing_source", "pricing_updated_at", "manheim_source_status", "manheim_updated_at",
+        "retail_comp_count", "retail_comp_confidence", "mmr_confidence_proxy",
         "condition_grade", "risk_flags", "listing_url", "url",
         "photo_count", "bidder_count", "raw_data",
     ]
@@ -1669,6 +1818,7 @@ def _safe_truth_audit(base_url: str, service_key: str) -> dict[str, Any]:
 
     return {
         "recent_opportunities": _summarize_recent_opportunity_truth(recent_opportunities),
+        "market_data_quality": _summarize_market_data_quality(recent_opportunities),
         "recent_alerts": {
             "sample_count": len(alert_rows),
             "status_counts": dict(alert_status_counts.most_common(20)),
