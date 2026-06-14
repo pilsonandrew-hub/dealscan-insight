@@ -35,6 +35,7 @@ from report_pricing_blocked_source_candidates import (
 
 
 MIN_SEEDABLE_HISTORY_ROWS = 5
+MIN_COMPLETED_SALE_REFRESH_ROWS = 5
 
 
 REPORT_SQL = """
@@ -171,10 +172,13 @@ def classify_gap(row: dict, *, min_seedable_history_rows: int = MIN_SEEDABLE_HIS
 
     if int(row.get("usable_market_prices_matches") or 0) > 0:
         return "covered_by_market_prices"
-    if int(row.get("usable_dealer_sales_matches") or 0) >= 2:
+    usable_dealer_sales = int(row.get("usable_dealer_sales_matches") or 0)
+    if usable_dealer_sales >= MIN_COMPLETED_SALE_REFRESH_ROWS:
         return "covered_by_dealer_sales"
     if int(row.get("usable_competitor_sales_matches") or 0) >= min_seedable_history_rows:
         return "covered_by_competitor_sales"
+    if usable_dealer_sales > 0:
+        return "insufficient_dealer_sales"
 
     usable_history = int(row.get("usable_opportunity_history") or 0)
     if usable_history >= min_seedable_history_rows:
@@ -191,7 +195,8 @@ def recommended_action_for_status(status: str) -> str:
         "covered_by_market_prices": "none",
         "covered_by_dealer_sales": "refresh_market_prices_from_dealer_sales",
         "covered_by_competitor_sales": "refresh_market_prices_from_competitor_sales",
-        "seedable_from_internal_history": "refresh_market_prices_from_dealer_sales",
+        "seedable_from_internal_history": "review_internal_history_for_completed_sales_evidence",
+        "insufficient_dealer_sales": "request_completed_sales_evidence",
         "insufficient_internal_history": "wait_for_more_internal_history",
         "insufficient_competitor_sales": "request_completed_sales_evidence",
         "blocked_no_internal_comp_evidence": "request_completed_sales_evidence",
@@ -216,10 +221,12 @@ def _recovery_key(row: dict) -> tuple[int | None, str, str, str | None]:
 def _status_from_counts(evidence_counts: dict[str, int]) -> str:
     if evidence_counts["usable_market_prices"] > 0:
         return "covered_by_market_prices"
-    if evidence_counts["usable_dealer_sales"] >= 2:
+    if evidence_counts["usable_dealer_sales"] >= MIN_COMPLETED_SALE_REFRESH_ROWS:
         return "covered_by_dealer_sales"
     if evidence_counts["usable_competitor_sales"] >= MIN_SEEDABLE_HISTORY_ROWS:
         return "covered_by_competitor_sales"
+    if evidence_counts["usable_dealer_sales"] > 0:
+        return "insufficient_dealer_sales"
     if evidence_counts["usable_internal_history"] >= MIN_SEEDABLE_HISTORY_ROWS:
         return "seedable_from_internal_history"
     if evidence_counts["usable_internal_history"] > 0:

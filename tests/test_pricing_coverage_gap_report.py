@@ -22,13 +22,19 @@ def test_classify_gap_reports_existing_market_price_coverage():
 
 
 def test_classify_gap_requires_two_dealer_sales_before_coverage():
-    row = {
+    insufficient = {
         "usable_market_prices_matches": 0,
         "usable_dealer_sales_matches": 2,
         "usable_opportunity_history": 0,
     }
+    covered = {
+        "usable_market_prices_matches": 0,
+        "usable_dealer_sales_matches": 5,
+        "usable_opportunity_history": 0,
+    }
 
-    assert report_pricing_coverage_gaps.classify_gap(row) == "covered_by_dealer_sales"
+    assert report_pricing_coverage_gaps.classify_gap(insufficient) == "insufficient_dealer_sales"
+    assert report_pricing_coverage_gaps.classify_gap(covered) == "covered_by_dealer_sales"
 
 
 def test_classify_gap_separates_seedable_and_insufficient_history():
@@ -561,6 +567,56 @@ def test_group_recovery_rows_prefers_actionable_completed_sales_coverage():
     assert groups[0]["status"] == "covered_by_competitor_sales"
     assert groups[0]["recommended_action"] == "refresh_market_prices_from_competitor_sales"
     assert groups[0]["evidence_counts"]["usable_competitor_sales"] == 5
+
+
+def test_group_recovery_rows_does_not_recommend_unusable_dealer_sales_refresh():
+    rows = [
+        {
+            "year": 2021,
+            "make": "Ford",
+            "model": "Explorer",
+            "state": "AL",
+            "source": "proxibid",
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 2,
+            "dealer_sales_matches": 2,
+            "usable_opportunity_history": 0,
+            "market_comp_opportunity_history": 0,
+            "usable_competitor_sales_matches": 0,
+            "competitor_sales_matches": 0,
+        }
+    ]
+
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+
+    assert groups[0]["status"] == "insufficient_dealer_sales"
+    assert groups[0]["recommended_action"] == "request_completed_sales_evidence"
+
+
+def test_group_recovery_rows_internal_history_action_is_supported_by_workflow_boundary():
+    rows = [
+        {
+            "year": 2021,
+            "make": "Ford",
+            "model": "Explorer",
+            "state": "AL",
+            "source": "proxibid",
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_opportunity_history": 5,
+            "market_comp_opportunity_history": 5,
+            "usable_competitor_sales_matches": 0,
+            "competitor_sales_matches": 0,
+        }
+    ]
+
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+
+    assert groups[0]["status"] == "seedable_from_internal_history"
+    assert groups[0]["recommended_action"] == "review_internal_history_for_completed_sales_evidence"
 
 
 def test_group_recovery_rows_does_not_double_count_shared_group_evidence():
