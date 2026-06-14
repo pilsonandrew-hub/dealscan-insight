@@ -180,6 +180,8 @@ def test_seller_recovery_audit_returns_sanitized_evidence_backed_candidates(monk
     assert set(candidate["score_components"]) == {"value_gap", "listing_quality", "evidence_strength", "source_health"}
     assert round(sum(candidate["score_components"].values()), 2) == candidate["recovery_score"]
     assert candidate["evidence"]["photo_count_present"] is True
+    assert candidate["evidence"]["bidder_depth_surface"] is None
+    assert candidate["evidence"]["source_mirror_bidder_count_present"] is False
     assert candidate["truth_boundary"].startswith("Internal prioritization")
     serialized = str(result)
     assert "1FTFW1E50PFA00000" not in serialized
@@ -228,6 +230,12 @@ def test_seller_recovery_audit_ranks_candidates_with_bounded_scores(monkeypatch)
     assert candidates[0]["recovery_score"] > candidates[1]["recovery_score"]
     assert candidates[0]["recovery_tier"] == "high"
     assert candidates[1]["recovery_tier"] in {"medium", "low"}
+    assert candidates[0]["source_site"] == "govdeals"
+    assert candidates[0]["evidence"]["bidder_depth_surface"] is None
+    assert candidates[0]["evidence"]["source_mirror_bidder_count_present"] is False
+    assert candidates[1]["source_site"] == "hibid"
+    assert candidates[1]["evidence"]["bidder_depth_surface"] == "source_mirror"
+    assert candidates[1]["evidence"]["source_mirror_bidder_count_present"] is True
     for candidate in candidates:
         assert 0 <= candidate["recovery_score"] <= 100
         assert set(candidate["score_components"]) == {"value_gap", "listing_quality", "evidence_strength", "source_health"}
@@ -243,6 +251,7 @@ def test_seller_recovery_audit_returns_rollups_and_truth_boundaries(monkeypatch)
     monkeypatch.setattr(internal, "supabase_client", _Supabase({
         "source_health_daily": [
             {"source_name": "allsurplus", "total_runs": 2, "processed_runs": 1, "failed_runs": 1, "saved_count": 3, "skipped_count": 9, "parse_event_count": 11},
+            {"source_name": "allsurplus", "total_runs": 1, "processed_runs": 0, "failed_runs": 1, "saved_count": 0, "skipped_count": 4, "parse_event_count": 2},
         ],
         "ingest_delivery_log": [
             {"status": "skipped_margin", "error_message": "margin_below_floor"},
@@ -264,7 +273,7 @@ def test_seller_recovery_audit_returns_rollups_and_truth_boundaries(monkeypatch)
     assert result["recovery_rollups"]["top_sources_by_score"][0]["source_site"] == "allsurplus"
     assert result["source_health_summary"]["observed_source_count"] == 1
     assert result["source_health_summary"]["sources_with_failed_runs"] == 1
-    assert result["source_health_summary"]["total_failed_runs"] == 1
+    assert result["source_health_summary"]["total_failed_runs"] == 2
     assert result["truth_boundaries"]["candidate_ranking"].startswith("Internal deterministic prioritization")
     assert "seller intent" in result["truth_boundaries"]["source_health"]
 

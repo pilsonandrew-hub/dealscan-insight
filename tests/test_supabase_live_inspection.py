@@ -578,6 +578,61 @@ def test_seller_recovery_audit_reports_source_mirror_bidder_depth_when_opportuni
     assert candidate["evidence"]["source_mirror_bidder_count_present"] is True
 
 
+def test_seller_recovery_audit_does_not_apply_source_mirror_bidder_depth_cross_source():
+    report = inspection._summarize_seller_recovery_audit(
+        opportunity_rows=[
+            {
+                "is_active": True,
+                "source_site": "govdeals",
+                "year": 2024,
+                "make": "Ford",
+                "model": "F-150",
+                "dos_score": 84,
+                "gross_margin": 5000,
+                "bid_headroom": 1200,
+                "pricing_maturity": "proxy",
+                "photo_count": 1,
+                "bidder_count": None,
+            }
+        ],
+        source_listing_rows=[
+            {
+                "source_site": "hibid",
+                "source": "hibid",
+                "bidder_count": 6,
+                "created_at": "2026-06-13T14:00:00Z",
+            }
+        ],
+        source_health_rows=[{"source_name": "govdeals"}],
+        delivery_rows=[],
+        parse_event_rows=[],
+    )
+
+    assert report["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
+    candidate = report["value_leak_candidates"][0]
+    assert candidate["source_site"] == "govdeals"
+    assert candidate["evidence"]["bidder_depth_surface"] is None
+    assert candidate["evidence"]["source_mirror_bidder_count_present"] is False
+
+
+def test_seller_recovery_audit_counts_failed_sources_distinctly():
+    report = inspection._summarize_seller_recovery_audit(
+        opportunity_rows=[],
+        source_listing_rows=[],
+        source_health_rows=[
+            {"source_name": "govdeals", "failed_runs": 1},
+            {"source_name": "govdeals", "failed_runs": 2},
+            {"source_name": "hibid", "failed_runs": 0},
+        ],
+        delivery_rows=[],
+        parse_event_rows=[],
+    )
+
+    assert report["source_health_summary"]["observed_source_count"] == 2
+    assert report["source_health_summary"]["sources_with_failed_runs"] == 1
+    assert report["source_health_summary"]["total_failed_runs"] == 3
+
+
 def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypatch):
     columns = {
         "opportunities": {

@@ -373,9 +373,20 @@ def _source_health_component(source_site: str, source_health_index: dict[str, di
     return _bounded_component(score, 10.0)
 
 
-def _candidate_evidence(row: dict[str, Any], *, source_bidder_available: bool) -> dict[str, Any]:
+def _source_keys_with_bidder_counts(rows: list[dict[str, Any]]) -> set[str]:
+    return {
+        _source_key(row.get("source_site") or row.get("source"))
+        for row in rows
+        if _bidder_count(row) is not None
+    }
+
+
+def _candidate_evidence(row: dict[str, Any], *, source_bidder_sources: set[str]) -> dict[str, Any]:
     opportunity_bidder = _bidder_count(row)
-    source_mirror_bidder = bool(source_bidder_available and opportunity_bidder is None)
+    source_mirror_bidder = bool(
+        opportunity_bidder is None
+        and _source_key(row.get("source_site") or row.get("source")) in source_bidder_sources
+    )
     return {
         "dos_score_present": _numeric_score(row) is not None,
         "gross_margin_present": _first_number(row, "gross_margin", "potential_profit", "margin") is not None,
@@ -398,7 +409,7 @@ def _score_candidate(
     row: dict[str, Any],
     reasons: list[str],
     *,
-    source_bidder_available: bool,
+    source_bidder_sources: set[str],
     source_health_index: dict[str, dict[str, Any]],
 ) -> tuple[float, dict[str, float], dict[str, Any]]:
     gross_margin = _first_number(row, "gross_margin", "potential_profit", "margin")
@@ -412,7 +423,7 @@ def _score_candidate(
         sum(RECOVERY_REASON_WEIGHTS.get(reason, 0.0) for reason in reasons),
         30.0,
     )
-    evidence = _candidate_evidence(row, source_bidder_available=source_bidder_available)
+    evidence = _candidate_evidence(row, source_bidder_sources=source_bidder_sources)
     evidence_strength = _bounded_component(
         (3.0 if evidence["dos_score_present"] else 0.0)
         + (2.0 if evidence["gross_margin_present"] else 0.0)
@@ -447,7 +458,7 @@ def _seller_recovery_candidates(
 ) -> list[dict[str, Any]]:
     source_listing_rows = source_listing_rows or []
     source_health_index = _source_health_by_source(source_health_rows or [])
-    source_bidder_available = any(_bidder_count(row) is not None for row in source_listing_rows)
+    source_bidder_sources = _source_keys_with_bidder_counts(source_listing_rows)
     candidates: list[dict[str, Any]] = []
     for row in rows:
         if row.get("is_active") is False:
@@ -463,7 +474,7 @@ def _seller_recovery_candidates(
         recovery_score, score_components, evidence = _score_candidate(
             row,
             reasons,
-            source_bidder_available=source_bidder_available,
+            source_bidder_sources=source_bidder_sources,
             source_health_index=source_health_index,
         )
         candidates.append({
@@ -593,9 +604,11 @@ def _source_health_summary(
     }
     return {
         "observed_source_count": len(observed_sources),
-        "sources_with_failed_runs": sum(
-            1 for row in source_health_rows if (_as_int(row.get("failed_runs")) or 0) > 0
-        ),
+        "sources_with_failed_runs": len({
+            _source_key(row.get("source_name"))
+            for row in source_health_rows
+            if row.get("source_name") and (_as_int(row.get("failed_runs")) or 0) > 0
+        }),
         "total_processed_runs": sum(_as_int(row.get("processed_runs")) or 0 for row in source_health_rows),
         "total_failed_runs": sum(_as_int(row.get("failed_runs")) or 0 for row in source_health_rows),
         "total_saved_count": sum(_as_int(row.get("saved_count")) or 0 for row in source_health_rows),
