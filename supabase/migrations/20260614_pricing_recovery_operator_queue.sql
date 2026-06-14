@@ -56,4 +56,22 @@ create index if not exists idx_pricing_recovery_requests_status
 create index if not exists idx_pricing_recovery_request_events_request_id
   on public.pricing_recovery_request_events(request_id);
 
+create or replace function public.set_pricing_recovery_requests_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_pricing_recovery_requests_updated_at
+  on public.pricing_recovery_requests;
+
+create trigger trg_pricing_recovery_requests_updated_at
+  before update on public.pricing_recovery_requests
+  for each row
+  execute function public.set_pricing_recovery_requests_updated_at();
+
 notify pgrst, 'reload schema';

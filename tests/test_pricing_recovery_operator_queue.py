@@ -206,3 +206,56 @@ def test_supabase_rest_upsert_uses_merge_duplicates_prefer(monkeypatch):
     assert "on_conflict=group_key" in captured["url"]
     assert "resolution=merge-duplicates" in captured["headers"]["Prefer"]
     assert "return=representation" in captured["headers"]["Prefer"]
+
+
+def test_supabase_rest_lookup_fetches_lifecycle_fields(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'[{"id": "req-1", "queue_status": "evidence_requested", "owner": "operator"}]'
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr(queue.urllib_request, "urlopen", fake_urlopen)
+    repo = queue.SupabaseRestQueueRepository(
+        supabase_url="https://example.supabase.co",
+        service_role_key="service-role",
+    )
+
+    row = repo.get_by_group_key("2020|ford|escape|sc|gsaauctions,proxibid")
+
+    assert row["queue_status"] == "evidence_requested"
+    assert "owner" in captured["url"]
+    assert "priority" in captured["url"]
+    assert "blocked_reason" in captured["url"]
+    assert "resolution_notes" in captured["url"]
+    assert "resolved_at" in captured["url"]
+
+
+def test_dry_run_uses_live_repository_when_credentials_exist():
+    repo = queue.repository_for_sync(
+        apply=False,
+        rest_base_url="https://example.supabase.co/rest/v1",
+        service_role_key="service-role",
+    )
+
+    assert isinstance(repo, queue.SupabaseRestQueueRepository)
+
+
+def test_dry_run_without_credentials_uses_local_empty_repository():
+    repo = queue.repository_for_sync(
+        apply=False,
+        rest_base_url=None,
+        service_role_key=None,
+    )
+
+    assert isinstance(repo, queue.DryRunQueueRepository)

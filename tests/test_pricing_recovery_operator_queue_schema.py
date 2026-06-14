@@ -32,3 +32,5 @@ def test_pricing_recovery_queue_schema_has_status_constraints_and_audit_indexes(
     assert "create index if not exists idx_pricing_recovery_requests_queue_status" in sql
     assert "create index if not exists idx_pricing_recovery_request_events_request_id" in sql
     assert "notify pgrst, 'reload schema'" in sql
+    assert "create or replace function public.set_pricing_recovery_requests_updated_at()" in sql
+    assert "before update on public.pricing_recovery_requests" in sql

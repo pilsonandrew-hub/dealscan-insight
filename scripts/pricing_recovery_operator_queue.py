@@ -229,7 +229,10 @@ class SupabaseRestQueueRepository:
     def get_by_group_key(self, group_key: str) -> dict[str, Any] | None:
         query = urllib_parse.urlencode(
             {
-                "select": "id,group_key,queue_status",
+                "select": (
+                    "id,group_key,queue_status,owner,priority,"
+                    "blocked_reason,resolution_notes,resolved_at"
+                ),
                 "group_key": f"eq.{group_key}",
                 "limit": "1",
             }
@@ -255,6 +258,22 @@ class SupabaseRestQueueRepository:
         rows = self._request("POST", "pricing_recovery_request_events", event)
         if not isinstance(rows, list) or not rows:
             raise RuntimeError("Supabase queue event insert returned no row")
+
+
+def repository_for_sync(
+    *,
+    apply: bool,
+    rest_base_url: str | None,
+    service_role_key: str | None,
+) -> QueueRepository:
+    if rest_base_url and service_role_key:
+        return SupabaseRestQueueRepository(
+            supabase_url=rest_base_url,
+            service_role_key=service_role_key,
+        )
+    if apply:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for queue apply")
+    return DryRunQueueRepository()
 
 
 def records_from_live_pricing_proof(
@@ -321,17 +340,16 @@ def main() -> int:
         records = []
 
     apply = bool(args.queue_apply)
-    if apply:
-        rest_base_url, service_role_key, _ = report_pricing_coverage_gaps.resolve_rest_config(None)
-        if not rest_base_url or not service_role_key:
-            print("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for queue apply", file=sys.stderr)
-            return 2
-        repo: QueueRepository = SupabaseRestQueueRepository(
-            supabase_url=rest_base_url,
+    rest_base_url, service_role_key, _ = report_pricing_coverage_gaps.resolve_rest_config(None)
+    try:
+        repo = repository_for_sync(
+            apply=apply,
+            rest_base_url=rest_base_url,
             service_role_key=service_role_key,
         )
-    else:
-        repo = DryRunQueueRepository()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     summary = sync_queue_records(
         records,
