@@ -163,6 +163,127 @@ def classify_gap(row: dict, *, min_seedable_history_rows: int = MIN_SEEDABLE_HIS
     return "blocked_no_internal_comp_evidence"
 
 
+def recommended_action_for_status(status: str) -> str:
+    return {
+        "covered_by_market_prices": "none",
+        "covered_by_dealer_sales": "refresh_market_prices_from_dealer_sales",
+        "covered_by_competitor_sales": "refresh_market_prices_from_competitor_sales",
+        "seedable_from_internal_history": "refresh_market_prices_from_dealer_sales",
+        "insufficient_internal_history": "wait_for_more_internal_history",
+        "insufficient_competitor_sales": "request_completed_sales_evidence",
+        "blocked_no_internal_comp_evidence": "request_completed_sales_evidence",
+        "dirty_source_row": "ignore_dirty_source_row",
+        "expired_pricing_gap": "ignore_expired_listing",
+    }.get(status, "request_completed_sales_evidence")
+
+
+def _recovery_key(row: dict) -> tuple[int | None, str, str, str | None]:
+    try:
+        year = int(row.get("year")) if row.get("year") is not None else None
+    except (TypeError, ValueError):
+        year = None
+    return (
+        year,
+        _norm_text(row.get("make")),
+        _norm_text(row.get("model")),
+        _norm_text(row.get("state")) or None,
+    )
+
+
+def _status_from_counts(evidence_counts: dict[str, int]) -> str:
+    if evidence_counts["usable_market_prices"] > 0:
+        return "covered_by_market_prices"
+    if evidence_counts["usable_dealer_sales"] >= 2:
+        return "covered_by_dealer_sales"
+    if evidence_counts["usable_competitor_sales"] >= MIN_SEEDABLE_HISTORY_ROWS:
+        return "covered_by_competitor_sales"
+    if evidence_counts["usable_internal_history"] >= MIN_SEEDABLE_HISTORY_ROWS:
+        return "seedable_from_internal_history"
+    if evidence_counts["usable_internal_history"] > 0:
+        return "insufficient_internal_history"
+    if evidence_counts["competitor_sales"] > 0:
+        return "insufficient_competitor_sales"
+    return "blocked_no_internal_comp_evidence"
+
+
+def group_recovery_rows(rows: list[dict]) -> list[dict]:
+    groups: dict[tuple[int | None, str, str, str | None], dict] = {}
+    for row in rows:
+        key = _recovery_key(row)
+        group = groups.setdefault(
+            key,
+            {
+                "key": {
+                    "year": key[0],
+                    "make": key[1],
+                    "model": key[2],
+                    "state": key[3],
+                },
+                "candidate_count": 0,
+                "source_counts": {},
+                "evidence_counts": {
+                    "usable_market_prices": 0,
+                    "market_prices": 0,
+                    "usable_dealer_sales": 0,
+                    "dealer_sales": 0,
+                    "usable_internal_history": 0,
+                    "internal_history": 0,
+                    "usable_competitor_sales": 0,
+                    "competitor_sales": 0,
+                },
+            },
+        )
+        group["candidate_count"] += 1
+        source = _norm_text(row.get("source") or row.get("source_site")) or "unknown"
+        group["source_counts"][source] = group["source_counts"].get(source, 0) + 1
+        evidence_counts = group["evidence_counts"]
+        evidence_counts["usable_market_prices"] += int(row.get("usable_market_prices_matches") or 0)
+        evidence_counts["market_prices"] += int(row.get("market_prices_matches") or 0)
+        evidence_counts["usable_dealer_sales"] += int(row.get("usable_dealer_sales_matches") or 0)
+        evidence_counts["dealer_sales"] += int(row.get("dealer_sales_matches") or 0)
+        evidence_counts["usable_internal_history"] += int(row.get("usable_opportunity_history") or 0)
+        evidence_counts["internal_history"] += int(row.get("market_comp_opportunity_history") or 0)
+        evidence_counts["usable_competitor_sales"] += int(row.get("usable_competitor_sales_matches") or 0)
+        evidence_counts["competitor_sales"] += int(row.get("competitor_sales_matches") or 0)
+
+    recovery_groups = []
+    for group in groups.values():
+        status = _status_from_counts(group["evidence_counts"])
+        group["status"] = status
+        group["recommended_action"] = recommended_action_for_status(status)
+        recovery_groups.append(group)
+    return sorted(
+        recovery_groups,
+        key=lambda group: (
+            -int(group["candidate_count"]),
+            group["key"]["year"] or 0,
+            group["key"]["make"],
+            group["key"]["model"],
+            group["key"]["state"] or "",
+        ),
+    )
+
+
+def format_recovery_group(group: dict) -> str:
+    key = group.get("key") or {}
+    evidence = group.get("evidence_counts") or {}
+    sources = group.get("source_counts") or {}
+    source_text = ",".join(f"{source}:{count}" for source, count in sorted(sources.items()))
+    return (
+        "- "
+        f"{key.get('year')} {key.get('make')} {key.get('model')} "
+        f"state={key.get('state') or 'unknown'} "
+        f"candidates={group.get('candidate_count', 0)} "
+        f"sources={source_text or 'none'} "
+        f"status={group.get('status')} "
+        f"action={group.get('recommended_action')} "
+        f"market={evidence.get('usable_market_prices', 0)}/{evidence.get('market_prices', 0)} "
+        f"dealer_sales={evidence.get('usable_dealer_sales', 0)}/{evidence.get('dealer_sales', 0)} "
+        f"competitor_sales={evidence.get('usable_competitor_sales', 0)}/{evidence.get('competitor_sales', 0)} "
+        f"history={evidence.get('usable_internal_history', 0)}/{evidence.get('internal_history', 0)}"
+    )
+
+
 def format_gap_row(row: dict) -> str:
     evidence_status = classify_gap(row)
     origin = row.get("candidate_origin") or "opportunity_proxy"

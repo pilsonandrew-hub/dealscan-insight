@@ -428,3 +428,109 @@ def test_format_delivery_pricing_skip_does_not_label_it_as_active_opportunity():
     assert "opportunity_active=None" in formatted
     assert "auction_active=True" in formatted
     assert " active=True " not in formatted
+
+
+def test_group_recovery_rows_blocks_when_no_evidence_and_stays_sanitized():
+    rows = [
+        {
+            "candidate_origin": "delivery_pricing_skip",
+            "year": 2020,
+            "make": "Ford",
+            "model": "Escape",
+            "state": "SC",
+            "source": "proxibid",
+            "auction_active": True,
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_opportunity_history": 0,
+            "market_comp_opportunity_history": 0,
+            "title": "private title",
+            "vin": "1FMCU0F60LUB43858",
+            "listing_url": "https://example.test/private",
+        }
+    ]
+
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+
+    assert groups == [
+        {
+            "key": {
+                "year": 2020,
+                "make": "ford",
+                "model": "escape",
+                "state": "sc",
+            },
+            "candidate_count": 1,
+            "source_counts": {"proxibid": 1},
+            "status": "blocked_no_internal_comp_evidence",
+            "recommended_action": "request_completed_sales_evidence",
+            "evidence_counts": {
+                "usable_market_prices": 0,
+                "market_prices": 0,
+                "usable_dealer_sales": 0,
+                "dealer_sales": 0,
+                "usable_internal_history": 0,
+                "internal_history": 0,
+                "usable_competitor_sales": 0,
+                "competitor_sales": 0,
+            },
+        }
+    ]
+
+    formatted = report_pricing_coverage_gaps.format_recovery_group(groups[0])
+    assert "private title" not in formatted
+    assert "1FMCU0F60LUB43858" not in formatted
+    assert "https://example.test/private" not in formatted
+    assert "status=blocked_no_internal_comp_evidence" in formatted
+    assert "action=request_completed_sales_evidence" in formatted
+
+
+def test_group_recovery_rows_preserves_insufficient_history_threshold():
+    rows = [
+        {
+            "year": 2016,
+            "make": "Ford",
+            "model": "F-150",
+            "state": "GA",
+            "source": "allsurplus",
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_opportunity_history": 2,
+            "market_comp_opportunity_history": 2,
+        }
+    ]
+
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+
+    assert groups[0]["status"] == "insufficient_internal_history"
+    assert groups[0]["recommended_action"] == "wait_for_more_internal_history"
+
+
+def test_group_recovery_rows_prefers_actionable_completed_sales_coverage():
+    rows = [
+        {
+            "year": 2021,
+            "make": "Ford",
+            "model": "Explorer",
+            "state": "AL",
+            "source": "proxibid",
+            "usable_market_prices_matches": 0,
+            "market_prices_matches": 0,
+            "usable_dealer_sales_matches": 0,
+            "dealer_sales_matches": 0,
+            "usable_opportunity_history": 0,
+            "market_comp_opportunity_history": 0,
+            "usable_competitor_sales_matches": 5,
+            "competitor_sales_matches": 6,
+        }
+    ]
+
+    groups = report_pricing_coverage_gaps.group_recovery_rows(rows)
+
+    assert groups[0]["status"] == "covered_by_competitor_sales"
+    assert groups[0]["recommended_action"] == "refresh_market_prices_from_competitor_sales"
+    assert groups[0]["evidence_counts"]["usable_competitor_sales"] == 5
