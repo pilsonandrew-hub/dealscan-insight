@@ -258,7 +258,7 @@ def test_supabase_rest_apply_uses_atomic_queue_sync_rpc(monkeypatch):
     assert "pricing_recovery_requests?on_conflict" not in captured["url"]
 
 
-def test_supabase_rest_lookup_fetches_lifecycle_fields(monkeypatch):
+def test_supabase_rest_lookup_uses_service_role_rpc(monkeypatch):
     captured = {}
 
     class FakeResponse:
@@ -269,10 +269,13 @@ def test_supabase_rest_lookup_fetches_lifecycle_fields(monkeypatch):
             return False
 
         def read(self):
-            return b'[{"id": "req-1", "queue_status": "evidence_requested", "owner": "operator"}]'
+            return b'{"id": "req-1", "queue_status": "evidence_requested", "owner": "operator"}'
 
     def fake_urlopen(request, timeout):
         captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["method"] = request.get_method()
+        captured["payload"] = request.data.decode("utf-8")
         return FakeResponse()
 
     monkeypatch.setattr(queue.urllib_request, "urlopen", fake_urlopen)
@@ -284,13 +287,35 @@ def test_supabase_rest_lookup_fetches_lifecycle_fields(monkeypatch):
     row = repo.get_by_group_key("2020|ford|escape|sc|gsaauctions,proxibid")
 
     assert row["queue_status"] == "evidence_requested"
-    assert "group_key=eq.%22" in captured["url"]
-    assert "gsaauctions%2Cproxibid%22" in captured["url"]
-    assert "owner" in captured["url"]
-    assert "priority" in captured["url"]
-    assert "blocked_reason" in captured["url"]
-    assert "resolution_notes" in captured["url"]
-    assert "resolved_at" in captured["url"]
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/rest/v1/rpc/get_pricing_recovery_request_by_group_key")
+    assert "Prefer" not in captured["headers"]
+    assert "pricing_recovery_requests?" not in captured["url"]
+    assert "request_group_key" in captured["payload"]
+    assert "gsaauctions,proxibid" in captured["payload"]
+
+
+def test_supabase_rest_lookup_empty_rpc_body_means_missing_row(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b""
+
+    def fake_urlopen(request, timeout):
+        return FakeResponse()
+
+    monkeypatch.setattr(queue.urllib_request, "urlopen", fake_urlopen)
+    repo = queue.SupabaseRestQueueRepository(
+        supabase_url="https://example.supabase.co",
+        service_role_key="service-role",
+    )
+
+    assert repo.get_by_group_key("2020|ford|escape|sc|gsaauctions,proxibid") is None
 
 
 def test_dry_run_uses_live_repository_when_credentials_exist():

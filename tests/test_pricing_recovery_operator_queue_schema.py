@@ -62,3 +62,17 @@ def test_pricing_recovery_queue_schema_has_atomic_sync_rpc():
     assert "insert into public.pricing_recovery_request_events" in sql
     assert "request_id" in sql
     assert "grant execute on function public.sync_pricing_recovery_request(jsonb, jsonb) to service_role" in sql
+
+
+def test_pricing_recovery_queue_schema_has_service_role_lookup_rpc():
+    sql = MIGRATION.read_text().lower()
+
+    assert "create or replace function public.get_pricing_recovery_request_by_group_key(" in sql
+    assert "request_group_key text" in sql
+    assert "from public.pricing_recovery_requests" in sql
+    assert "where request_rows.group_key = request_group_key" in sql
+    assert "jsonb_build_object(" in sql
+    assert "'queue_status', request_rows.queue_status" in sql
+    assert "select *\n  into saved_request\n  from public.pricing_recovery_requests request_rows" not in sql
+    assert "raise exception 'get_pricing_recovery_request_by_group_key requires service_role'" in sql
+    assert "grant execute on function public.get_pricing_recovery_request_by_group_key(text) to service_role" in sql
