@@ -223,7 +223,7 @@ function passes(item) {
     const currentYear = new Date().getFullYear();
     if (HIGH_RUST_STATES.has(state)) {
         if (!(year && year >= currentYear - 2)) return false;
-        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
     }
     return true;
 }

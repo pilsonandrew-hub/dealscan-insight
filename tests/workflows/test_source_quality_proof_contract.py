@@ -170,6 +170,32 @@ def test_equipmentfacts_actor_is_safe_for_supply_reactivation():
     assert 'mileage > 50000' not in text
 
 
+def test_equipmentfacts_rust_state_new_vehicle_exception_tracks_current_year():
+    text = Path('apify/actors/ds-equipmentfacts/src/main.js').read_text()
+
+    assert 'const RUST_STATE_NEW_VEHICLE_MIN_YEAR = CURRENT_YEAR - 2' in text
+    assert 'year < RUST_STATE_NEW_VEHICLE_MIN_YEAR' in text
+    assert 'year < 2023' not in text
+
+
+def test_rust_state_new_vehicle_logs_match_two_year_policy():
+    paths = [
+        Path('apify/actors/ds-allsurplus/src/main.js'),
+        Path('apify/actors/ds-equipmentfacts/src/main.js'),
+        Path('apify/actors/ds-govdeals/src/main_api.js'),
+        Path('apify/actors/ds-hibid-v2/src/main.js'),
+        Path('apify/actors/ds-publicsurplus/src/main.js'),
+        Path('apify/actors/ds-ritchiebros/src/main.js'),
+        Path('backend/scrapers/govdeals_active.py'),
+    ]
+
+    for path in paths:
+        text = path.read_text()
+        assert '3yr old' not in text
+        assert '≤3yr old' not in text
+        assert '<=3yr old' not in text
+
+
 def test_proxibid_actor_keeps_rejected_detail_rows_out_of_opportunities():
     text = ACTOR.read_text()
     assert '!lot.rejected_after_detail' in text

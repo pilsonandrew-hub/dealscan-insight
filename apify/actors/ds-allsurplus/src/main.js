@@ -450,7 +450,7 @@ for (const searchText of searchTerms) {
                 if (!allowHighRust && HIGH_RUST_STATES.has(state)) {
                     const currentYear = new Date().getFullYear();
                     if (year && year >= currentYear - 2) {
-                        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤3yr old)`);
+                        console.log(`[BYPASS] Rust state ${state} allowed — vehicle is ${year} (≤2yr old)`);
                     } else {
                         console.log(`[SKIP] High-rust state: ${state} — ${title}`);
                         rowsExcludedRustState++;
