@@ -48,3 +48,17 @@ def test_pricing_recovery_queue_schema_locks_tables_to_service_role():
     assert sql.count("to service_role") >= 2
     assert sql.count("using (true)") >= 2
     assert sql.count("with check (true)") >= 2
+
+
+def test_pricing_recovery_queue_schema_has_atomic_sync_rpc():
+    sql = MIGRATION.read_text().lower()
+
+    assert "create or replace function public.sync_pricing_recovery_request(" in sql
+    assert "request_payload jsonb" in sql
+    assert "event_payload jsonb" in sql
+    assert "returns jsonb" in sql
+    assert "insert into public.pricing_recovery_requests" in sql
+    assert "on conflict (group_key) do update set" in sql
+    assert "insert into public.pricing_recovery_request_events" in sql
+    assert "request_id" in sql
+    assert "grant execute on function public.sync_pricing_recovery_request(jsonb, jsonb) to service_role" in sql

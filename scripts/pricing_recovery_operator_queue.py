@@ -61,9 +61,7 @@ VIN_LIKE_RE = re.compile(r"\b(?:vin\s*#?\s*)?[A-HJ-NPR-Z0-9]{17}\b", re.IGNORECA
 class QueueRepository(Protocol):
     def get_by_group_key(self, group_key: str) -> dict[str, Any] | None: ...
 
-    def upsert_request(self, record: dict[str, Any]) -> dict[str, Any]: ...
-
-    def insert_event(self, event: dict[str, Any]) -> None: ...
+    def save_request_with_event(self, record: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def _norm_text(value: Any) -> str:
@@ -154,22 +152,19 @@ def sync_queue_records(
             summary["would_update" if existing else "would_insert"] += 1
             continue
 
-        saved = repo.upsert_request(payload)
         event_type = "updated" if existing else "inserted"
+        event = {
+            "event_type": event_type,
+            "previous_queue_status": (existing or {}).get("queue_status"),
+            "next_queue_status": payload["queue_status"],
+            "actor": actor,
+            "reason": payload["recommended_action"],
+            "proof_run_id": payload.get("latest_proof_run_id"),
+            "head_sha": payload.get("latest_proof_head_sha"),
+            "metadata": {"group_key": payload["group_key"], "status": payload["status"]},
+        }
+        saved = repo.save_request_with_event(payload, event)
         summary[event_type] += 1
-        repo.insert_event(
-            {
-                "request_id": saved["id"],
-                "event_type": event_type,
-                "previous_queue_status": (existing or {}).get("queue_status"),
-                "next_queue_status": saved["queue_status"],
-                "actor": actor,
-                "reason": payload["recommended_action"],
-                "proof_run_id": payload.get("latest_proof_run_id"),
-                "head_sha": payload.get("latest_proof_head_sha"),
-                "metadata": {"group_key": payload["group_key"], "status": payload["status"]},
-            }
-        )
     return summary
 
 
@@ -177,11 +172,8 @@ class DryRunQueueRepository:
     def get_by_group_key(self, group_key: str) -> dict[str, Any] | None:
         return None
 
-    def upsert_request(self, record: dict[str, Any]) -> dict[str, Any]:
+    def save_request_with_event(self, record: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
         return {"id": "dry-run", **record}
-
-    def insert_event(self, event: dict[str, Any]) -> None:
-        return None
 
 
 class SupabaseRestQueueRepository:
@@ -194,8 +186,6 @@ class SupabaseRestQueueRepository:
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
-        *,
-        merge_duplicates: bool = False,
     ) -> Any:
         data = None
         headers = {
@@ -206,10 +196,7 @@ class SupabaseRestQueueRepository:
         if payload is not None:
             data = json.dumps(payload, sort_keys=True).encode("utf-8")
             headers["Content-Type"] = "application/json"
-            prefer = ["return=representation"]
-            if merge_duplicates:
-                prefer.append("resolution=merge-duplicates")
-            headers["Prefer"] = ",".join(prefer)
+            headers["Prefer"] = "return=representation"
         request = urllib_request.Request(
             f"{self.base_url}/rest/v1/{path}",
             data=data,
@@ -242,22 +229,15 @@ class SupabaseRestQueueRepository:
             return None
         return dict(rows[0])
 
-    def upsert_request(self, record: dict[str, Any]) -> dict[str, Any]:
-        payload = dict(record)
-        rows = self._request(
+    def save_request_with_event(self, record: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+        row = self._request(
             "POST",
-            "pricing_recovery_requests?on_conflict=group_key",
-            payload,
-            merge_duplicates=True,
+            "rpc/sync_pricing_recovery_request",
+            {"request_payload": record, "event_payload": event},
         )
-        if not isinstance(rows, list) or not rows:
-            raise RuntimeError("Supabase queue upsert returned no row")
-        return dict(rows[0])
-
-    def insert_event(self, event: dict[str, Any]) -> None:
-        rows = self._request("POST", "pricing_recovery_request_events", event)
-        if not isinstance(rows, list) or not rows:
-            raise RuntimeError("Supabase queue event insert returned no row")
+        if not isinstance(row, dict) or not row:
+            raise RuntimeError("Supabase queue sync RPC returned no row")
+        return dict(row)
 
 
 def repository_for_sync(

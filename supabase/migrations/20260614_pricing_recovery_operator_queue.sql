@@ -97,4 +97,137 @@ create trigger trg_pricing_recovery_requests_updated_at
   for each row
   execute function public.set_pricing_recovery_requests_updated_at();
 
+create or replace function public.sync_pricing_recovery_request(
+  request_payload jsonb,
+  event_payload jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  saved_request public.pricing_recovery_requests%rowtype;
+begin
+  if auth.role() <> 'service_role' then
+    raise exception 'sync_pricing_recovery_request requires service_role'
+      using errcode = '42501';
+  end if;
+
+  insert into public.pricing_recovery_requests (
+    group_key,
+    year,
+    make,
+    model,
+    state,
+    source_families,
+    candidate_count,
+    status,
+    recommended_action,
+    queue_status,
+    owner,
+    priority,
+    blocked_reason,
+    resolution_notes,
+    market_prices_usable,
+    market_prices_total,
+    dealer_sales_usable,
+    dealer_sales_total,
+    competitor_sales_usable,
+    competitor_sales_total,
+    internal_history_usable,
+    internal_history_total,
+    latest_proof_run_id,
+    latest_proof_head_sha,
+    last_seen_at,
+    resolved_at
+  )
+  values (
+    request_payload->>'group_key',
+    (request_payload->>'year')::integer,
+    request_payload->>'make',
+    request_payload->>'model',
+    nullif(request_payload->>'state', ''),
+    coalesce(array(select jsonb_array_elements_text(coalesce(request_payload->'source_families', '[]'::jsonb))), '{}'::text[]),
+    coalesce((request_payload->>'candidate_count')::integer, 0),
+    request_payload->>'status',
+    request_payload->>'recommended_action',
+    coalesce(nullif(request_payload->>'queue_status', ''), 'open'),
+    nullif(request_payload->>'owner', ''),
+    coalesce((request_payload->>'priority')::integer, 0),
+    nullif(request_payload->>'blocked_reason', ''),
+    nullif(request_payload->>'resolution_notes', ''),
+    coalesce((request_payload->>'market_prices_usable')::integer, 0),
+    coalesce((request_payload->>'market_prices_total')::integer, 0),
+    coalesce((request_payload->>'dealer_sales_usable')::integer, 0),
+    coalesce((request_payload->>'dealer_sales_total')::integer, 0),
+    coalesce((request_payload->>'competitor_sales_usable')::integer, 0),
+    coalesce((request_payload->>'competitor_sales_total')::integer, 0),
+    coalesce((request_payload->>'internal_history_usable')::integer, 0),
+    coalesce((request_payload->>'internal_history_total')::integer, 0),
+    nullif(request_payload->>'latest_proof_run_id', ''),
+    nullif(request_payload->>'latest_proof_head_sha', ''),
+    coalesce(nullif(request_payload->>'last_seen_at', '')::timestamptz, timezone('utc', now())),
+    nullif(request_payload->>'resolved_at', '')::timestamptz
+  )
+  on conflict (group_key) do update set
+    year = excluded.year,
+    make = excluded.make,
+    model = excluded.model,
+    state = excluded.state,
+    source_families = excluded.source_families,
+    candidate_count = excluded.candidate_count,
+    status = excluded.status,
+    recommended_action = excluded.recommended_action,
+    queue_status = excluded.queue_status,
+    owner = excluded.owner,
+    priority = excluded.priority,
+    blocked_reason = excluded.blocked_reason,
+    resolution_notes = excluded.resolution_notes,
+    market_prices_usable = excluded.market_prices_usable,
+    market_prices_total = excluded.market_prices_total,
+    dealer_sales_usable = excluded.dealer_sales_usable,
+    dealer_sales_total = excluded.dealer_sales_total,
+    competitor_sales_usable = excluded.competitor_sales_usable,
+    competitor_sales_total = excluded.competitor_sales_total,
+    internal_history_usable = excluded.internal_history_usable,
+    internal_history_total = excluded.internal_history_total,
+    latest_proof_run_id = excluded.latest_proof_run_id,
+    latest_proof_head_sha = excluded.latest_proof_head_sha,
+    last_seen_at = excluded.last_seen_at,
+    resolved_at = excluded.resolved_at
+  returning * into saved_request;
+
+  insert into public.pricing_recovery_request_events (
+    request_id,
+    event_type,
+    previous_queue_status,
+    next_queue_status,
+    actor,
+    reason,
+    proof_run_id,
+    head_sha,
+    metadata
+  )
+  values (
+    saved_request.id,
+    event_payload->>'event_type',
+    nullif(event_payload->>'previous_queue_status', ''),
+    nullif(event_payload->>'next_queue_status', ''),
+    nullif(event_payload->>'actor', ''),
+    nullif(event_payload->>'reason', ''),
+    nullif(event_payload->>'proof_run_id', ''),
+    nullif(event_payload->>'head_sha', ''),
+    coalesce(event_payload->'metadata', '{}'::jsonb)
+  );
+
+  return to_jsonb(saved_request);
+end;
+$$;
+
+revoke all on function public.sync_pricing_recovery_request(jsonb, jsonb)
+  from public, anon, authenticated;
+
+grant execute on function public.sync_pricing_recovery_request(jsonb, jsonb) to service_role;
+
 notify pgrst, 'reload schema';

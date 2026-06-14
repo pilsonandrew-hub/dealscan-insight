@@ -83,14 +83,13 @@ class FakeQueueRepository:
     def get_by_group_key(self, group_key):
         return self.existing.get(group_key)
 
-    def upsert_request(self, record):
+    def save_request_with_event(self, record, event):
         row = {"id": self.existing.get(record["group_key"], {}).get("id", "req-1"), **record}
         self.upserts.append(row)
         self.existing[record["group_key"]] = row
-        return row
-
-    def insert_event(self, event):
+        event = {"request_id": row["id"], **event}
         self.events.append(event)
+        return row
 
 
 def test_sync_dry_run_does_not_write():
@@ -172,7 +171,7 @@ def test_sync_apply_preserves_existing_operator_status():
     assert repo.events[0]["next_queue_status"] == "evidence_requested"
 
 
-def test_supabase_rest_upsert_uses_merge_duplicates_prefer(monkeypatch):
+def test_supabase_rest_apply_uses_atomic_queue_sync_rpc(monkeypatch):
     captured = {}
 
     class FakeResponse:
@@ -183,12 +182,13 @@ def test_supabase_rest_upsert_uses_merge_duplicates_prefer(monkeypatch):
             return False
 
         def read(self):
-            return b'[{"id": "req-1", "queue_status": "open"}]'
+            return b'{"id": "req-1", "queue_status": "open"}'
 
     def fake_urlopen(request, timeout):
         captured["url"] = request.full_url
         captured["headers"] = dict(request.header_items())
         captured["method"] = request.get_method()
+        captured["payload"] = request.data.decode("utf-8")
         return FakeResponse()
 
     monkeypatch.setattr(queue.urllib_request, "urlopen", fake_urlopen)
@@ -197,15 +197,29 @@ def test_supabase_rest_upsert_uses_merge_duplicates_prefer(monkeypatch):
         service_role_key="service-role",
     )
 
-    row = repo.upsert_request(
-        queue.build_queue_record(recovery_group(), proof_run_id="run", head_sha="sha", now=NOW)
+    record = queue.build_queue_record(recovery_group(), proof_run_id="run", head_sha="sha", now=NOW)
+    row = repo.save_request_with_event(
+        record,
+        {
+            "event_type": "inserted",
+            "previous_queue_status": None,
+            "next_queue_status": "open",
+            "actor": "github-actions",
+            "reason": record["recommended_action"],
+            "proof_run_id": record["latest_proof_run_id"],
+            "head_sha": record["latest_proof_head_sha"],
+            "metadata": {"group_key": record["group_key"], "status": record["status"]},
+        },
     )
 
     assert row["id"] == "req-1"
     assert captured["method"] == "POST"
-    assert "on_conflict=group_key" in captured["url"]
-    assert "resolution=merge-duplicates" in captured["headers"]["Prefer"]
+    assert captured["url"].endswith("/rest/v1/rpc/sync_pricing_recovery_request")
     assert "return=representation" in captured["headers"]["Prefer"]
+    payload = captured["payload"]
+    assert "request_payload" in payload
+    assert "event_payload" in payload
+    assert "pricing_recovery_requests?on_conflict" not in captured["url"]
 
 
 def test_supabase_rest_lookup_fetches_lifecycle_fields(monkeypatch):
