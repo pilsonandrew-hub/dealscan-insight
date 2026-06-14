@@ -823,7 +823,7 @@ def _market_data_quality(
     freshness_status = (
         "fresh"
         if latest_age_hours is not None and latest_age_hours <= MARKET_DATA_FRESHNESS_THRESHOLD_HOURS
-        else "stale"
+        else "stale" if active_rows else "unavailable"
     )
 
     degraded_reasons: list[str] = []
@@ -835,7 +835,7 @@ def _market_data_quality(
         degraded_reasons.append("proxy_pricing_share_above_threshold")
     if high_score_proxy_count > 0:
         degraded_reasons.append("high_score_proxy_pricing_present")
-    if freshness_status == "stale":
+    if active_rows and freshness_status == "stale":
         degraded_reasons.append("pricing_evidence_stale")
     non_live_rows = [
         row for row in active_rows
@@ -848,13 +848,16 @@ def _market_data_quality(
         degraded_reasons.append("retail_comps_sparse")
     if active_rows and live_count == 0 and "manheim_source_status" not in unavailable_dimensions:
         degraded_reasons.append("manheim_live_share_below_threshold")
+    substrate_ready = bool(pricing_substrate.get("ready_for_market_comp_pricing"))
     if (
-        pricing_substrate.get("market_prices_table") == "present"
+        not substrate_ready
+        and pricing_substrate.get("market_prices_table") == "present"
         and int(pricing_substrate.get("market_prices_usable_rows") or 0) == 0
     ):
         degraded_reasons.append("market_prices_unusable")
     if (
-        pricing_substrate.get("dealer_sales_table") == "present"
+        not substrate_ready
+        and pricing_substrate.get("dealer_sales_table") == "present"
         and int(pricing_substrate.get("dealer_sales_usable_rows") or 0) < 2
     ):
         degraded_reasons.append("dealer_sales_sparse")

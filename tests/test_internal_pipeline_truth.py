@@ -710,6 +710,58 @@ def test_pipeline_truth_reports_market_data_quality_healthy_for_fresh_non_proxy_
     assert quality["unavailable_dimensions"] == []
 
 
+def test_pipeline_truth_keeps_market_data_quality_healthy_when_market_prices_are_ready(monkeypatch):
+    monkeypatch.setattr(internal, "supabase_client", _Supabase({
+        "opportunities": [
+            {
+                "id": "live-market",
+                "is_active": True,
+                "dos_score": 82,
+                "score": 82,
+                "source_site": "proxibid",
+                "pricing_maturity": "live_market",
+                "pricing_source": "live_manheim",
+                "pricing_updated_at": "2099-01-01T00:00:00+00:00",
+                "manheim_source_status": "live",
+                "manheim_updated_at": "2099-01-01T00:00:00+00:00",
+                "retail_comp_count": 3,
+                "retail_comp_confidence": 0.91,
+                "mmr_confidence_proxy": 94,
+                "mileage": 18000,
+                "year": 2025,
+                "vin": "1FMUK8DH5SGA77978",
+                "condition_grade": "Good",
+                "investment_grade": "Platinum",
+            },
+        ],
+        "webhook_log": [],
+        "alert_log": [],
+        "ingest_delivery_log": [],
+        "dealer_sales": [
+            {"id": "sale-1", "sale_price": 22000, "sale_date": "2099-01-01T00:00:00+00:00"},
+        ],
+        "market_prices": [
+            {
+                "id": "market-1",
+                "avg_price": 25000,
+                "low_price": 23000,
+                "high_price": 27000,
+                "sample_size": 3,
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "source": "seeded_market_comp",
+            },
+        ],
+    }))
+
+    result = internal.build_pipeline_truth()
+
+    assert result["pricing_substrate"]["ready_for_market_comp_pricing"] is True
+    quality = result["market_data_quality"]
+    assert quality["status"] == "healthy"
+    assert "dealer_sales_sparse" not in quality["degraded_reasons"]
+    assert "market_prices_unusable" not in quality["degraded_reasons"]
+
+
 def test_pipeline_truth_uses_same_score_resolution_for_buckets_and_dos80(monkeypatch):
     monkeypatch.setattr(
         internal,
