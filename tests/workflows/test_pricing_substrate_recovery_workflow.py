@@ -13,8 +13,14 @@ def test_pricing_substrate_recovery_workflow_is_manual_and_confirmation_gated():
     assert "pull_request:" not in text
     assert "apply:" in text
     assert "confirmation:" in text
+    assert "source:" in text
+    assert "- competitor_sales" in text
+    assert "- dealer_sales" in text
     assert "REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES" in text
     assert "scripts/refresh_market_prices_from_completed_sales.py" in text
+    assert 'SOURCE: ${{ inputs.source }}' in text
+    assert '--source "${SOURCE}"' in text
+    assert "--source competitor_sales" not in text
     assert "SUPABASE_URL: ${{ secrets.SUPABASE_URL }}" in text
     assert "SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" in text
     assert "psycopg2-binary==2.9.9" in text

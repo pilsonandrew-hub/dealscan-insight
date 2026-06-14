@@ -659,3 +659,74 @@ def test_fetch_gap_rows_via_rest_enriches_competitor_sales_coverage(monkeypatch)
     assert rows[0]["competitor_sales_matches"] == 5
     assert rows[0]["usable_competitor_sales_matches"] == 5
     assert report_pricing_coverage_gaps.group_recovery_rows(rows)[0]["status"] == "covered_by_competitor_sales"
+
+
+def test_fetch_gap_rows_via_rest_counts_stale_competitor_sales_as_insufficient(monkeypatch):
+    def fake_fetch(base_url, service_role_key, table, query):
+        if table == "opportunities":
+            return [
+                {
+                    "id": "proxy-stale-competitor-sales",
+                    "source": "proxibid",
+                    "source_site": "proxibid",
+                    "title": "2021 Ford Explorer",
+                    "year": 2021,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "AL",
+                    "mileage": 30000,
+                    "vin": "1FM5K8GCXMGA00001",
+                    "pricing_maturity": "proxy",
+                    "pricing_source": "proxy",
+                    "is_active": True,
+                    "processed_at": "2026-06-05T12:00:00+00:00",
+                }
+            ]
+        if table in {"market_prices", "dealer_sales", "ingest_delivery_log"}:
+            return []
+        if table == "competitor_sales":
+            if any(field == "auction_end_date" for field, _ in query):
+                return []
+            return [
+                {
+                    "id": "stale-comp",
+                    "year": 2021,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "AL",
+                    "sale_price": 25000,
+                    "auction_end_date": "2024-01-01T00:00:00+00:00",
+                    "source": "govdeals",
+                },
+                {
+                    "id": "null-date-comp",
+                    "year": 2021,
+                    "make": "Ford",
+                    "model": "Explorer",
+                    "state": "AL",
+                    "sale_price": 26000,
+                    "auction_end_date": None,
+                    "source": "govdeals",
+                },
+            ]
+        raise AssertionError(table)
+
+    monkeypatch.setattr(report_pricing_coverage_gaps, "_fetch_postgrest_rows", fake_fetch)
+
+    rows = report_pricing_coverage_gaps.fetch_gap_rows_via_rest(
+        "https://example.supabase.co",
+        "service-key",
+        lookback_days=1,
+        max_mileage=50000,
+        max_age_years=10,
+        limit=20,
+        now=report_pricing_coverage_gaps.datetime.fromisoformat("2026-06-05T12:00:00+00:00"),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["competitor_sales_matches"] == 2
+    assert rows[0]["usable_competitor_sales_matches"] == 0
+    assert report_pricing_coverage_gaps.classify_gap(rows[0]) == "insufficient_competitor_sales"
+    group = report_pricing_coverage_gaps.group_recovery_rows(rows)[0]
+    assert group["status"] == "insufficient_competitor_sales"
+    assert group["evidence_counts"]["competitor_sales"] == 2

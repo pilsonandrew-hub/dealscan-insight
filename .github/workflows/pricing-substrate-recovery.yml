@@ -27,6 +27,14 @@ on:
         description: "Minimum completed-sale sample size"
         required: true
         default: "5"
+      source:
+        description: "Trusted completed-sale source to stamp on market_prices"
+        required: true
+        default: "competitor_sales"
+        type: choice
+        options:
+          - competitor_sales
+          - dealer_sales
       source_run_id:
         description: "Governed evidence acquisition run id"
         required: true
@@ -49,6 +57,7 @@ jobs:
       CONFIRMATION: ${{ inputs.confirmation }}
       TTL_DAYS: ${{ inputs.ttl_days }}
       MIN_SAMPLE_SIZE: ${{ inputs.min_sample_size }}
+      SOURCE: ${{ inputs.source }}
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
     steps:
       - name: Set Git default branch for quiet checkout
@@ -91,7 +100,7 @@ jobs:
 
           args=(
             --input-json "${EVIDENCE_FILE}"
-            --source competitor_sales
+            --source "${SOURCE}"
             --source-run-id "${SOURCE_RUN_ID}"
             --ttl-days "${TTL_DAYS}"
             --min-sample-size "${MIN_SAMPLE_SIZE}"

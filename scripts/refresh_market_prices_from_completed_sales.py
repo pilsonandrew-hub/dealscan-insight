@@ -25,6 +25,7 @@ DEFAULT_MIN_SAMPLE_SIZE = 5
 DEFAULT_TTL_DAYS = 14
 DEFAULT_MAX_EVIDENCE_AGE_DAYS = 365
 APPLY_CONFIRMATION = "REFRESH_MARKET_PRICES_FROM_COMPLETED_SALES"
+ALLOWED_COMPLETED_SALE_SOURCES = {"competitor_sales", "dealer_sales"}
 
 
 def _normalize_text(value: Any) -> str:
@@ -78,6 +79,9 @@ def build_market_price_preview(
 ) -> dict[str, Any] | None:
     if min_sample_size < 2 or ttl_days <= 0 or not source_run_id:
         return None
+    source_clean = _normalize_text(source)
+    if source_clean not in ALLOWED_COMPLETED_SALE_SOURCES:
+        return None
 
     now_utc = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
     usable: list[tuple[dict[str, Any], float, datetime]] = []
@@ -105,7 +109,6 @@ def build_market_price_preview(
 
     prices = [price for _, price, _ in usable]
     latest_sale = max(sale_date for _, _, sale_date in usable)
-    source_clean = _normalize_text(source)
     return {
         "year": expected_key[0],
         "make": expected_key[1],
@@ -242,7 +245,7 @@ def insert_market_price_preview_via_rest(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-json", help="JSON file containing completed-sale rows for one vehicle group.")
-    parser.add_argument("--source", default="competitor_sales")
+    parser.add_argument("--source", choices=sorted(ALLOWED_COMPLETED_SALE_SOURCES), default="competitor_sales")
     parser.add_argument("--source-run-id", required=True)
     parser.add_argument("--ttl-days", type=int, default=DEFAULT_TTL_DAYS)
     parser.add_argument("--min-sample-size", type=int, default=DEFAULT_MIN_SAMPLE_SIZE)

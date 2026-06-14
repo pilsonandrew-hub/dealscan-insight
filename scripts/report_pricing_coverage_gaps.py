@@ -670,14 +670,27 @@ def fetch_gap_rows_via_rest(
             ("sale_date", f"gte.{sales_since}"),
         ],
     )
+    candidate_years = [
+        int(row["year"])
+        for row in clean_proxy_rows
+        if row.get("year") is not None and str(row.get("year")).isdigit()
+    ]
+    competitor_sales_query = [
+        ("select", "id,year,make,model,state,sale_price,auction_end_date,source"),
+        ("limit", str(max(limit * 100, 1000))),
+    ]
+    if candidate_years:
+        competitor_sales_query.extend(
+            [
+                ("year", f"gte.{min(candidate_years)}"),
+                ("year", f"lte.{max(candidate_years)}"),
+            ]
+        )
     competitor_sales_rows = _fetch_postgrest_rows(
         base_url,
         service_role_key,
         "competitor_sales",
-        [
-            ("select", "id,year,make,model,state,sale_price,auction_end_date,source"),
-            ("auction_end_date", f"gte.{sales_since}"),
-        ],
+        competitor_sales_query,
     )
     history_rows = _fetch_postgrest_rows(
         base_url,

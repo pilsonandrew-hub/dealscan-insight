@@ -50,6 +50,55 @@ def test_preview_market_price_from_competitor_sales_group():
     assert "proxy" not in preview["confidence_notes"].lower()
 
 
+def test_preview_market_price_preserves_dealer_sales_source():
+    rows = [
+        {
+            "year": 2020,
+            "make": "Ford",
+            "model": "Escape",
+            "state": "SC",
+            "sale_price": price,
+            "sale_date": "2026-05-01T00:00:00+00:00",
+        }
+        for price in (17000, 18000, 19000, 20000, 21000)
+    ]
+
+    preview = refresh_market_prices_from_completed_sales.build_market_price_preview(
+        rows,
+        source="dealer_sales",
+        source_run_id="pricing-recovery-test",
+        now=datetime(2026, 6, 14, tzinfo=timezone.utc),
+        ttl_days=14,
+        min_sample_size=5,
+    )
+
+    assert preview["source"] == "dealer_sales"
+    assert preview["metadata"]["seed_basis"] == "dealer_sales"
+
+
+def test_preview_rejects_untrusted_source_names():
+    rows = [
+        {
+            "year": 2020,
+            "make": "Ford",
+            "model": "Escape",
+            "state": "SC",
+            "sale_price": price,
+            "auction_end_date": "2026-05-01T00:00:00+00:00",
+        }
+        for price in (17000, 18000, 19000, 20000, 21000)
+    ]
+
+    assert refresh_market_prices_from_completed_sales.build_market_price_preview(
+        rows,
+        source="active_bid_proxy",
+        source_run_id="pricing-recovery-test",
+        now=datetime(2026, 6, 14, tzinfo=timezone.utc),
+        ttl_days=14,
+        min_sample_size=5,
+    ) is None
+
+
 def test_preview_rejects_sparse_or_zero_completed_sales():
     sparse_rows = [
         {
