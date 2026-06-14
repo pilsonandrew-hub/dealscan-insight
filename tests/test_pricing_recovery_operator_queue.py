@@ -171,6 +171,42 @@ def test_sync_apply_preserves_existing_operator_status():
     assert repo.events[0]["next_queue_status"] == "evidence_requested"
 
 
+def test_sync_apply_reopens_terminal_rows_when_group_reappears():
+    existing = {
+        "2020|ford|escape|sc|gsaauctions,proxibid": {
+            "id": "req-3",
+            "group_key": "2020|ford|escape|sc|gsaauctions,proxibid",
+            "queue_status": "dismissed",
+            "owner": "operator-1",
+            "priority": 7,
+            "blocked_reason": None,
+            "resolution_notes": "not enough evidence last run",
+            "resolved_at": "2026-06-13T20:00:00+00:00",
+        }
+    }
+    repo = FakeQueueRepository(existing=existing)
+    records = [
+        queue.build_queue_record(recovery_group(), proof_run_id="run-3", head_sha="sha-3", now=NOW)
+    ]
+
+    summary = queue.sync_queue_records(
+        records,
+        repo=repo,
+        apply=True,
+        confirmation=queue.APPLY_CONFIRMATION,
+        actor="github-actions",
+    )
+
+    assert summary["updated"] == 1
+    assert repo.upserts[0]["queue_status"] == "open"
+    assert repo.upserts[0]["resolved_at"] is None
+    assert repo.upserts[0]["owner"] == "operator-1"
+    assert repo.upserts[0]["priority"] == 7
+    assert repo.events[0]["previous_queue_status"] == "dismissed"
+    assert repo.events[0]["next_queue_status"] == "open"
+    assert repo.events[0]["event_type"] == "reopened"
+
+
 def test_supabase_rest_apply_uses_atomic_queue_sync_rpc(monkeypatch):
     captured = {}
 

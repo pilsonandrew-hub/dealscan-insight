@@ -54,6 +54,7 @@ QUEUE_STATUSES = {
     "blocked",
     "dismissed",
 }
+TERMINAL_QUEUE_STATUSES = {"applied", "dismissed"}
 APPLY_CONFIRMATION = "SYNC_PRICING_RECOVERY_OPERATOR_QUEUE"
 VIN_LIKE_RE = re.compile(r"\b(?:vin\s*#?\s*)?[A-HJ-NPR-Z0-9]{17}\b", re.IGNORECASE)
 
@@ -150,14 +151,27 @@ def sync_queue_records(
         existing = repo.get_by_group_key(record["group_key"])
         payload = dict(record)
         if existing:
-            for field in ("queue_status", "owner", "priority", "blocked_reason", "resolution_notes", "resolved_at"):
+            terminal_reopen = existing.get("queue_status") in TERMINAL_QUEUE_STATUSES
+            lifecycle_fields = ("owner", "priority", "blocked_reason", "resolution_notes")
+            if not terminal_reopen:
+                lifecycle_fields = ("queue_status", *lifecycle_fields, "resolved_at")
+            for field in lifecycle_fields:
                 if field in existing:
                     payload[field] = existing[field]
+            if terminal_reopen:
+                payload["queue_status"] = "open"
+                payload["resolved_at"] = None
         if not apply:
             summary["would_update" if existing else "would_insert"] += 1
             continue
 
-        event_type = "updated" if existing else "inserted"
+        event_type = (
+            "reopened"
+            if existing and existing.get("queue_status") in TERMINAL_QUEUE_STATUSES
+            else "updated"
+            if existing
+            else "inserted"
+        )
         event = {
             "event_type": event_type,
             "previous_queue_status": (existing or {}).get("queue_status"),
@@ -169,7 +183,7 @@ def sync_queue_records(
             "metadata": {"group_key": payload["group_key"], "status": payload["status"]},
         }
         saved = repo.save_request_with_event(payload, event)
-        summary[event_type] += 1
+        summary["updated" if event_type == "reopened" else event_type] += 1
     return summary
 
 
