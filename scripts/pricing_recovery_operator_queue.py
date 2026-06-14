@@ -91,6 +91,11 @@ def _safe_text(value: Any) -> str:
     return VIN_LIKE_RE.sub("[redacted]", _norm_text(value))
 
 
+def _postgrest_eq_literal(value: str) -> str:
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'eq."{escaped}"'
+
+
 def build_queue_record(group: dict[str, Any], *, proof_run_id: str, head_sha: str, now: datetime) -> dict[str, Any]:
     key = group.get("key") or {}
     sources = sorted(_norm_text(source) for source in (group.get("source_counts") or {}) if _norm_text(source))
@@ -220,7 +225,7 @@ class SupabaseRestQueueRepository:
                     "id,group_key,queue_status,owner,priority,"
                     "blocked_reason,resolution_notes,resolved_at"
                 ),
-                "group_key": f"eq.{group_key}",
+                "group_key": _postgrest_eq_literal(group_key),
                 "limit": "1",
             }
         )

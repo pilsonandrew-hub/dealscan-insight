@@ -248,6 +248,8 @@ def test_supabase_rest_lookup_fetches_lifecycle_fields(monkeypatch):
     row = repo.get_by_group_key("2020|ford|escape|sc|gsaauctions,proxibid")
 
     assert row["queue_status"] == "evidence_requested"
+    assert "group_key=eq.%22" in captured["url"]
+    assert "gsaauctions%2Cproxibid%22" in captured["url"]
     assert "owner" in captured["url"]
     assert "priority" in captured["url"]
     assert "blocked_reason" in captured["url"]
