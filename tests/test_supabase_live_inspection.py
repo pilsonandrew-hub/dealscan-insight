@@ -546,6 +546,9 @@ def test_seller_recovery_audit_reports_source_mirror_bidder_depth_when_opportuni
                 "year": 2024,
                 "make": "Ford",
                 "model": "F-150",
+                "dos_score": 84,
+                "gross_margin": 5000,
+                "bid_headroom": 1200,
                 "pricing_maturity": "proxy",
                 "photo_count": 1,
                 "bidder_count": None,
@@ -570,6 +573,9 @@ def test_seller_recovery_audit_reports_source_mirror_bidder_depth_when_opportuni
     assert report["unsupported_dimensions"]["bidder_depth"]["status"] == "available"
     assert report["unsupported_dimensions"]["bidder_depth"]["evidence_surface"] == "source_mirror"
     assert "bidder_depth" not in report["summary"]["unavailable_dimensions"]
+    candidate = report["value_leak_candidates"][0]
+    assert candidate["evidence"]["bidder_depth_surface"] == "source_mirror"
+    assert candidate["evidence"]["source_mirror_bidder_count_present"] is True
 
 
 def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypatch):
@@ -705,6 +711,16 @@ def test_safe_truth_audit_includes_sanitized_seller_recovery_candidates(monkeypa
         "missing_photos_flag",
         "zero_photo_count",
     ]
+    candidate = report["seller_recovery_audit"]["value_leak_candidates"][0]
+    assert candidate["recovery_score"] > 0
+    assert candidate["recovery_tier"] in {"high", "medium", "low"}
+    assert round(sum(candidate["score_components"].values()), 2) == candidate["recovery_score"]
+    assert candidate["evidence"]["photo_count_present"] is True
+    assert report["seller_recovery_audit"]["recovery_rollups"]["reason_counts"]["missing_photos_flag"] == 1
+    assert report["seller_recovery_audit"]["source_health_summary"]["observed_source_count"] == 1
+    assert report["seller_recovery_audit"]["truth_boundaries"]["candidate_ranking"].startswith(
+        "Internal deterministic prioritization"
+    )
     serialized = str(report)
     assert "1FTFW1E50PFA00000" not in serialized
     assert "https://example.test/private" not in serialized

@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -825,6 +825,135 @@ def _first_positive_number(row: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
+RECOVERY_REASON_WEIGHTS = {
+    "missing_vin": 4.0,
+    "missing_mileage": 4.0,
+    "missing_auction_end": 4.0,
+    "condition_unverified": 5.0,
+    "proxy_pricing": 5.0,
+    "missing_photos_flag": 4.0,
+    "zero_photo_count": 4.0,
+    "low_photo_count": 2.0,
+}
+
+
+SELLER_RECOVERY_TRUTH_BOUNDARIES = {
+    "candidate_ranking": "Internal deterministic prioritization, not a recovery guarantee.",
+    "bidder_depth": "Uses governed opportunity bidder_count when present; otherwise uses governed source mirror bidder_count when present.",
+    "photo_quality": "Uses governed photo_count and missing_photos risk flags; does not infer photo quality from private raw payloads.",
+    "source_health": "Aggregates run and parse-event observability; does not prove seller intent.",
+}
+
+
+def _bounded_component(value: float, maximum: float) -> float:
+    return round(max(0.0, min(float(value), maximum)), 2)
+
+
+def _component_from_amount(value: float | None, *, cap: float, points: float) -> float:
+    if value is None or value <= 0:
+        return 0.0
+    return _bounded_component((min(value, cap) / cap) * points, points)
+
+
+def _source_key(value: Any) -> str:
+    return str(value or "unknown").strip().lower()[:80] or "unknown"
+
+
+def _recovery_tier(score: float) -> str:
+    if score >= 75:
+        return "high"
+    if score >= 45:
+        return "medium"
+    return "low"
+
+
+def _source_health_by_source(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        latest.setdefault(_source_key(row.get("source_name")), row)
+    return latest
+
+
+def _source_health_component(source_site: str, source_health_index: dict[str, dict[str, Any]]) -> float:
+    row = source_health_index.get(_source_key(source_site))
+    if not row:
+        return 0.0
+    score = 2.0
+    if (_coerce_int(row.get("failed_runs")) or 0) > 0:
+        score += 3.0
+    if (_coerce_int(row.get("skipped_count")) or 0) > 0:
+        score += 2.0
+    if (_coerce_int(row.get("parse_event_count")) or 0) > 0:
+        score += 2.0
+    if (_coerce_int(row.get("saved_count")) or 0) > 0:
+        score += 1.0
+    return _bounded_component(score, 10.0)
+
+
+def _seller_recovery_candidate_evidence(row: dict[str, Any], *, source_bidder_available: bool) -> dict[str, Any]:
+    opportunity_bidder = _bidder_count(row)
+    source_mirror_bidder = bool(source_bidder_available and opportunity_bidder is None)
+    return {
+        "dos_score_present": _coerce_float(row.get("dos_score") if row.get("dos_score") is not None else row.get("score")) is not None,
+        "gross_margin_present": _first_positive_number(row, "gross_margin", "potential_profit", "margin") is not None,
+        "bid_headroom_present": _first_positive_number(row, "bid_headroom") is not None,
+        "photo_count_present": _photo_count(row) is not None,
+        "opportunity_bidder_count_present": opportunity_bidder is not None,
+        "source_mirror_bidder_count_present": source_mirror_bidder,
+        "bidder_depth_surface": (
+            "opportunities"
+            if opportunity_bidder is not None
+            else "source_mirror"
+            if source_mirror_bidder
+            else None
+        ),
+        "pricing_maturity": str(row.get("pricing_maturity") or "unknown")[:80],
+    }
+
+
+def _score_seller_recovery_candidate(
+    row: dict[str, Any],
+    reasons: list[str],
+    *,
+    source_bidder_available: bool,
+    source_health_index: dict[str, dict[str, Any]],
+) -> tuple[float, dict[str, float], dict[str, Any]]:
+    gross_margin = _first_positive_number(row, "gross_margin", "potential_profit", "margin")
+    bid_headroom = _first_positive_number(row, "bid_headroom")
+    value_gap = _bounded_component(
+        _component_from_amount(gross_margin, cap=25000.0, points=25.0)
+        + _component_from_amount(bid_headroom, cap=25000.0, points=15.0),
+        40.0,
+    )
+    listing_quality = _bounded_component(
+        sum(RECOVERY_REASON_WEIGHTS.get(reason, 0.0) for reason in reasons),
+        30.0,
+    )
+    evidence = _seller_recovery_candidate_evidence(row, source_bidder_available=source_bidder_available)
+    evidence_strength = _bounded_component(
+        (3.0 if evidence["dos_score_present"] else 0.0)
+        + (2.0 if evidence["gross_margin_present"] else 0.0)
+        + (2.0 if evidence["bid_headroom_present"] else 0.0)
+        + (4.0 if evidence["photo_count_present"] else 0.0)
+        + (4.0 if evidence["opportunity_bidder_count_present"] else 0.0)
+        + (3.0 if evidence["source_mirror_bidder_count_present"] else 0.0)
+        + (3.0 if str(row.get("pricing_maturity") or "").lower() == "market_comp" else 0.0)
+        + (2.0 if str(row.get("pricing_maturity") or "").lower() != "proxy" else 0.0),
+        20.0,
+    )
+    source_health = _source_health_component(
+        str(row.get("source_site") or row.get("source") or "unknown"),
+        source_health_index,
+    )
+    components = {
+        "value_gap": value_gap,
+        "listing_quality": listing_quality,
+        "evidence_strength": evidence_strength,
+        "source_health": source_health,
+    }
+    return round(sum(components.values()), 2), components, evidence
+
+
 def _summarize_listing_quality_for_seller_recovery(rows: list[dict[str, Any]]) -> dict[str, Any]:
     active_rows = [row for row in rows if row.get("is_active") is not False]
     known_photo_counts = [
@@ -884,7 +1013,16 @@ def _summarize_source_listing_quality_for_seller_recovery(rows: list[dict[str, A
     }
 
 
-def _seller_recovery_candidates_from_opportunities(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+def _seller_recovery_candidates_from_opportunities(
+    rows: list[dict[str, Any]],
+    *,
+    source_listing_rows: list[dict[str, Any]] | None = None,
+    source_health_rows: list[dict[str, Any]] | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    source_listing_rows = source_listing_rows or []
+    source_health_index = _source_health_by_source(source_health_rows or [])
+    source_bidder_available = any(_bidder_count(row) is not None for row in source_listing_rows)
     candidates: list[dict[str, Any]] = []
     for row in rows:
         if row.get("is_active") is False:
@@ -897,6 +1035,12 @@ def _seller_recovery_candidates_from_opportunities(rows: list[dict[str, Any]], *
         if not reasons:
             continue
         score = _coerce_float(row.get("dos_score") if row.get("dos_score") is not None else row.get("score"))
+        recovery_score, score_components, evidence = _score_seller_recovery_candidate(
+            row,
+            reasons,
+            source_bidder_available=source_bidder_available,
+            source_health_index=source_health_index,
+        )
         candidates.append({
             "source_site": str(row.get("source_site") or row.get("source") or "unknown")[:80],
             "year": _coerce_int(row.get("year")),
@@ -907,9 +1051,15 @@ def _seller_recovery_candidates_from_opportunities(rows: list[dict[str, Any]], *
             "bid_headroom": round(bid_headroom, 2) if bid_headroom is not None else None,
             "pricing_maturity": str(row.get("pricing_maturity") or "unknown")[:80],
             "recovery_reasons": reasons,
+            "recovery_score": recovery_score,
+            "recovery_tier": _recovery_tier(recovery_score),
+            "score_components": score_components,
+            "evidence": evidence,
+            "truth_boundary": "Internal prioritization from governed fields only; not a recovery guarantee or seller-intent claim.",
         })
     candidates.sort(
         key=lambda item: (
+            float(item["recovery_score"] or 0),
             float(item["gross_margin"] or 0),
             float(item["bid_headroom"] or 0),
             float(item["dos_score"] or 0),
@@ -917,6 +1067,69 @@ def _seller_recovery_candidates_from_opportunities(rows: list[dict[str, Any]], *
         reverse=True,
     )
     return candidates[:limit]
+
+
+def _seller_recovery_rollups(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    reason_counts: Counter[str] = Counter()
+    tier_counts: Counter[str] = Counter()
+    source_counts: Counter[str] = Counter()
+    source_scores: dict[str, list[float]] = defaultdict(list)
+    source_reasons: dict[str, Counter[str]] = defaultdict(Counter)
+    for candidate in candidates:
+        source = str(candidate.get("source_site") or "unknown")[:80]
+        tier_counts[str(candidate.get("recovery_tier") or "low")] += 1
+        source_counts[source] += 1
+        source_scores[source].append(float(candidate.get("recovery_score") or 0))
+        for reason in candidate.get("recovery_reasons") or []:
+            reason_counts[str(reason)] += 1
+            source_reasons[source][str(reason)] += 1
+    top_sources = []
+    for source, scores in source_scores.items():
+        top_sources.append({
+            "source_site": source,
+            "candidate_count": source_counts[source],
+            "average_recovery_score": round(sum(scores) / len(scores), 2) if scores else 0.0,
+            "top_reasons": [reason for reason, _count in source_reasons[source].most_common(5)],
+        })
+    top_sources.sort(
+        key=lambda item: (item["average_recovery_score"], item["candidate_count"]),
+        reverse=True,
+    )
+    return {
+        "reason_counts": dict(reason_counts.most_common(20)),
+        "tier_counts": {
+            "high": tier_counts.get("high", 0),
+            "medium": tier_counts.get("medium", 0),
+            "low": tier_counts.get("low", 0),
+        },
+        "source_counts": dict(source_counts.most_common(20)),
+        "top_sources_by_score": top_sources[:10],
+    }
+
+
+def _seller_recovery_source_health_summary(
+    source_health_rows: list[dict[str, Any]],
+    delivery_rows: list[dict[str, Any]],
+    parse_event_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    observed_sources = {
+        _source_key(row.get("source_name"))
+        for row in source_health_rows
+        if row.get("source_name")
+    }
+    return {
+        "observed_source_count": len(observed_sources),
+        "sources_with_failed_runs": sum(
+            1 for row in source_health_rows if (_coerce_int(row.get("failed_runs")) or 0) > 0
+        ),
+        "total_processed_runs": sum(_coerce_int(row.get("processed_runs")) or 0 for row in source_health_rows),
+        "total_failed_runs": sum(_coerce_int(row.get("failed_runs")) or 0 for row in source_health_rows),
+        "total_saved_count": sum(_coerce_int(row.get("saved_count")) or 0 for row in source_health_rows),
+        "total_skipped_count": sum(_coerce_int(row.get("skipped_count")) or 0 for row in source_health_rows),
+        "total_parse_event_count": sum(_coerce_int(row.get("parse_event_count")) or 0 for row in source_health_rows),
+        "top_delivery_statuses": _summarize_recent_delivery_truth(delivery_rows).get("status_counts", {}),
+        "top_parse_event_statuses": _summarize_parse_event_rows(parse_event_rows).get("status_counts", {}),
+    }
 
 
 def _summarize_seller_recovery_audit(
@@ -928,7 +1141,11 @@ def _summarize_seller_recovery_audit(
     parse_event_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     source_listing_rows = source_listing_rows or []
-    candidates = _seller_recovery_candidates_from_opportunities(opportunity_rows)
+    candidates = _seller_recovery_candidates_from_opportunities(
+        opportunity_rows,
+        source_listing_rows=source_listing_rows,
+        source_health_rows=source_health_rows,
+    )
     source_names = {row.get("source_name") for row in source_health_rows if row.get("source_name")}
     opportunity_bidder_available = any(_bidder_count(row) is not None for row in opportunity_rows)
     source_bidder_available = any(_bidder_count(row) is not None for row in source_listing_rows)
@@ -975,7 +1192,14 @@ def _summarize_seller_recovery_audit(
         "parse_event_status_counts": _summarize_parse_event_rows(parse_event_rows).get("status_counts", {}),
         "parse_event_type_counts": _summarize_parse_event_rows(parse_event_rows).get("event_type_counts", {}),
         "value_leak_candidates": candidates,
+        "source_health_summary": _seller_recovery_source_health_summary(
+            source_health_rows,
+            delivery_rows,
+            parse_event_rows,
+        ),
+        "recovery_rollups": _seller_recovery_rollups(candidates),
         "unsupported_dimensions": unsupported_dimensions,
+        "truth_boundaries": SELLER_RECOVERY_TRUTH_BOUNDARIES,
         "truth_boundary": "Sanitized aggregate seller recovery proof. Does not print VINs, listing URLs, descriptions, raw payloads, user data, or tokens.",
     }
 
